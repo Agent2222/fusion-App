@@ -45,7 +45,7 @@ const s3PublicBase =
     (s3Bucket && awsRegion
         ? `https://${s3Bucket}.s3.${awsRegion}.amazonaws.com`
         : '');
-const s3Prefix = (process.env.S3_KEY_PREFIX || 'studio/').replace(/^\/+/, '');
+const s3Prefix = (process.env.S3_KEY_PREFIX || 'uploads/').replace(/^\/+/, '');
 
 /** On Render and most PaaS hosts there is no instance role — set AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY. Locally, omit them to use ~/.aws or env profile. */
 let s3Client = null;
@@ -199,7 +199,7 @@ app.post('/storage/presign', requireApiKey, async (req, res) => {
             return res.status(400).json({ error: 'Invalid key' });
         }
         key = key.replace(/^\/+/, '');
-        if (!key.startsWith(s3Prefix) && !key.startsWith('studio/')) {
+        if (!key.startsWith(s3Prefix)) {
             key = `${s3Prefix}${key}`;
         }
         if (typeof contentType !== 'string' || !contentType.length) {

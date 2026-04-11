@@ -19,7 +19,7 @@ Small Express server for Stripe Payment Intents, Resend email, and S3 presigned 
 | `AWS_SECRET_ACCESS_KEY` | with access key above | IAM secret key |
 | `AWS_SESSION_TOKEN` | optional | Only if using temporary credentials (STS) |
 | `S3_PUBLIC_BASE_URL` | no | Public base for object URLs (default: virtual-hosted–style S3 URL) |
-| `S3_KEY_PREFIX` | no | Prefix for keys (default `studio/`) |
+| `S3_KEY_PREFIX` | no | Prefix for keys (default `uploads/`) |
 
 ## Scripts
 

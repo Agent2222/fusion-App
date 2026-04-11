@@ -8,7 +8,7 @@ import { presignUpload } from './integrationApi.js';
  */
 export async function uploadBlobToS3(file, inputEl) {
     const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, '_') || 'file';
-    const key = `studio/${Date.now()}-${safe}`;
+    const key = `uploads/${Date.now()}-${safe}`;
     const ct = file.type || 'application/octet-stream';
     const { putUrl, publicUrl } = await presignUpload(key, ct);
     const res = await fetch(putUrl, {

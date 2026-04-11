@@ -57,6 +57,7 @@ Set at least the following. Use **your real values**; do not commit them.
 | `AWS_ACCESS_KEY_ID` | S3 on Render | IAM user access key — **required** on hosts without an IAM instance role |
 | `AWS_SECRET_ACCESS_KEY` | S3 on Render | IAM secret for the same user |
 | `S3_PUBLIC_BASE_URL` | Optional | Public URL base for objects (CloudFront or `https://bucket.s3.region.amazonaws.com`) |
+| `S3_KEY_PREFIX` | Optional | Object key prefix (default **`uploads/`**). IAM should allow `s3:PutObject` on `arn:aws:s3:::YOUR_BUCKET/uploads/*`. |
 | `CORS_STRICT` | Optional | Set to `1` only if you want an allowlist (`CORS_ORIGINS` + built-in Fusion origins). **Leave unset** so browsers on `fusionart.world`, `*.icp0.io`, etc. always get valid CORS without redeploying the API. |
 | `CORS_ORIGINS` | With `CORS_STRICT` | Extra allowed origins, e.g. `https://<canister>.icp0.io` (no trailing slash) |
 | `INTEGRATION_API_KEY` | Optional hardening | Random secret; if set, frontend must send `Authorization: Bearer …` on POST routes |
@@ -133,9 +134,40 @@ Ensure the **asset canister** serves the **new** `dist` output from the build ab
 3. **Studio → Services:** Set base URL to your Render URL if needed → **Test connection**.
 4. **Join flow:** Complete a **test** card payment (Stripe test mode).
 5. **Email:** **Send test email** from Services (Resend configured on Render).
-6. **S3:** Upload from Studio (bucket + CORS allow `PUT` from your IC origin).
+6. **S3:** Upload from Studio (bucket **CORS** must allow `PUT` from the **exact** browser `Origin` — see below).
 
-If the browser shows CORS errors, fix **`CORS_ORIGINS`** on Render to match the **exact** page origin (scheme + host, no path).
+If the browser shows CORS errors against **Render**, fix **`CORS_ORIGINS`** on Render to match the **exact** page origin (scheme + host, no path).
+
+### S3 bucket CORS (browser uploads)
+
+S3 compares `AllowedOrigins` to the **`Origin` header** exactly: **no path, no trailing slash** after the port. Wrong: `http://canister.localhost:4943/` — correct: `http://canister.localhost:4943`.
+
+Add every origin you use, for example:
+
+- `https://fusionart.world` and `https://www.fusionart.world` (production)
+- `http://<asset-canister-id>.localhost:4943` (local `dfx` — copy from the browser address bar, then **strip any trailing `/`**)
+- `http://localhost:3000` (Vite dev, if you test uploads there)
+
+Example rule (adjust origins):
+
+```json
+[
+  {
+    "AllowedHeaders": ["*"],
+    "AllowedMethods": ["PUT", "GET", "HEAD"],
+    "AllowedOrigins": [
+      "https://fusionart.world",
+      "https://www.fusionart.world",
+      "http://YOUR_ASSET_CANISTER_ID.localhost:4943",
+      "http://localhost:3000"
+    ],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 3000
+  }
+]
+```
+
+After saving the bucket CORS config in AWS, wait a minute and retry (or new presigned URL).
 
 If POSTs return **401**, either remove `INTEGRATION_API_KEY` on Render for testing or set **`VITE_INTEGRATION_API_KEY`** and Studio bearer to the same value.
 
@@ -150,6 +182,7 @@ If POSTs return **401**, either remove `INTEGRATION_API_KEY` on Render for testi
 | Stripe “not configured” | `STRIPE_SECRET_KEY` on Render |
 | Email “RESEND_FROM” / 503 | `RESEND_FROM` + `RESEND_API_KEY` on Render |
 | S3 presign 503 / “Could not load credentials” | Set **`AWS_ACCESS_KEY_ID`** and **`AWS_SECRET_ACCESS_KEY`** on Render (IAM user with `s3:PutObject`). Local dev can use `~/.aws` instead. |
+| S3 PUT blocked by CORS / preflight | Bucket **CORS** `AllowedOrigins` must match **`Origin` exactly** (no trailing `/`). Include `http://<canister>.localhost:4943` for local dfx. Use `"AllowedHeaders": ["*"]` if preflight still fails. |
 | Cold start / timeout | Render free tier sleep—upgrade or retry |
 
 ---

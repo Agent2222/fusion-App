@@ -2163,7 +2163,7 @@ function openServicesHelpResend() {
 function openServicesHelpS3() {
     const body = `
       <ol class="studio-help-list">
-        <li>Create an S3 bucket and IAM user/role with <code>s3:PutObject</code> on a prefix such as <code>studio/*</code>.</li>
+        <li>Create an S3 bucket and IAM user/role with <code>s3:PutObject</code> on a prefix such as <code>uploads/*</code>.</li>
         <li>Set <code>AWS_REGION</code>, <code>S3_BUCKET</code>, and optionally <code>S3_PUBLIC_BASE_URL</code> (CloudFront or bucket URL) on the integration server.</li>
         <li>Bucket CORS: allow <code>PUT</code> from your site origin for presigned uploads.</li>
         <li>Studio calls <code>POST /storage/presign</code> then uploads the file with the returned URL.</li>
