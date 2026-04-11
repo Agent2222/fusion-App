@@ -5,15 +5,24 @@
   <meta charset="UTF-8" />
   <link rel="icon" type="image/svg+xml" href="/favicon.ico" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>IC Hello Starter</title>
+  <title>Fusion App</title>
+  <!-- Preconnect to Typekit for faster font loading -->
+  <link rel="preconnect" href="https://use.typekit.net" crossorigin>
+  <link rel="dns-prefetch" href="https://use.typekit.net">
+  <!-- Typekit Font Loader - Load immediately -->
+  <script src="/momochidori VF.js"></script>
 </head>
 
 <body>
+  <app-loadscreen visible="true" fonts-ready="false" message=""></app-loadscreen>
   <div class="browser-warning">
     ⚠️ If this page appears broken, try reloading. If the problem persists, try switching browsers; Chrome or
     Firefox are recommended.
   </div>
-  <div id="root"></div>
+  <div id="app">
+    <!-- Content will be dynamically loaded here -->
+  </div>
+  <app-page-transition></app-page-transition>
   <script type="module" src="/src/main.js"></script>
 </body>
 

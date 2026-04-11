@@ -9,7 +9,7 @@
         "fusion-app-backend"
       ],
       "source": [
-        "src/fusion-app-frontend/dist"
+        "src/fusion-app-frontend/dist_check"
       ],
       "type": "assets",
       "workspace": "fusion-app-frontend"

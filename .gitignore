@@ -9,6 +9,14 @@
 
 # dfx temporary files
 .dfx/
+.dfx-cache/
+
+# local build / preview output (do not push)
+src/fusion-app-frontend/dist_check/
+src/fusion-app-frontend/dist_live/
+
+# Cursor (optional; remove this line if you want rules in the repo)
+.cursor/
 
 # generated files
 **/declarations/

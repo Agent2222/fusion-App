@@ -1,0 +1,337 @@
+import { navigate } from '../../router.js';
+import { artistEnglishBlock, artistLocaleBlock, artistSlugFromName } from '../../utils/artistSlug.js';
+
+/** 20 cards per page, 5 columns × 4 rows */
+const PAGE_SIZE = 20;
+
+/**
+ * @param {Array} artists
+ * @returns {Array}
+ */
+function dedupeArtistsById(artists) {
+    const seen = new Set();
+    const out = [];
+    for (const a of artists) {
+        if (!a || typeof a !== 'object') continue;
+        const id = a.id != null ? String(a.id) : a.slug != null ? String(a.slug) : null;
+        const key = id || JSON.stringify(a);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(a);
+    }
+    return out;
+}
+
+/**
+ * Dedupe by artist id, then shuffle. No padding/repeats — avoids duplicate cards when filtering.
+ * @param {Array} artists — same shape as testData.allArtists.artists
+ * @returns {Array}
+ */
+export function buildFeedPool(artists) {
+    if (!artists || artists.length === 0) return [];
+    const unique = dedupeArtistsById(artists);
+    return shuffleInPlace([...unique]);
+}
+
+function shuffleInPlace(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+}
+
+function escapeHtml(s) {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+class ArtistsFeedElement extends HTMLElement {
+    constructor() {
+        super();
+        this.attachShadow({ mode: 'open' });
+        this.pool = [];
+        this.currentPage = 0;
+        this._shellReady = false;
+    }
+
+    getArtists() {
+        return this.pool;
+    }
+
+    /**
+     * @param {Array} artists — full pool (e.g. from buildFeedPool)
+     */
+    setArtists(artists) {
+        this.pool = Array.isArray(artists) ? artists : [];
+        this.currentPage = 0;
+        if (this._shellReady) {
+            this.updatePage();
+        }
+    }
+
+    connectedCallback() {
+        this.ensureShell();
+        if (this.pool.length) {
+            this.updatePage();
+        }
+    }
+
+    ensureShell() {
+        if (this._shellReady) return;
+        this._shellReady = true;
+
+        this.shadowRoot.innerHTML = `
+            <style>
+                :host {
+                    display: block;
+                }
+
+                .artists-feed {
+                    width: 100%;
+                    box-sizing: border-box;
+                }
+
+                .header {
+                    font-size: clamp(1rem, 1.2vw, 1.35rem);
+                    font-variation-settings: var(--fv-display);
+                    color: var(--c2);
+                    padding-bottom: 3%;
+                    user-select: none;
+                    padding-left: 2%;
+                }
+
+                .feed-grid {
+                    display: grid;
+                    grid-template-columns: repeat(5, minmax(0, 1fr));
+                    width: 100%;
+                    min-height: 0;
+                }
+
+                .artist-card {
+                    display: grid;
+                    grid-template-rows: minmax(0, 1fr) auto;
+                    min-width: 0;
+                    cursor: pointer;
+                    transition: opacity 0.25s ease;
+                }
+
+                .artist-card:hover {
+                    opacity: 0.92;
+                }
+
+                .artist-card:hover .artist-card-image img {
+                    transform: scale(1.06);
+                }
+
+                .artist-card-image {
+                    width: 100%;
+                    aspect-ratio: 3 / 4;
+                    overflow: hidden;
+                    background: var(--c3);
+                }
+
+                .artist-card-image img {
+                    width: 100%;
+                    height: 100%;
+                    object-fit: cover;
+                    transform-origin: center center;
+                    transition: transform 0.35s ease;
+                }
+
+                .artist-card-content {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 0.4rem 0.25rem 0.55rem;
+                    background-color: var(--c3);
+                    gap: 0.15rem;
+                }
+
+                .artist-card-title {
+                    font-size: clamp(0.72rem, 0.95vw, 0.95rem);
+                    font-variation-settings: var(--fv-card-title);
+                    color: var(--c2);
+                    line-height: 1.2;
+                    text-align: center;
+                }
+
+                .artist-card-discipline {
+                    font-size: clamp(0.62rem, 0.78vw, 0.8rem);
+                    font-variation-settings: var(--fv-caption);
+                    color: var(--c2);
+                    line-height: 1.2;
+                    text-align: center;
+                    opacity: 0.9;
+                }
+
+                .feed-footer {
+                    display: flex;
+                    flex-wrap: wrap;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 1rem 1.5rem;
+                    margin-top: 1.75rem;
+                    padding-top: 1rem;
+                }
+
+                .feed-meta {
+                    font-size: clamp(0.75rem, 0.85vw, 0.95rem);
+                    font-variation-settings: var(--fv-label);
+                    color: var(--c2);
+                    opacity: 0.85;
+                    min-width: 12rem;
+                    text-align: center;
+                }
+
+                .feed-nav {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    gap: 0.65rem;
+                }
+
+                .feed-nav-buttons {
+                    display: flex;
+                    align-items: center;
+                    gap: 1.5rem;
+                }
+
+                .feed-page-label {
+                    font-size: clamp(0.72rem, 0.8vw, 0.9rem);
+                    font-variation-settings: var(--fv-label-strong);
+                    color: var(--c2);
+                    opacity: 0.85;
+                    letter-spacing: 0.04em;
+                    user-select: none;
+                }
+
+                .nav-btn {
+                    min-width: 7.5rem;
+                    padding: 0.6em 1em;
+                    font-size: clamp(0.75rem, 0.85vw, 0.95rem);
+                    font-variation-settings: var(--fv-title);
+                    letter-spacing: 0.06em;
+                    text-transform: uppercase;
+                    color: var(--c2);
+                    background: var(--c3);
+                    border: 1px solid var(--c2);
+                    cursor: pointer;
+                    transition: background 0.2s ease, opacity 0.2s ease;
+                }
+
+                .nav-btn:hover:not(:disabled) {
+                    background: var(--c5);
+                }
+
+                .nav-btn:disabled {
+                    opacity: 0.35;
+                    cursor: not-allowed;
+                }
+
+                @media (max-width: 900px) {
+                    .feed-grid {
+                        grid-template-columns: repeat(3, minmax(0, 1fr));
+                    }
+                }
+
+                @media (max-width: 520px) {
+                    .feed-grid {
+                        grid-template-columns: repeat(2, minmax(0, 1fr));
+                    }
+                }
+            </style>
+            <div class="artists-feed">
+                <div class="header">All Artists</div>
+                <div class="feed-grid" id="feedGrid"></div>
+                <div class="feed-footer">
+                    <div class="feed-nav">
+                        <div class="feed-nav-buttons">
+                            <button type="button" class="nav-btn" id="btnBack" aria-label="Previous page">Back</button>
+                            <button type="button" class="nav-btn" id="btnNext" aria-label="Next page">Next</button>
+                        </div>
+                        <div class="feed-page-label" id="feedPageLabel" aria-live="polite">Pg. 1</div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        this.gridEl = this.shadowRoot.getElementById('feedGrid');
+        this.btnBack = this.shadowRoot.getElementById('btnBack');
+        this.btnNext = this.shadowRoot.getElementById('btnNext');
+        this.pageLabelEl = this.shadowRoot.getElementById('feedPageLabel');
+
+        this.btnBack.addEventListener('click', () => this.goPrev());
+        this.btnNext.addEventListener('click', () => this.goNext());
+    }
+
+    goPrev() {
+        if (this.currentPage <= 0) return;
+        this.currentPage -= 1;
+        this.updatePage();
+    }
+
+    goNext() {
+        const totalPages = Math.max(1, Math.ceil(this.pool.length / PAGE_SIZE));
+        if (this.currentPage >= totalPages - 1) return;
+        this.currentPage += 1;
+        this.updatePage();
+    }
+
+    updatePage() {
+        if (!this._shellReady) return;
+
+        const grid = this.gridEl;
+        grid.innerHTML = '';
+
+        const total = this.pool.length;
+        const totalPages = total === 0 ? 1 : Math.ceil(total / PAGE_SIZE);
+        const start = this.currentPage * PAGE_SIZE;
+        const slice = this.pool.slice(start, start + PAGE_SIZE);
+
+        const locale = typeof window.getLocale === 'function' ? window.getLocale() : 'en';
+
+        for (let i = 0; i < slice.length; i++) {
+            const artist = slice[i];
+            const loc = artistLocaleBlock(artist, locale);
+            const artistName = loc?.name ?? '';
+            const artistImage = artist.image;
+            const artistDiscipline = loc?.discipline ?? '';
+
+            const card = document.createElement('div');
+            card.classList.add('artist-card');
+            card.addEventListener('click', () => {
+                const en = artistEnglishBlock(artist);
+                const slug = artist.slug || artistSlugFromName(en?.name ?? '');
+                navigate(`/profile/${encodeURIComponent(slug)}`);
+            });
+
+            card.innerHTML = `
+                <div class="artist-card-image">
+                    <img src="${artistImage}" alt="${escapeHtml(artistName)}">
+                </div>
+                <div class="artist-card-content">
+                    <div class="artist-card-title">${escapeHtml(artistName)}</div>
+                    <div class="artist-card-discipline">${escapeHtml(artistDiscipline)}</div>
+                </div>
+            `;
+            grid.appendChild(card);
+        }
+
+        this.btnBack.disabled = this.currentPage <= 0;
+        this.btnNext.disabled = total === 0 || this.currentPage >= totalPages - 1;
+
+        if (this.pageLabelEl) {
+            const pageNum = total === 0 ? 1 : this.currentPage + 1;
+            this.pageLabelEl.textContent = `Pg. ${pageNum}`;
+        }
+    }
+}
+
+customElements.define('app-artists-feed', ArtistsFeedElement);
+
+export { ArtistsFeedElement };

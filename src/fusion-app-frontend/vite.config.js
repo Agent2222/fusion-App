@@ -22,6 +22,11 @@ export default defineConfig({
         target: "http://127.0.0.1:4943",
         changeOrigin: true,
       },
+      "/integration": {
+        target: "http://127.0.0.1:8787",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/integration/, ""),
+      },
     },
   },
   publicDir: "assets",

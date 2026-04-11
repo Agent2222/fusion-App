@@ -1,0 +1,285 @@
+// Placeholder — structure, content, and styles TBD
+import { navigate } from '../../router.js';
+import { artistEnglishBlock, artistLocaleBlock, artistSlugFromName } from '../../utils/artistSlug.js';
+
+class FeaturedArtistComponent extends HTMLElement {
+    constructor() {
+        super();
+        this.shadow = this.attachShadow({ mode: 'open' });
+        this.data = null;
+    }
+
+    get active() {
+        return this.getAttribute('active') || false;
+    }
+
+    set active(val) {
+        const next = val === true || val === 'true' ? 'true' : 'false';
+        if (this.getAttribute('active') === next) return;
+        this.setAttribute('active', next);
+    }
+    
+
+    getFeaturedArtist() {
+        return this.data;
+    }
+
+    setFeaturedArtist(data) {
+        this.data = data;
+        this.render();
+    }
+
+    static get observedAttributes() {
+        return ['active'];
+    }
+
+    attributeChangedCallback(prop, oldVal, newVal) {
+        if (prop === 'active') {
+            if (oldVal === newVal) return;
+            this.render();
+        }
+    }
+
+    createArtistCard(length) {
+        for (let i=0; i<length; i++) {
+            const artist = this.data.artists[i];
+            const locale = typeof window.getLocale === 'function' ? window.getLocale() : 'en';
+            const loc = artistLocaleBlock(artist, locale);
+            const artistName = loc?.name ?? '';
+            const artistImage = artist.image;
+            const artistDiscipline = loc?.discipline ?? '';
+
+            let card = document.createElement('div');
+            card.classList.add('artist-card');
+
+            card.addEventListener('click', () => {
+                const en = artistEnglishBlock(artist);
+                const slug = artist.slug || artistSlugFromName(en?.name ?? '');
+                navigate(`/profile/${encodeURIComponent(slug)}`);
+            });
+
+            card.innerHTML = `
+                <div class="artist-card-image">
+                    <img src="${artistImage}" alt="${artistName}">
+                </div>
+                <div class="artist-card-content">
+                    <div class="artist-card-title">${artistName}</div>
+                    <div class="artist-card-discipline">${artistDiscipline}</div>
+                </div>
+            `;
+
+            this.shadowRoot.querySelector('.content').appendChild(card);
+        }
+    }
+
+    hideAllArtistsButton() {
+        this.shadowRoot.querySelector('.button-cta').style.display = 'none';
+    }
+
+    showAllArtistsButton() {
+        this.shadowRoot.querySelector('.button-cta').style.display = 'flex';
+    }
+
+    connectedCallback() {
+        this.render();
+        // Event delegation: render() replaces shadow HTML, so per-node listeners would be lost
+        // after setFeaturedArtist() / attribute changes. One listener on the root survives.
+        if (!this._allArtistsNavBound) {
+            this._allArtistsNavBound = true;
+            this.shadowRoot.addEventListener('click', (e) => {
+                const t = e.target;
+                if (t && t.id === 'allArtistsButton') {
+                    navigate('/artists');
+                }
+            });
+        }
+    }
+
+    render() {
+        this.shadow.innerHTML = `
+            <style>
+                :host {
+                    display: block;
+                }
+
+                .featured-artist {
+                    width: 100%;
+                    height: auto;
+                    display: grid;
+                    grid-template-columns: 1fr;
+                    grid-template-rows: 5% 85% 10%;
+                    align-items: center;
+                    justify-content: center;
+                    padding-bottom: 120px;
+                    padding-top: 20px;
+                }
+
+                .header {
+                    width: 100%;
+                    height: 100%;
+                    font-size: 1.4rem;
+                    font-variation-settings: var(--fv-display);
+                    padding-left: 2%;
+                    user-select: none;
+                }
+
+                .content {
+                    width: 100%;
+                    height: 100%;
+                    display: grid;
+                    grid-template-columns: 1fr 1fr 1fr 1fr;
+                    grid-template-rows: auto;
+                }
+
+                .artist-card {
+                    width: 100%;
+                    height: 100%;
+                    display: grid;
+                    grid-template-columns: 1fr;
+                    grid-template-rows: 80% 20%;
+                    cursor: pointer;
+                    transition: all 0.5s ease;
+                }
+
+                .artist-card:hover > .artist-card-image > img {
+                    animation: scaleImage 15s ease forwards;
+                }
+
+                @keyframes scaleImage {
+                    from {
+                        transform: scale(1);
+                    }
+                    to {
+                        transform: scale(1.2);
+                    }
+                }
+
+                .artist-card-image {
+                    width: 100%;
+                    height: 100%;
+                    overflow: hidden;
+                }
+                
+                .artist-card-image img {
+                    width: 100%;
+                    height: 100%;
+                    object-fit: cover;
+                    transform-origin: center top;
+                }
+                
+                .artist-card-content {
+                    width: 100%;
+                    height: 100%;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    background-color: var(--c3);
+                }
+                
+                .artist-card-title {
+                    font-size: clamp(1.3rem, 1.8vw, 2rem);
+                    font-variation-settings: var(--fv-headline-wide);
+                    color: var(--c2);
+                    letter-spacing: 0.02em;
+                    line-height: 1.2;
+                }
+                
+                .artist-card-discipline {
+                    font-size: clamp(1rem, 1vw, 1.4rem);
+                    font-variation-settings: var(--fv-body-wide);
+                    color: var(--c2);
+                    letter-spacing: 0.02em;
+                    line-height: 1.2;
+                }
+
+                .button-cta {
+                    width: 23%;
+                    height: 55%;
+                    display: flex;
+                    align-items: end;
+                    justify-content: end;
+                    margin-top: 4%;
+                    margin-left: 75%;
+                    margin-right: 2%;
+                    border-bottom: 1px solid var(--c2);
+                    transition: all 0.3s ease;
+                }
+                
+                #allArtistsButton {
+                    max-width: 300px;
+                    min-width: 200px;
+                    height: 50%;
+                    margin-left: 40%;
+                    display: flex;
+                    justify-self: end;
+                    align-items: center;
+                    justify-content: end;
+                    padding-right: 5%;
+                    background-color: var(--c3);
+                    font-size: clamp(1rem, 1.2vw, 1.4rem);
+                    font-variation-settings: var(--fv-headline);
+                    cursor: pointer;
+                    transition: all 0.3s ease;
+                }
+
+                #allArtistsButton:hover {
+                    background-color: var(--c5);
+                }
+
+                .button-cta:has(#allArtistsButton:hover) {
+                    width: 30%;
+                    margin-left: 68%;
+                }
+
+                @media (max-width: 1024px) {
+                    .content {
+                        grid-template-columns: 1fr 1fr;
+                    }
+
+                    .button-cta {
+                        width: 100%;
+                        height: auto;
+                        margin-left: 0;
+                        margin-right: 0;
+                        justify-content: center;
+                        align-items: center;
+                    }
+
+                    #allArtistsButton {
+                        margin-left: 0;
+                        width: min(100%, 320px);
+                        max-width: 100%;
+                    }
+                }
+
+                @media (max-width: 768px) {
+                    .content {
+                        grid-template-columns: 1fr;
+                    }
+
+                    .featured-artist {
+                        padding-bottom: 3rem;
+                        padding-top: 1rem;
+                    }
+
+                    .button-cta:has(#allArtistsButton:hover) {
+                        width: 100%;
+                        margin-left: 0;
+                    }
+                }
+            </style>
+            <div class="featured-artist">
+                <div class="header">Featured Artist</div>
+                <div class="content"></div>
+                <div class="button-cta">
+                    <div id="allArtistsButton">All Artists</div>
+                </div>
+            </div>
+        `;
+    }
+}
+
+customElements.define('app-featured-artist', FeaturedArtistComponent);
+
+export { FeaturedArtistComponent };

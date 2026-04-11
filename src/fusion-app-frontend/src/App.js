@@ -1,6 +1,6 @@
 import { html, render } from 'lit-html';
-import { fusion_app_backend } from 'declarations/fusion-app-backend';
 import logo from './logo2.svg';
+import { createICActor } from './config.js';
 
 class App {
   greeting = '';
@@ -12,7 +12,14 @@ class App {
   #handleSubmit = async (e) => {
     e.preventDefault();
     const name = document.getElementById('name').value;
-    this.greeting = await fusion_app_backend.greet(name);
+    // Lazy-load declarations so we don't create an actor (and call fetchRootKey)
+    // during initial page load.
+    const fusionAppBackendDecl = await import('declarations/fusion-app-backend');
+    const actor = await createICActor(
+      fusionAppBackendDecl.idlFactory,
+      fusionAppBackendDecl.canisterId
+    );
+    this.greeting = await actor.greet(name);
     this.#render();
   };
 

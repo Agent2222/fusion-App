@@ -1,0 +1,46 @@
+/* Link button 1 — hero primary CTA (program-hero, journal-hero). See .cursor/rules/styles.mdc */
+
+.programCTA {
+    width: 60%;
+    height: 100%;
+    align-items: end;
+    align-self: end;
+    justify-content: end;
+    margin-top: 1%;
+    border-bottom: 1px solid var(--c2);
+    margin-left: 40%;
+    margin-top: 4%;
+    transition: all 0.3s ease;
+}
+
+.ctaButton {
+    width: 200px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: end;
+    justify-self: end;
+    background-color: var(--c3);
+    color: var(--c2);
+    line-height: 1.3;
+    padding-right: 5%;
+    margin-top: 4%;
+    font-size: 1.2rem;
+    font-variation-settings: var(--fv-cta);
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-sizing: border-box;
+}
+
+a.ctaButton {
+    text-decoration: none;
+}
+
+.ctaButton:hover {
+    background-color: var(--c5);
+}
+
+.programCTA:has(.ctaButton:hover) {
+    width: 80%;
+    margin-left: 20%;
+}

@@ -1,5 +1,643 @@
+import Types "./types";
+import _HashMap "mo:base/HashMap";
+import _Iter "mo:base/Iter";
+import Text "mo:base/Text";
+import Principal "mo:base/Principal";
+import Array "mo:base/Array";
+import Debug "mo:base/Debug";
+import Order "mo:base/Order";
+
 persistent actor {
+  /// Internet Identity / admin principals allowed to list/delete subscribers and manage admins.
+  stable var adminPrincipals : [Principal] = [];
+
+  // Stable snapshot of the HashMap entries (email -> subscriber).
+  stable var subscribersStable : [(Text, Types.Subscriber)] = [];
+
+  /// Principal -> user account (roles, links). Flushed in preupgrade.
+  stable var accountsStable : [(Principal, Types.UserAccount)] = [];
+
+  /// Artist id -> full record. Flushed in preupgrade.
+  stable var artistsStable : [(Text, Types.ArtistRecord)] = [];
+
+  stable var programsStable : [(Text, Types.ProgramRecord)] = [];
+  stable var journalsStable : [(Text, Types.JournalRecord)] = [];
+  stable var editionsStable : [(Text, Types.EditionRecord)] = [];
+  stable var contentPagesStable : [(Text, Types.ContentPageRecord)] = [];
+  stable var applicantsStable : [(Text, Types.ApplicantRecord)] = [];
+  stable var siteSettingsStable : [(Text, Text)] = [];
+
+  // In-memory hashmap for fast lookups/updates.
+  transient var subscribersByEmail : _HashMap.HashMap<Text, Types.Subscriber> =
+    _HashMap.HashMap<Text, Types.Subscriber>(
+      subscribersStable.size(),
+      Text.equal,
+      Text.hash
+    );
+
+  transient var accountsByPrincipal : _HashMap.HashMap<Principal, Types.UserAccount> =
+    _HashMap.HashMap<Principal, Types.UserAccount>(
+      accountsStable.size(),
+      Principal.equal,
+      Principal.hash
+    );
+
+  transient var artistsById : _HashMap.HashMap<Text, Types.ArtistRecord> =
+    _HashMap.HashMap<Text, Types.ArtistRecord>(
+      artistsStable.size(),
+      Text.equal,
+      Text.hash
+    );
+
+  /// slug -> artist id
+  transient var artistSlugToId : _HashMap.HashMap<Text, Text> =
+    _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
+
+  transient var programsById : _HashMap.HashMap<Text, Types.ProgramRecord> =
+    _HashMap.HashMap<Text, Types.ProgramRecord>(0, Text.equal, Text.hash);
+
+  transient var journalsById : _HashMap.HashMap<Text, Types.JournalRecord> =
+    _HashMap.HashMap<Text, Types.JournalRecord>(0, Text.equal, Text.hash);
+
+  transient var editionsById : _HashMap.HashMap<Text, Types.EditionRecord> =
+    _HashMap.HashMap<Text, Types.EditionRecord>(0, Text.equal, Text.hash);
+
+  transient var contentBySlug : _HashMap.HashMap<Text, Types.ContentPageRecord> =
+    _HashMap.HashMap<Text, Types.ContentPageRecord>(0, Text.equal, Text.hash);
+
+  transient var applicantsById : _HashMap.HashMap<Text, Types.ApplicantRecord> =
+    _HashMap.HashMap<Text, Types.ApplicantRecord>(0, Text.equal, Text.hash);
+
+  transient var siteSettingsByKey : _HashMap.HashMap<Text, Text> =
+    _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
+
+  // Populate hashmaps on install / reload.
+  for (entry in subscribersStable.vals()) {
+    let email = entry.0;
+    let sub = entry.1;
+    subscribersByEmail.put(email, sub);
+  };
+
+  for (entry in accountsStable.vals()) {
+    let p = entry.0;
+    let acc = entry.1;
+    accountsByPrincipal.put(p, acc);
+  };
+
+  for (entry in artistsStable.vals()) {
+    let id = entry.0;
+    let rec = entry.1;
+    artistsById.put(id, rec);
+    artistSlugToId.put(rec.profile.slug, id);
+  };
+
+  for (entry in programsStable.vals()) {
+    programsById.put(entry.0, entry.1);
+  };
+  for (entry in journalsStable.vals()) {
+    journalsById.put(entry.0, entry.1);
+  };
+  for (entry in editionsStable.vals()) {
+    editionsById.put(entry.0, entry.1);
+  };
+  for (entry in contentPagesStable.vals()) {
+    contentBySlug.put(entry.0, entry.1);
+  };
+  for (entry in applicantsStable.vals()) {
+    applicantsById.put(entry.0, entry.1);
+  };
+  for (entry in siteSettingsStable.vals()) {
+    siteSettingsByKey.put(entry.0, entry.1);
+  };
+
+  private func isAdminPrincipal(p : Principal) : Bool {
+    for (a in adminPrincipals.vals()) {
+      if (Principal.equal(a, p)) {
+        return true;
+      };
+    };
+    false;
+  };
+
+  private func assertAdmin(caller : Principal) {
+    if (not isAdminPrincipal(caller)) {
+      Debug.trap("Unauthorized: admin only");
+    };
+  };
+
+  private func isStaffOrAdminCaller(caller : Principal) : Bool {
+    if (isAdminPrincipal(caller)) {
+      return true;
+    };
+    switch (accountsByPrincipal.get(caller)) {
+      case (?acc) {
+        if (acc.status == #active) {
+          switch (acc.role) {
+            case (#staff) { return true };
+            case (#admin) { return true };
+            case _ { false };
+          };
+        } else {
+          false;
+        };
+      };
+      case null { false };
+    };
+  };
+
+  private func assertStaffOrAdmin(caller : Principal) {
+    if (not isStaffOrAdminCaller(caller)) {
+      Debug.trap("Unauthorized: staff or admin only");
+    };
+  };
+
+  private func roleIsPrivileged(r : Types.UserRole) : Bool {
+    switch (r) {
+      case (#staff) { true };
+      case (#admin) { true };
+      case _ { false };
+    };
+  };
+
+  /// One-time bootstrap: if no admins exist, the caller becomes the first admin. Returns true if it did.
+  public shared (msg) func bootstrapAdminIfEmpty() : async Bool {
+    if (adminPrincipals.size() > 0) {
+      return false;
+    };
+    adminPrincipals := [msg.caller];
+    let now = "1970-01-01T00:00:00.000Z";
+    accountsByPrincipal.put(
+      msg.caller,
+      {
+        role = #admin;
+        status = #active;
+        linkedArtistId = null;
+        linkedOrgId = null;
+        updatedAt = now;
+      },
+    );
+    return true;
+  };
+
+  public query func isAdmin(principal : Principal) : async Bool {
+    isAdminPrincipal(principal);
+  };
+
+  public shared query (msg) func isCallerAdmin() : async Bool {
+    isAdminPrincipal(msg.caller);
+  };
+
+  public shared (msg) func addAdmin(newAdmin : Principal) : async () {
+    assertAdmin(msg.caller);
+    if (isAdminPrincipal(newAdmin)) {
+      return;
+    };
+    adminPrincipals := Array.append(adminPrincipals, [newAdmin]);
+  };
+
   public query func greet(name : Text) : async Text {
     return "Hello, " # name # "!";
+  };
+
+  system func preupgrade() {
+    subscribersStable := _Iter.toArray(subscribersByEmail.entries());
+    accountsStable := _Iter.toArray(accountsByPrincipal.entries());
+    artistsStable := _Iter.toArray(artistsById.entries());
+    programsStable := _Iter.toArray(programsById.entries());
+    journalsStable := _Iter.toArray(journalsById.entries());
+    editionsStable := _Iter.toArray(editionsById.entries());
+    contentPagesStable := _Iter.toArray(contentBySlug.entries());
+    applicantsStable := _Iter.toArray(applicantsById.entries());
+    siteSettingsStable := _Iter.toArray(siteSettingsByKey.entries());
+  };
+
+  system func postupgrade() {
+    subscribersByEmail := _HashMap.HashMap<Text, Types.Subscriber>(
+      subscribersStable.size(),
+      Text.equal,
+      Text.hash
+    );
+    for (entry in subscribersStable.vals()) {
+      let email = entry.0;
+      let sub = entry.1;
+      subscribersByEmail.put(email, sub);
+    };
+    subscribersStable := [];
+
+    accountsByPrincipal := _HashMap.HashMap<Principal, Types.UserAccount>(
+      accountsStable.size(),
+      Principal.equal,
+      Principal.hash
+    );
+    for (entry in accountsStable.vals()) {
+      accountsByPrincipal.put(entry.0, entry.1);
+    };
+    accountsStable := [];
+
+    artistsById := _HashMap.HashMap<Text, Types.ArtistRecord>(
+      artistsStable.size(),
+      Text.equal,
+      Text.hash
+    );
+    artistSlugToId := _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
+    for (entry in artistsStable.vals()) {
+      let id = entry.0;
+      let rec = entry.1;
+      artistsById.put(id, rec);
+      artistSlugToId.put(rec.profile.slug, id);
+    };
+    artistsStable := [];
+
+    programsById := _HashMap.HashMap<Text, Types.ProgramRecord>(0, Text.equal, Text.hash);
+    for (entry in programsStable.vals()) {
+      programsById.put(entry.0, entry.1);
+    };
+    programsStable := [];
+
+    journalsById := _HashMap.HashMap<Text, Types.JournalRecord>(0, Text.equal, Text.hash);
+    for (entry in journalsStable.vals()) {
+      journalsById.put(entry.0, entry.1);
+    };
+    journalsStable := [];
+
+    editionsById := _HashMap.HashMap<Text, Types.EditionRecord>(0, Text.equal, Text.hash);
+    for (entry in editionsStable.vals()) {
+      editionsById.put(entry.0, entry.1);
+    };
+    editionsStable := [];
+
+    contentBySlug := _HashMap.HashMap<Text, Types.ContentPageRecord>(0, Text.equal, Text.hash);
+    for (entry in contentPagesStable.vals()) {
+      contentBySlug.put(entry.0, entry.1);
+    };
+    contentPagesStable := [];
+
+    applicantsById := _HashMap.HashMap<Text, Types.ApplicantRecord>(0, Text.equal, Text.hash);
+    for (entry in applicantsStable.vals()) {
+      applicantsById.put(entry.0, entry.1);
+    };
+    applicantsStable := [];
+
+    siteSettingsByKey := _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
+    for (entry in siteSettingsStable.vals()) {
+      siteSettingsByKey.put(entry.0, entry.1);
+    };
+    siteSettingsStable := [];
+  };
+
+  // ===== Accounts =====
+
+  public shared query (msg) func getAccountForCaller() : async ?Types.UserAccount {
+    return accountsByPrincipal.get(msg.caller);
+  };
+
+  /// Admin-only: set full account for any principal (e.g. promote staff).
+  public shared (msg) func adminUpsertUserAccount(
+    p : Principal,
+    account : Types.UserAccount,
+  ) : async () {
+    assertAdmin(msg.caller);
+    accountsByPrincipal.put(p, account);
+  };
+
+  /// Caller registers or updates a non-privileged role; stored as #pending until admin activates.
+  public shared (msg) func registerOrUpdateAccount(role : Types.UserRole) : async () {
+    if (roleIsPrivileged(role)) {
+      Debug.trap("Cannot self-request staff or admin");
+    };
+    let now = "1970-01-01T00:00:00.000Z";
+    let acc : Types.UserAccount = {
+      role = role;
+      status = #pending;
+      linkedArtistId = null;
+      linkedOrgId = null;
+      updatedAt = now;
+    };
+    accountsByPrincipal.put(msg.caller, acc);
+  };
+
+  // ===== Artists (public reads; writes staff/admin) =====
+
+  public query func listArtists() : async [Types.Artist] {
+    let vals = _Iter.toArray(artistsById.vals());
+    let sorted = Array.sort(
+      vals,
+      func(a : Types.ArtistRecord, b : Types.ArtistRecord) : Order.Order {
+        if (a.profile.featuredOrder < b.profile.featuredOrder) {
+          #less;
+        } else if (a.profile.featuredOrder > b.profile.featuredOrder) {
+          #greater;
+        } else {
+          #equal;
+        };
+      },
+    );
+    Array.map<Types.ArtistRecord, Types.Artist>(
+      sorted,
+      func(r : Types.ArtistRecord) : Types.Artist { r.profile },
+    );
+  };
+
+  public query func getArtistBySlug(slug : Text) : async ?Types.Artist {
+    switch (artistSlugToId.get(slug)) {
+      case null { null };
+      case (?id) {
+        switch (artistsById.get(id)) {
+          case null { null };
+          case (?rec) { ?rec.profile };
+        };
+      };
+    };
+  };
+
+  private func sanitizeArtistRecordForPublic(rec : Types.ArtistRecord) : Types.ArtistRecord {
+    { rec with accessCode = "" };
+  };
+
+  /// Full row including optional `localesJson` for profile parity with testData.
+  /// Strips `accessCode` so public callers never receive onboarding codes.
+  public query func getArtistRecordBySlug(slug : Text) : async ?Types.ArtistRecord {
+    switch (artistSlugToId.get(slug)) {
+      case null { null };
+      case (?id) {
+        switch (artistsById.get(id)) {
+          case null { null };
+          case (?rec) { ?sanitizeArtistRecordForPublic(rec) };
+        };
+      };
+    };
+  };
+
+  /// Staff/admin: full records including `imported` and `accessCode` (for Studio roster).
+  public shared (msg) func listArtistRecordsForStudio() : async [Types.ArtistRecord] {
+    assertStaffOrAdmin(msg.caller);
+    _Iter.toArray(artistsById.vals());
+  };
+
+  private func putArtistRecord(record : Types.ArtistRecord) {
+    let id = record.profile.id;
+    let slug = record.profile.slug;
+    switch (artistsById.get(id)) {
+      case (?old) {
+        if (old.profile.slug != slug) {
+          ignore artistSlugToId.remove(old.profile.slug);
+        };
+      };
+      case null {};
+    };
+    artistsById.put(id, record);
+    artistSlugToId.put(slug, id);
+  };
+
+  public shared (msg) func upsertArtist(record : Types.ArtistRecord) : async () {
+    assertStaffOrAdmin(msg.caller);
+    putArtistRecord(record);
+  };
+
+  public shared (msg) func bulkUpsertArtists(records : [Types.ArtistRecord]) : async () {
+    assertStaffOrAdmin(msg.caller);
+    for (r in records.vals()) {
+      putArtistRecord(r);
+    };
+  };
+
+  public shared (msg) func deleteArtistById(artistId : Text) : async Bool {
+    assertAdmin(msg.caller);
+    switch (artistsById.remove(artistId)) {
+      case null { false };
+      case (?rec) {
+        ignore artistSlugToId.remove(rec.profile.slug);
+        true;
+      };
+    };
+  };
+
+  // ===== Programs (public reads; writes staff/admin) =====
+
+  public query func listPrograms() : async [Types.ProgramRecord] {
+    let vals = _Iter.toArray(programsById.vals());
+    Array.sort(
+      vals,
+      func(a : Types.ProgramRecord, b : Types.ProgramRecord) : Order.Order {
+        if (a.featuredOrder < b.featuredOrder) { #less } else if (a.featuredOrder > b.featuredOrder) { #greater } else { #equal };
+      },
+    );
+  };
+
+  public query func getProgram(programId : Text) : async ?Types.ProgramRecord {
+    programsById.get(programId);
+  };
+
+  public shared (msg) func upsertProgram(rec : Types.ProgramRecord) : async () {
+    assertStaffOrAdmin(msg.caller);
+    programsById.put(rec.id, rec);
+  };
+
+  public shared (msg) func bulkUpsertPrograms(records : [Types.ProgramRecord]) : async () {
+    assertStaffOrAdmin(msg.caller);
+    for (r in records.vals()) {
+      programsById.put(r.id, r);
+    };
+  };
+
+  public shared (msg) func deleteProgram(programId : Text) : async Bool {
+    assertAdmin(msg.caller);
+    switch (programsById.remove(programId)) {
+      case null { false };
+      case (?_) { true };
+    };
+  };
+
+  // ===== Journal =====
+
+  public query func listJournalEntries() : async [Types.JournalRecord] {
+    let vals = _Iter.toArray(journalsById.vals());
+    Array.sort(
+      vals,
+      func(a : Types.JournalRecord, b : Types.JournalRecord) : Order.Order {
+        Text.compare(a.id, b.id);
+      },
+    );
+  };
+
+  public query func getJournalEntry(entryId : Text) : async ?Types.JournalRecord {
+    journalsById.get(entryId);
+  };
+
+  public shared (msg) func upsertJournalEntry(rec : Types.JournalRecord) : async () {
+    assertStaffOrAdmin(msg.caller);
+    journalsById.put(rec.id, rec);
+  };
+
+  public shared (msg) func deleteJournalEntry(entryId : Text) : async Bool {
+    assertAdmin(msg.caller);
+    switch (journalsById.remove(entryId)) {
+      case null { false };
+      case (?_) { true };
+    };
+  };
+
+  // ===== Editions (products) =====
+
+  public query func listEditions() : async [Types.EditionRecord] {
+    let vals = _Iter.toArray(editionsById.vals());
+    Array.sort(
+      vals,
+      func(a : Types.EditionRecord, b : Types.EditionRecord) : Order.Order {
+        Text.compare(a.id, b.id);
+      },
+    );
+  };
+
+  public shared (msg) func upsertEdition(rec : Types.EditionRecord) : async () {
+    assertStaffOrAdmin(msg.caller);
+    editionsById.put(rec.id, rec);
+  };
+
+  public shared (msg) func deleteEdition(editionId : Text) : async Bool {
+    assertAdmin(msg.caller);
+    switch (editionsById.remove(editionId)) {
+      case null { false };
+      case (?_) { true };
+    };
+  };
+
+  // ===== Content pages (CMS) =====
+
+  public query func listContentPages() : async [Types.ContentPageRecord] {
+    let vals = _Iter.toArray(contentBySlug.vals());
+    Array.sort(
+      vals,
+      func(a : Types.ContentPageRecord, b : Types.ContentPageRecord) : Order.Order {
+        Text.compare(a.slug, b.slug);
+      },
+    );
+  };
+
+  public query func getContentPage(slug : Text) : async ?Types.ContentPageRecord {
+    contentBySlug.get(slug);
+  };
+
+  public shared (msg) func upsertContentPage(rec : Types.ContentPageRecord) : async () {
+    assertStaffOrAdmin(msg.caller);
+    contentBySlug.put(rec.slug, rec);
+  };
+
+  public shared (msg) func deleteContentPage(slug : Text) : async Bool {
+    assertAdmin(msg.caller);
+    switch (contentBySlug.remove(slug)) {
+      case null { false };
+      case (?_) { true };
+    };
+  };
+
+  // ===== Applicants =====
+
+  public shared query (msg) func listApplicants() : async [Types.ApplicantRecord] {
+    assertStaffOrAdmin(msg.caller);
+    let vals = _Iter.toArray(applicantsById.vals());
+    Array.sort(
+      vals,
+      func(a : Types.ApplicantRecord, b : Types.ApplicantRecord) : Order.Order {
+        Text.compare(a.createdAt, b.createdAt);
+      },
+    );
+  };
+
+  public shared (msg) func upsertApplicant(rec : Types.ApplicantRecord) : async () {
+    assertStaffOrAdmin(msg.caller);
+    applicantsById.put(rec.id, rec);
+  };
+
+  public shared (msg) func deleteApplicant(applicantId : Text) : async Bool {
+    assertAdmin(msg.caller);
+    switch (applicantsById.remove(applicantId)) {
+      case null { false };
+      case (?_) { true };
+    };
+  };
+
+  // ===== Site settings (key/value text) =====
+
+  public query func getSiteSetting(key : Text) : async ?Text {
+    siteSettingsByKey.get(key);
+  };
+
+  public shared (msg) func setSiteSetting(key : Text, value : Text) : async () {
+    assertAdmin(msg.caller);
+    siteSettingsByKey.put(key, value);
+  };
+
+  /// Admin-only: list all accounts (Studio Users tab).
+  public shared query (msg) func listAccounts() : async [(Principal, Types.UserAccount)] {
+    assertAdmin(msg.caller);
+    _Iter.toArray(accountsByPrincipal.entries());
+  };
+
+  // ===== Queries: subscribers =====
+
+  public shared query (msg) func getSubscribers() : async [Types.Subscriber] {
+    assertAdmin(msg.caller);
+    return _Iter.toArray(subscribersByEmail.vals());
+  };
+
+  public query func getSubscriberByEmail(email : Text) : async ?Types.Subscriber {
+    return subscribersByEmail.get(email);
+  };
+
+  // ===== Updates: subscribers =====
+
+  // Upsert a subscriber: if email exists, update fields; otherwise add a new entry.
+  // Public (any caller) for marketing-site early-access signup.
+  // Returns true if an existing subscriber was updated; false if created.
+  public shared (_msg) func upsertSubscriber(
+    email : Text,
+    category : Text,
+    timestamp : Text,
+    fullName : Text,
+    intent : Text,
+  ) : async Bool {
+    switch (subscribersByEmail.get(email)) {
+      case null {
+        subscribersByEmail.put(email, {
+          timestamp = timestamp;
+          email = email;
+          category = category;
+          fullName = fullName;
+          intent = intent;
+        });
+        return false;
+      };
+      case (?_) {
+        subscribersByEmail.put(email, {
+          timestamp = timestamp;
+          email = email;
+          category = category;
+          fullName = fullName;
+          intent = intent;
+        });
+        return true;
+      };
+    };
+  };
+
+  // Delete by email. Admin only.
+  public shared (msg) func deleteSubscriberByEmail(email : Text) : async Bool {
+    assertAdmin(msg.caller);
+    switch (subscribersByEmail.remove(email)) {
+      case null { return false };
+      case (?_) { return true };
+    };
+  };
+
+  /// Admin-only: batch import (e.g. CSV upload from Studio).
+  public shared (msg) func bulkUpsertSubscribers(rows : [Types.Subscriber]) : async Nat {
+    assertAdmin(msg.caller);
+    var count : Nat = 0;
+    for (sub in rows.vals()) {
+      subscribersByEmail.put(sub.email, sub);
+      count += 1;
+    };
+    count;
   };
 };
