@@ -37,6 +37,9 @@ const resendFrom = process.env.RESEND_FROM || '';
 
 const awsRegion = process.env.AWS_REGION || process.env.S3_REGION || '';
 const s3Bucket = process.env.S3_BUCKET || '';
+const awsAccessKeyId = process.env.AWS_ACCESS_KEY_ID || '';
+const awsSecretAccessKey = process.env.AWS_SECRET_ACCESS_KEY || '';
+const awsSessionToken = process.env.AWS_SESSION_TOKEN || '';
 const s3PublicBase =
     process.env.S3_PUBLIC_BASE_URL ||
     (s3Bucket && awsRegion
@@ -44,9 +47,19 @@ const s3PublicBase =
         : '');
 const s3Prefix = (process.env.S3_KEY_PREFIX || 'studio/').replace(/^\/+/, '');
 
+/** On Render and most PaaS hosts there is no instance role — set AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY. Locally, omit them to use ~/.aws or env profile. */
 let s3Client = null;
 if (awsRegion && s3Bucket) {
-    s3Client = new S3Client({ region: awsRegion });
+    /** @type {import('@aws-sdk/client-s3').S3ClientConfig} */
+    const s3Config = { region: awsRegion };
+    if (awsAccessKeyId && awsSecretAccessKey) {
+        s3Config.credentials = {
+            accessKeyId: awsAccessKeyId,
+            secretAccessKey: awsSecretAccessKey,
+            ...(awsSessionToken ? { sessionToken: awsSessionToken } : {}),
+        };
+    }
+    s3Client = new S3Client(s3Config);
 }
 
 const app = express();
@@ -84,6 +97,8 @@ app.get('/health', (_req, res) => {
         stripe: stripeSecret ? 'configured' : 'missing',
         resend: resendApiKey ? 'configured' : 'missing',
         s3: s3Client && s3Bucket ? 'configured' : 'missing',
+        /** Hint for Render etc.: set IAM keys when not using a local AWS profile. */
+        s3AwsEnvKeys: Boolean(awsAccessKeyId && awsSecretAccessKey),
     });
 });
 
@@ -201,6 +216,12 @@ app.post('/storage/presign', requireApiKey, async (req, res) => {
         return res.json({ putUrl, publicUrl });
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
+        if (/credentials|Could not load credentials/i.test(msg)) {
+            return res.status(503).json({
+                error:
+                    'AWS credentials not available. On Render (and similar), set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY for an IAM user with s3:PutObject on this bucket. Locally you can use ~/.aws/credentials instead.',
+            });
+        }
         return res.status(500).json({ error: msg });
     }
 });

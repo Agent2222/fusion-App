@@ -1212,6 +1212,80 @@ button.studio-wordmark-btn:hover {
   border-bottom: 1px solid color-mix(in srgb, var(--c2, #000) 12%, transparent);
 }
 
+.studio-services-grid--panel {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.studio-tabs {
+  margin-top: 0.5rem;
+}
+
+.studio-tabs__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--c2, #000) 12%, transparent);
+}
+
+.studio-tabs__tab {
+  font: inherit;
+  font-size: 0.875rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--c2, #000) 22%, transparent);
+  background: var(--studio-card-bg, #fff);
+  color: var(--c2, #111);
+  cursor: pointer;
+}
+
+.studio-tabs__tab:hover {
+  border-color: color-mix(in srgb, var(--c2, #000) 40%, transparent);
+}
+
+.studio-tabs__tab.is-active {
+  border-color: var(--c2, #111);
+  background: color-mix(in srgb, var(--c2, #000) 8%, var(--studio-card-bg, #fff));
+  font-weight: 600;
+}
+
+.studio-tabs__panel[hidden] {
+  display: none !important;
+}
+
+.studio-tabs__panel.is-active {
+  display: block;
+}
+
+.studio-services-test-heading {
+  margin-top: 1.25rem;
+  margin-bottom: 0.25rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.studio-textarea-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8rem;
+  resize: vertical;
+}
+
+.studio-services-file-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.studio-input-file {
+  font: inherit;
+  font-size: 0.875rem;
+  max-width: 100%;
+}
+
 .studio-services-actions {
   display: flex;
   flex-wrap: wrap;

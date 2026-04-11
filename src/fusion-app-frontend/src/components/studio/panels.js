@@ -51,7 +51,7 @@ import {
     shortRefLabel,
 } from '../../utils/studioPlainForms.js';
 import { openStudioModal } from '../../utils/studioModal.js';
-import { fetchIntegrationHealth, sendEmail } from '../../utils/integrationApi.js';
+import { createPaymentIntent, fetchIntegrationHealth, sendEmail } from '../../utils/integrationApi.js';
 import { uploadBlobToS3 } from '../../utils/studioS3Upload.js';
 import {
     LS_INTEGRATION_API_KEY,
@@ -581,89 +581,144 @@ function renderServices() {
         <div class="studio-section-stack studio-services">
             <p class="studio-muted">Configure off-chain integrations (Stripe, Resend, S3). Publishable keys and URLs can be stored here for dev; <strong>never</strong> ship live secret keys in a public build. Server secrets belong in <code>services/fusion-integration-api/.env</code>.</p>
             <p class="studio-banner studio-banner--info" id="studio-svc-msg" style="display:none"></p>
-            <div class="studio-form-grid studio-services-grid">
-                <h3 class="studio-subheading studio-field--full">Integration API</h3>
-                <label class="studio-field studio-field--full">
-                    <span>Base URL</span>
-                    <input type="text" id="studio-svc-url" class="studio-input" placeholder="/integration or https://api.example.com" autocomplete="off" />
-                </label>
-                <label class="studio-field studio-field--full">
-                    <span>API Bearer (optional)</span>
-                    <input type="password" id="studio-svc-bearer" class="studio-input" placeholder="If INTEGRATION_API_KEY is set on server" autocomplete="off" />
-                </label>
-                <div class="studio-field studio-field--full studio-services-actions">
-                    <button type="button" class="studio-btn-primary" id="studio-svc-save">Save</button>
-                    <button type="button" class="studio-btn-ghost" id="studio-svc-health">Test connection</button>
+            <div class="studio-tabs" data-studio-tabs="services">
+                <div class="studio-tabs__list" role="tablist" aria-label="Services sections">
+                    <button type="button" class="studio-tabs__tab is-active" role="tab" id="studio-svc-tab-connect" aria-selected="true" aria-controls="studio-svc-panel-connect">Connection</button>
+                    <button type="button" class="studio-tabs__tab" role="tab" id="studio-svc-tab-stripe" aria-selected="false" aria-controls="studio-svc-panel-stripe">Stripe</button>
+                    <button type="button" class="studio-tabs__tab" role="tab" id="studio-svc-tab-resend" aria-selected="false" aria-controls="studio-svc-panel-resend">Resend</button>
+                    <button type="button" class="studio-tabs__tab" role="tab" id="studio-svc-tab-s3" aria-selected="false" aria-controls="studio-svc-panel-s3">Amazon S3</button>
                 </div>
-            </div>
-            <div class="studio-form-grid studio-services-grid">
-                <h3 class="studio-subheading studio-field--full">Stripe</h3>
-                <p class="studio-muted studio-field--full">Use <strong>test</strong> keys until launch. Secret keys are for the integration server only — paste below to copy into <code>.env</code>; they are not saved in the browser.</p>
-                <div class="studio-field-row studio-field--full">
-                    <label class="studio-field studio-field--inline">
-                        <input type="radio" name="studio-svc-stripe-mode" value="test" id="studio-svc-mode-test" checked />
-                        Test (pk_test / sk_test)
-                    </label>
-                    <label class="studio-field studio-field--inline">
-                        <input type="radio" name="studio-svc-stripe-mode" value="live" id="studio-svc-mode-live" />
-                        Live publishable (pk_live)
-                    </label>
-                </div>
-                <label class="studio-field studio-field--full">
-                    <span>Publishable key (test) <code>pk_test_…</code></span>
-                    <input type="text" id="studio-svc-pk-test" class="studio-input" placeholder="pk_test_…" autocomplete="off" />
-                </label>
-                <label class="studio-field studio-field--full">
-                    <span>Secret key (test) <code>sk_test_…</code> — server only, not persisted</span>
-                    <input type="password" id="studio-svc-sk-test" class="studio-input" placeholder="Paste to generate .env; cleared on reload" autocomplete="off" />
-                </label>
-                <details class="studio-field studio-field--full" id="studio-svc-live-details">
-                    <summary>Live keys (production)</summary>
-                    <label class="studio-field studio-field--full">
-                        <span>Publishable key (live) <code>pk_live_…</code></span>
-                        <input type="text" id="studio-svc-pk-live" class="studio-input" placeholder="pk_live_…" autocomplete="off" />
-                    </label>
-                    <label class="studio-field studio-field--full">
-                        <span>Secret key (live) <code>sk_live_…</code> — server only, not persisted</span>
-                        <input type="password" id="studio-svc-sk-live" class="studio-input" placeholder="Never commit" autocomplete="off" />
-                    </label>
-                </details>
-                <p class="studio-field--full">Resolved publishable key: <code id="studio-svc-pk-resolved">—</code></p>
-                <div class="studio-field studio-field--full studio-services-actions">
-                    <button type="button" class="studio-btn-ghost" id="studio-svc-help-stripe">How to set up Stripe</button>
-                    <button type="button" class="studio-btn-ghost" id="studio-svc-copy-env">Copy .env snippet</button>
-                </div>
-            </div>
-            <div class="studio-form-grid studio-services-grid">
-                <h3 class="studio-subheading studio-field--full">Resend</h3>
-                <p class="studio-muted studio-field--full">The Resend API key stays on the integration server (<code>RESEND_API_KEY</code>). Use this to send a test email through your API.</p>
-                <label class="studio-field studio-field--full">
-                    <span>Test recipient email</span>
-                    <input type="email" id="studio-svc-resend-to" class="studio-input" placeholder="you@example.com" />
-                </label>
-                <label class="studio-field studio-field--full">
-                    <span>From (optional)</span>
-                    <input type="text" id="studio-svc-resend-from" class="studio-input" placeholder='Fusion &lt;onboarding@resend.dev&gt; — must be allowed in Resend' autocomplete="off" />
-                </label>
-                <div class="studio-field studio-field--full studio-services-actions">
-                    <button type="button" class="studio-btn-ghost" id="studio-svc-help-resend">How to set up Resend</button>
-                    <button type="button" class="studio-btn-primary" id="studio-svc-send-test">Send test email</button>
-                </div>
-            </div>
-            <div class="studio-form-grid studio-services-grid">
-                <h3 class="studio-subheading studio-field--full">Amazon S3</h3>
-                <p class="studio-muted studio-field--full">IAM credentials stay on the server. These fields are notes for your <code>.env</code> and copy snippet.</p>
-                <label class="studio-field"><span>Region</span>
-                    <input type="text" id="studio-svc-s3-region" class="studio-input" placeholder="us-east-1" />
-                </label>
-                <label class="studio-field"><span>Bucket</span>
-                    <input type="text" id="studio-svc-s3-bucket" class="studio-input" placeholder="my-bucket" />
-                </label>
-                <label class="studio-field studio-field--full"><span>Public base URL</span>
-                    <input type="text" id="studio-svc-s3-public" class="studio-input" placeholder="https://… or CloudFront" />
-                </label>
-                <div class="studio-field studio-field--full studio-services-actions">
-                    <button type="button" class="studio-btn-ghost" id="studio-svc-help-s3">How to set up S3</button>
+                <div class="studio-tabs__panels">
+                    <div id="studio-svc-panel-connect" class="studio-tabs__panel is-active" role="tabpanel" aria-labelledby="studio-svc-tab-connect">
+                        <div class="studio-form-grid studio-services-grid studio-services-grid--panel">
+                            <h3 class="studio-subheading studio-field--full">Integration API</h3>
+                            <label class="studio-field studio-field--full">
+                                <span>Base URL</span>
+                                <input type="text" id="studio-svc-url" class="studio-input" placeholder="/integration or https://api.example.com" autocomplete="off" />
+                            </label>
+                            <label class="studio-field studio-field--full">
+                                <span>API Bearer (optional)</span>
+                                <input type="password" id="studio-svc-bearer" class="studio-input" placeholder="If INTEGRATION_API_KEY is set on server" autocomplete="off" />
+                            </label>
+                            <div class="studio-field studio-field--full studio-services-actions">
+                                <button type="button" class="studio-btn-primary" id="studio-svc-save">Save</button>
+                                <button type="button" class="studio-btn-ghost" id="studio-svc-health">Test connection</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="studio-svc-panel-stripe" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-svc-tab-stripe" hidden>
+                        <div class="studio-form-grid studio-services-grid studio-services-grid--panel">
+                            <h3 class="studio-subheading studio-field--full">Stripe</h3>
+                            <p class="studio-muted studio-field--full">Use <strong>test</strong> keys until launch. Secret keys are for the integration server only — paste below to copy into <code>.env</code>; they are not saved in the browser.</p>
+                            <div class="studio-field-row studio-field--full">
+                                <label class="studio-field studio-field--inline">
+                                    <input type="radio" name="studio-svc-stripe-mode" value="test" id="studio-svc-mode-test" checked />
+                                    Test (pk_test / sk_test)
+                                </label>
+                                <label class="studio-field studio-field--inline">
+                                    <input type="radio" name="studio-svc-stripe-mode" value="live" id="studio-svc-mode-live" />
+                                    Live publishable (pk_live)
+                                </label>
+                            </div>
+                            <label class="studio-field studio-field--full">
+                                <span>Publishable key (test) <code>pk_test_…</code></span>
+                                <input type="text" id="studio-svc-pk-test" class="studio-input" placeholder="pk_test_…" autocomplete="off" />
+                            </label>
+                            <label class="studio-field studio-field--full">
+                                <span>Secret key (test) <code>sk_test_…</code> — server only, not persisted</span>
+                                <input type="password" id="studio-svc-sk-test" class="studio-input" placeholder="Paste to generate .env; cleared on reload" autocomplete="off" />
+                            </label>
+                            <details class="studio-field studio-field--full" id="studio-svc-live-details">
+                                <summary>Live keys (production)</summary>
+                                <label class="studio-field studio-field--full">
+                                    <span>Publishable key (live) <code>pk_live_…</code></span>
+                                    <input type="text" id="studio-svc-pk-live" class="studio-input" placeholder="pk_live_…" autocomplete="off" />
+                                </label>
+                                <label class="studio-field studio-field--full">
+                                    <span>Secret key (live) <code>sk_live_…</code> — server only, not persisted</span>
+                                    <input type="password" id="studio-svc-sk-live" class="studio-input" placeholder="Never commit" autocomplete="off" />
+                                </label>
+                            </details>
+                            <p class="studio-field--full">Resolved publishable key: <code id="studio-svc-pk-resolved">—</code></p>
+                            <div class="studio-field studio-field--full studio-services-actions">
+                                <button type="button" class="studio-btn-ghost" id="studio-svc-help-stripe">How to set up Stripe</button>
+                                <button type="button" class="studio-btn-ghost" id="studio-svc-copy-env">Copy .env snippet</button>
+                            </div>
+                            <h4 class="studio-subheading studio-field--full studio-services-test-heading">Test PaymentIntent</h4>
+                            <p class="studio-muted studio-field--full">Creates a PaymentIntent via <code>POST /stripe/create-payment-intent</code> (min 50 in smallest units, e.g. $0.50 USD or ¥50 JPY). Use the client secret with Stripe.js; test card <code>4242424242424242</code> where confirmation runs.</p>
+                            <label class="studio-field">
+                                <span>Amount</span>
+                                <input type="number" id="studio-svc-pi-amount" class="studio-input" min="0.5" step="0.01" value="1.00" />
+                            </label>
+                            <label class="studio-field">
+                                <span>Currency</span>
+                                <select id="studio-svc-pi-currency" class="studio-input">
+                                    <option value="usd" selected>usd</option>
+                                    <option value="eur">eur</option>
+                                    <option value="gbp">gbp</option>
+                                    <option value="jpy">jpy</option>
+                                </select>
+                            </label>
+                            <div class="studio-field studio-field--full studio-services-actions">
+                                <button type="button" class="studio-btn-primary" id="studio-svc-pi-create">Create test PaymentIntent</button>
+                                <button type="button" class="studio-btn-ghost" id="studio-svc-pi-copy" disabled>Copy client secret</button>
+                            </div>
+                            <label class="studio-field studio-field--full">
+                                <span>Client secret</span>
+                                <textarea id="studio-svc-pi-secret" class="studio-input studio-textarea-mono" rows="3" readonly placeholder="Create a PaymentIntent to see the secret"></textarea>
+                            </label>
+                        </div>
+                    </div>
+                    <div id="studio-svc-panel-resend" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-svc-tab-resend" hidden>
+                        <div class="studio-form-grid studio-services-grid studio-services-grid--panel">
+                            <h3 class="studio-subheading studio-field--full">Resend</h3>
+                            <p class="studio-muted studio-field--full">The Resend API key stays on the integration server (<code>RESEND_API_KEY</code>). Use this to send a test email through your API.</p>
+                            <label class="studio-field studio-field--full">
+                                <span>Test recipient email</span>
+                                <input type="email" id="studio-svc-resend-to" class="studio-input" placeholder="you@example.com" />
+                            </label>
+                            <label class="studio-field studio-field--full">
+                                <span>From (optional)</span>
+                                <input type="text" id="studio-svc-resend-from" class="studio-input" placeholder='Fusion &lt;onboarding@resend.dev&gt; — must be allowed in Resend' autocomplete="off" />
+                            </label>
+                            <div class="studio-field studio-field--full studio-services-actions">
+                                <button type="button" class="studio-btn-ghost" id="studio-svc-help-resend">How to set up Resend</button>
+                                <button type="button" class="studio-btn-primary" id="studio-svc-send-test">Send test email</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="studio-svc-panel-s3" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-svc-tab-s3" hidden>
+                        <div class="studio-form-grid studio-services-grid studio-services-grid--panel">
+                            <h3 class="studio-subheading studio-field--full">Amazon S3</h3>
+                            <p class="studio-muted studio-field--full">IAM credentials stay on the server. These fields are notes for your <code>.env</code> and copy snippet.</p>
+                            <label class="studio-field"><span>Region</span>
+                                <input type="text" id="studio-svc-s3-region" class="studio-input" placeholder="us-east-1" />
+                            </label>
+                            <label class="studio-field"><span>Bucket</span>
+                                <input type="text" id="studio-svc-s3-bucket" class="studio-input" placeholder="my-bucket" />
+                            </label>
+                            <label class="studio-field studio-field--full"><span>Public base URL</span>
+                                <input type="text" id="studio-svc-s3-public" class="studio-input" placeholder="https://… or CloudFront" />
+                            </label>
+                            <div class="studio-field studio-field--full studio-services-actions">
+                                <button type="button" class="studio-btn-ghost" id="studio-svc-help-s3">How to set up S3</button>
+                            </div>
+                            <h4 class="studio-subheading studio-field--full studio-services-test-heading">Test upload</h4>
+                            <p class="studio-muted studio-field--full">Presigns via <code>POST /storage/presign</code> then uploads with <code>PUT</code>. Bucket CORS must allow your Studio origin.</p>
+                            <div class="studio-field studio-field--full studio-services-file-row">
+                                <input type="file" id="studio-svc-s3-file" class="studio-input-file" />
+                                <button type="button" class="studio-btn-primary" id="studio-svc-s3-upload">Upload test file</button>
+                            </div>
+                            <p class="studio-field--full studio-muted" id="studio-svc-s3-status" style="display:none"></p>
+                            <label class="studio-field studio-field--full">
+                                <span>Public URL</span>
+                                <input type="text" id="studio-svc-s3-result-url" class="studio-input" readonly placeholder="—" />
+                            </label>
+                            <div class="studio-field studio-field--full studio-services-actions">
+                                <button type="button" class="studio-btn-ghost" id="studio-svc-s3-copy-url" disabled>Copy URL</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -2116,6 +2171,43 @@ function openServicesHelpS3() {
     openStudioModal(body, { title: 'Set up S3 uploads', wide: true });
 }
 
+/**
+ * @param {number} amountInput
+ * @param {string} currency
+ * @returns {number}
+ */
+function studioStripeAmountToMinor(amountInput, currency) {
+    const c = currency.toLowerCase();
+    if (c === 'jpy') {
+        return Math.round(amountInput);
+    }
+    return Math.round(amountInput * 100);
+}
+
+function initServicesTabs(mainEl) {
+    const root = mainEl.querySelector('[data-studio-tabs="services"]');
+    if (!root) return;
+    const tabs = root.querySelectorAll('.studio-tabs__tab[role="tab"]');
+    const panels = root.querySelectorAll('.studio-tabs__panel[role="tabpanel"]');
+    const activate = (tabEl) => {
+        const panelId = tabEl.getAttribute('aria-controls');
+        if (!panelId) return;
+        tabs.forEach((t) => {
+            const on = t === tabEl;
+            t.setAttribute('aria-selected', on ? 'true' : 'false');
+            t.classList.toggle('is-active', on);
+        });
+        panels.forEach((p) => {
+            const on = p.id === panelId;
+            p.hidden = !on;
+            p.classList.toggle('is-active', on);
+        });
+    };
+    tabs.forEach((tab) => {
+        tab.addEventListener('click', () => activate(tab));
+    });
+}
+
 async function initServices(mainEl) {
     const msg = mainEl.querySelector('#studio-svc-msg');
     const show = (kind, text) => {
@@ -2185,6 +2277,7 @@ async function initServices(mainEl) {
     };
 
     load();
+    initServicesTabs(mainEl);
 
     mainEl.querySelector('#studio-svc-save')?.addEventListener('click', () => save());
     mainEl.querySelector('#studio-svc-health')?.addEventListener('click', async () => {
@@ -2231,6 +2324,79 @@ async function initServices(mainEl) {
         } catch (e) {
             show('error', e instanceof Error ? e.message : String(e));
         }
+    });
+
+    const piAmount = mainEl.querySelector('#studio-svc-pi-amount');
+    const piCurrency = mainEl.querySelector('#studio-svc-pi-currency');
+    const piSecret = mainEl.querySelector('#studio-svc-pi-secret');
+    const piCopyBtn = mainEl.querySelector('#studio-svc-pi-copy');
+    mainEl.querySelector('#studio-svc-pi-create')?.addEventListener('click', async () => {
+        const raw = parseFloat(piAmount?.value || '0');
+        const currency = (piCurrency?.value || 'usd').toLowerCase();
+        if (!Number.isFinite(raw) || raw <= 0) {
+            show('error', 'Enter a valid amount.');
+            return;
+        }
+        const minor = studioStripeAmountToMinor(raw, currency);
+        if (minor < 50) {
+            show('error', 'Amount too small (minimum 50 in smallest currency units, e.g. $0.50 or ¥50).');
+            return;
+        }
+        show('info', 'Creating PaymentIntent…');
+        try {
+            const { clientSecret } = await createPaymentIntent(minor, currency, { source: 'studio-test' });
+            if (piSecret) piSecret.value = clientSecret || '';
+            if (piCopyBtn) piCopyBtn.disabled = !clientSecret;
+            show('ok', 'PaymentIntent created.');
+        } catch (e) {
+            if (piSecret) piSecret.value = '';
+            if (piCopyBtn) piCopyBtn.disabled = true;
+            show('error', e instanceof Error ? e.message : String(e));
+        }
+    });
+    mainEl.querySelector('#studio-svc-pi-copy')?.addEventListener('click', async () => {
+        const v = (piSecret?.value || '').trim();
+        if (!v) return;
+        const ok = await copyToClipboard(v);
+        show(ok ? 'ok' : 'error', ok ? 'Copied client secret.' : 'Copy failed.');
+    });
+
+    const s3File = mainEl.querySelector('#studio-svc-s3-file');
+    const s3Status = mainEl.querySelector('#studio-svc-s3-status');
+    const s3ResultUrl = mainEl.querySelector('#studio-svc-s3-result-url');
+    const s3CopyUrlBtn = mainEl.querySelector('#studio-svc-s3-copy-url');
+    mainEl.querySelector('#studio-svc-s3-upload')?.addEventListener('click', async () => {
+        const file = s3File?.files?.[0];
+        if (!file) {
+            show('error', 'Choose a file first.');
+            return;
+        }
+        show('info', 'Uploading…');
+        if (s3Status) {
+            s3Status.style.display = 'block';
+            s3Status.textContent = 'Uploading…';
+        }
+        if (s3ResultUrl) s3ResultUrl.value = '';
+        if (s3CopyUrlBtn) s3CopyUrlBtn.disabled = true;
+        try {
+            const url = await uploadBlobToS3(file, null);
+            if (s3ResultUrl) s3ResultUrl.value = url;
+            if (s3CopyUrlBtn) s3CopyUrlBtn.disabled = false;
+            if (s3Status) s3Status.textContent = 'Upload complete.';
+            show('ok', 'File uploaded.');
+        } catch (e) {
+            if (s3Status) {
+                s3Status.textContent = '';
+                s3Status.style.display = 'none';
+            }
+            show('error', e instanceof Error ? e.message : String(e));
+        }
+    });
+    mainEl.querySelector('#studio-svc-s3-copy-url')?.addEventListener('click', async () => {
+        const v = (s3ResultUrl?.value || '').trim();
+        if (!v) return;
+        const ok = await copyToClipboard(v);
+        show(ok ? 'ok' : 'error', ok ? 'Copied public URL.' : 'Copy failed.');
     });
 }
 

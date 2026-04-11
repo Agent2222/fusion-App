@@ -11,7 +11,7 @@
 
         // Allow Typekit network connections (momochidori VF.js)
         "headers": {
-            "Content-Security-Policy": "default-src 'self';script-src 'self';connect-src 'self' http://localhost:* https://icp0.io https://*.icp0.io https://icp-api.io https://use.typekit.net https://*.typekit.net https://fusion-integration-api.onrender.com;img-src 'self' data:;style-src * 'unsafe-inline';style-src-elem * 'unsafe-inline';font-src *;object-src 'none';base-uri 'self';frame-ancestors 'none';form-action 'self';upgrade-insecure-requests;"
+            "Content-Security-Policy": "default-src 'self';script-src 'self';connect-src 'self' http://localhost:* https://icp0.io https://*.icp0.io https://icp-api.io https://use.typekit.net https://*.typekit.net https://fusion-app-sycs.onrender.com https://www.fusionart.world https://fusionart.world 'self' data:;style-src * 'unsafe-inline';style-src-elem * 'unsafe-inline';font-src *;object-src 'none';base-uri 'self';frame-ancestors 'none';form-action 'self';upgrade-insecure-requests;"
         },
 
         // Uncomment to disable the warning about using the

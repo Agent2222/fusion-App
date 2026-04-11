@@ -54,6 +54,8 @@ Set at least the following. Use **your real values**; do not commit them.
 | `RESEND_FROM` | Email | e.g. `Fusion <onboarding@resend.dev>` or your verified domain |
 | `AWS_REGION` | S3 presign | e.g. `us-east-1` |
 | `S3_BUCKET` | S3 presign | Bucket name |
+| `AWS_ACCESS_KEY_ID` | S3 on Render | IAM user access key — **required** on hosts without an IAM instance role |
+| `AWS_SECRET_ACCESS_KEY` | S3 on Render | IAM secret for the same user |
 | `S3_PUBLIC_BASE_URL` | Optional | Public URL base for objects (CloudFront or `https://bucket.s3.region.amazonaws.com`) |
 | `CORS_STRICT` | Optional | Set to `1` only if you want an allowlist (`CORS_ORIGINS` + built-in Fusion origins). **Leave unset** so browsers on `fusionart.world`, `*.icp0.io`, etc. always get valid CORS without redeploying the API. |
 | `CORS_ORIGINS` | With `CORS_STRICT` | Extra allowed origins, e.g. `https://<canister>.icp0.io` (no trailing slash) |
@@ -147,7 +149,7 @@ If POSTs return **401**, either remove `INTEGRATION_API_KEY` on Render for testi
 | `Integration API URL not configured` | `VITE_INTEGRATION_API_URL` was set at **build** time; rebuild and redeploy assets |
 | Stripe “not configured” | `STRIPE_SECRET_KEY` on Render |
 | Email “RESEND_FROM” / 503 | `RESEND_FROM` + `RESEND_API_KEY` on Render |
-| S3 presign 503 | `AWS_REGION`, `S3_BUCKET`, IAM permissions |
+| S3 presign 503 / “Could not load credentials” | Set **`AWS_ACCESS_KEY_ID`** and **`AWS_SECRET_ACCESS_KEY`** on Render (IAM user with `s3:PutObject`). Local dev can use `~/.aws` instead. |
 | Cold start / timeout | Render free tier sleep—upgrade or retry |
 
 ---

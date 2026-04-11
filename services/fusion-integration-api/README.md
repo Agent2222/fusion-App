@@ -15,6 +15,9 @@ Small Express server for Stripe Payment Intents, Resend email, and S3 presigned 
 | `RESEND_FROM` | for email | Verified sender, e.g. `Fusion <onboarding@resend.dev>` |
 | `AWS_REGION` or `S3_REGION` | for S3 | Region |
 | `S3_BUCKET` | for S3 | Bucket name |
+| `AWS_ACCESS_KEY_ID` | for S3 on **Render / most hosts** | IAM user access key (`AKIA…`). Required unless the process can use another [default credential chain](https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/setting-credentials-node.html) (e.g. local `~/.aws/credentials`). |
+| `AWS_SECRET_ACCESS_KEY` | with access key above | IAM secret key |
+| `AWS_SESSION_TOKEN` | optional | Only if using temporary credentials (STS) |
 | `S3_PUBLIC_BASE_URL` | no | Public base for object URLs (default: virtual-hosted–style S3 URL) |
 | `S3_KEY_PREFIX` | no | Prefix for keys (default `studio/`) |
 
