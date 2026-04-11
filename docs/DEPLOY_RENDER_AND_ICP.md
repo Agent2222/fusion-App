@@ -55,22 +55,12 @@ Set at least the following. Use **your real values**; do not commit them.
 | `AWS_REGION` | S3 presign | e.g. `us-east-1` |
 | `S3_BUCKET` | S3 presign | Bucket name |
 | `S3_PUBLIC_BASE_URL` | Optional | Public URL base for objects (CloudFront or `https://bucket.s3.region.amazonaws.com`) |
-| `CORS_ORIGINS` | Browser calls | Comma-separated **exact** origins—see below |
-| `INTEGRATION_API_KEY` | Optional hardening | Random secret; if set, frontend must send `Authorization: Bearer …` |
+| `CORS_STRICT` | Optional | Set to `1` only if you want an allowlist (`CORS_ORIGINS` + built-in Fusion origins). **Leave unset** so browsers on `fusionart.world`, `*.icp0.io`, etc. always get valid CORS without redeploying the API. |
+| `CORS_ORIGINS` | With `CORS_STRICT` | Extra allowed origins, e.g. `https://<canister>.icp0.io` (no trailing slash) |
+| `INTEGRATION_API_KEY` | Optional hardening | Random secret; if set, frontend must send `Authorization: Bearer …` on POST routes |
 
-**`CORS_ORIGINS` (important)**  
-If you set this variable, the API restricts browser origins to **your list plus** built-in defaults (`https://fusionart.world`, `www`, and local `localhost:3000`). Add every **extra** origin that should call the API, for example:
-
-- Your **IC** site: `https://<your-asset-canister>.icp0.io` (use the URL users actually open)
-- You do **not** need to repeat `https://fusionart.world` here unless you want it documented in the list; it is merged automatically.
-
-If you **omit** `CORS_ORIGINS` entirely, the server allows **all** origins (fine for isolated testing; less strict).
-
-No trailing slashes. Example:
-
-```text
-https://abcd-efgh.icp0.io
-```
+**CORS (default)**  
+The integration API **reflects the request `Origin`** for CORS unless `CORS_STRICT=1`. That avoids “No `Access-Control-Allow-Origin`” when you add a custom domain or new IC URL. Protect sensitive actions with `INTEGRATION_API_KEY` on POST routes, not by hiding CORS from unknown origins on GET `/health`.
 
 ### 1.3 Health check (optional but useful)
 

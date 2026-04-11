@@ -11,7 +11,10 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 const PORT = Number(process.env.PORT || 8787);
-/** Always allow these (plus anything in CORS_ORIGINS). Custom domain + local Studio. */
+/** If "1" / "true", only allow DEFAULT + CORS_ORIGINS. Otherwise reflect any Origin (browser CORS always OK; POST still needs API key when set). */
+const CORS_STRICT = ['1', 'true', 'yes'].includes(
+    String(process.env.CORS_STRICT || '').toLowerCase(),
+);
 const DEFAULT_CORS_ORIGINS = [
     'https://fusionart.world',
     'https://www.fusionart.world',
@@ -50,16 +53,17 @@ const app = express();
 app.set('trust proxy', 1);
 app.use(
     cors({
-        origin:
-            corsOriginsFromEnv.length === 0
-                ? true
-                : (origin, cb) => {
-                      if (!origin || corsAllowList.includes(origin)) {
-                          cb(null, true);
-                      } else {
-                          cb(new Error('Not allowed by CORS'));
-                      }
-                  },
+        origin: (origin, cb) => {
+            if (!CORS_STRICT) {
+                cb(null, true);
+                return;
+            }
+            if (!origin || corsAllowList.includes(origin)) {
+                cb(null, true);
+            } else {
+                cb(new Error('Not allowed by CORS'));
+            }
+        },
     })
 );
 app.use(express.json({ limit: '512kb' }));
@@ -81,6 +85,11 @@ app.get('/health', (_req, res) => {
         resend: resendApiKey ? 'configured' : 'missing',
         s3: s3Client && s3Bucket ? 'configured' : 'missing',
     });
+});
+
+/** Confirms traffic hits this app (helps distinguish Render routing vs Node). */
+app.get('/', (_req, res) => {
+    res.type('text/plain').send('fusion-integration-api ok — use GET /health');
 });
 
 app.post('/stripe/create-payment-intent', requireApiKey, async (req, res) => {
