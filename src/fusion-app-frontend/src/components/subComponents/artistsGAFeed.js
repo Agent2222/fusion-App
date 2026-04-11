@@ -1,9 +1,9 @@
 import { navigate } from '../../router.js';
 import { artistEnglishBlock, artistLocaleBlock, artistSlugFromName } from '../../utils/artistSlug.js';
 
-import prepIcon from '../../../assets/icon-cal.png';
-import showingIcon from '../../../assets/icon-loc.png';
-import availableIcon from '../../../assets/icon-art.png';
+import prepIcon from '../../assets/icon-cal.png';
+import showingIcon from '../../assets/icon-loc.png';
+import availableIcon from '../../assets/icon-art.png';
 
 const PAGE_SIZE = 20;
 

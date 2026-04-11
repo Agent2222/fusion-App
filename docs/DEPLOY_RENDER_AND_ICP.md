@@ -59,16 +59,17 @@ Set at least the following. Use **your real values**; do not commit them.
 | `INTEGRATION_API_KEY` | Optional hardening | Random secret; if set, frontend must send `Authorization: Bearer …` |
 
 **`CORS_ORIGINS` (important)**  
-List every origin that will call the API from the browser, for example:
+If you set this variable, the API restricts browser origins to **your list plus** built-in defaults (`https://fusionart.world`, `www`, and local `localhost:3000`). Add every **extra** origin that should call the API, for example:
 
-- Your **IC** site: `https://<your-asset-canister>.icp0.io` and/or `https://<id>.ic0.app` (use the URL users actually open)
-- Any **custom domain** you attach to the asset canister
-- For local dev: `http://localhost:3000` (optional)
+- Your **IC** site: `https://<your-asset-canister>.icp0.io` (use the URL users actually open)
+- You do **not** need to repeat `https://fusionart.world` here unless you want it documented in the list; it is merged automatically.
+
+If you **omit** `CORS_ORIGINS` entirely, the server allows **all** origins (fine for isolated testing; less strict).
 
 No trailing slashes. Example:
 
 ```text
-https://abcd-efgh.icp0.io,http://localhost:3000
+https://abcd-efgh.icp0.io
 ```
 
 ### 1.3 Health check (optional but useful)

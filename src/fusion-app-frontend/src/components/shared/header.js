@@ -1,7 +1,8 @@
 import { navigate, activateDeactivate } from '../../router.js';
 // Header Custom Element Component
 import gsap from 'gsap';
-import SymbolLogo from '../../../assets/Fusion-X-SymbolLogo.png';
+import SymbolLogo from '../../assets/Fusion-X-SymbolLogo.png';
+import HeaderWideLogo from '../../assets/Fusion-X-logo-02.png';
 
 const MENU_IDLE_MS = 2000;
 const SCROLL_DELTA_PX = 4;
@@ -1047,7 +1048,7 @@ class HeaderComponent extends HTMLElement {
             </style>
             <header>
                 <div id="logo">
-                    <img id="headerLogo" class="header-logo-wide" src="/Fusion-X-logo-02.png" alt="Logo">
+                    <img id="headerLogo" class="header-logo-wide" src="${HeaderWideLogo}" alt="Logo">
                     <img id="headerLogoSymbol" class="header-logo-symbol" src="${SymbolLogo}" alt="Logo">
                 </div>
                 <button type="button" id="headerMenuToggle" class="header-menu-toggle" aria-expanded="false" aria-controls="headerNavCluster" aria-label="${en ? 'Open menu' : 'メニューを開く'}">

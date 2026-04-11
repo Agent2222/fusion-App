@@ -1,3 +1,5 @@
+import mainHyaku2 from '../assets/main-hyaku-2.jpg';
+
 function buildContent() {
     let element = document.createElement("div")
     element.id = "oneHundredMainContent"
@@ -27,7 +29,7 @@ function buildContent() {
                 <div id="TBDLocation100">Ishikawa,<br>Japan</div>
             </div>
             <div id="imageBlock100">
-                <img src="/main-hyaku-2.jpg" alt="Test">
+                <img src="${mainHyaku2}" alt="Test">
             </div>
         </div>
         <div class="feedBlock" id="ConceptFeedBlock100">

@@ -29,7 +29,7 @@ export default defineConfig({
       },
     },
   },
-  publicDir: "assets",
+  publicDir: "public",
   plugins: [
     environment("all", { prefix: "CANISTER_" }),
     environment("all", { prefix: "DFX_" }),

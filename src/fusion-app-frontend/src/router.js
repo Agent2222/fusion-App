@@ -3,10 +3,10 @@ import { DEV_MODE } from './config.js';
 import { renderHeader } from './components/shared/header.js';
 import { renderFooter } from './components/shared/footer.js';
 
-import LightLogo from '../assets/Fusion-X-logo-03.png';
-import DarkLogo from '../assets/Fusion-X-logo-02.png';
-import DarkSymbolLogo from '../assets/Fusion-X-SymbolLogo.png';
-import LightSymbolLogo from '../assets/Fusion-X-SymbolLogo-2.png';
+import LightLogo from './assets/Fusion-X-logo-03.png';
+import DarkLogo from './assets/Fusion-X-logo-02.png';
+import DarkSymbolLogo from './assets/Fusion-X-SymbolLogo.png';
+import LightSymbolLogo from './assets/Fusion-X-SymbolLogo-2.png';
 
 let headerAndFooterActive = false;
 

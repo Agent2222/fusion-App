@@ -1,5 +1,6 @@
 import { gsap } from "gsap";
-import { DEV_MODE, getHost } from '../../config.js';
+import fusionNature2 from '../../assets/fusion-nature2.mp4';
+import { DEV_MODE, getHost, config } from '../../config.js';
 import { getDataSource, setDataSource } from '../../utils/database.js';
 import { activateDeactivate, navigate } from '../../router.js';
 import { getFusionBackendActor } from '../../utils/earlyAccessSubscribe.js';
@@ -814,6 +815,7 @@ class LoadScreenComponent extends HTMLElement {
         console.log("eventListeners");
         this.shadowRoot.querySelector(".loadscreen-container").addEventListener('click', () => {
             if (!this.fontsReady) return;
+            if (!config.siteActive) return;
 
             this.shadowRoot.host.style.zIndex = '0';
 
@@ -1060,6 +1062,7 @@ class LoadScreenComponent extends HTMLElement {
         const circleLabels = circleKeys.map((key) => {
             return (labelConfig && labelConfig[key] && labelConfig[key].colorName) || key.toUpperCase();
         });
+        const siteActive = !!config.siteActive;
         this.shadow.innerHTML = `
             <style>
                 :host {
@@ -1240,7 +1243,7 @@ class LoadScreenComponent extends HTMLElement {
                     width: 98%;
                     height: 100%;
                     position: absolute;
-                    display: flex;
+                    display: ${siteActive ? 'flex' : 'none'};
                     flex-direction: column;
                     align-items: end;
                     justify-content: center;
@@ -1386,7 +1389,7 @@ class LoadScreenComponent extends HTMLElement {
                     z-index: 1000;
                     overflow-y: auto;
                     mix-blend-mode: multiply;
-                    display: none !important;
+                    display: ${siteActive ? 'none' : 'grid'};
                 }
 
                 #comingSoonParent {
@@ -1908,7 +1911,7 @@ class LoadScreenComponent extends HTMLElement {
                 <!-- vid1/vid2 removed: empty <video> still paints in some in-app browsers (e.g. Instagram) -->
                 <div class="motifVid vid3">
                     <video
-                        src="/fusion-nature2.mp4"
+                        src="${fusionNature2}"
                         autoplay
                         muted
                         loop

@@ -2,6 +2,12 @@ import './components/subComponents/page-transition.js';
 import { router } from './router.js';
 import { DEV_MODE } from './config.js';
 import './index.css';
+import faviconUrl from './assets/favicon.ico';
+import './assets/momochidori VF.js';
+
+const faviconLink =
+    typeof document !== 'undefined' ? document.querySelector('link[rel="icon"]') : null;
+if (faviconLink) faviconLink.href = faviconUrl;
 // Import and register custom elements
 import './components/shared/header.js';
 import './components/shared/footer.js';

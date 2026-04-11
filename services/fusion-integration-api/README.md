@@ -7,7 +7,7 @@ Small Express server for Stripe Payment Intents, Resend email, and S3 presigned 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `PORT` | no | Default `8787` |
-| `CORS_ORIGINS` | no | Comma-separated allowed origins (empty = allow all, dev only) |
+| `CORS_ORIGINS` | no | Comma-separated **extra** origins (empty = allow all origins). If set, the server also always allows `https://fusionart.world`, `https://www.fusionart.world`, and `http://localhost:3000` / `127.0.0.1:3000` plus your list here (e.g. `https://….icp0.io`). |
 | `INTEGRATION_API_KEY` | no | If set, require `Authorization: Bearer <token>` on POST routes |
 | `STRIPE_SECRET_KEY` | for Stripe | `sk_test_…` or `sk_live_…` |
 | `RESEND_API_KEY` | for email | Resend API key |

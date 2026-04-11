@@ -1,6 +1,6 @@
 // Footer Custom Element Component
 import gsap from 'gsap';
-import SymbolLogo from '../../../assets/Fusion-X-SymbolLogo.png';
+import SymbolLogo from '../../assets/Fusion-X-SymbolLogo.png';
 
 /** Pixels from bottom to treat as "at bottom" (matches small rounding / subpixel). */
 const BOTTOM_THRESHOLD_PX = 200;

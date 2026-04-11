@@ -11,10 +11,18 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 const PORT = Number(process.env.PORT || 8787);
-const corsOrigins = (process.env.CORS_ORIGINS || '')
+/** Always allow these (plus anything in CORS_ORIGINS). Custom domain + local Studio. */
+const DEFAULT_CORS_ORIGINS = [
+    'https://fusionart.world',
+    'https://www.fusionart.world',
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+];
+const corsOriginsFromEnv = (process.env.CORS_ORIGINS || '')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
+const corsAllowList = [...new Set([...DEFAULT_CORS_ORIGINS, ...corsOriginsFromEnv])];
 const apiKey = process.env.INTEGRATION_API_KEY || '';
 
 const stripeSecret = process.env.STRIPE_SECRET_KEY || '';
@@ -43,10 +51,10 @@ app.set('trust proxy', 1);
 app.use(
     cors({
         origin:
-            corsOrigins.length === 0
+            corsOriginsFromEnv.length === 0
                 ? true
                 : (origin, cb) => {
-                      if (!origin || corsOrigins.includes(origin)) {
+                      if (!origin || corsAllowList.includes(origin)) {
                           cb(null, true);
                       } else {
                           cb(new Error('Not allowed by CORS'));

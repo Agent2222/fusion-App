@@ -1,10 +1,13 @@
 /**
  * App configuration.
  * - devMode: set true for development (enables console logs, etc.); false for production.
+ * - siteActive: when true, full site is reachable (click-to-enter); when false, loadscreen shows
+ *   the coming-soon / early-access column and hides the enter CTA.
  * - apiBaseUrl: base URL for API requests (e.g. '/api' or 'http://localhost:3000' in dev).
  */
 export const config = {
-  devMode: true,
+  devMode: false,
+  siteActive: false,
   apiBaseUrl: '/api',
 };
 

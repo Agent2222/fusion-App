@@ -7,6 +7,7 @@ import Array "mo:base/Array";
 import Debug "mo:base/Debug";
 import Order "mo:base/Order";
 
+// One-time mainnet migration from minimal subscriber-only wasm used `Migration.mo` (removed after upgrade).
 persistent actor {
   /// Internet Identity / admin principals allowed to list/delete subscribers and manage admins.
   stable var adminPrincipals : [Principal] = [];

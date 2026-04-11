@@ -1,4 +1,4 @@
-import placeholderImg from '../../assets/dev/program_hero-1.jpg';
+import placeholderImg from '../assets/dev/program_hero-1.jpg';
 import { findArtistByEnglishName } from '../utils/artistSlug.js';
 import { findProgramPairByPathname, getArtists } from '../utils/database.js';
 import {

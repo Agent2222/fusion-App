@@ -1,22 +1,22 @@
 // Images
-import image1 from '../assets/dev/program_hero-1.jpg';
-import image2 from '../assets/dev/fa-1.jpg';
-import image3 from '../assets/dev/fa-2.jpg';
-import image4 from '../assets/dev/fa-3.jpg';
-import image5 from '../assets/dev/fa-4.jpg';
-import image6 from '../assets/dev/fa-5.jpg';
-import image7 from '../assets/dev/fa-6.jpg';
-import image8 from '../assets/dev/fa-7.jpg';
-import image9 from '../assets/dev/fa-8.jpg';
+import image1 from './assets/dev/program_hero-1.jpg';
+import image2 from './assets/dev/fa-1.jpg';
+import image3 from './assets/dev/fa-2.jpg';
+import image4 from './assets/dev/fa-3.jpg';
+import image5 from './assets/dev/fa-4.jpg';
+import image6 from './assets/dev/fa-5.jpg';
+import image7 from './assets/dev/fa-6.jpg';
+import image8 from './assets/dev/fa-7.jpg';
+import image9 from './assets/dev/fa-8.jpg';
 
-import object1 from '../assets/dev/oh-1.webp';
-import object2 from '../assets/dev/oh-2.webp';
-import object3 from '../assets/dev/oh-3.webp';
-import object4 from '../assets/dev/oh-4.webp';
+import object1 from './assets/dev/oh-1.webp';
+import object2 from './assets/dev/oh-2.webp';
+import object3 from './assets/dev/oh-3.webp';
+import object4 from './assets/dev/oh-4.webp';
 
-import journal1 from '../assets/dev/je-1.jpg';
-import journal2 from '../assets/dev/je-2.jpg';
-import journal3 from '../assets/dev/je-3.jpg'; 
+import journal1 from './assets/dev/je-1.jpg';
+import journal2 from './assets/dev/je-2.jpg';
+import journal3 from './assets/dev/je-3.jpg'; 
 
 /**
  * Feed item shape: { imageSrc, imageAlt, location, month, date, year, label, ctaExhibit, ctaAttend }
