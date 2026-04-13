@@ -2216,7 +2216,7 @@ export const testData = {
     },
     /**
      * Multi-stage join modal (`app-join-network`): keyed by `data-modal-type` membership | access | apply.
-     * Stages: band (teaser), entry, value, payment, confirmation.
+     * Stages: band (teaser), entry, value, payment, linkAccount (pay-first II), confirmation.
      */
     joinNetworkFlow: {
         membership: {
@@ -2322,6 +2322,18 @@ export const testData = {
                     completeLabel: '支払いを完了',
                     footerNote: '安全な一回のお支払い。FUSION は 2 か月ごとに $50 で更新されます。',
                     devCompleteLabel: 'デモで完了',
+                },
+            },
+            linkAccount: {
+                en: {
+                    title: 'Link your account',
+                    lead: 'Sign in with Internet Identity to activate your membership and sync it to your profile.',
+                    signInLabel: 'Continue with Internet Identity',
+                },
+                ja: {
+                    title: 'アカウントをリンク',
+                    lead: 'メンバーシップを有効にするには、Internet Identity でサインインしてください。',
+                    signInLabel: 'Internet Identity で続行',
                 },
             },
             confirmation: {
@@ -2459,6 +2471,18 @@ export const testData = {
                     devCompleteLabel: 'デモで完了',
                 },
             },
+            linkAccount: {
+                en: {
+                    title: 'Link your account',
+                    lead: 'Sign in with Internet Identity to activate your access and sync it to your profile.',
+                    signInLabel: 'Continue with Internet Identity',
+                },
+                ja: {
+                    title: 'アカウントをリンク',
+                    lead: 'アクセスを有効にするには、Internet Identity でサインインしてください。',
+                    signInLabel: 'Internet Identity で続行',
+                },
+            },
             confirmation: {
                 en: {
                     title: 'Access Confirmed',
@@ -2592,6 +2616,18 @@ export const testData = {
                     completeLabel: '支払いを完了',
                     footerNote: '安全な一回のお支払い。FUSION は 2 か月ごとに $50 で更新されます。',
                     devCompleteLabel: 'デモで完了',
+                },
+            },
+            linkAccount: {
+                en: {
+                    title: 'Link your account',
+                    lead: 'Sign in with Internet Identity to activate your membership and continue your application.',
+                    signInLabel: 'Continue with Internet Identity',
+                },
+                ja: {
+                    title: 'アカウントをリンク',
+                    lead: 'メンバーシップを有効にし応募を続けるには、Internet Identity でサインインしてください。',
+                    signInLabel: 'Internet Identity で続行',
                 },
             },
             confirmation: {

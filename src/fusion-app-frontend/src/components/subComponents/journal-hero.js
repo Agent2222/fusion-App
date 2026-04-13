@@ -1,4 +1,5 @@
 import { navigate } from '../../router.js';
+import { escapeHtml, previewPlainText } from '../../utils/textPreview.js';
 
 // Placeholder — structure, content, and styles TBD
 class JournalHeroComponent extends HTMLElement {
@@ -63,13 +64,15 @@ class JournalHeroComponent extends HTMLElement {
         this._slideCount = count;
         this._activeIndex = 0;
 
-        const locale = window.getLocale();
+        const loc = typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
 
         for (let i = 0; i < count; i++) {
-            const journalImage = journals[i].imageSrc;
-            const journalTitle = journals[i][locale].title;
-            const journalDescription = journals[i][locale].description;
-            const journalLink = journals[i].link;
+            const row = journals[i];
+            const journalImage = row.imageSrc;
+            const slice = row[loc] || row.en || {};
+            const journalTitle = slice.title ?? '';
+            const journalDescription = previewPlainText(slice.description ?? '', 250);
+            const journalLink = row.link || '#';
 
             const journalCard = document.createElement('div');
             journalCard.classList.add('journal-card');
@@ -82,15 +85,15 @@ class JournalHeroComponent extends HTMLElement {
                                 <a href="/journal">All Entries</a>
                             </div>
                         </div>
-                        <div class="left-content-title">${journalTitle}</div>
-                        <div class="left-content-description">${journalDescription}</div>
+                        <div class="left-content-title">${escapeHtml(journalTitle)}</div>
+                        <div class="left-content-description">${escapeHtml(journalDescription)}</div>
                         <div class="programCTA">
-                            <a class="ctaButton" href="${journalLink}">Read Entry</a>
+                            <a class="ctaButton" href="${escapeHtml(journalLink)}">Read Entry</a>
                         </div>
                     </div>
                 </div>
                 <div class="right-content">
-                    <img class="journal-card-image" src="${journalImage}" alt="${journalTitle}">
+                    <img class="journal-card-image" src="${escapeHtml(journalImage)}" alt="${escapeHtml(slice.imageAlt ?? journalTitle)}">
                 </div>
             `;
 

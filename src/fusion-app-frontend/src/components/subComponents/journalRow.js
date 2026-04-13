@@ -4,14 +4,7 @@
  */
 import { getJournalEntries, subscribeDataSource } from '../../utils/database.js';
 import { navigate } from '../../router.js';
-
-function escapeHtml(s) {
-    return String(s)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-}
+import { escapeHtml, previewPlainText } from '../../utils/textPreview.js';
 
 class JournalRowComponent extends HTMLElement {
     constructor() {
@@ -132,7 +125,7 @@ class JournalRowComponent extends HTMLElement {
         const journalImage = entry.imageSrc;
         const journalLink = entry.link || '#';
         const journalTitle = loc?.title ?? '';
-        const journalDescription = loc?.description ?? '';
+        const journalDescription = previewPlainText(loc?.description ?? '', 250);
         const ctaLabel = loc?.cta ?? 'Read Entry';
         const imageAlt = loc?.imageAlt ?? journalTitle;
 

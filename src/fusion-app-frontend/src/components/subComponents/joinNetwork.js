@@ -1,3 +1,5 @@
+import { ERROR_USER_INTERRUPT } from '@dfinity/auth-client';
+
 /**
  * Join FUSION — band + multi-stage modal (`data-modal-type`: membership | access | apply).
  * Copy: `testData.joinNetworkFlow`; legacy `context` maps to modal type. See plan: join network modal flow.
@@ -14,7 +16,13 @@ import {
     prefetchFusionBackendActor,
     submitEarlyAccessToCanister,
 } from '../../utils/earlyAccessSubscribe.js';
-import { createSubscription, getIntegrationBaseUrl, sendEmail } from '../../utils/integrationApi.js';
+import {
+    createSubscription,
+    FUSION_PENDING_MEMBERSHIP_LINK_KEY,
+    getIntegrationBaseUrl,
+    linkSubscriptionToPrincipal,
+    sendEmail,
+} from '../../utils/integrationApi.js';
 import { getStripePublishableKeyResolved } from '../../utils/studioServicesConfig.js';
 
 /**
@@ -35,7 +43,7 @@ function parseMoneyToCents(raw) {
 }
 
 /** @typedef {'membership'|'access'|'apply'} ModalType */
-/** @typedef {'entry'|'value'|'payment'|'confirmation'} FlowStage */
+/** @typedef {'entry'|'value'|'payment'|'linkAccount'|'confirmation'} FlowStage */
 
 const CONTEXT_TO_MODAL = /** @type {Record<string, ModalType>} */ ({
     home: 'membership',
@@ -49,7 +57,7 @@ const CONTEXT_TO_MODAL = /** @type {Record<string, ModalType>} */ ({
     programs: 'apply',
 });
 
-const STAGES = /** @type {FlowStage[]} */ (['entry', 'value', 'payment', 'confirmation']);
+const STAGES = /** @type {FlowStage[]} */ (['entry', 'value', 'payment', 'linkAccount', 'confirmation']);
 
 /**
  * @param {Record<string, unknown> | null} flow
@@ -93,6 +101,7 @@ class JoinNetworkComponent extends HTMLElement {
         /** @type {(e: Event) => void} */
         this._onFusionAuthChange = () => {
             void this._syncBandOpenButtonAuth();
+            void this._tryCompletePendingLink();
         };
         this._joinNetworkSubmitting = false;
         /** Opened after sign-in with no account — close without completing join logs out of II. */
@@ -103,6 +112,9 @@ class JoinNetworkComponent extends HTMLElement {
         this._joinMode = 'full';
         /** When true, `afterJoinSaved` skips early-access + register (already done before Stripe). */
         this._preStripeCanisterSyncDone = false;
+        /** Pay-first Stripe: pending link id + subscription id until II links. */
+        this._fusionPendingId = /** @type {string | null} */ (null);
+        this._fusionSubscriptionId = /** @type {string | null} */ (null);
         /** @type {FlowStage} */
         this._stage = 'entry';
         /** @type {ModalType} */
@@ -367,6 +379,7 @@ class JoinNetworkComponent extends HTMLElement {
         const entry = getFlowSlice(flow, mt, 'entry', loc);
         const value = getFlowSlice(flow, mt, 'value', loc);
         const payment = getFlowSlice(flow, mt, 'payment', loc);
+        const linkAccount = getFlowSlice(flow, mt, 'linkAccount', loc);
         const conf = getFlowSlice(flow, mt, 'confirmation', loc);
 
         const set = (sel, text) => {
@@ -421,6 +434,26 @@ class JoinNetworkComponent extends HTMLElement {
             if (devSkip && payment.devCompleteLabel) {
                 devSkip.textContent = payment.devCompleteLabel;
             }
+        }
+
+        {
+            const la =
+                linkAccount ||
+                (loc === 'ja'
+                    ? {
+                          title: 'アカウントをリンク',
+                          lead: 'メンバーシップを有効にするには、Internet Identity でサインインしてください。',
+                          signInLabel: 'Internet Identity で続行',
+                      }
+                    : {
+                          title: 'Link your account',
+                          lead: 'Sign in with Internet Identity to activate your membership and sync it to your profile.',
+                          signInLabel: 'Continue with Internet Identity',
+                      });
+            set('#jnLinkTitle', la.title);
+            set('#jnLinkLead', la.lead);
+            const si = this.shadowRoot?.querySelector('#jnLinkSignIn');
+            if (si) si.textContent = la.signInLabel || 'Continue with Internet Identity';
         }
 
         if (conf) {
@@ -498,16 +531,16 @@ class JoinNetworkComponent extends HTMLElement {
     }
 
     /**
-     * Full join: early-access + `registerOrUpdateAccount` before creating a subscription.
-     * Resubscribe: requires II only.
+     * Resubscribe: requires II only (existing member).
+     * Full join: anonymous early-access only — payment first, then II + `registerOrUpdateAccount` after link step.
      */
     async _ensureAccountBeforeStripe() {
         const { getIdentityIfAuthenticated } = await import('../../utils/icAuth.js');
-        const identity = await getIdentityIfAuthenticated();
-        if (!identity) {
-            throw new Error('Sign in with Internet Identity to continue.');
-        }
         if (this._joinMode === 'resubscribe') {
+            const identity = await getIdentityIfAuthenticated();
+            if (!identity) {
+                throw new Error('Sign in with Internet Identity to continue.');
+            }
             this._preStripeCanisterSyncDone = true;
             return;
         }
@@ -518,13 +551,106 @@ class JoinNetworkComponent extends HTMLElement {
             throw new Error('Complete name, email, and role on step 1 first.');
         }
         await submitEarlyAccessToCanister(email, cat, fullName, this._modalType);
-        const { getAuthenticatedFusionBackendActor } = await import('../../utils/earlyAccessSubscribe.js');
-        const { categoryToUserRole } = await import('../../utils/authHeader.js');
-        const actor = await getAuthenticatedFusionBackendActor();
-        if (actor && typeof actor.registerOrUpdateAccount === 'function') {
-            await actor.registerOrUpdateAccount(categoryToUserRole(cat));
+        this._preStripeCanisterSyncDone = false;
+    }
+
+    /**
+     * After pay-first checkout + II sign-in: link Stripe subscription to principal, register account, finish confirmation.
+     */
+    async _tryCompletePendingLink() {
+        if (this._stage !== 'linkAccount' || !this._fusionPendingId) return;
+        const root = this.shadowRoot;
+        const errEl = root?.querySelector('#jnLinkErr');
+        if (errEl) errEl.textContent = '';
+        try {
+            const { getIdentityIfAuthenticated } = await import('../../utils/icAuth.js');
+            const identity = await getIdentityIfAuthenticated();
+            if (!identity) return;
+            const principal = identity.getPrincipal().toText();
+            const email = this._getEmailForSubscription();
+            await linkSubscriptionToPrincipal({
+                fusionPendingId: this._fusionPendingId,
+                email,
+                principal,
+                subscriptionId: this._fusionSubscriptionId || undefined,
+            });
+            const cat = this._getSelectedCategoryNormalized();
+            const { getAuthenticatedFusionBackendActor } = await import('../../utils/earlyAccessSubscribe.js');
+            const { categoryToUserRole } = await import('../../utils/authHeader.js');
+            const actor = await getAuthenticatedFusionBackendActor();
+            if (actor && typeof actor.registerOrUpdateAccount === 'function') {
+                await actor.registerOrUpdateAccount(categoryToUserRole(cat));
+            }
+            this._fusionPendingId = null;
+            this._fusionSubscriptionId = null;
+            this._preStripeCanisterSyncDone = true;
+            try {
+                sessionStorage.removeItem(FUSION_PENDING_MEMBERSHIP_LINK_KEY);
+            } catch {
+                /* ignore */
+            }
+            await this._afterJoinSaved();
+        } catch (e) {
+            if (DEV_MODE) console.error('[JoinNetwork] link pending', e);
+            if (errEl) {
+                errEl.textContent =
+                    e instanceof Error ? e.message : 'Could not link your account. Try again.';
+            }
         }
-        this._preStripeCanisterSyncDone = true;
+    }
+
+    /**
+     * Shared tail: optional early-access + register (when `_preStripeCanisterSyncDone` is false), welcome email, confirmation stage.
+     */
+    async _afterJoinSaved() {
+        const root = this.shadowRoot;
+        const email = this._getEmailForSubscription() || this._formEmail.trim();
+        const cat = this._getSelectedCategoryNormalized();
+        const fullName = (this.shadowRoot?.querySelector('#jnFullName')?.value || this._formFullName || '').trim();
+        if (!this._preStripeCanisterSyncDone) {
+            try {
+                await submitEarlyAccessToCanister(email, cat, fullName, this._modalType);
+            } catch (err) {
+                if (DEV_MODE) {
+                    console.error('[JoinNetwork] Early access save failed', err);
+                    console.error('[JoinNetwork] IC host:', getHost());
+                }
+                const errEl = root?.querySelector('#jnPayErr');
+                if (errEl) errEl.textContent = 'Could not save your signup. Please try again.';
+                throw err;
+            }
+            try {
+                const { getIdentityIfAuthenticated } = await import('../../utils/icAuth.js');
+                const identity = await getIdentityIfAuthenticated();
+                if (identity) {
+                    const { getAuthenticatedFusionBackendActor } = await import(
+                        '../../utils/earlyAccessSubscribe.js'
+                    );
+                    const { categoryToUserRole } = await import('../../utils/authHeader.js');
+                    const actor = await getAuthenticatedFusionBackendActor();
+                    if (actor && typeof actor.registerOrUpdateAccount === 'function') {
+                        await actor.registerOrUpdateAccount(categoryToUserRole(cat));
+                    }
+                }
+            } catch (regErr) {
+                if (DEV_MODE) console.warn('[JoinNetwork] registerOrUpdateAccount', regErr);
+            }
+        }
+        this._preStripeCanisterSyncDone = false;
+        if (email.includes('@')) {
+            try {
+                await sendEmail({
+                    to: email,
+                    subject: 'Welcome to FUSION',
+                    text: 'Thank you — your FUSION signup was received.',
+                });
+            } catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                console.warn('[JoinNetwork] confirmation email failed (signup still saved):', msg);
+            }
+        }
+        this._joinFlowCompleted = true;
+        this._showStage('confirmation');
     }
 
     _teardownStripePayment() {
@@ -605,9 +731,6 @@ class JoinNetworkComponent extends HTMLElement {
 
             await this._ensureAccountBeforeStripe();
             const { getIdentityIfAuthenticated } = await import('../../utils/icAuth.js');
-            const identity = await getIdentityIfAuthenticated();
-            if (!identity) throw new Error('Sign in with Internet Identity first.');
-            const principal = identity.getPrincipal().toText();
             const emailForSub = this._getEmailForSubscription();
             if (!emailForSub.includes('@')) {
                 throw new Error(
@@ -617,11 +740,22 @@ class JoinNetworkComponent extends HTMLElement {
                 );
             }
 
+            /** @type {string | undefined} */
+            let principalOpt;
+            if (this._joinMode === 'resubscribe') {
+                const identity = await getIdentityIfAuthenticated();
+                if (!identity) throw new Error('Sign in with Internet Identity first.');
+                principalOpt = identity.getPrincipal().toText();
+            } else {
+                this._fusionPendingId = null;
+                this._fusionSubscriptionId = null;
+            }
+
             // Load Stripe.js and create Subscription (first invoice PaymentIntent) in parallel.
-            const [{ loadStripe }, { clientSecret }] = await Promise.all([
+            const [{ loadStripe }, subRes] = await Promise.all([
                 import('@stripe/stripe-js'),
                 createSubscription({
-                    principal,
+                    ...(principalOpt ? { principal: principalOpt } : {}),
                     email: emailForSub,
                     metadata: {
                         category: cat || '',
@@ -629,6 +763,11 @@ class JoinNetworkComponent extends HTMLElement {
                     },
                 }),
             ]);
+            const clientSecret = subRes.clientSecret;
+            if (subRes.fusionPendingId) {
+                this._fusionPendingId = subRes.fusionPendingId;
+                this._fusionSubscriptionId = subRes.subscriptionId || null;
+            }
             if (myGen !== this._stripePrepareGen || this._stage !== 'payment') return;
 
             if (hint) hint.textContent = 'Loading secure card form…';
@@ -1191,6 +1330,15 @@ class JoinNetworkComponent extends HTMLElement {
                             <button type="button" class="jn-btn-back" id="jnPayBack">Back</button>
                         </div>
 
+                        <div class="jn-panel" data-jn-panel="linkAccount" hidden>
+                            <div class="jn-panel-head">
+                                <h2 id="jnLinkTitle"></h2>
+                                <p id="jnLinkLead"></p>
+                            </div>
+                            <button type="button" class="jn-btn-primary" id="jnLinkSignIn">Continue with Internet Identity</button>
+                            <p id="jnLinkErr" class="jn-live" aria-live="polite"></p>
+                        </div>
+
                         <div class="jn-panel" data-jn-panel="confirmation" hidden>
                             <div class="jn-panel-head">
                                 <h2 id="jnConfTitle"></h2>
@@ -1246,6 +1394,8 @@ class JoinNetworkComponent extends HTMLElement {
         const openBtn = root.querySelector('#bandOpenBtn');
         this._modalType = resolveModalType(this);
         this._preStripeCanisterSyncDone = false;
+        this._fusionPendingId = null;
+        this._fusionSubscriptionId = null;
         if (detail && detail.mode === 'resubscribe') {
             this._joinMode = 'resubscribe';
             this._stage = 'payment';
@@ -1295,6 +1445,13 @@ class JoinNetworkComponent extends HTMLElement {
 
         dlg?.addEventListener('close', () => {
             this._teardownStripePayment();
+            try {
+                if (this._stage === 'linkAccount') {
+                    sessionStorage.removeItem(FUSION_PENDING_MEMBERSHIP_LINK_KEY);
+                }
+            } catch {
+                /* ignore */
+            }
             const shouldLogoutIi =
                 this._logoutIfDismissedWithoutJoin && !this._joinFlowCompleted;
             this._logoutIfDismissedWithoutJoin = false;
@@ -1355,54 +1512,23 @@ class JoinNetworkComponent extends HTMLElement {
             this._showStage('value');
         });
 
+        root.querySelector('#jnLinkSignIn')?.addEventListener('click', async () => {
+            const errEl = root.querySelector('#jnLinkErr');
+            if (errEl) errEl.textContent = '';
+            try {
+                const { loginInternetIdentity } = await import('../../utils/icAuth.js');
+                await loginInternetIdentity();
+            } catch (e) {
+                if (e === ERROR_USER_INTERRUPT) return;
+                if (errEl) {
+                    errEl.textContent =
+                        e instanceof Error ? e.message : 'Sign-in could not complete. Try again.';
+                }
+            }
+        });
+
         const afterJoinSaved = async () => {
-            const email = this._getEmailForSubscription() || this._formEmail.trim();
-            const cat = this._getSelectedCategoryNormalized();
-            const fullName = (this.shadowRoot?.querySelector('#jnFullName')?.value || this._formFullName || '').trim();
-            if (!this._preStripeCanisterSyncDone) {
-                try {
-                    await submitEarlyAccessToCanister(email, cat, fullName, this._modalType);
-                } catch (err) {
-                    if (DEV_MODE) {
-                        console.error('[JoinNetwork] Early access save failed', err);
-                        console.error('[JoinNetwork] IC host:', getHost());
-                    }
-                    const errEl = root.querySelector('#jnPayErr');
-                    if (errEl) errEl.textContent = 'Could not save your signup. Please try again.';
-                    throw err;
-                }
-                try {
-                    const { getIdentityIfAuthenticated } = await import('../../utils/icAuth.js');
-                    const identity = await getIdentityIfAuthenticated();
-                    if (identity) {
-                        const { getAuthenticatedFusionBackendActor } = await import(
-                            '../../utils/earlyAccessSubscribe.js'
-                        );
-                        const { categoryToUserRole } = await import('../../utils/authHeader.js');
-                        const actor = await getAuthenticatedFusionBackendActor();
-                        if (actor && typeof actor.registerOrUpdateAccount === 'function') {
-                            await actor.registerOrUpdateAccount(categoryToUserRole(cat));
-                        }
-                    }
-                } catch (regErr) {
-                    if (DEV_MODE) console.warn('[JoinNetwork] registerOrUpdateAccount', regErr);
-                }
-            }
-            this._preStripeCanisterSyncDone = false;
-            if (email.includes('@')) {
-                try {
-                    await sendEmail({
-                        to: email,
-                        subject: 'Welcome to FUSION',
-                        text: 'Thank you — your FUSION signup was received.',
-                    });
-                } catch (e) {
-                    const msg = e instanceof Error ? e.message : String(e);
-                    console.warn('[JoinNetwork] confirmation email failed (signup still saved):', msg);
-                }
-            }
-            this._joinFlowCompleted = true;
-            this._showStage('confirmation');
+            await this._afterJoinSaved();
         };
 
         const completePayment = async () => {
@@ -1435,6 +1561,15 @@ class JoinNetworkComponent extends HTMLElement {
                     });
                     if (error) {
                         if (errEl) errEl.textContent = error.message || 'Payment failed.';
+                        return;
+                    }
+                    if (this._joinMode === 'full' && this._fusionPendingId) {
+                        try {
+                            sessionStorage.setItem(FUSION_PENDING_MEMBERSHIP_LINK_KEY, '1');
+                        } catch {
+                            /* ignore */
+                        }
+                        this._showStage('linkAccount');
                         return;
                     }
                     await afterJoinSaved();

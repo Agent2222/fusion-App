@@ -1,24 +1,53 @@
 import { getJournalEntries, subscribeDataSource } from '../utils/database.js';
 
 /**
- * @returns {number | null}
+ * URL segment after `/journal/entry/` (supports numeric ids, `j_…` studio ids, and slug routes).
+ * @returns {string | null}
  */
-function journalEntryIdFromPathname() {
+function journalEntryKeyFromPathname() {
     const path = window.location.pathname;
     if (!path.startsWith('/journal/entry/')) return null;
     const seg = path.slice('/journal/entry/'.length).split('/').filter(Boolean)[0];
     if (!seg) return null;
-    const id = parseInt(seg, 10);
-    return Number.isFinite(id) ? id : null;
+    try {
+        return decodeURIComponent(seg);
+    } catch {
+        return seg;
+    }
 }
 
 /**
- * @param {number} id
- * @param {Array<{ id: number }>} list
+ * Last path segment of a stored `link` like `/journal/entry/my-slug`.
+ * @param {unknown} link
+ * @returns {string}
  */
-function findJournalById(id, list) {
-    if (!Array.isArray(list)) return null;
-    return list.find((j) => Number(j?.id) === id) ?? null;
+export function journalEntrySegmentFromLink(link) {
+    if (!link || typeof link !== 'string') return '';
+    const m = link.trim().match(/\/journal\/entry\/([^/?#]+)/);
+    return m ? m[1] : '';
+}
+
+/**
+ * @param {string} key — path segment from the URL
+ * @param {Array<Record<string, unknown>>} list
+ * @returns {Record<string, unknown> | null}
+ */
+export function findJournalByPathSegment(key, list) {
+    if (!key || !Array.isArray(list)) return null;
+    const k = String(key).trim();
+    for (const j of list) {
+        if (!j || typeof j !== 'object') continue;
+        const idRaw = /** @type {Record<string, unknown>} */ (j).id;
+        const idStr = idRaw === undefined || idRaw === null ? '' : String(idRaw);
+        if (idStr === k) return /** @type {Record<string, unknown>} */ (j);
+        if (/^\d+$/.test(k)) {
+            const n = Number(k);
+            if (Number(idRaw) === n) return /** @type {Record<string, unknown>} */ (j);
+        }
+        const fromLink = journalEntrySegmentFromLink(/** @type {Record<string, unknown>} */ (j).link);
+        if (fromLink && fromLink === k) return /** @type {Record<string, unknown>} */ (j);
+    }
+    return null;
 }
 
 export function generateJournalEntryContent() {
@@ -81,11 +110,11 @@ export default function initJournalEntry() {
         _unsubJournalEntry = null;
     }
 
-    const id = journalEntryIdFromPathname();
+    const pathKey = journalEntryKeyFromPathname();
 
     const run = async () => {
         const list = await getJournalEntries();
-        const entry = id != null ? findJournalById(id, list) : null;
+        const entry = pathKey != null ? findJournalByPathSegment(pathKey, list) : null;
 
         const article = document.getElementById('journalEntryDetail');
         const notFound = document.getElementById('journalEntryNotFound');
@@ -96,7 +125,7 @@ export default function initJournalEntry() {
             else el.setAttribute('hidden', '');
         };
 
-        if (id == null || !entry) {
+        if (pathKey == null || !entry) {
             show(article, false);
             show(notFound, true);
             document.title = 'Journal entry not found · Fusion';

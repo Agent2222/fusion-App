@@ -58,18 +58,19 @@ export async function fetchIntegrationHealth() {
     return res.json();
 }
 
+/** Set while pay-first join awaits Internet Identity after Stripe (`icAuth.runPostLoginPipeline` guard). */
+export const FUSION_PENDING_MEMBERSHIP_LINK_KEY = 'fusion-pending-membership-link';
+
 /**
  * Create a Stripe Subscription (bi-monthly Price) and return the first invoice PaymentIntent client secret.
- * @param {{ principal: string, email: string, metadata?: Record<string, string> }} opts
- * @returns {Promise<{ clientSecret: string, subscriptionId: string, customerId: string }>}
+ * Omit `principal` for **pay-first** checkout: response includes `fusionPendingId` until the user links II.
+ * @param {{ principal?: string, email: string, metadata?: Record<string, string> }} opts
+ * @returns {Promise<{ clientSecret: string, subscriptionId: string, customerId: string, fusionPendingId?: string }>}
  */
 export async function createSubscription(opts) {
     const principal = opts?.principal;
     const email = opts?.email;
     const metadata = opts?.metadata && typeof opts.metadata === 'object' ? opts.metadata : {};
-    if (typeof principal !== 'string' || !principal.trim()) {
-        throw new Error('principal required');
-    }
     if (typeof email !== 'string' || !email.includes('@')) {
         throw new Error('valid email required');
     }
@@ -77,14 +78,18 @@ export async function createSubscription(opts) {
     if (!base) {
         throw new Error('Integration API URL not configured.');
     }
+    /** @type {Record<string, string>} */
+    const body = {
+        email: email.trim(),
+        metadata,
+    };
+    if (typeof principal === 'string' && principal.trim()) {
+        body.principal = principal.trim();
+    }
     const res = await fetch(`${base}/stripe/create-subscription`, {
         method: 'POST',
         headers: integrationHeadersJson(),
-        body: JSON.stringify({
-            principal: principal.trim(),
-            email: email.trim(),
-            metadata,
-        }),
+        body: JSON.stringify(body),
     });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -95,6 +100,49 @@ export async function createSubscription(opts) {
         throw new Error('Invalid subscription response');
     }
     return data;
+}
+
+/**
+ * Attach IC principal to a pay-first Stripe subscription after Internet Identity sign-in.
+ * @param {{ fusionPendingId: string, email: string, principal: string, subscriptionId?: string }} opts
+ */
+export async function linkSubscriptionToPrincipal(opts) {
+    const fusionPendingId = opts?.fusionPendingId;
+    const email = opts?.email;
+    const principal = opts?.principal;
+    const subscriptionId = opts?.subscriptionId;
+    if (typeof fusionPendingId !== 'string' || !fusionPendingId.trim()) {
+        throw new Error('fusionPendingId required');
+    }
+    if (typeof email !== 'string' || !email.includes('@')) {
+        throw new Error('valid email required');
+    }
+    if (typeof principal !== 'string' || !principal.trim()) {
+        throw new Error('principal required');
+    }
+    const base = getIntegrationBaseUrl();
+    if (!base) {
+        throw new Error('Integration API URL not configured.');
+    }
+    /** @type {Record<string, string>} */
+    const body = {
+        fusionPendingId: fusionPendingId.trim(),
+        email: email.trim(),
+        principal: principal.trim(),
+    };
+    if (typeof subscriptionId === 'string' && subscriptionId.trim()) {
+        body.subscriptionId = subscriptionId.trim();
+    }
+    const res = await fetch(`${base}/stripe/link-subscription-to-principal`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Link subscription HTTP ${res.status}`);
+    }
+    return res.json();
 }
 
 /**

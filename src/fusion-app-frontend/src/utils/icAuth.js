@@ -4,6 +4,7 @@
  */
 import { AuthClient, ERROR_USER_INTERRUPT } from '@dfinity/auth-client';
 import { DEV_MODE, getInternetIdentityUrl } from '../config.js';
+import { FUSION_PENDING_MEMBERSHIP_LINK_KEY } from './integrationApi.js';
 
 /** @returns {string} */
 function requireInternetIdentityUrl() {
@@ -122,6 +123,13 @@ export async function logoutInternetIdentity() {
  * After a fresh II login: if not admin and no `UserAccount`, open join/register modal.
  */
 export async function runPostLoginPipeline() {
+    try {
+        if (sessionStorage.getItem(FUSION_PENDING_MEMBERSHIP_LINK_KEY) === '1') {
+            return;
+        }
+    } catch {
+        /* ignore */
+    }
     const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
     const actor = await getAuthenticatedFusionBackendActor();
     if (!actor) return;

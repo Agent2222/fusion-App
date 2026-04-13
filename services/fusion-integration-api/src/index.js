@@ -3,9 +3,11 @@
  * Env: see README in this package.
  */
 import 'dotenv/config';
+import { randomUUID } from 'node:crypto';
 import cors from 'cors';
 import express from 'express';
 import Stripe from 'stripe';
+import { Principal } from '@dfinity/principal';
 import { Resend } from 'resend';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -126,13 +128,34 @@ app.use(express.json({ limit: '512kb' }));
 /**
  * @param {import('stripe').Stripe.Event} event
  */
+/**
+ * Only push when subscription has a valid IC principal (skip pay-first / pending link rows).
+ * @param {import('stripe').Stripe.Subscription} sub
+ * @param {string} [customerId]
+ */
+async function pushSubscriptionToCanisterIfLinked(sub, customerId) {
+    const p = sub.metadata?.principal;
+    if (!p || typeof p !== 'string' || !p.trim()) {
+        return;
+    }
+    try {
+        Principal.fromText(p.trim());
+    } catch {
+        return;
+    }
+    await pushSubscriptionToCanister(sub, customerId);
+}
+
+/**
+ * @param {import('stripe').Stripe.Event} event
+ */
 async function handleStripeWebhookEvent(event) {
     switch (event.type) {
         case 'customer.subscription.created':
         case 'customer.subscription.updated':
         case 'customer.subscription.deleted': {
             const sub = /** @type {import('stripe').Stripe.Subscription} */ (event.data.object);
-            await pushSubscriptionToCanister(sub);
+            await pushSubscriptionToCanisterIfLinked(sub);
             break;
         }
         case 'invoice.paid':
@@ -141,7 +164,7 @@ async function handleStripeWebhookEvent(event) {
             const subId = inv.subscription;
             if (typeof subId === 'string' && stripe) {
                 const sub = await stripe.subscriptions.retrieve(subId);
-                await pushSubscriptionToCanister(sub);
+                await pushSubscriptionToCanisterIfLinked(sub);
             }
             break;
         }
@@ -210,6 +233,22 @@ app.post('/stripe/create-payment-intent', requireApiKey, async (req, res) => {
     }
 });
 
+/**
+ * Merge request metadata into Stripe metadata object (string values only).
+ * @param {Record<string, unknown>} rawMeta
+ * @param {Record<string, string>} base
+ */
+function mergeStripeMetadata(rawMeta, base) {
+    /** @type {Record<string, string>} */
+    const metadata = { ...base };
+    for (const [k, v] of Object.entries(rawMeta)) {
+        if (typeof k !== 'string' || !k.length) continue;
+        metadata[k.slice(0, 40)] =
+            typeof v === 'string' ? v.slice(0, 500) : String(v ?? '').slice(0, 500);
+    }
+    return metadata;
+}
+
 /** Bi-monthly (or any) recurring Price from Stripe Dashboard — `price_…` */
 app.post('/stripe/create-subscription', requireApiKey, async (req, res) => {
     try {
@@ -220,28 +259,38 @@ app.post('/stripe/create-subscription', requireApiKey, async (req, res) => {
         if (!priceId) {
             return res.status(503).json({ error: 'STRIPE_PRICE_ID not configured' });
         }
-        const principal = req.body?.principal;
+        const principalRaw = req.body?.principal;
+        const principal =
+            typeof principalRaw === 'string' && principalRaw.trim() ? principalRaw.trim().slice(0, 500) : '';
         const email = req.body?.email;
-        if (typeof principal !== 'string' || !principal.trim()) {
-            return res.status(400).json({ error: 'principal required' });
-        }
         if (typeof email !== 'string' || !email.includes('@')) {
             return res.status(400).json({ error: 'valid email required' });
         }
         const rawMeta = req.body?.metadata && typeof req.body.metadata === 'object' ? req.body.metadata : {};
+
+        const payFirstPending = !principal;
+        const fusionPendingId = payFirstPending ? randomUUID() : '';
+
         /** @type {Record<string, string>} */
-        const metadata = { principal: principal.trim().slice(0, 500) };
-        for (const [k, v] of Object.entries(rawMeta)) {
-            if (typeof k !== 'string' || !k.length) continue;
-            metadata[k.slice(0, 40)] =
-                typeof v === 'string' ? v.slice(0, 500) : String(v ?? '').slice(0, 500);
+        let metadata;
+        if (payFirstPending) {
+            metadata = mergeStripeMetadata(rawMeta, {
+                fusion_pending_id: fusionPendingId,
+                pending_email: email.trim().slice(0, 500),
+            });
+        } else {
+            metadata = mergeStripeMetadata(rawMeta, { principal });
         }
 
         const existing = await stripe.customers.list({ email: email.trim(), limit: 1 });
         let customer;
         if (existing.data.length > 0) {
             customer = existing.data[0];
-            if (!customer.metadata?.principal) {
+            if (payFirstPending) {
+                customer = await stripe.customers.update(customer.id, {
+                    metadata: { ...customer.metadata, ...metadata },
+                });
+            } else if (!customer.metadata?.principal) {
                 customer = await stripe.customers.update(customer.id, {
                     metadata: { ...customer.metadata, principal: metadata.principal },
                 });
@@ -253,13 +302,16 @@ app.post('/stripe/create-subscription', requireApiKey, async (req, res) => {
             });
         }
 
+        const subMeta = payFirstPending
+            ? { fusion_pending_id: fusionPendingId }
+            : { principal: metadata.principal };
         const subscription = await stripe.subscriptions.create({
             customer: customer.id,
             items: [{ price: priceId }],
             payment_behavior: 'default_incomplete',
             payment_settings: { save_default_payment_method: 'on_subscription' },
             expand: ['latest_invoice.payment_intent'],
-            metadata: { principal: metadata.principal },
+            metadata: mergeStripeMetadata(rawMeta, subMeta),
         });
 
         const invoice = subscription.latest_invoice;
@@ -274,16 +326,153 @@ app.post('/stripe/create-subscription', requireApiKey, async (req, res) => {
             return res.status(500).json({ error: 'No client_secret on subscription invoice' });
         }
 
-        try {
-            await pushSubscriptionToCanister(subscription, customer.id);
-        } catch (e) {
-            console.warn('[stripe] create-subscription canister sync (webhook may follow):', e);
+        if (!payFirstPending) {
+            try {
+                await pushSubscriptionToCanister(subscription, customer.id);
+            } catch (e) {
+                console.warn('[stripe] create-subscription canister sync (webhook may follow):', e);
+            }
         }
 
-        return res.json({
+        /** @type {Record<string, string>} */
+        const out = {
             clientSecret,
             subscriptionId: subscription.id,
             customerId: customer.id,
+        };
+        if (payFirstPending) {
+            out.fusionPendingId = fusionPendingId;
+        }
+        return res.json(out);
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return res.status(500).json({ error: msg });
+    }
+});
+
+/**
+ * After pay-first checkout: attach IC principal to Stripe + canister.
+ * Body: { fusionPendingId, email, principal, subscriptionId? } — prefer subscriptionId when available (no Customer Search).
+ */
+app.post('/stripe/link-subscription-to-principal', requireApiKey, async (req, res) => {
+    try {
+        if (!stripe) {
+            return res.status(503).json({ error: 'Stripe not configured' });
+        }
+        const fusionPendingId = req.body?.fusionPendingId;
+        const email = req.body?.email;
+        const principalText = req.body?.principal;
+        const subscriptionIdHint = req.body?.subscriptionId;
+        if (typeof fusionPendingId !== 'string' || !fusionPendingId.trim()) {
+            return res.status(400).json({ error: 'fusionPendingId required' });
+        }
+        if (typeof email !== 'string' || !email.includes('@')) {
+            return res.status(400).json({ error: 'valid email required' });
+        }
+        if (typeof principalText !== 'string' || !principalText.trim()) {
+            return res.status(400).json({ error: 'principal required' });
+        }
+        const trimmedPrincipal = principalText.trim();
+        try {
+            Principal.fromText(trimmedPrincipal);
+        } catch {
+            return res.status(400).json({ error: 'invalid principal' });
+        }
+
+        const emailNorm = email.trim().toLowerCase();
+        const pendingTrim = fusionPendingId.trim();
+
+        /** @type {import('stripe').Stripe.Subscription} */
+        let best;
+        /** @type {import('stripe').Stripe.Customer} */
+        let customer;
+
+        if (typeof subscriptionIdHint === 'string' && subscriptionIdHint.trim()) {
+            const sub = await stripe.subscriptions.retrieve(subscriptionIdHint.trim());
+            if (sub.metadata?.fusion_pending_id !== pendingTrim) {
+                return res.status(400).json({ error: 'pending id does not match subscription' });
+            }
+            const cid =
+                typeof sub.customer === 'string' ? sub.customer : sub.customer?.id || '';
+            if (!cid) {
+                return res.status(400).json({ error: 'subscription has no customer' });
+            }
+            const cust = await stripe.customers.retrieve(cid);
+            customer = /** @type {import('stripe').Stripe.Customer} */ (cust);
+            if (customer.deleted || (customer.email || '').toLowerCase() !== emailNorm) {
+                return res.status(403).json({ error: 'email does not match pending checkout' });
+            }
+            best = sub;
+        } else {
+            const escaped = escapeStripeMetadataQueryValue(pendingTrim);
+            const search = await stripe.customers.search({
+                query: `metadata['fusion_pending_id']:'${escaped}'`,
+                limit: 5,
+            });
+            customer = search.data.find((c) => (c.email || '').toLowerCase() === emailNorm);
+            if (!customer && search.data.length === 1) {
+                customer = search.data[0];
+            }
+            if (!customer) {
+                return res.status(404).json({ error: 'No pending subscription found for this id' });
+            }
+            if ((customer.email || '').toLowerCase() !== emailNorm) {
+                return res.status(403).json({ error: 'email does not match pending checkout' });
+            }
+
+            const subs = await stripe.subscriptions.list({
+                customer: customer.id,
+                status: 'all',
+                limit: 100,
+            });
+            const pending = subs.data.filter((s) => s.metadata?.fusion_pending_id === pendingTrim);
+            if (!pending.length) {
+                return res.status(404).json({ error: 'Subscription not found for pending id' });
+            }
+            /** @param {import('stripe').Stripe.Subscription} s */
+            const rank = (s) => {
+                if (s.status === 'active' || s.status === 'trialing') return 0;
+                if (s.status === 'past_due') return 1;
+                if (s.status === 'incomplete') return 2;
+                return 3;
+            };
+            const sorted = [...pending].sort((a, b) => rank(a) - rank(b));
+            best = sorted[0];
+        }
+
+        const okStates = ['active', 'trialing', 'past_due'];
+        if (!okStates.includes(best.status)) {
+            return res.status(409).json({
+                error: `Subscription not in a linkable state: ${best.status}`,
+            });
+        }
+
+        const newSubMeta = {
+            ...best.metadata,
+            principal: trimmedPrincipal.slice(0, 500),
+            fusion_pending_id: '',
+        };
+        await stripe.subscriptions.update(best.id, { metadata: newSubMeta });
+
+        const newCustMeta = {
+            ...customer.metadata,
+            principal: trimmedPrincipal.slice(0, 500),
+            fusion_pending_id: '',
+        };
+        await stripe.customers.update(customer.id, { metadata: newCustMeta });
+
+        const updated = await stripe.subscriptions.retrieve(best.id);
+        try {
+            await pushSubscriptionToCanister(updated, customer.id);
+        } catch (e) {
+            console.warn('[stripe] link-subscription canister sync:', e);
+        }
+
+        return res.json({
+            ok: true,
+            subscriptionId: updated.id,
+            customerId: customer.id,
+            status: updated.status,
         });
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);

@@ -2550,7 +2550,8 @@ async function initJournal(mainEl) {
             <p class="studio-muted">Internal reference: <code class="studio-code-inline">${escapeHtml(shortRefLabel(String(j.id)))}</code></p>
             <div class="studio-modal-fields-row">
             <label class="studio-field studio-field--full"><span>Entry ID</span><input name="id" required class="studio-input" value="${escapeHtml(String(j.id))}" ${existing ? 'readonly' : ''} /></label>
-            <label class="studio-field"><span>Public page link <span class="studio-field-kind-badge studio-field-kind-badge--${linkKind}">${escapeHtml(getFieldKindBadgeLabel(linkKind))}</span></span><input name="link" class="studio-input" value="${escapeHtml(String(j.link || ''))}" placeholder="/journal/entry/…" /></label>
+            <label class="studio-field"><span>Public page link <span class="studio-field-kind-badge studio-field-kind-badge--${linkKind}">${escapeHtml(getFieldKindBadgeLabel(linkKind))}</span></span><input name="link" class="studio-input" value="${escapeHtml(String(j.link || ''))}" placeholder="/journal/entry/your-slug-or-id" /></label>
+            <p class="studio-muted studio-modal-hint">Use the same path the site will open — e.g. <code class="studio-code-inline">/journal/entry/fusion-is-growing</code>. The last segment must match this URL (Entry ID can stay the internal <code class="studio-code-inline">j_…</code> value).</p>
             <label class="studio-field"><span>Cover image <span class="studio-field-kind-badge studio-field-kind-badge--${imgKind}">${escapeHtml(getFieldKindBadgeLabel(imgKind))}</span></span><input name="imageSrc" id="studio-je-img" class="studio-input" value="${escapeHtml(String(j.imageSrc || ''))}" placeholder="Asset path or URL" /></label>
             <label class="studio-file-label studio-btn-ghost">
                 <input type="file" id="studio-je-img-file" accept="image/*,video/*" class="studio-file-input" />
