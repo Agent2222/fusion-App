@@ -1,8 +1,8 @@
 /**
  * Audio row — custom control bar (no native `<audio controls>`), so no ⋮ menu / playback-speed UI.
- * Source: `testData.audio` + `data-audio-id`.
+ * Source: CMS `audio` list + `data-audio-id`.
  */
-import { testData } from '../../testData.js';
+import { getContentBundleForStudio, subscribeDataSource } from '../../utils/database.js';
 
 function escapeHtml(s) {
     return String(s)
@@ -25,6 +25,10 @@ class AudioRowComponent extends HTMLElement {
         this.shadow = this.attachShadow({ mode: 'open' });
         /** @type {(() => void) | null} */
         this._teardown = null;
+        /** @type {Array<unknown> | null} */
+        this._audioList = null;
+        /** @type {(() => void) | null} */
+        this._unsubData = null;
     }
 
     static get observedAttributes() {
@@ -39,7 +43,9 @@ class AudioRowComponent extends HTMLElement {
     }
 
     connectedCallback() {
-        this.render();
+        if (this._unsubData) this._unsubData();
+        this._unsubData = subscribeDataSource(() => void this._loadAudioList());
+        void this._loadAudioList();
     }
 
     disconnectedCallback() {
@@ -47,6 +53,16 @@ class AudioRowComponent extends HTMLElement {
             this._teardown();
             this._teardown = null;
         }
+        if (this._unsubData) {
+            this._unsubData();
+            this._unsubData = null;
+        }
+    }
+
+    async _loadAudioList() {
+        const raw = await getContentBundleForStudio('audio');
+        this._audioList = Array.isArray(raw) ? raw : null;
+        this.render();
     }
 
     _getAudioId() {
@@ -56,9 +72,9 @@ class AudioRowComponent extends HTMLElement {
 
     _resolveEntry() {
         const id = this._getAudioId();
-        const list = testData.audio;
+        const list = this._audioList;
         if (id == null || !Array.isArray(list)) return null;
-        return list.find((a) => String(a.id) === id) ?? null;
+        return list.find((a) => String(/** @type {Record<string, unknown>} */ (a).id) === id) ?? null;
     }
 
     _wireCustomPlayer(audio) {

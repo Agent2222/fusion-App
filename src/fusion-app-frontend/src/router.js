@@ -1,4 +1,5 @@
 import { DEV_MODE } from './config.js';
+import { getGateStateForPath, renderGatedHomeInnerHtml, renderGatedPageHtml } from './utils/pageGate.js';
 
 import { renderHeader } from './components/shared/header.js';
 import { renderFooter } from './components/shared/footer.js';
@@ -121,6 +122,12 @@ const routes = {
         /** Skip auto-injected public header/footer — studio is a separate shell. */
         noChrome: true,
     },
+    '/settings/profile': {
+        loader: () => import('./components/settingsProfile.js'),
+        title: 'Profile settings',
+        description: 'Edit public profile copy',
+        contentGenerator: 'generateSettingsProfileContent',
+    },
     '/404': {
         loader: () => import('./components/notFound.js'),
         title: 'Page Not Found',
@@ -132,6 +139,9 @@ const routes = {
 /** Paths like `/profile/:slug` share the profile module; exact map keys only match `/profile`. */
 /** `/editions/:slug` (not `/editions`) loads `editionView`. */
 function matchContentRoute(path) {
+    if (path === '/settings' || path.startsWith('/settings/')) {
+        return routes['/settings/profile'];
+    }
     if (path === '/profile' || path.startsWith('/profile/')) {
         return routes['/profile'];
     }
@@ -180,7 +190,12 @@ class Router {
     }
 
     init() {
-        // Handle browser back/forward buttons
+        // Avoid the browser fighting our own scroll resets on SPA navigations.
+        if (typeof history !== 'undefined' && 'scrollRestoration' in history) {
+            history.scrollRestoration = 'manual';
+        }
+
+        // Handle browser back/forward (history already updated — do not pushState here).
         window.addEventListener('popstate', () => {
             this.handleRoute();
         });
@@ -213,7 +228,8 @@ class Router {
     syncLoadscreenForPath(path) {
         const ls = document.querySelector('app-loadscreen');
         if (!ls) return;
-        if (path === '/studio') {
+        // Debug shortcuts (Studio, Profile settings) can run before “click to enter” — hide the veil.
+        if (path === '/studio' || path.startsWith('/settings')) {
             ls.visible = false;
             ls.style.zIndex = '';
         }
@@ -266,6 +282,128 @@ class Router {
                 didCover = true;
             }
 
+            const gate = getGateStateForPath(path);
+            const usePageGate =
+                gate.gated === true && gate.copy && gate.pageKey && !route.noChrome;
+
+            if (usePageGate) {
+                if (path === '/' && route.isFullPage) {
+                    const headerWasActive = document.getElementById('header')?.getAttribute('active') === 'true';
+                    const footerWasActive = document.getElementById('footer')?.getAttribute('active') === 'true';
+
+                    const html = `
+                        <div class="page home-page">
+                            ${renderHeader()}
+                            ${renderFooter()}
+                            <main id="homeMain" class="main-cont">
+                                <div id="homeMainContent" class="feed-container">
+                                    ${renderGatedHomeInnerHtml(gate.copy, path, gate.pageKey)}
+                                </div>
+                            </main>
+                        </div>
+                    `;
+                    const appElement = document.getElementById('app') || document.getElementById('root');
+                    if (appElement) {
+                        appElement.innerHTML = html;
+                    }
+
+                    const hasHeader = !!document.getElementById('header');
+                    const hasFooter = !!document.getElementById('footer');
+                    if (
+                        headerAndFooterActive === false &&
+                        (!hasHeader || !hasFooter) &&
+                        !route.noChrome
+                    ) {
+                        const headerHtml = renderHeader();
+                        const footerHtml = renderFooter();
+                        const parser = new DOMParser();
+                        const footerElement = parser.parseFromString(footerHtml, 'text/html').body.firstChild;
+                        const headerElement = parser.parseFromString(headerHtml, 'text/html').body.firstChild;
+                        if (!hasHeader) appElement.appendChild(headerElement);
+                        if (!hasFooter) appElement.appendChild(footerElement);
+                        headerAndFooterActive = true;
+                    } else if (hasHeader && hasFooter) {
+                        headerAndFooterActive = true;
+                    }
+
+                    this.viewedLandingPage = true;
+
+                    if (headerWasActive) {
+                        document.getElementById('header')?.setAttribute('active', 'true');
+                    }
+                    if (footerWasActive) {
+                        document.getElementById('footer')?.setAttribute('active', 'true');
+                    }
+                } else {
+                    this.ensurePersistentStructure();
+
+                    let appElement2 = document.getElementById('app');
+                    const hasHeader = !!document.getElementById('header');
+                    const hasFooter = !!document.getElementById('footer');
+                    if (headerAndFooterActive === false && (!hasHeader || !hasFooter)) {
+                        const headerHtml = renderHeader();
+                        const footerHtml = renderFooter();
+                        const parser = new DOMParser();
+                        const footerElement = parser.parseFromString(footerHtml, 'text/html').body.firstChild;
+                        const headerElement = parser.parseFromString(headerHtml, 'text/html').body.firstChild;
+                        if (!hasHeader) appElement2.appendChild(headerElement);
+                        if (!hasFooter) appElement2.appendChild(footerElement);
+                        headerAndFooterActive = true;
+                    } else if (hasHeader && hasFooter) {
+                        headerAndFooterActive = true;
+                    }
+
+                    let mainContent = document.getElementById('mainContent');
+                    if (!mainContent) {
+                        const appElement = document.getElementById('app') || document.getElementById('root');
+                        const main = document.createElement('main');
+                        main.id = 'mainContent';
+                        appElement.appendChild(main);
+                        mainContent = main;
+                    }
+
+                    const headerWasActiveInjected = document.getElementById('header')?.getAttribute('active') === 'true';
+                    const footerWasActiveInjected = document.getElementById('footer')?.getAttribute('active') === 'true';
+
+                    mainContent.innerHTML = renderGatedPageHtml(path, gate.copy, gate.pageKey);
+
+                    if (headerWasActiveInjected) {
+                        document.getElementById('header')?.setAttribute('active', 'true');
+                    }
+                    if (footerWasActiveInjected) {
+                        document.getElementById('footer')?.setAttribute('active', 'true');
+                    }
+                }
+
+                this.activateDeactivate(path);
+                this.scrollRouteContainersToTop();
+
+                const isEditionDetail =
+                    path.startsWith('/editions/') && path.slice('/editions/'.length).split('/').filter(Boolean)[0];
+                const isProgramDetail =
+                    (path.startsWith('/program/') && path.slice('/program/'.length).split('/').filter(Boolean)[0]) ||
+                    (path.startsWith('/programs/') &&
+                        path.slice('/programs/'.length).split('/').filter(Boolean)[0]);
+                const isJournalEntryDetail =
+                    path.startsWith('/journal/entry/') &&
+                    path.slice('/journal/entry/'.length).split('/').filter(Boolean)[0];
+                const isEventDetail =
+                    path.startsWith('/event/') && path.slice('/event/'.length).split('/').filter(Boolean)[0];
+                if (
+                    !path.startsWith('/profile') &&
+                    !path.startsWith('/settings') &&
+                    !isProgramDetail &&
+                    !isEditionDetail &&
+                    !isJournalEntryDetail &&
+                    !isEventDetail
+                ) {
+                    // Keep section titles for gated routes (same as normal routes).
+                    document.title = route.title;
+                }
+
+                this.onRouteChange(path, route);
+                this.syncHeaderLogosForPath(path);
+            } else {
             // Load component module (static loader so bundlers can include it)
             const componentModule = await route.loader();
             
@@ -326,8 +464,7 @@ class Router {
                 }
                 
             } else {
-                // Handle content injection routes
-                const componentModule = await route.loader();
+                // Handle content injection routes (reuse module loaded above)
                 const contentGeneratorName = route.contentGenerator || 'generateContent';
                 const contentGenerator = componentModule[contentGeneratorName] || componentModule.generateContent;
                 
@@ -382,11 +519,9 @@ class Router {
 
                 if (headerWasActiveInjected) {
                     document.getElementById('header')?.setAttribute('active', 'true');
-                    console.log('header was active injected');
                 }
                 if (footerWasActiveInjected) {
                     document.getElementById('footer')?.setAttribute('active', 'true');
-                    console.log('footer was active injected');
                 }
             }
 
@@ -395,12 +530,6 @@ class Router {
 
             this.scrollRouteContainersToTop();
 
-            // Update browser history
-            if (this.currentRoute !== path) {
-                window.history.pushState({}, '', path);
-                this.currentRoute = path;
-            }
-            
             // Profile / edition / journal entry titles are set in init from content data
             const isEditionDetail =
                 path.startsWith('/editions/') && path.slice('/editions/'.length).split('/').filter(Boolean)[0];
@@ -415,6 +544,7 @@ class Router {
                 path.startsWith('/event/') && path.slice('/event/'.length).split('/').filter(Boolean)[0];
             if (
                 !path.startsWith('/profile') &&
+                !path.startsWith('/settings') &&
                 !isProgramDetail &&
                 !isEditionDetail &&
                 !isJournalEntryDetail &&
@@ -427,6 +557,7 @@ class Router {
             this.onRouteChange(path, route);
 
             this.syncHeaderLogosForPath(path);
+            }
         } catch (error) {
             console.error('Error loading route:', error);
             this.applyThemeForPath('/404');
@@ -452,6 +583,10 @@ class Router {
             this.syncHeaderLogosForPath('/404');
             this.scrollRouteContainersToTop();
         } finally {
+            // Keep in sync with the address bar (initial load, navigate(), popstate, locale refresh).
+            if (typeof window !== 'undefined') {
+                this.currentRoute = window.location.pathname;
+            }
             if (didCover && ptEl && typeof ptEl.reveal === 'function') {
                 await ptEl.reveal();
             }
@@ -487,16 +622,23 @@ class Router {
     }
 
     setupNavigation() {
-        // Add click event listeners to all navigation links
         document.addEventListener('click', (e) => {
-            if (e.target.matches('a[href^="/"]')) {
-                e.preventDefault();
-                const href = e.target.getAttribute('href');
-                this.navigate(href);
-            }
+            const a = e.target?.closest?.('a[href^="/"]');
+            if (!a) return;
+            if (a.target === '_blank' || a.getAttribute('download') != null) return;
+            if (e.defaultPrevented) return;
+            if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+            const href = a.getAttribute('href');
+            if (!href || href.startsWith('//')) return;
+            e.preventDefault();
+            this.navigate(href);
         });
     }
 
+    /**
+     * Client-side navigation: one history entry per transition. `handleRoute` never calls
+     * pushState so back/forward (popstate) stays aligned with the rendered view.
+     */
     navigate(path) {
         window.history.pushState({}, '', path);
         // activateDeactivate runs inside handleRoute after DOM updates; don’t run it here

@@ -59,6 +59,78 @@ export async function fetchIntegrationHealth() {
 }
 
 /**
+ * Create a Stripe Subscription (bi-monthly Price) and return the first invoice PaymentIntent client secret.
+ * @param {{ principal: string, email: string, metadata?: Record<string, string> }} opts
+ * @returns {Promise<{ clientSecret: string, subscriptionId: string, customerId: string }>}
+ */
+export async function createSubscription(opts) {
+    const principal = opts?.principal;
+    const email = opts?.email;
+    const metadata = opts?.metadata && typeof opts.metadata === 'object' ? opts.metadata : {};
+    if (typeof principal !== 'string' || !principal.trim()) {
+        throw new Error('principal required');
+    }
+    if (typeof email !== 'string' || !email.includes('@')) {
+        throw new Error('valid email required');
+    }
+    const base = getIntegrationBaseUrl();
+    if (!base) {
+        throw new Error('Integration API URL not configured.');
+    }
+    const res = await fetch(`${base}/stripe/create-subscription`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify({
+            principal: principal.trim(),
+            email: email.trim(),
+            metadata,
+        }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Create subscription HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    if (!data.clientSecret) {
+        throw new Error('Invalid subscription response');
+    }
+    return data;
+}
+
+/**
+ * Ask the integration API to load this principal’s Stripe subscription and update the canister.
+ * No-ops when integration URL is missing; logs warnings on failure (safe after login).
+ * @param {string} principalText
+ * @returns {Promise<{ synced?: boolean, reason?: string, status?: string } | undefined>}
+ */
+export async function syncSubscriptionFromStripe(principalText) {
+    if (typeof principalText !== 'string' || !principalText.trim()) {
+        return undefined;
+    }
+    const base = getIntegrationBaseUrl();
+    if (!base) {
+        return undefined;
+    }
+    try {
+        const res = await fetch(`${base}/stripe/sync-subscription`, {
+            method: 'POST',
+            headers: integrationHeadersJson(),
+            body: JSON.stringify({ principal: principalText.trim() }),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            const detail = typeof err.error === 'string' ? err.error : `HTTP ${res.status}`;
+            console.warn('[Fusion] sync-subscription:', detail);
+            return undefined;
+        }
+        return await res.json();
+    } catch (e) {
+        console.warn('[Fusion] sync-subscription failed:', e);
+        return undefined;
+    }
+}
+
+/**
  * @param {number} amountCents
  * @param {string} [currency]
  * @param {Record<string, string>} [metadata]
@@ -103,7 +175,10 @@ export async function sendEmail(opts) {
     });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `Email HTTP ${res.status}`);
+        const detail = typeof err.error === 'string' ? err.error : '';
+        throw new Error(
+            detail || `Email failed (HTTP ${res.status}). Check Integration API RESEND_* env and Resend dashboard.`,
+        );
     }
     return res.json();
 }

@@ -46,12 +46,17 @@ class ProgramHeroComponent extends HTMLElement {
         const locale =
             typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
         const loc = this.data?.[locale] || {};
+        const safeTxt = (v) => {
+            if (v === undefined || v === null) return '';
+            const s = String(v);
+            return s === 'NaN' ? '' : s;
+        };
         const imageSrc = this.data?.imageSrc;
         const imageAlt = loc.imageAlt;
-        const location = loc.location;
-        const season = loc.season;
-        const year = loc.year;
-        const cta = loc.cta;
+        const location = safeTxt(loc.location);
+        const season = safeTxt(loc.season);
+        const year = safeTxt(loc.year);
+        const cta = safeTxt(loc.cta);
         const route = loc.routeLink || this.data?.routeLink || '/programs';
 
         this.shadow.innerHTML = `
@@ -208,8 +213,11 @@ class ProgramHeroComponent extends HTMLElement {
                     }
 
                     .program-hero-right {
-                        width: 100%;
-                        padding-right: 0;
+                        width: 90%;
+                        padding-left: 5%;
+                        padding-right: 5%;
+                        margin-left: auto;
+                        margin-right: auto;
                         height: auto;
                     }
 
@@ -233,6 +241,12 @@ class ProgramHeroComponent extends HTMLElement {
 
                     .ctaButton {
                         width: min(100%, 280px);
+                    }
+                }
+
+                @media (max-width: 768px) {
+                    .ctaButton {
+                        width: min(100%, 180px);
                     }
                 }
 

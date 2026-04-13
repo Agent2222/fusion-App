@@ -1,5 +1,5 @@
 // Two-column banner (half event-row height): program image + residency copy.
-import { testData } from '../../testData.js';
+import { getAllProgramsBlock, subscribeDataSource } from '../../utils/database.js';
 
 function escapeHtml(s) {
     return String(s)
@@ -16,13 +16,19 @@ const PROGRAM_ID_ALIASES = {
 
 /**
  * @param {string} programId
+ * @param {Record<string, unknown> | null} block
  * @returns {{ program: object, loc: object } | null}
  */
-function resolveProgram(programId) {
+function resolveProgram(programId, block) {
     if (programId == null || programId === '') return null;
     const id = PROGRAM_ID_ALIASES[programId] || programId;
     const locale = typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
-    const list = testData.allPrograms?.programs?.[locale] ?? testData.allPrograms?.programs?.en;
+    const programs = block?.programs;
+    const list =
+        programs && typeof programs === 'object'
+            ? /** @type {Record<string, unknown>} */ (programs)[locale] ??
+              /** @type {Record<string, unknown>} */ (programs).en
+            : null;
     if (!Array.isArray(list)) return null;
     const program = list.find((p) => p && String(p.id) === String(id));
     if (!program) return null;
@@ -33,6 +39,10 @@ class VeteranBannerComponent extends HTMLElement {
     constructor() {
         super();
         this.shadow = this.attachShadow({ mode: 'open' });
+        /** @type {Record<string, unknown> | null} */
+        this._programsBlock = null;
+        /** @type {(() => void) | null} */
+        this._unsubData = null;
         this._onLocaleChange = () => this.render();
     }
 
@@ -46,11 +56,22 @@ class VeteranBannerComponent extends HTMLElement {
 
     connectedCallback() {
         window.addEventListener('fusion-localechange', this._onLocaleChange);
-        this.render();
+        if (this._unsubData) this._unsubData();
+        this._unsubData = subscribeDataSource(() => void this._loadPrograms());
+        void this._loadPrograms();
     }
 
     disconnectedCallback() {
         window.removeEventListener('fusion-localechange', this._onLocaleChange);
+        if (this._unsubData) {
+            this._unsubData();
+            this._unsubData = null;
+        }
+    }
+
+    async _loadPrograms() {
+        this._programsBlock = await getAllProgramsBlock();
+        this.render();
     }
 
     _getProgramId() {
@@ -60,7 +81,7 @@ class VeteranBannerComponent extends HTMLElement {
 
     render() {
         const programId = this._getProgramId();
-        const resolved = programId ? resolveProgram(programId) : null;
+        const resolved = programId ? resolveProgram(programId, this._programsBlock) : null;
         const imageSrc = resolved?.program?.imageSrc ?? '';
         const title = resolved
             ? resolved.loc?.programPage?.headline ?? resolved.loc?.focus ?? resolved.loc?.id ?? ''

@@ -1,8 +1,10 @@
 import { applyEditionFilters } from '../utils/feedFilterApply.js';
-import { getEditions } from '../utils/database.js';
+import { getEditions, subscribeDataSource } from '../utils/database.js';
 
 /** @type {((e: CustomEvent) => void) | null} */
 let _editionsFeedFilterHandler = null;
+/** @type {(() => void) | null} */
+let _unsubEditions = null;
 
 export function render() {
     return `
@@ -23,7 +25,12 @@ export default function initEditions() {
     const feed = document.getElementById('editionsFeed');
     if (!feed || typeof feed.setEditions !== 'function') return;
 
-    void (async () => {
+    if (_unsubEditions) {
+        _unsubEditions();
+        _unsubEditions = null;
+    }
+
+    const wire = async () => {
         const items = await getEditions();
         if (_editionsFeedFilterHandler) {
             window.removeEventListener('fusion-feed-filter', _editionsFeedFilterHandler);
@@ -42,7 +49,10 @@ export default function initEditions() {
             categoryKeys: [],
         });
         feed.setEditions({ items: initial });
-    })();
+    };
+
+    void wire();
+    _unsubEditions = subscribeDataSource(() => void wire());
 }
 
 export function generateEditionsContent() {

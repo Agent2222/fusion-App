@@ -5,13 +5,14 @@
   },
   "name": "fusion-app",
   "scripts": {
+    "download-legacy-firebase-images": "node download-legacy-firebase-images.mjs",
     "backup": "bash scripts/backup.sh",
     "build": "npm run build --workspaces --if-present",
     "prebuild": "npm run prebuild --workspaces --if-present",
     "pretest": "npm run prebuild --workspaces --if-present",
     "start": "npm start --workspaces --if-present",
     "test": "npm test --workspaces --if-present",
-    "integration-api": "npm run dev --workspace=fusion-integration-api",
+    "s": "npm run dev --workspace=fusion-integration-api",
     "integration-api:start": "npm start --workspace=fusion-integration-api"
   },
   "type": "module",

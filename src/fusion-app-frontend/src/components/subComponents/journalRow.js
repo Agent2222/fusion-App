@@ -1,9 +1,8 @@
 /**
  * Single journal entry — same card layout as `journal-hero.js` without horizontal scroll or dots.
- * Select via `data-journal-id` (matches `testData.journals.journals[].id`), or `data-journal-index` (0-based fallback).
- * Or call `setJournalRow(entry)`.
+ * Select via `data-journal-id` or `data-journal-index`, or call `setJournalRow(entry)`.
  */
-import { testData } from '../../testData.js';
+import { getJournalEntries, subscribeDataSource } from '../../utils/database.js';
 import { navigate } from '../../router.js';
 
 function escapeHtml(s) {
@@ -18,8 +17,12 @@ class JournalRowComponent extends HTMLElement {
     constructor() {
         super();
         this.shadow = this.attachShadow({ mode: 'open' });
-        /** @type {object | null} Override: one item shape like `testData.journals.journals[i]` */
+        /** @type {object | null} Override entry */
         this._entryOverride = null;
+        /** @type {Array<unknown> | null} */
+        this._journalsList = null;
+        /** @type {(() => void) | null} */
+        this._unsubData = null;
         this._onLocaleChange = () => this.render();
     }
 
@@ -54,7 +57,9 @@ class JournalRowComponent extends HTMLElement {
 
     connectedCallback() {
         window.addEventListener('fusion-localechange', this._onLocaleChange);
-        this.render();
+        if (this._unsubData) this._unsubData();
+        this._unsubData = subscribeDataSource(() => void this._loadJournals());
+        void this._loadJournals();
         if (!this._journalNavBound) {
             this._journalNavBound = true;
             this.shadow.addEventListener('click', (e) => {
@@ -68,6 +73,15 @@ class JournalRowComponent extends HTMLElement {
 
     disconnectedCallback() {
         window.removeEventListener('fusion-localechange', this._onLocaleChange);
+        if (this._unsubData) {
+            this._unsubData();
+            this._unsubData = null;
+        }
+    }
+
+    async _loadJournals() {
+        this._journalsList = await getJournalEntries();
+        this.render();
     }
 
     _getJournalId() {
@@ -84,7 +98,7 @@ class JournalRowComponent extends HTMLElement {
 
     _resolveEntry() {
         if (this._entryOverride) return this._entryOverride;
-        const list = testData.journals?.journals;
+        const list = this._journalsList;
         if (!Array.isArray(list) || list.length === 0) return null;
 
         const id = this._getJournalId();

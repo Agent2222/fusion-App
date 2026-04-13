@@ -1,4 +1,4 @@
-import { testData } from '../testData.js';
+import { getEventsList, subscribeDataSource } from '../utils/database.js';
 
 /**
  * @returns {number | null}
@@ -146,41 +146,67 @@ function mountOtherEventRows(currentId, list) {
     }
 }
 
+/** @type {(() => void) | null} */
+let _unsubEvent = null;
+/** @type {((e: Event) => void) | null} */
+let _eventRsvpSubmit = null;
+
 export default function initEvent() {
+    if (_unsubEvent) {
+        _unsubEvent();
+        _unsubEvent = null;
+    }
+
     const id = eventIdFromPathname();
-    const list = testData.events || [];
-    const ev = id != null ? findEventById(id, list) : null;
 
-    const article = document.getElementById('eventDetail');
-    const notFound = document.getElementById('eventDetailNotFound');
+    const run = async () => {
+        const formBefore = document.getElementById('eventRsvpForm');
+        if (formBefore && _eventRsvpSubmit) {
+            formBefore.removeEventListener('submit', _eventRsvpSubmit);
+            _eventRsvpSubmit = null;
+        }
 
-    const show = (el, on) => {
-        if (!el) return;
-        if (on) el.removeAttribute('hidden');
-        else el.setAttribute('hidden', '');
+        const list = await getEventsList();
+        const ev = id != null ? findEventById(id, list) : null;
+
+        const article = document.getElementById('eventDetail');
+        const notFound = document.getElementById('eventDetailNotFound');
+
+        const show = (el, on) => {
+            if (!el) return;
+            if (on) el.removeAttribute('hidden');
+            else el.setAttribute('hidden', '');
+        };
+
+        if (id == null || !ev) {
+            show(article, false);
+            show(notFound, true);
+            const otherSec = document.getElementById('eventOtherSection');
+            if (otherSec) otherSec.hidden = true;
+            document.title = 'Event not found · Fusion';
+            return;
+        }
+
+        show(article, true);
+        show(notFound, false);
+        applyEventToDom(ev);
+        mountOtherEventRows(id, list);
+
+        const form = document.getElementById('eventRsvpForm');
+        if (form && ev.status === 'upcoming') {
+            _eventRsvpSubmit = (e) => {
+                e.preventDefault();
+                const thanks = document.getElementById('eventRsvpThanks');
+                const f = document.getElementById('eventRsvpForm');
+                if (thanks) thanks.hidden = false;
+                if (f) f.hidden = true;
+            };
+            form.addEventListener('submit', _eventRsvpSubmit);
+        }
     };
 
-    if (id == null || !ev) {
-        show(article, false);
-        show(notFound, true);
-        const otherSec = document.getElementById('eventOtherSection');
-        if (otherSec) otherSec.hidden = true;
-        document.title = 'Event not found · Fusion';
-        return;
-    }
-
-    show(article, true);
-    show(notFound, false);
-    applyEventToDom(ev);
-    mountOtherEventRows(id, list);
-
-    const form = document.getElementById('eventRsvpForm');
-    if (form && ev.status === 'upcoming') {
-        form.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const thanks = document.getElementById('eventRsvpThanks');
-            if (thanks) thanks.hidden = false;
-            form.hidden = true;
-        });
-    }
+    void run();
+    _unsubEvent = subscribeDataSource(() => {
+        void run();
+    });
 }

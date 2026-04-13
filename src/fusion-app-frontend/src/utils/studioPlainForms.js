@@ -2,6 +2,8 @@
  * Studio: plain-text editing helpers (no JSON shown to editors).
  */
 
+import { getFieldKind } from './studioFieldRegistry.js';
+
 /**
  * @param {unknown} v
  */
@@ -77,6 +79,24 @@ export function applyStringPatches(original, pathValueMap) {
 }
 
 /**
+ * Copy Context page English media/link URL fields to Japanese so JA tracks EN (Studio hides duplicate JA media rows).
+ * @param {unknown} bundle
+ */
+export function syncContextJaMediaFromEn(bundle) {
+    const rows = flattenStringFields(bundle);
+    /** @type {Record<string, string>} */
+    const patches = {};
+    for (const r of rows) {
+        if (!r.path.startsWith('en.')) continue;
+        const kind = getFieldKind('context', r.path);
+        if (kind !== 'assetUrl' && kind !== 'externalUrl') continue;
+        const rest = r.path.slice(3);
+        patches[`ja.${rest}`] = r.value;
+    }
+    return applyStringPatches(bundle, patches);
+}
+
+/**
  * @param {unknown} obj
  * @param {string[]} parts
  * @param {string} value
@@ -106,6 +126,122 @@ function setPath(obj, parts, value) {
         else /** @type {Record<string, unknown>} */ (obj)[key] = child;
     }
     setPath(child, rest, value);
+}
+
+/**
+ * @param {unknown} obj
+ * @param {string[]} parts
+ */
+function setPathValue(obj, parts, value) {
+    if (!parts.length || obj === null || typeof obj !== 'object') return;
+    const key = parts[0];
+    if (parts.length === 1) {
+        if (Array.isArray(obj)) {
+            const idx = Number(key);
+            if (!Number.isNaN(idx)) obj[idx] = value;
+        } else {
+            /** @type {Record<string, unknown>} */ (obj)[key] = value;
+        }
+        return;
+    }
+    const rest = parts.slice(1);
+    const isArr = Array.isArray(obj);
+    const k = isArr ? Number(key) : key;
+    /** @type {unknown} */
+    let child = isArr ? obj[k] : /** @type {Record<string, unknown>} */ (obj)[key];
+    if (child === undefined || child === null) {
+        const nextKey = rest[0];
+        const makeArr = /^\d+$/.test(String(nextKey));
+        child = makeArr ? [] : {};
+        if (isArr) obj[k] = child;
+        else /** @type {Record<string, unknown>} */ (obj)[key] = child;
+    }
+    setPathValue(child, rest, value);
+}
+
+/**
+ * @param {unknown} obj
+ * @param {string[]} parts
+ * @returns {unknown}
+ */
+export function getValueAtPath(obj, parts) {
+    /** @type {unknown} */
+    let cur = obj;
+    for (const p of parts) {
+        if (cur === null || cur === undefined) return undefined;
+        if (Array.isArray(cur)) {
+            const idx = Number(p);
+            if (Number.isNaN(idx)) return undefined;
+            cur = cur[idx];
+        } else if (typeof cur === 'object') {
+            cur = /** @type {Record<string, unknown>} */ (cur)[p];
+        } else {
+            return undefined;
+        }
+    }
+    return cur;
+}
+
+/**
+ * Number and boolean leaves only (Studio scalar inputs).
+ * @param {unknown} obj
+ * @param {string} [prefix]
+ * @returns {{ path: string, label: string, value: number | boolean, kind: 'number' | 'boolean' }[]}
+ */
+export function flattenScalarFields(obj, prefix = '') {
+    const rows = [];
+    if (obj === null || obj === undefined) return rows;
+    if (typeof obj === 'number' || typeof obj === 'boolean') {
+        if (!prefix) return rows;
+        rows.push({
+            path: prefix,
+            label: humanizeContentPath(prefix),
+            value: obj,
+            kind: typeof obj === 'boolean' ? 'boolean' : 'number',
+        });
+        return rows;
+    }
+    if (typeof obj !== 'object') return rows;
+    if (Array.isArray(obj)) {
+        obj.forEach((item, i) => {
+            const p = prefix ? `${prefix}.${i}` : String(i);
+            rows.push(...flattenScalarFields(item, p));
+        });
+        return rows;
+    }
+    for (const k of Object.keys(obj)) {
+        const p = prefix ? `${prefix}.${k}` : k;
+        rows.push(...flattenScalarFields(obj[k], p));
+    }
+    return rows;
+}
+
+/**
+ * Apply scalar edits after string patches; uses **original** bundle to detect number vs boolean.
+ * @param {unknown} original
+ * @param {unknown} patched
+ * @param {Record<string, string>} scalarMap — path → string from inputs (numbers as decimal text; booleans as 'true'/'false')
+ */
+export function applyScalarPatches(original, patched, scalarMap) {
+    const next = deepCloneJson(patched);
+    if (next === null || typeof next !== 'object') {
+        return next;
+    }
+    for (const [path, strVal] of Object.entries(scalarMap)) {
+        if (!path) continue;
+        const parts = path.split('.');
+        const origVal = getValueAtPath(original, parts);
+        if (typeof origVal === 'number') {
+            const n = Number(strVal);
+            if (!Number.isNaN(n)) {
+                setPathValue(next, parts, n);
+            }
+        } else if (typeof origVal === 'boolean') {
+            const b = strVal === 'true' || strVal === '1' || strVal === 'on';
+            setPathValue(next, parts, b);
+        }
+    }
+    return next;
 }
 
 /**

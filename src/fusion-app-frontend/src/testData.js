@@ -120,20 +120,6 @@ export const testData = {
             },
         ],
     },
-    privacyPolicy: {
-        en: [
-            {
-                title: "Privacy Policy",
-                description: "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Quis ipsum suspendisse ultrices gravida. ",
-            },
-        ],
-        ja: [
-            {
-                title: "プライバシーポリシー",
-                description: "ジャパン・アーティスト・レジデンシーのプライバシーポリシーをご紹介します。",
-            },
-        ],
-    },
     allPrograms: {
         order: 2,
         programs: {
@@ -141,6 +127,8 @@ export const testData = {
                 {
                     id: "fusionKaga",
                     imageSrc: image1,
+                    /** Detail-page hero; `.mp4` uses `<video>`, images use `<img>` (see programView.js). */
+                    heroMediaSrc: '/fusion-nature.mp4',
                     focus: "Japan Artist Residency",
                     imageAlt: "Exhibit",
                     location: "Kaga, Ishikawa, Japan",

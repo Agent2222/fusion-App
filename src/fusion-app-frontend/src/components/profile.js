@@ -1,5 +1,6 @@
 import { artistLocaleBlock } from '../utils/artistSlug.js';
 import { getArtistBySlug } from '../utils/database.js';
+import { worldTextParts } from '../utils/worldNormalize.js';
 
 /**
  * @param {HTMLElement | null} container
@@ -236,10 +237,7 @@ export default function initProfile() {
         if (practiceEl) practiceEl.textContent = loc.world?.practice || '';
         if (perspectiveEl) {
             perspectiveEl.replaceChildren();
-            const raw = loc.world?.perspective;
-            const parts = Array.isArray(raw) ? raw : raw != null && raw !== '' ? [String(raw)] : [];
-            for (const text of parts) {
-                if (!text) continue;
+            for (const text of worldTextParts(loc.world?.perspective)) {
                 const p = document.createElement('p');
                 p.textContent = text;
                 perspectiveEl.appendChild(p);
@@ -249,10 +247,7 @@ export default function initProfile() {
         if (contextHeadingEl) contextHeadingEl.textContent = locale === 'ja' ? '文脈' : 'Context';
         if (contextContentEl) {
             contextContentEl.replaceChildren();
-            const raw = loc.world?.context;
-            const parts = Array.isArray(raw) ? raw : raw != null && raw !== '' ? [String(raw)] : [];
-            for (const text of parts) {
-                if (!text) continue;
+            for (const text of worldTextParts(loc.world?.context)) {
                 const p = document.createElement('p');
                 p.textContent = text;
                 contextContentEl.appendChild(p);
@@ -263,9 +258,7 @@ export default function initProfile() {
         const sightWordsContainerEl = document.getElementById('sight-words-container');
         if (sightWordsContainerEl) {
             sightWordsContainerEl.replaceChildren();
-            const raw = loc.world?.vision;
-            const parts = Array.isArray(raw) ? raw : raw != null && raw !== '' ? [String(raw)] : [];
-            for (const text of parts) {
+            for (const text of worldTextParts(loc.world?.vision)) {
                 if (!text) continue;
                 const p = document.createElement('p');
                 p.className = 'profile-sight-word-line';
@@ -290,10 +283,7 @@ export default function initProfile() {
         const constructingWordsContainerEl = document.getElementById('constructing-words-container');
         if (constructingWordsContainerEl) {
             constructingWordsContainerEl.replaceChildren();
-            const raw = loc.world?.constructing;
-            const parts = Array.isArray(raw) ? raw : raw != null && raw !== '' ? [String(raw)] : [];
-            for (const text of parts) {
-                if (!text) continue;
+            for (const text of worldTextParts(loc.world?.constructing)) {
                 const p = document.createElement('p');
                 p.textContent = text;
                 constructingWordsContainerEl.appendChild(p);

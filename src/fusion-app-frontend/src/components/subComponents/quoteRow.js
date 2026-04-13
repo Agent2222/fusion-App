@@ -1,8 +1,8 @@
 /**
  * Large left-aligned quote with a small right-aligned attribution link below.
- * Copy from `testData.quoteRow[context]` — `quote`, `attribution`, `attributionHref` per locale.
+ * Copy from CMS `quote-row` bundle keyed by `context`.
  */
-import { testData } from '../../testData.js';
+import { getContentBundleForStudio, subscribeDataSource } from '../../utils/database.js';
 
 function escapeHtml(s) {
     return String(s)
@@ -16,6 +16,10 @@ class QuoteRowComponent extends HTMLElement {
     constructor() {
         super();
         this.shadow = this.attachShadow({ mode: 'open' });
+        /** @type {Record<string, unknown> | null} */
+        this._quoteBundle = null;
+        /** @type {(() => void) | null} */
+        this._unsubData = null;
         this._onLocaleChange = () => this.render();
     }
 
@@ -42,16 +46,28 @@ class QuoteRowComponent extends HTMLElement {
 
     connectedCallback() {
         window.addEventListener('fusion-localechange', this._onLocaleChange);
-        this.render();
+        if (this._unsubData) this._unsubData();
+        this._unsubData = subscribeDataSource(() => void this._loadQuote());
+        void this._loadQuote();
     }
 
     disconnectedCallback() {
         window.removeEventListener('fusion-localechange', this._onLocaleChange);
+        if (this._unsubData) {
+            this._unsubData();
+            this._unsubData = null;
+        }
+    }
+
+    async _loadQuote() {
+        const raw = await getContentBundleForStudio('quote-row');
+        this._quoteBundle = raw && typeof raw === 'object' ? /** @type {Record<string, unknown>} */ (raw) : null;
+        this.render();
     }
 
     _getSlice() {
         const ctx = this.getAttribute('context') || 'journal';
-        const block = testData.quoteRow;
+        const block = this._quoteBundle;
         if (!block || !block[ctx]) return null;
         return block[ctx];
     }

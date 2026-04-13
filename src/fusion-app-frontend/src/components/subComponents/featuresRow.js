@@ -1,10 +1,8 @@
 /**
  * Three feature cards in one row (`1 × 3` grid).
- * Data source: `testData.featureCards.groups` — pick a group with `data-area` matching `group.id`
- * (e.g. `context`, `programs`). Defaults to `context` if unset.
- * Optional per group: `marginTop`, `marginBottom` (CSS lengths for the features row).
+ * Data source: CMS `feature-cards` — pick a group with `data-area` matching `group.id`.
  */
-import { testData } from '../../testData.js';
+import { getContentBundleForStudio, subscribeDataSource } from '../../utils/database.js';
 
 function escapeHtml(s) {
     return String(s)
@@ -18,7 +16,17 @@ class FeaturesRowComponent extends HTMLElement {
     constructor() {
         super();
         this.shadow = this.attachShadow({ mode: 'open' });
+        /** @type {Record<string, unknown> | null} */
+        this._featureCardsBundle = null;
+        /** @type {(() => void) | null} */
+        this._unsubData = null;
         this._onLocaleChange = () => this.render();
+        /** @param {Event} ev */
+        this._onFusionCms = (ev) => {
+            const slug = /** @type {CustomEvent<{ slug?: string }>} */ (ev).detail?.slug;
+            if (slug && slug !== 'feature-cards') return;
+            void this._loadFeatures();
+        };
     }
 
     get active() {
@@ -53,18 +61,33 @@ class FeaturesRowComponent extends HTMLElement {
 
     connectedCallback() {
         window.addEventListener('fusion-localechange', this._onLocaleChange);
-        this.render();
+        window.addEventListener('fusion-content-pages-changed', this._onFusionCms);
+        if (this._unsubData) this._unsubData();
+        this._unsubData = subscribeDataSource(() => void this._loadFeatures());
+        void this._loadFeatures();
     }
 
     disconnectedCallback() {
         window.removeEventListener('fusion-localechange', this._onLocaleChange);
+        window.removeEventListener('fusion-content-pages-changed', this._onFusionCms);
+        if (this._unsubData) {
+            this._unsubData();
+            this._unsubData = null;
+        }
+    }
+
+    async _loadFeatures() {
+        const bundle = await getContentBundleForStudio('feature-cards', { forStudio: false });
+        this._featureCardsBundle =
+            bundle && typeof bundle === 'object' ? /** @type {Record<string, unknown>} */ (bundle) : null;
+        this.render();
     }
 
     _getGroup() {
         const area = this._getArea();
-        const groups = testData.featureCards?.groups;
+        const groups = /** @type {unknown} */ (this._featureCardsBundle?.groups);
         if (!Array.isArray(groups)) return null;
-        return groups.find((entry) => entry && entry.id === area) ?? null;
+        return groups.find((entry) => entry && /** @type {Record<string, unknown>} */ (entry).id === area) ?? null;
     }
 
     _getItems() {
@@ -208,7 +231,7 @@ class FeaturesRowComponent extends HTMLElement {
             </style>
             ${
                 empty
-                    ? `<div class="features-row features-row--empty" part="features-row" style="${rowMarginStyle}">No feature cards for area “${escapeHtml(this._getArea())}” (testData.featureCards.groups)</div>`
+                    ? `<div class="features-row features-row--empty" part="features-row" style="${rowMarginStyle}">No feature cards for area “${escapeHtml(this._getArea())}”.</div>`
                     : `<div class="features-row" part="features-row" style="${rowMarginStyle}">${cells}</div>`
             }
         `;

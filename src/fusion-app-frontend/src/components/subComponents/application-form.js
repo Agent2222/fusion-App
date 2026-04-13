@@ -1,10 +1,15 @@
 /**
- * Program application: 3-step form (Artist → Portfolio → Payment) with horizontal scroll + dot pagination.
+ * Program application: 2-step form (Artist → Portfolio & submit) with horizontal scroll + dot pagination.
  */
 
 import { PROGRAM_APPLICATION_VIEWPORT_TOP_GAP_PX } from '../../utils/scrollAnchorToViewportGap.js';
+import {
+    getMyArtistRecord,
+    PROGRAM_APPLICATION_ERROR_CODE,
+    submitProgramApplication,
+} from '../../utils/database.js';
 
-const STEP_COUNT = 3;
+const STEP_COUNT = 2;
 
 class ApplicationFormComponent extends HTMLElement {
     constructor() {
@@ -28,11 +33,11 @@ class ApplicationFormComponent extends HTMLElement {
     }
 
     static get observedAttributes() {
-        return ['active'];
+        return ['active', 'data-program-id'];
     }
 
     attributeChangedCallback(prop, oldVal, newVal) {
-        if (prop === 'active' && oldVal !== newVal) {
+        if ((prop === 'active' || prop === 'data-program-id') && oldVal !== newVal) {
             this.render();
             this._afterRender();
         }
@@ -45,13 +50,10 @@ class ApplicationFormComponent extends HTMLElement {
                 title: '応募フォーム',
                 stepArtist: 'アーティスト',
                 stepPortfolio: 'ポートフォリオ',
-                stepPayment: 'お支払い',
                 step1Title: 'ステップ 1：アーティスト',
                 step2Title: 'ステップ 2：ポートフォリオ',
-                step3Title: 'ステップ 3：お支払い',
                 lead1: '連絡先と所在地を入力してください。',
-                lead2: 'ウェブサイト、分野、自己紹介、レジデンシーで達成したいことを共有してください。',
-                lead3: 'お支払い方法を確認し、送信を完了してください。',
+                lead2: 'ウェブサイト、分野、自己紹介、レジデンシーで達成したいことを共有し、送信してください。',
                 firstName: '名（ファーストネーム）',
                 lastName: '姓（ラストネーム）',
                 email: 'メールアドレス',
@@ -68,14 +70,16 @@ class ApplicationFormComponent extends HTMLElement {
                 explorationByline: '（制作や生活で、いま前に引っ張られているもの）',
                 residencyGoals: 'このレジデンシーに参加したら、内面でも外面でも、何を持ち帰りたいですか？',
                 residencyGoalsByline: '（作品、視点の変化、つながり、言葉にしにくいものでも）',
-                cardName: 'カード名義',
-                cardNumber: 'カード番号',
-                expiry: '有効期限',
-                cvc: 'セキュリティコード',
+                submitError: '送信に失敗しました。もう一度お試しください。',
+                submitNoAccount:
+                    'この Internet Identity には Fusion のメンバーアカウントがありません。参加（Join）の登録を完了するか、アーティストとして紐づいたアカウントでサインインしてください。管理者だけの II では応募できません。',
+                submitNoLinkedArtist:
+                    'アカウントに紐づくアーティストプロフィールがありません。Studio でロスターと紐づけてもらうか、アーティストとリンクされた II でサインインしてください。',
+                submitSuccess: '応募を受け付けました。',
+                alreadyApplied: 'このプログラムには既に応募済みです。内容を更新して再送信できます。',
                 next: '次へ',
                 back: '戻る',
-                submit: '送信',
-                secure: '安全なお支払い',
+                submit: '応募を送信',
                 required: '必須',
             };
         }
@@ -83,13 +87,11 @@ class ApplicationFormComponent extends HTMLElement {
             title: 'Application Form',
             stepArtist: 'Artist',
             stepPortfolio: 'Portfolio',
-            stepPayment: 'Payment',
             step1Title: 'The Artist',
             step2Title: 'Tell us who you are; beyond the surface',
-            step3Title: 'The Investment',
             lead1: 'Enter your name, email, and location.',
-            lead2: 'We’re less interested in perfect answers, more in perspective. Share what feels true to you. This is how we begin to understand your work and where you\'re going.',
-            lead3: 'Review payment details and complete your submission.',
+            lead2:
+                'We’re less interested in perfect answers, more in perspective. Share what feels true to you, then submit your application.',
             firstName: 'First name',
             lastName: 'Last name',
             email: 'Email',
@@ -107,14 +109,16 @@ class ApplicationFormComponent extends HTMLElement {
             residencyGoals:
                 'If you joined this residency, what would you want to leave with — internally or externally?',
             residencyGoalsByline: '(This could be a body of work, a shift in perspective, a connection, or something intangible)',
-            cardName: 'Name on card',
-            cardNumber: 'Card number',
-            expiry: 'Expiry',
-            cvc: 'CVC',
+            submitError: 'Could not submit. Please try again.',
+            submitNoAccount:
+                'This Internet Identity has no Fusion member account. Finish the Join / registration flow, or sign in with an identity linked to an artist. Admin-only identities (no member profile) cannot submit applications.',
+            submitNoLinkedArtist:
+                'Your account has no linked artist profile. Ask Fusion to link your roster row in Studio, or sign in with an identity that is linked to an artist.',
+            submitSuccess: 'Your application was received.',
+            alreadyApplied: 'You already applied to this program. You can update and resubmit.',
             next: 'Next',
             back: 'Back',
             submit: 'Submit application',
-            secure: 'Secure payment',
             required: 'required',
         };
     }
@@ -232,13 +236,161 @@ class ApplicationFormComponent extends HTMLElement {
 
         root.querySelector('.app-next-1')?.addEventListener('click', () => this._goToSlide(1));
         root.querySelector('.app-back-1')?.addEventListener('click', () => this._goToSlide(0));
-        root.querySelector('.app-next-2')?.addEventListener('click', () => this._goToSlide(2));
-        root.querySelector('.app-back-2')?.addEventListener('click', () => this._goToSlide(1));
 
         const form = root.querySelector('#app-application-form-fields');
         form?.addEventListener('submit', (e) => {
             e.preventDefault();
+            void this._submitApplication();
         });
+    }
+
+    /**
+     * @returns {Record<string, string>}
+     */
+    _collectPayload() {
+        const root = this.shadowRoot;
+        const get = (id) => root?.querySelector(`#${id}`)?.value ?? '';
+        return {
+            firstName: String(get('app-first-name')).trim(),
+            lastName: String(get('app-last-name')).trim(),
+            email: String(get('app-email')).trim(),
+            country: String(get('app-country')).trim(),
+            stateProvince: String(get('app-state')).trim(),
+            city: String(get('app-city')).trim(),
+            website: String(get('app-website')).trim(),
+            discipline: String(get('app-discipline')).trim(),
+            bioStatement: String(get('app-bio')).trim(),
+            exploration: String(get('app-exploration')).trim(),
+            residencyGoals: String(get('app-goals')).trim(),
+        };
+    }
+
+    async _submitApplication() {
+        const root = this.shadowRoot;
+        const statusEl = root?.querySelector('#app-form-status');
+        const programId = this.getAttribute('data-program-id') || '';
+        const L = this._labels();
+        if (!programId) {
+            if (statusEl) {
+                statusEl.textContent = 'Missing program id.';
+                statusEl.classList.add('is-error');
+            }
+            return;
+        }
+        const form = root?.querySelector('#app-application-form-fields');
+        if (form && !form.checkValidity()) {
+            form.reportValidity();
+            return;
+        }
+        if (statusEl) {
+            statusEl.textContent = '';
+            statusEl.classList.remove('is-error', 'is-success');
+        }
+        const payload = this._collectPayload();
+        try {
+            await submitProgramApplication(programId, payload);
+            if (statusEl) {
+                statusEl.textContent = L.submitSuccess;
+                statusEl.classList.add('is-success');
+            }
+        } catch (err) {
+            const code = err && typeof err === 'object' && 'code' in err ? String(/** @type {{ code?: unknown }} */ (err).code) : '';
+            const raw = err instanceof Error ? err.message : String(err);
+            const blob = `${raw} ${err && typeof err === 'object' && 'message' in err ? String(/** @type {{ message?: unknown }} */ (err).message) : ''}`;
+            let line = L.submitError;
+            if (code === PROGRAM_APPLICATION_ERROR_CODE.NO_ACCOUNT || /No account for caller/i.test(blob)) {
+                line = L.submitNoAccount;
+            } else if (code === PROGRAM_APPLICATION_ERROR_CODE.NO_LINKED_ARTIST || /No linked artist on account/i.test(blob)) {
+                line = L.submitNoLinkedArtist;
+            } else if (
+                raw &&
+                raw.length < 280 &&
+                !/Request ID:|Reject code:|ic0\.trap|Canister called/i.test(raw)
+            ) {
+                line = raw;
+            }
+            if (statusEl) {
+                statusEl.textContent = line;
+                statusEl.classList.add('is-error');
+            }
+            if (typeof console !== 'undefined' && console.error) {
+                console.error('[ApplicationForm]', err);
+            }
+        }
+    }
+
+    async _prefillFromArtist() {
+        const root = this.shadowRoot;
+        if (!root) return;
+        const programId = this.getAttribute('data-program-id') || '';
+        let rec;
+        try {
+            rec = await getMyArtistRecord();
+        } catch {
+            return;
+        }
+        if (!rec) return;
+
+        const locale = typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
+        let locales = {};
+        try {
+            const lj = rec.locales_json ?? rec.localesJson;
+            const raw = typeof lj === 'string' ? lj : '';
+            locales = raw ? JSON.parse(raw) : {};
+        } catch {
+            locales = {};
+        }
+        const block = locales[locale] || locales.en || {};
+        const name = String(block.name || '').trim();
+        const parts = name.split(/\s+/).filter(Boolean);
+        const firstName = parts[0] || '';
+        const lastName = parts.slice(1).join(' ') || '';
+        const loc = block.location && typeof block.location === 'object' ? block.location : {};
+        const country = String(loc.country || '').trim();
+        const stateProvince = String(loc.state || loc.region || '').trim();
+        const city = String(loc.city || '').trim();
+
+        const setVal = (id, v) => {
+            const el = root.querySelector(`#${id}`);
+            if (el && 'value' in el) el.value = v;
+        };
+
+        if (firstName) setVal('app-first-name', firstName);
+        if (lastName) setVal('app-last-name', lastName);
+        if (country) setVal('app-country', country);
+        if (stateProvince) setVal('app-state', stateProvince);
+        if (city) setVal('app-city', city);
+        if (block.discipline) setVal('app-discipline', String(block.discipline));
+
+        const appliedRaw = rec.applied_json ?? rec.appliedJson;
+        if (programId && appliedRaw) {
+            try {
+                const applied = typeof appliedRaw === 'string' ? JSON.parse(appliedRaw) : appliedRaw;
+                const entry = applied[programId];
+                const p = entry && typeof entry === 'object' ? entry.payload : null;
+                if (p && typeof p === 'object') {
+                    if (p.firstName != null) setVal('app-first-name', String(p.firstName));
+                    if (p.lastName != null) setVal('app-last-name', String(p.lastName));
+                    if (p.email != null) setVal('app-email', String(p.email));
+                    if (p.country != null) setVal('app-country', String(p.country));
+                    if (p.stateProvince != null) setVal('app-state', String(p.stateProvince));
+                    if (p.city != null) setVal('app-city', String(p.city));
+                    if (p.website != null) setVal('app-website', String(p.website));
+                    if (p.discipline != null) setVal('app-discipline', String(p.discipline));
+                    if (p.bioStatement != null) setVal('app-bio', String(p.bioStatement));
+                    if (p.exploration != null) setVal('app-exploration', String(p.exploration));
+                    if (p.residencyGoals != null) setVal('app-goals', String(p.residencyGoals));
+                }
+                const L = this._labels();
+                const statusEl = root.querySelector('#app-form-status');
+                if (entry && statusEl) {
+                    statusEl.textContent = L.alreadyApplied;
+                    statusEl.classList.add('is-success');
+                }
+            } catch {
+                /* ignore */
+            }
+        }
     }
 
     _afterRender() {
@@ -251,6 +403,7 @@ class ApplicationFormComponent extends HTMLElement {
         this._bindPagination(scrollEl);
         this._setActiveDot(0);
         this._wireControls();
+        void this._prefillFromArtist();
     }
 
     disconnectedCallback() {
@@ -538,26 +691,20 @@ class ApplicationFormComponent extends HTMLElement {
                     opacity: 0.85;
                 }
 
-                .app-secure-row {
-                    margin-top: 1.5rem;
-                    padding-top: 1rem;
-                    border-top: 1px solid rgba(0, 0, 0, 0.08);
-                    display: flex;
-                    flex-wrap: wrap;
-                    align-items: center;
-                    justify-content: center;
-                    gap: 0.75rem 1.25rem;
-                    font-size: clamp(0.75rem, 0.95vw, 0.85rem);
-                    font-variation-settings: var(--fv-caption);
+                .app-form-status {
+                    margin-top: 1rem;
+                    font-size: clamp(0.85rem, 1vw, 0.95rem);
+                    font-variation-settings: var(--fv-body-wide);
                     color: var(--c2);
-                    opacity: 0.75;
+                    min-height: 1.25em;
                 }
 
-                .app-card-brands {
-                    display: flex;
-                    gap: 0.75rem;
-                    letter-spacing: 0.12em;
-                    font-variation-settings: var(--fv-label-strong);
+                .app-form-status.is-error {
+                    color: #8b2942;
+                }
+
+                .app-form-status.is-success {
+                    opacity: 0.9;
                 }
             </style>
             <div class="application-form-root">
@@ -566,8 +713,6 @@ class ApplicationFormComponent extends HTMLElement {
                     <button type="button" class="app-step-node is-active" data-app-step="0" aria-current="step">${L.stepArtist}</button>
                     <span class="app-step-join" aria-hidden="true"></span>
                     <button type="button" class="app-step-node" data-app-step="1">${L.stepPortfolio}</button>
-                    <span class="app-step-join" aria-hidden="true"></span>
-                    <button type="button" class="app-step-node" data-app-step="2">${L.stepPayment}</button>
                 </div>
 
                 <form id="app-application-form-fields" novalidate>
@@ -638,34 +783,6 @@ class ApplicationFormComponent extends HTMLElement {
                             </div>
                             <div class="app-form-actions app-form-actions--split">
                                 <button type="button" class="app-btn app-btn--ghost app-back-1">${L.back}</button>
-                                <button type="button" class="app-btn app-btn--primary app-next-2">${L.next}</button>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="app-form-slide" data-slide="2">
-                        <div class="app-form-card">
-                            <h3 class="app-step-heading">${L.step3Title}</h3>
-                            <p class="app-step-lead">${L.lead3}</p>
-                            <div class="app-field">
-                                <label for="app-card-name">${L.cardName}</label>
-                                <input id="app-card-name" name="cardName" type="text" autocomplete="cc-name" />
-                            </div>
-                            <div class="app-field">
-                                <label for="app-card-number">${L.cardNumber}</label>
-                                <input id="app-card-number" name="cardNumber" type="text" inputmode="numeric" autocomplete="cc-number" />
-                            </div>
-                            <div class="app-field app-field--card-row">
-                                <div>
-                                    <label for="app-card-exp">${L.expiry}</label>
-                                    <input id="app-card-exp" name="cardExpiry" type="text" autocomplete="cc-exp" placeholder="MM/YY" />
-                                </div>
-                                <div>
-                                    <label for="app-card-cvc">${L.cvc}</label>
-                                    <input id="app-card-cvc" name="cardCvc" type="text" inputmode="numeric" autocomplete="cc-csc" />
-                                </div>
-                            </div>
-                            <div class="app-form-actions app-form-actions--split">
-                                <button type="button" class="app-btn app-btn--ghost app-back-2">${L.back}</button>
                                 <button type="submit" class="app-btn app-btn--primary">${L.submit}</button>
                             </div>
                         </div>
@@ -673,17 +790,13 @@ class ApplicationFormComponent extends HTMLElement {
                 </div>
                 </form>
 
+                <p id="app-form-status" class="app-form-status" role="status" aria-live="polite"></p>
+
                 <div class="app-form-pagination-wrap">
                     <div class="app-form-pagination-dot-container" role="tablist" aria-label="Form steps">
                         <button type="button" class="app-form-pagination-dot active" data-app-step="0" aria-label="Step 1" aria-current="true"></button>
                         <button type="button" class="app-form-pagination-dot" data-app-step="1" aria-label="Step 2"></button>
-                        <button type="button" class="app-form-pagination-dot" data-app-step="2" aria-label="Step 3"></button>
                     </div>
-                </div>
-
-                <div class="app-secure-row">
-                    <span>${L.secure}</span>
-                    <span class="app-card-brands" aria-hidden="true">VISA · Mastercard · AMEX</span>
                 </div>
             </div>
         `;

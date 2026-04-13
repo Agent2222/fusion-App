@@ -1,6 +1,7 @@
 import placeholderImg from '../assets/dev/program_hero-1.jpg';
 import { findArtistByEnglishName } from '../utils/artistSlug.js';
 import { findProgramPairByPathname, getArtists } from '../utils/database.js';
+import { getAuthSnapshot } from '../utils/icAuth.js';
 import {
     PROGRAM_APPLICATION_VIEWPORT_TOP_GAP_PX,
     scrollElementTopToViewportGap,
@@ -28,6 +29,121 @@ function formatCostText(costs) {
     return base || additional;
 }
 
+/**
+ * @param {string} url
+ * @returns {boolean}
+ */
+export function isVideoUrl(url) {
+    const u = String(url || '').split(/[?#]/)[0].toLowerCase();
+    return /\.(mp4|webm|ogg)$/i.test(u);
+}
+
+/**
+ * @param {HTMLElement | null} container
+ * @param {string} url
+ * @param {string} alt
+ */
+function setProgramHeroMedia(container, url, alt) {
+    if (!container) return;
+    const u = String(url || '').trim();
+    container.replaceChildren();
+    if (!u) return;
+
+    if (isVideoUrl(u)) {
+        const v = document.createElement('video');
+        v.setAttribute('src', u);
+        v.setAttribute('playsinline', '');
+        v.muted = true;
+        v.autoplay = true;
+        v.loop = true;
+        v.setAttribute('aria-label', alt || 'Program');
+        container.appendChild(v);
+        return;
+    }
+    const img = document.createElement('img');
+    img.src = u;
+    img.alt = alt || '';
+    container.appendChild(img);
+}
+
+const CTA_COPY = {
+    en: { guest: 'Sign up & apply', user: 'Begin application' },
+    ja: { guest: 'サインアップして応募', user: '応募を始める' },
+};
+
+/** Avoid duplicate listeners if `applyProgramToDom` is ever invoked more than once. */
+let programApplicationCtasWired = false;
+
+/**
+ * @param {boolean} authenticated
+ * @returns {string}
+ */
+function ctaLabelForAuth(authenticated) {
+    const loc = typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
+    const b = authenticated ? CTA_COPY[loc].user : CTA_COPY[loc].guest;
+    return b;
+}
+
+/**
+ * @param {string} programId
+ */
+function wireProgramApplicationSection(programId) {
+    const wrap = document.getElementById('programApplicationWrap');
+    const formEl = document.getElementById('programApplicationSection');
+    if (formEl && programId) {
+        formEl.setAttribute('data-program-id', programId);
+    }
+
+    if (programApplicationCtasWired) {
+        return;
+    }
+    programApplicationCtasWired = true;
+
+    const revealAndScroll = () => {
+        if (wrap) {
+            wrap.removeAttribute('hidden');
+            wrap.removeAttribute('inert');
+        }
+        if (formEl) {
+            formEl.setAttribute('active', 'true');
+        }
+        const section = document.getElementById('programApplicationSection');
+        scrollElementTopToViewportGap(section, PROGRAM_APPLICATION_VIEWPORT_TOP_GAP_PX);
+    };
+
+    const introCta1 = document.getElementById('programIntroCTA1');
+    const appBtn1 = document.getElementById('applicationButton1');
+
+    const onPrimaryCta = async () => {
+        const snap = await getAuthSnapshot();
+        if (!snap.authenticated) {
+            window.dispatchEvent(new CustomEvent('fusion-open-join-network', { detail: {} }));
+            return;
+        }
+        revealAndScroll();
+    };
+
+    introCta1?.addEventListener('click', () => void onPrimaryCta());
+    appBtn1?.addEventListener('click', () => void onPrimaryCta());
+
+    const refreshAuthUi = async () => {
+        const snap = await getAuthSnapshot();
+        const label = ctaLabelForAuth(snap.authenticated);
+        if (introCta1) introCta1.textContent = label;
+        if (appBtn1) appBtn1.textContent = label;
+        if (!snap.authenticated) {
+            if (wrap) {
+                wrap.setAttribute('hidden', '');
+                wrap.setAttribute('inert', '');
+            }
+            if (formEl) formEl.setAttribute('active', 'false');
+        }
+    };
+
+    void refreshAuthUi();
+    window.addEventListener('fusion-auth-change', () => void refreshAuthUi());
+}
+
 export function generateProgramViewContent() {
     return `
         <div class="page program-view-page">
@@ -35,7 +151,7 @@ export function generateProgramViewContent() {
                 <div id="programViewMainContent" class="feed-container">
                     <div class="page-content program-view-content">
                         <div class="program-detail-hero">
-                            <img id="programDetailImage" src="" alt=""/>
+                            <div id="programDetailHeroMedia" class="program-detail-hero-media"></div>
                         </div>
                         <div id="programIntroSection">
                             <div id="programIntroTitle"></div>
@@ -44,10 +160,10 @@ export function generateProgramViewContent() {
                                 <p id="programIntroSubLine2"></p>
                             </div>
                             <div id="programIntroCTAs">
-                                <div id="programIntroCTA1">Begin Application</div>
+                                <div id="programIntroCTA1" class="program-intro-cta" role="button" tabindex="0">Sign up & apply</div>
                                 <div id="programIntroCTA2">
                                     <div class="horizontal-line"><hr></div>
-                                    <div id="applicationButton1">Reserve Your Space</div>
+                                    <div id="applicationButton1" class="program-intro-cta" role="button" tabindex="0">Sign up & apply</div>
                                     <div class="horizontal-line"><hr></div>
                                 </div>
                             </div>
@@ -59,7 +175,9 @@ export function generateProgramViewContent() {
                         </div>
                         <app-confirmed-artists-feed id="confirmedArtistsFeed" active="true"></app-confirmed-artists-feed>
                         <app-program-details id="programDetailsSection" active="true"></app-program-details>
-                        <app-application-form id="programApplicationSection" active="true"></app-application-form>
+                        <div id="programApplicationWrap" class="program-application-wrap" hidden inert>
+                            <app-application-form id="programApplicationSection" active="false" data-program-id=""></app-application-form>
+                        </div>
                         <div class="shoutHeadline">
                             This is not for every artist.<br><br>It is for those willing to work<br>within unfamiliar environments—<br>alongside others,<br> in close proximity to place and process.
                         </div>
@@ -83,13 +201,11 @@ async function applyProgramToDom(programPair) {
         ...(current?.programPage || {}),
     };
 
-    const image = document.getElementById('programDetailImage');
+    const hero = document.getElementById('programDetailHeroMedia');
     const introTitle = document.getElementById('programIntroTitle');
     const introSubLine1 = document.getElementById('programIntroSubLine1');
     const introSubLine2 = document.getElementById('programIntroSubLine2');
-    const introCTAs = document.getElementById('programIntroCTAs');
     const keyOfferingsTitle = document.getElementById('keyOfferingsTitle');
-    const keyOfferingsGallery = document.getElementById('keyOfferingsGallery');
     const confirmedArtistsFeed = document.getElementById('confirmedArtistsFeed');
     const programDetailsSection = document.getElementById('programDetailsSection');
 
@@ -97,18 +213,23 @@ async function applyProgramToDom(programPair) {
     const summaryText = current?.briefDescription || programPage?.description || '';
     const subheadlineText = programPage?.subheadline || '';
     const descriptionText = programPage?.description || '';
-    const offerings = Array.isArray(programPage?.offeringCards) ? programPage.offeringCards : [];
     const artists = Array.isArray(programPage?.confirmedArtists) ? programPage.confirmedArtists : [];
     const details = programPage?.programDetails || {};
     const keyDates = Array.isArray(details?.keyDates) ? details.keyDates : [];
 
-    if (image) {
-        image.src = current?.imageSrc || '';
-        image.alt = current?.imageAlt || titleText || 'Program';
-    }
+    const heroUrl = current?.heroMediaSrc || current?.imageSrc || '';
+    const heroAlt = current?.imageAlt || titleText || 'Program';
+    setProgramHeroMedia(hero, heroUrl, heroAlt);
+
     if (introTitle) introTitle.textContent = programPage?.headline || titleText;
     if (introSubLine1) introSubLine1.textContent = subheadlineText || summaryText;
     if (introSubLine2) introSubLine2.textContent = descriptionText;
+
+    const programId = current?.id != null ? String(current.id) : '';
+    const formEl = document.getElementById('programApplicationSection');
+    if (formEl && programId) {
+        formEl.setAttribute('data-program-id', programId);
+    }
 
     if (confirmedArtistsFeed && typeof confirmedArtistsFeed.setConfirmedArtistsFeed === 'function') {
         const headline = programPage?.confirmedHeadline || '';
@@ -139,12 +260,6 @@ async function applyProgramToDom(programPair) {
         keyOfferingsTitle.textContent = programPage?.offeringHeadline || '';
     }
 
-    // if (keyOfferingsGallery) {
-    //     keyOfferingsGallery.innerHTML = offerings.map((offering) => `<img src="${offering.gallery[0]}" alt="${offering.title}">`).join('');
-    //     keyOfferingsGallery.innerHTML = offerings.map((offering) => `<img src="${offering.gallery[0]}" alt="${offering.title}">`).join('');
-    //     keyOfferingsGallery.innerHTML = offerings.map((offering) => `<img src="${offering.gallery[0]}" alt="${offering.title}">`).join('');
-    // }
-
     if (
         programDetailsSection &&
         typeof programDetailsSection.setProgramDetails === 'function'
@@ -160,6 +275,10 @@ async function applyProgramToDom(programPair) {
     }
 
     document.title = `${titleText || 'Program'} · Fusion`;
+
+    if (programId) {
+        wireProgramApplicationSection(programId);
+    }
 }
 
 export default function initProgramView() {
@@ -182,15 +301,5 @@ export default function initProgramView() {
 
         show(notFound, false);
         await applyProgramToDom(pair);
-
-        const scrollToApplication = () => {
-            const section = document.getElementById('programApplicationSection');
-            scrollElementTopToViewportGap(section, PROGRAM_APPLICATION_VIEWPORT_TOP_GAP_PX);
-        };
-
-        const introCta1 = document.getElementById('programIntroCTA1');
-        if (introCta1) {
-            introCta1.addEventListener('click', scrollToApplication);
-        }
     })();
 }

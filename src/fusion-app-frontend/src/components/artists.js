@@ -3,7 +3,7 @@ import { renderFooter } from './shared/footer.js';
 
 import { buildFeedPool } from './subComponents/artistsFeed.js';
 import { applyArtistFilters } from '../utils/feedFilterApply.js';
-import { getArtists } from '../utils/database.js';
+import { getArtists, getFeaturedArtists } from '../utils/database.js';
 
 /** @type {((e: CustomEvent) => void) | null} */
 let _artistsFeedFilterHandler = null;
@@ -26,13 +26,10 @@ export function render() {
 export default function initArtists() {
     void (async () => {
         const all = await getArtists();
+        const feat = await getFeaturedArtists();
         const featuredArtist = document.getElementById('featuredArtist2');
         if (featuredArtist && typeof featuredArtist.setFeaturedArtist === 'function') {
-            const sorted = [...(all || [])].sort(
-                (a, b) => (Number(a.featuredOrder) || 0) - (Number(b.featuredOrder) || 0)
-            );
-            const feat = sorted.slice(0, 8);
-            featuredArtist.setFeaturedArtist({ artists: feat });
+            featuredArtist.setFeaturedArtist({ artists: feat || [] });
             featuredArtist.createArtistCard(feat.length);
             featuredArtist.hideAllArtistsButton();
         }

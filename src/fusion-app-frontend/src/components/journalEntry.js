@@ -1,4 +1,4 @@
-import { testData } from '../testData.js';
+import { getJournalEntries, subscribeDataSource } from '../utils/database.js';
 
 /**
  * @returns {number | null}
@@ -72,28 +72,44 @@ function applyJournalEntry(entry) {
     document.title = `${title || 'Journal'} · Fusion`;
 }
 
+/** @type {(() => void) | null} */
+let _unsubJournalEntry = null;
+
 export default function initJournalEntry() {
-    const id = journalEntryIdFromPathname();
-    const list = testData.journals?.journals || [];
-    const entry = id != null ? findJournalById(id, list) : null;
-
-    const article = document.getElementById('journalEntryDetail');
-    const notFound = document.getElementById('journalEntryNotFound');
-
-    const show = (el, on) => {
-        if (!el) return;
-        if (on) el.removeAttribute('hidden');
-        else el.setAttribute('hidden', '');
-    };
-
-    if (id == null || !entry) {
-        show(article, false);
-        show(notFound, true);
-        document.title = 'Journal entry not found · Fusion';
-        return;
+    if (_unsubJournalEntry) {
+        _unsubJournalEntry();
+        _unsubJournalEntry = null;
     }
 
-    show(article, true);
-    show(notFound, false);
-    applyJournalEntry(entry);
+    const id = journalEntryIdFromPathname();
+
+    const run = async () => {
+        const list = await getJournalEntries();
+        const entry = id != null ? findJournalById(id, list) : null;
+
+        const article = document.getElementById('journalEntryDetail');
+        const notFound = document.getElementById('journalEntryNotFound');
+
+        const show = (el, on) => {
+            if (!el) return;
+            if (on) el.removeAttribute('hidden');
+            else el.setAttribute('hidden', '');
+        };
+
+        if (id == null || !entry) {
+            show(article, false);
+            show(notFound, true);
+            document.title = 'Journal entry not found · Fusion';
+            return;
+        }
+
+        show(article, true);
+        show(notFound, false);
+        applyJournalEntry(entry);
+    };
+
+    void run();
+    _unsubJournalEntry = subscribeDataSource(() => {
+        void run();
+    });
 }

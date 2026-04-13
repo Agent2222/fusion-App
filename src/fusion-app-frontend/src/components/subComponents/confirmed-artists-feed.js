@@ -1,5 +1,10 @@
 import { navigate } from '../../router.js';
-import { artistEnglishBlock, artistLocaleBlock, artistSlugFromName } from '../../utils/artistSlug.js';
+import {
+    artistDisplayDiscipline,
+    artistDisplayName,
+    artistEnglishBlock,
+    artistSlugFromName,
+} from '../../utils/artistSlug.js';
 
 const MAX_ARTISTS = 30;
 const MAX_PAGES = 3;
@@ -60,10 +65,9 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
 
     _createArtistCard(artist) {
         const locale = typeof window.getLocale === 'function' ? window.getLocale() : 'en';
-        const loc = artistLocaleBlock(artist, locale);
-        const artistName = loc?.name ?? '';
+        const artistName = artistDisplayName(artist, locale);
         const artistImage = artist.image;
-        const artistDiscipline = loc?.discipline ?? '';
+        const artistDiscipline = artistDisplayDiscipline(artist, locale);
 
         const card = document.createElement('div');
         card.classList.add('artist-card');
@@ -71,7 +75,8 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
         card.addEventListener('click', (e) => {
             e.stopPropagation();
             const en = artistEnglishBlock(artist);
-            const slug = artist.slug || artistSlugFromName(en?.name ?? '');
+            const slug =
+                artist.slug || artistSlugFromName(en?.name ?? artistDisplayName(artist, 'en'));
             navigate(`/profile/${encodeURIComponent(slug)}`);
         });
 

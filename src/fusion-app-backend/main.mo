@@ -1,4 +1,5 @@
 import Types "./types";
+import Llm "mo:llm";
 import _HashMap "mo:base/HashMap";
 import _Iter "mo:base/Iter";
 import Text "mo:base/Text";
@@ -10,13 +11,26 @@ import Order "mo:base/Order";
 // One-time mainnet migration from minimal subscriber-only wasm used `Migration.mo` (removed after upgrade).
 persistent actor {
   /// Internet Identity / admin principals allowed to list/delete subscribers and manage admins.
-  stable var adminPrincipals : [Principal] = [];
+  /// Initial value is used on **first install only**; upgrades keep stable state. New defaults must also be
+  /// listed in `defaultAdminPrincipals()` so `postupgrade` merges them into existing canisters.
+  stable var adminPrincipals : [Principal] = [
+    Principal.fromText("6pq72-g2xdl-lae4k-3kadu-aksdn-qvebw-s23b6-4yhtg-wngft-3hvqb-xae"),
+    Principal.fromText("7dhk2-asv4d-cqgdn-wknwc-hbfpj-yvi6l-zvepa-nn264-eh2io-gudsn-xqe"),
+    Principal.fromText("fjqfj-67bb7-lyure-u2naw-63fbm-3xmn6-qluef-pqtd5-thj7z-ythn6-2ae"),
+    Principal.fromText("5mnm6-7wh7d-imemq-z22vs-zgudw-szmvi-ake5j-o3q22-eodai-4sj4y-oqe"),
+  ];
 
   // Stable snapshot of the HashMap entries (email -> subscriber).
   stable var subscribersStable : [(Text, Types.Subscriber)] = [];
 
-  /// Principal -> user account (roles, links). Flushed in preupgrade.
-  stable var accountsStable : [(Principal, Types.UserAccount)] = [];
+  /// Principal -> user account core (roles, links). Flushed in preupgrade.
+  stable var accountsStable : [(Principal, Types.UserAccountCore)] = [];
+
+  /// Stripe + membership flags (parallel to `accountsStable`).
+  stable var membershipByPrincipalStable : [(Principal, Types.MembershipFields)] = [];
+
+  /// Integration API caller (PEM identity) — set via admin. Required for `integrationRecordStripeSubscription`.
+  stable var integrationServicePrincipal : ?Principal = null;
 
   /// Artist id -> full record. Flushed in preupgrade.
   stable var artistsStable : [(Text, Types.ArtistRecord)] = [];
@@ -28,6 +42,9 @@ persistent actor {
   stable var applicantsStable : [(Text, Types.ApplicantRecord)] = [];
   stable var siteSettingsStable : [(Text, Text)] = [];
 
+  /// Composite key: `artistId|programId` → JSON `{"submittedAt":...,"payload":...}` (one entry per program).
+  stable var applicationByArtistProgramStable : [(Text, Text)] = [];
+
   // In-memory hashmap for fast lookups/updates.
   transient var subscribersByEmail : _HashMap.HashMap<Text, Types.Subscriber> =
     _HashMap.HashMap<Text, Types.Subscriber>(
@@ -36,9 +53,16 @@ persistent actor {
       Text.hash
     );
 
-  transient var accountsByPrincipal : _HashMap.HashMap<Principal, Types.UserAccount> =
-    _HashMap.HashMap<Principal, Types.UserAccount>(
+  transient var accountsByPrincipal : _HashMap.HashMap<Principal, Types.UserAccountCore> =
+    _HashMap.HashMap<Principal, Types.UserAccountCore>(
       accountsStable.size(),
+      Principal.equal,
+      Principal.hash
+    );
+
+  transient var membershipByPrincipal : _HashMap.HashMap<Principal, Types.MembershipFields> =
+    _HashMap.HashMap<Principal, Types.MembershipFields>(
+      membershipByPrincipalStable.size(),
       Principal.equal,
       Principal.hash
     );
@@ -72,6 +96,9 @@ persistent actor {
   transient var siteSettingsByKey : _HashMap.HashMap<Text, Text> =
     _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
 
+  transient var applicationByArtistProgram : _HashMap.HashMap<Text, Text> =
+    _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
+
   // Populate hashmaps on install / reload.
   for (entry in subscribersStable.vals()) {
     let email = entry.0;
@@ -83,6 +110,10 @@ persistent actor {
     let p = entry.0;
     let acc = entry.1;
     accountsByPrincipal.put(p, acc);
+  };
+
+  for (entry in membershipByPrincipalStable.vals()) {
+    membershipByPrincipal.put(entry.0, entry.1);
   };
 
   for (entry in artistsStable.vals()) {
@@ -109,6 +140,19 @@ persistent actor {
   };
   for (entry in siteSettingsStable.vals()) {
     siteSettingsByKey.put(entry.0, entry.1);
+  };
+  for (entry in applicationByArtistProgramStable.vals()) {
+    applicationByArtistProgram.put(entry.0, entry.1);
+  };
+
+  /// Keep in sync with `adminPrincipals` defaults above — `postupgrade` appends any of these not already stored.
+  private func defaultAdminPrincipals() : [Principal] {
+    [
+      Principal.fromText("6pq72-g2xdl-lae4k-3kadu-aksdn-qvebw-s23b6-4yhtg-wngft-3hvqb-xae"),
+      Principal.fromText("7dhk2-asv4d-cqgdn-wknwc-hbfpj-yvi6l-zvepa-nn264-eh2io-gudsn-xqe"),
+      Principal.fromText("fjqfj-67bb7-lyure-u2naw-63fbm-3xmn6-qluef-pqtd5-thj7z-ythn6-2ae"),
+      Principal.fromText("5mnm6-7wh7d-imemq-z22vs-zgudw-szmvi-ake5j-o3q22-eodai-4sj4y-oqe"),
+    ];
   };
 
   private func isAdminPrincipal(p : Principal) : Bool {
@@ -152,6 +196,95 @@ persistent actor {
     };
   };
 
+  private func assertIntegrationCaller(caller : Principal) {
+    switch (integrationServicePrincipal) {
+      case null { Debug.trap("Integration service principal not configured") };
+      case (?ip) {
+        if (not Principal.equal(caller, ip)) {
+          Debug.trap("Unauthorized: integration service only");
+        };
+      };
+    };
+  };
+
+  private func defaultMembership() : Types.MembershipFields {
+    {
+      stripeCustomerId = null;
+      stripeSubscriptionId = null;
+      stripeSubscriptionStatus = null;
+      membershipExemptManual = false;
+    };
+  };
+
+  private func mergeAccount(p : Principal) : ?Types.UserAccount {
+    switch (accountsByPrincipal.get(p)) {
+      case null { null };
+      case (?core) {
+        let m = switch (membershipByPrincipal.get(p)) {
+          case null { defaultMembership() };
+          case (?x) { x };
+        };
+        ?{
+          role = core.role;
+          status = core.status;
+          linkedArtistId = core.linkedArtistId;
+          linkedOrgId = core.linkedOrgId;
+          updatedAt = core.updatedAt;
+          stripeCustomerId = m.stripeCustomerId;
+          stripeSubscriptionId = m.stripeSubscriptionId;
+          stripeSubscriptionStatus = m.stripeSubscriptionStatus;
+          membershipExemptManual = m.membershipExemptManual;
+        };
+      };
+    };
+  };
+
+  private func putUserAccountParts(core : Types.UserAccountCore, m : Types.MembershipFields, p : Principal) {
+    accountsByPrincipal.put(p, core);
+    membershipByPrincipal.put(p, m);
+  };
+
+  private func putUserAccountFull(p : Principal, u : Types.UserAccount) {
+    let core : Types.UserAccountCore = {
+      role = u.role;
+      status = u.status;
+      linkedArtistId = u.linkedArtistId;
+      linkedOrgId = u.linkedOrgId;
+      updatedAt = u.updatedAt;
+    };
+    let m : Types.MembershipFields = {
+      stripeCustomerId = u.stripeCustomerId;
+      stripeSubscriptionId = u.stripeSubscriptionId;
+      stripeSubscriptionStatus = u.stripeSubscriptionStatus;
+      membershipExemptManual = u.membershipExemptManual;
+    };
+    putUserAccountParts(core, m, p);
+  };
+
+  /// Program application exists for this artist and program `studioStatus` is active or completed.
+  private func isAutoVeteranArtist(aid : Text) : Bool {
+    let prefix = aid # "|";
+    for ((k, _) in applicationByArtistProgram.entries()) {
+      if (Text.startsWith(k, #text prefix)) {
+        switch (Text.stripStart(k, #text prefix)) {
+          case (?pid) {
+            switch (programsById.get(pid)) {
+              case (?pr) {
+                let st = pr.studioStatus;
+                if (st == "active" or st == "completed") {
+                  return true;
+                };
+              };
+              case null {};
+            };
+          };
+          case null {};
+        };
+      };
+    };
+    false;
+  };
+
   private func roleIsPrivileged(r : Types.UserRole) : Bool {
     switch (r) {
       case (#staff) { true };
@@ -167,16 +300,14 @@ persistent actor {
     };
     adminPrincipals := [msg.caller];
     let now = "1970-01-01T00:00:00.000Z";
-    accountsByPrincipal.put(
-      msg.caller,
-      {
-        role = #admin;
-        status = #active;
-        linkedArtistId = null;
-        linkedOrgId = null;
-        updatedAt = now;
-      },
-    );
+    let core : Types.UserAccountCore = {
+      role = #admin;
+      status = #active;
+      linkedArtistId = null;
+      linkedOrgId = null;
+      updatedAt = now;
+    };
+    putUserAccountParts(core, defaultMembership(), msg.caller);
     return true;
   };
 
@@ -196,6 +327,12 @@ persistent actor {
     adminPrincipals := Array.append(adminPrincipals, [newAdmin]);
   };
 
+  /// Admin-only: full allowlist of admin principals (same source as `isCallerAdmin`).
+  public shared query (msg) func listAdmins() : async [Principal] {
+    assertAdmin(msg.caller);
+    adminPrincipals;
+  };
+
   public query func greet(name : Text) : async Text {
     return "Hello, " # name # "!";
   };
@@ -203,6 +340,7 @@ persistent actor {
   system func preupgrade() {
     subscribersStable := _Iter.toArray(subscribersByEmail.entries());
     accountsStable := _Iter.toArray(accountsByPrincipal.entries());
+    membershipByPrincipalStable := _Iter.toArray(membershipByPrincipal.entries());
     artistsStable := _Iter.toArray(artistsById.entries());
     programsStable := _Iter.toArray(programsById.entries());
     journalsStable := _Iter.toArray(journalsById.entries());
@@ -210,6 +348,7 @@ persistent actor {
     contentPagesStable := _Iter.toArray(contentBySlug.entries());
     applicantsStable := _Iter.toArray(applicantsById.entries());
     siteSettingsStable := _Iter.toArray(siteSettingsByKey.entries());
+    applicationByArtistProgramStable := _Iter.toArray(applicationByArtistProgram.entries());
   };
 
   system func postupgrade() {
@@ -225,7 +364,7 @@ persistent actor {
     };
     subscribersStable := [];
 
-    accountsByPrincipal := _HashMap.HashMap<Principal, Types.UserAccount>(
+    accountsByPrincipal := _HashMap.HashMap<Principal, Types.UserAccountCore>(
       accountsStable.size(),
       Principal.equal,
       Principal.hash
@@ -234,6 +373,16 @@ persistent actor {
       accountsByPrincipal.put(entry.0, entry.1);
     };
     accountsStable := [];
+
+    membershipByPrincipal := _HashMap.HashMap<Principal, Types.MembershipFields>(
+      membershipByPrincipalStable.size(),
+      Principal.equal,
+      Principal.hash
+    );
+    for (entry in membershipByPrincipalStable.vals()) {
+      membershipByPrincipal.put(entry.0, entry.1);
+    };
+    membershipByPrincipalStable := [];
 
     artistsById := _HashMap.HashMap<Text, Types.ArtistRecord>(
       artistsStable.size(),
@@ -284,12 +433,64 @@ persistent actor {
       siteSettingsByKey.put(entry.0, entry.1);
     };
     siteSettingsStable := [];
+
+    applicationByArtistProgram := _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
+    for (entry in applicationByArtistProgramStable.vals()) {
+      applicationByArtistProgram.put(entry.0, entry.1);
+    };
+    applicationByArtistProgramStable := [];
+
+    for (d in defaultAdminPrincipals().vals()) {
+      if (not isAdminPrincipal(d)) {
+        adminPrincipals := Array.append(adminPrincipals, [d]);
+      };
+    };
   };
 
   // ===== Accounts =====
 
   public shared query (msg) func getAccountForCaller() : async ?Types.UserAccount {
-    return accountsByPrincipal.get(msg.caller);
+    mergeAccount(msg.caller)
+  };
+
+  /// Billing / access for the logged-in principal (join gate + resubscribe).
+  public shared query (msg) func getMembershipAccessForCaller() : async Types.MembershipAccessResult {
+    if (isAdminPrincipal(msg.caller)) {
+      return #exempt;
+    };
+    switch (accountsByPrincipal.get(msg.caller)) {
+      case null { return #noAccount };
+      case (?core) {
+        switch (core.role) {
+          case (#admin) { return #exempt };
+          case (#staff) { return #exempt };
+          case _ {};
+        };
+        let m = switch (membershipByPrincipal.get(msg.caller)) {
+          case null { defaultMembership() };
+          case (?x) { x };
+        };
+        if (m.membershipExemptManual) {
+          return #exempt;
+        };
+        switch (core.linkedArtistId) {
+          case (?aid) {
+            if (isAutoVeteranArtist(aid)) {
+              return #exempt;
+            };
+          };
+          case null {};
+        };
+        let st = switch (m.stripeSubscriptionStatus) {
+          case null { "" };
+          case (?s) { s };
+        };
+        if (st == "active" or st == "trialing") {
+          return #ok;
+        };
+        return #needsSubscription;
+      };
+    };
   };
 
   /// Admin-only: set full account for any principal (e.g. promote staff).
@@ -298,7 +499,72 @@ persistent actor {
     account : Types.UserAccount,
   ) : async () {
     assertAdmin(msg.caller);
-    accountsByPrincipal.put(p, account);
+    putUserAccountFull(p, account);
+  };
+
+  /// Admin: set whether this member is exempt from subscription (manual veteran / complimentary).
+  public shared (msg) func adminSetMembershipExemptManual(memberPrincipal : Principal, exempt : Bool) : async () {
+    assertAdmin(msg.caller);
+    switch (accountsByPrincipal.get(memberPrincipal)) {
+      case null { Debug.trap("No account for principal") };
+      case (?_) {};
+    };
+    let m0 = switch (membershipByPrincipal.get(memberPrincipal)) {
+      case null { defaultMembership() };
+      case (?x) { x };
+    };
+    let m1 : Types.MembershipFields = {
+      stripeCustomerId = m0.stripeCustomerId;
+      stripeSubscriptionId = m0.stripeSubscriptionId;
+      stripeSubscriptionStatus = m0.stripeSubscriptionStatus;
+      membershipExemptManual = exempt;
+    };
+    membershipByPrincipal.put(memberPrincipal, m1);
+  };
+
+  /// Admin: PEM identity used by the integration API to record Stripe subscription updates.
+  public shared (msg) func adminSetIntegrationServicePrincipal(p : Principal) : async () {
+    assertAdmin(msg.caller);
+    integrationServicePrincipal := ?p;
+  };
+
+  public shared query (msg) func adminGetIntegrationServicePrincipal() : async ?Principal {
+    assertAdmin(msg.caller);
+    integrationServicePrincipal;
+  };
+
+  /// Integration API only — updates Stripe ids/status for a member principal.
+  public shared (msg) func integrationRecordStripeSubscription(
+    memberPrincipal : Principal,
+    stripeCustomerId : ?Text,
+    stripeSubscriptionId : ?Text,
+    stripeSubscriptionStatus : ?Text,
+  ) : async () {
+    assertIntegrationCaller(msg.caller);
+    switch (accountsByPrincipal.get(memberPrincipal)) {
+      case null { Debug.trap("No account for member principal") };
+      case (?_) {};
+    };
+    let m0 = switch (membershipByPrincipal.get(memberPrincipal)) {
+      case null { defaultMembership() };
+      case (?x) { x };
+    };
+    let m1 : Types.MembershipFields = {
+      stripeCustomerId = switch (stripeCustomerId) {
+        case null { m0.stripeCustomerId };
+        case (?x) { ?x };
+      };
+      stripeSubscriptionId = switch (stripeSubscriptionId) {
+        case null { m0.stripeSubscriptionId };
+        case (?x) { ?x };
+      };
+      stripeSubscriptionStatus = switch (stripeSubscriptionStatus) {
+        case null { m0.stripeSubscriptionStatus };
+        case (?x) { ?x };
+      };
+      membershipExemptManual = m0.membershipExemptManual;
+    };
+    membershipByPrincipal.put(memberPrincipal, m1);
   };
 
   /// Caller registers or updates a non-privileged role; stored as #pending until admin activates.
@@ -307,7 +573,7 @@ persistent actor {
       Debug.trap("Cannot self-request staff or admin");
     };
     let now = "1970-01-01T00:00:00.000Z";
-    let acc : Types.UserAccount = {
+    let acc : Types.UserAccountCore = {
       role = role;
       status = #pending;
       linkedArtistId = null;
@@ -315,6 +581,10 @@ persistent actor {
       updatedAt = now;
     };
     accountsByPrincipal.put(msg.caller, acc);
+    switch (membershipByPrincipal.get(msg.caller)) {
+      case null { membershipByPrincipal.put(msg.caller, defaultMembership()) };
+      case (?_) {};
+    };
   };
 
   // ===== Artists (public reads; writes staff/admin) =====
@@ -355,15 +625,183 @@ persistent actor {
     { rec with accessCode = "" };
   };
 
-  /// Full row including optional `localesJson` for profile parity with testData.
-  /// Strips `accessCode` so public callers never receive onboarding codes.
-  public query func getArtistRecordBySlug(slug : Text) : async ?Types.ArtistRecord {
+  /// Public roster with `localesJson` for feeds/cards (name, discipline). Strips `accessCode`.
+  public query func listArtistRecordsPublic() : async [Types.ArtistRecord] {
+    let vals = _Iter.toArray(artistsById.vals());
+    let sorted = Array.sort(
+      vals,
+      func(a : Types.ArtistRecord, b : Types.ArtistRecord) : Order.Order {
+        if (a.profile.featuredOrder < b.profile.featuredOrder) {
+          #less;
+        } else if (a.profile.featuredOrder > b.profile.featuredOrder) {
+          #greater;
+        } else {
+          #equal;
+        };
+      },
+    );
+    Array.map<Types.ArtistRecord, Types.ArtistRecord>(
+      sorted,
+      sanitizeArtistRecordForPublic,
+    );
+  };
+
+  private let anonPrincipal : Principal = Principal.fromText("2vxsx-fae");
+
+  private func artistRecordBySlugPublic(slug : Text) : ?Types.ArtistRecord {
     switch (artistSlugToId.get(slug)) {
       case null { null };
       case (?id) {
         switch (artistsById.get(id)) {
           case null { null };
           case (?rec) { ?sanitizeArtistRecordForPublic(rec) };
+        };
+      };
+    };
+  };
+
+  /// Full row including optional `localesJson` for profile parity with testData.
+  /// Strips `accessCode` so public callers never receive onboarding codes.
+  public query func getArtistRecordBySlug(slug : Text) : async ?Types.ArtistRecord {
+    artistRecordBySlugPublic(slug);
+  };
+
+  /// Alias for public profile reads (same projection as `getArtistRecordBySlug`).
+  public query func getPublicProfileBySlug(slug : Text) : async ?Types.ArtistRecord {
+    artistRecordBySlugPublic(slug);
+  };
+
+  /// Authenticated: full `ArtistRecord` for the caller when `linkedArtistId` is set (includes access code for the owner).
+  public shared query (msg) func getMyArtistRecord() : async ?Types.ArtistRecord {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      return null;
+    };
+    switch (accountsByPrincipal.get(msg.caller)) {
+      case null { null };
+      case (?acc) {
+        switch (acc.linkedArtistId) {
+          case null { null };
+          case (?aid) { artistsById.get(aid) };
+        };
+      };
+    };
+  };
+
+  /// Authenticated: merged program applications JSON (object keyed by programId) for the linked artist. Separate from `ArtistRecord` so `artistsStable` stays stable-compatible.
+  public shared query (msg) func getMyArtistApplicationsJson() : async ?Text {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      return null;
+    };
+    switch (accountsByPrincipal.get(msg.caller)) {
+      case null { null };
+      case (?acc) {
+        switch (acc.linkedArtistId) {
+          case null { null };
+          case (?aid) { buildAppliedJsonForArtist(aid) };
+        };
+      };
+    };
+  };
+
+  /// Authenticated: save one program application for the linked artist (`payloadJson` must be a JSON object string).
+  public shared (msg) func submitProgramApplication(
+    programId : Text,
+    payloadJson : Text,
+    submittedAt : Text,
+  ) : async () {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      Debug.trap("Anonymous caller");
+    };
+    if (programId.size() == 0) {
+      Debug.trap("programId required");
+    };
+    if (payloadJson.size() == 0) {
+      Debug.trap("payload required");
+    };
+    let aid = switch (accountsByPrincipal.get(msg.caller)) {
+      case null { Debug.trap("No account for caller") };
+      case (?acc) {
+        switch (acc.linkedArtistId) {
+          case null { Debug.trap("No linked artist on account") };
+          case (?id) { id };
+        };
+      };
+    };
+    let entry = "{\"submittedAt\":\"" # submittedAt # "\",\"payload\":" # payloadJson # "}";
+    if (entry.size() > maxApplicationEntryChars) {
+      Debug.trap("Application entry too large");
+    };
+    let key = aid # "|" # programId;
+    applicationByArtistProgram.put(key, entry);
+  };
+
+  /// Authenticated artist: replace `localesJson` for the linked roster row only (staff upsert still overrides).
+  public shared (msg) func updateMyArtistLocalesJson(localesJson : Text, updatedAt : Text) : async () {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      Debug.trap("Anonymous caller");
+    };
+    switch (accountsByPrincipal.get(msg.caller)) {
+      case null { Debug.trap("No account for caller") };
+      case (?acc) {
+        switch (acc.linkedArtistId) {
+          case null { Debug.trap("No linked artist on account") };
+          case (?aid) {
+            switch (artistsById.get(aid)) {
+              case null { Debug.trap("Linked artist not found") };
+              case (?rec) {
+                let newUpdated : Text = if (updatedAt.size() > 0) {
+                  updatedAt;
+                } else {
+                  rec.profile.updatedAt;
+                };
+                let newProfile : Types.Artist = { rec.profile with updatedAt = newUpdated };
+                putArtistRecord({
+                  rec with
+                  profile = newProfile;
+                  localesJson = ?localesJson;
+                });
+              };
+            };
+          };
+        };
+      };
+    };
+  };
+
+  /// Max URL length for profile hero image (HTTPS / asset ref).
+  private let maxProfileImageUrlLen : Nat = 4096;
+
+  /// Authenticated artist: update `profile.image` (and `updatedAt`) for the linked roster row only.
+  public shared (msg) func updateMyArtistProfilePatch(image : Text, updatedAt : Text) : async () {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      Debug.trap("Anonymous caller");
+    };
+    if (image.size() > maxProfileImageUrlLen) {
+      Debug.trap("Image URL too long");
+    };
+    switch (accountsByPrincipal.get(msg.caller)) {
+      case null { Debug.trap("No account for caller") };
+      case (?acc) {
+        switch (acc.linkedArtistId) {
+          case null { Debug.trap("No linked artist on account") };
+          case (?aid) {
+            switch (artistsById.get(aid)) {
+              case null { Debug.trap("Linked artist not found") };
+              case (?rec) {
+                let newUpdated : Text = if (updatedAt.size() > 0) {
+                  updatedAt;
+                } else {
+                  rec.profile.updatedAt;
+                };
+                let newProfile : Types.Artist = {
+                  rec.profile with
+                  image = image;
+                  updatedAt = newUpdated;
+                };
+                putArtistRecord({ rec with profile = newProfile });
+              };
+            };
+          };
         };
       };
     };
@@ -388,6 +826,32 @@ persistent actor {
     };
     artistsById.put(id, record);
     artistSlugToId.put(slug, id);
+  };
+
+  private let maxApplicationEntryChars : Nat = 100_000;
+
+  private func buildAppliedJsonForArtist(aid : Text) : ?Text {
+    let prefix = aid # "|";
+    var inner : Text = "";
+    var first : Bool = true;
+    for ((k, v) in applicationByArtistProgram.entries()) {
+      if (Text.startsWith(k, #text prefix)) {
+        switch (Text.stripStart(k, #text prefix)) {
+          case (?pid) {
+            if (not first) {
+              inner := inner # ",";
+            };
+            first := false;
+            inner := inner # "\"" # pid # "\":" # v;
+          };
+          case null {};
+        };
+      };
+    };
+    if (first) {
+      return null;
+    };
+    ?("{" # inner # "}");
   };
 
   public shared (msg) func upsertArtist(record : Types.ArtistRecord) : async () {
@@ -532,6 +996,37 @@ persistent actor {
     };
   };
 
+  /// Max characters per input field for Studio LLM helpers (protect cycles).
+  private let STUDIO_LLM_MAX_CHARS : Nat = 12_000;
+
+  private func assertStudioLlmField(s : Text) {
+    if (Text.size(s) > STUDIO_LLM_MAX_CHARS) {
+      Debug.trap("Text too long for Studio LLM");
+    };
+  };
+
+  /// Staff/admin: translate English copy to Japanese via IC LLM canister (mops `llm` → `Llm.prompt`).
+  public shared (msg) func studioTranslateEnToJa(englishText : Text) : async Text {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioLlmField(englishText);
+    let instruction = "Translate the following English to Japanese. Output only the Japanese translation, with no surrounding quotes or commentary.\n\n";
+    await Llm.prompt(#Llama3_1_8B, instruction # englishText);
+  };
+
+  /// Staff/admin: rewrite `sourceText` using `prompt`; `localeTag` is e.g. en or ja for model context.
+  public shared (msg) func studioReinterpretWithPrompt(prompt : Text, sourceText : Text, localeTag : Text) : async Text {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioLlmField(prompt);
+    assertStudioLlmField(sourceText);
+    if (Text.size(localeTag) > 32) {
+      Debug.trap("localeTag too long");
+    };
+    let header = "Rewrite the source text according to the user instruction. Output only the rewritten text, with no preamble or quotes.\n\nInstruction:\n";
+    let mid = "\n\nLocale: ";
+    let tail = "\n\nSource:\n";
+    await Llm.prompt(#Llama3_1_8B, header # prompt # mid # localeTag # tail # sourceText);
+  };
+
   // ===== Applicants =====
 
   public shared query (msg) func listApplicants() : async [Types.ApplicantRecord] {
@@ -572,7 +1067,16 @@ persistent actor {
   /// Admin-only: list all accounts (Studio Users tab).
   public shared query (msg) func listAccounts() : async [(Principal, Types.UserAccount)] {
     assertAdmin(msg.caller);
-    _Iter.toArray(accountsByPrincipal.entries());
+    Array.map<(Principal, Types.UserAccountCore), (Principal, Types.UserAccount)>(
+      _Iter.toArray(accountsByPrincipal.entries()),
+      func(entry : (Principal, Types.UserAccountCore)) : (Principal, Types.UserAccount) {
+        let p = entry.0;
+        switch (mergeAccount(p)) {
+          case null { Debug.trap("unreachable") };
+          case (?u) { (p, u) };
+        };
+      },
+    );
   };
 
   // ===== Queries: subscribers =====

@@ -46,6 +46,12 @@ class HeaderComponent extends HTMLElement {
         this._onResizeMqBound = null;
         /** @type {MediaQueryList | null} */
         this._mobileNavMql = null;
+        /**
+         * @type {{ kind: 'guest' } | { kind: 'admin' } | { kind: 'staff' } | { kind: 'needsRegistration' } | { kind: 'member', profileHref: string, pending: boolean }}
+         */
+        this._authUi = { kind: 'guest' };
+        /** @type {(() => void) | null} */
+        this._onFusionAuthBound = null;
     }
 
     /**
@@ -372,6 +378,11 @@ class HeaderComponent extends HTMLElement {
         this.attachMobileNavListeners();
         this.attachIdleHoverGuards();
         this.setLocale(this.getLocale(), { silent: true });
+        this._onFusionAuthBound = () => {
+            void this._refreshHeaderAuthState();
+        };
+        window.addEventListener('fusion-auth-change', this._onFusionAuthBound);
+        void this._refreshHeaderAuthState();
         this._onRouteChangeForNavBound = () => {
             this._syncActiveNavLink();
             this.closeMobileMenu();
@@ -391,6 +402,10 @@ class HeaderComponent extends HTMLElement {
         if (this._onRouteChangeForNavBound) {
             window.removeEventListener('routeChange', this._onRouteChangeForNavBound);
             this._onRouteChangeForNavBound = null;
+        }
+        if (this._onFusionAuthBound) {
+            window.removeEventListener('fusion-auth-change', this._onFusionAuthBound);
+            this._onFusionAuthBound = null;
         }
     }
 
@@ -417,6 +432,119 @@ class HeaderComponent extends HTMLElement {
             if (active) a.setAttribute('aria-current', 'page');
             else a.removeAttribute('aria-current');
         });
+    }
+
+    _fillAuthPair() {
+        const root = this.shadowRoot;
+        const slot = root?.querySelector('#headerAuthPair');
+        if (!slot) return;
+        const en = this.getLocale() === 'en';
+        const ui = this._authUi && typeof this._authUi === 'object' ? this._authUi : { kind: 'guest' };
+        const esc = (s) =>
+            String(s)
+                .replace(/&/g, '&amp;')
+                .replace(/"/g, '&quot;')
+                .replace(/</g, '&lt;');
+
+        if (ui.kind === 'guest') {
+            slot.innerHTML = `
+                        <button type="button" class="headerRectBtn" data-action="sign-in">${en ? 'SIGN-IN' : 'サインイン'}</button>
+                        <button type="button" class="headerRectBtn headerRectBtn--register" data-action="register">${en ? 'REGISTER' : '登録'}</button>`;
+            return;
+        }
+        if (ui.kind === 'admin' || ui.kind === 'staff') {
+            slot.innerHTML = `
+                        <button type="button" class="headerRectBtn" data-action="sign-out">${en ? 'SIGN OUT' : 'サインアウト'}</button>
+                        <button type="button" class="headerRectBtn headerRectBtn--register" data-href="/studio">${en ? 'STUDIO' : 'スタジオ'}</button>`;
+            return;
+        }
+        if (ui.kind === 'needsRegistration') {
+            slot.innerHTML = `
+                        <button type="button" class="headerRectBtn" data-action="sign-out">${en ? 'SIGN OUT' : 'サインアウト'}</button>
+                        <button type="button" class="headerRectBtn headerRectBtn--register" data-action="register">${en ? 'REGISTER' : '登録'}</button>`;
+            return;
+        }
+        if (ui.kind === 'member') {
+            const profLabel = ui.pending
+                ? en
+                    ? 'PROFILE (PENDING)'
+                    : 'プロフィール（審査中）'
+                : en
+                  ? 'PROFILE'
+                  : 'プロフィール';
+            const href = esc(ui.profileHref || '/register');
+            slot.innerHTML = `
+                        <button type="button" class="headerRectBtn" data-action="sign-out">${en ? 'SIGN OUT' : 'サインアウト'}</button>
+                        <button type="button" class="headerRectBtn headerRectBtn--register" data-href="${href}">${profLabel}</button>`;
+        }
+    }
+
+    async _refreshHeaderAuthState() {
+        try {
+            const { getAuthSnapshot } = await import('../../utils/icAuth.js');
+            const snap = await getAuthSnapshot();
+            if (!snap.authenticated) {
+                this._authUi = { kind: 'guest' };
+                this._fillAuthPair();
+                return;
+            }
+            const { getAuthenticatedFusionBackendActor } = await import('../../utils/earlyAccessSubscribe.js');
+            const actor = await getAuthenticatedFusionBackendActor();
+            if (!actor) {
+                this._authUi = { kind: 'guest' };
+                this._fillAuthPair();
+                return;
+            }
+            let isAdmin = false;
+            try {
+                if (typeof actor.isCallerAdmin === 'function') {
+                    isAdmin = await actor.isCallerAdmin();
+                }
+            } catch (_) {
+                /* ignore */
+            }
+            if (isAdmin) {
+                this._authUi = { kind: 'admin' };
+                this._fillAuthPair();
+                return;
+            }
+            let acc = null;
+            try {
+                if (typeof actor.getAccountForCaller === 'function') {
+                    const raw = await actor.getAccountForCaller();
+                    acc = Array.isArray(raw) ? (raw.length ? raw[0] : null) : raw;
+                }
+            } catch (_) {
+                /* ignore */
+            }
+            if (acc == null) {
+                this._authUi = { kind: 'needsRegistration' };
+                this._fillAuthPair();
+                return;
+            }
+            const role = acc.role;
+            if (role && typeof role === 'object') {
+                if ('admin' in role) {
+                    this._authUi = { kind: 'admin' };
+                    this._fillAuthPair();
+                    return;
+                }
+                if ('staff' in role) {
+                    this._authUi = { kind: 'staff' };
+                    this._fillAuthPair();
+                    return;
+                }
+            }
+            const st = acc.status;
+            const pending = Boolean(st && typeof st === 'object' && 'pending' in st);
+            const { resolveProfilePathForAccount } = await import('../../utils/authHeader.js');
+            const profileHref = await resolveProfilePathForAccount(acc);
+            this._authUi = { kind: 'member', profileHref, pending };
+            this._fillAuthPair();
+        } catch (_) {
+            this._authUi = { kind: 'guest' };
+            this._fillAuthPair();
+        }
     }
 
     _isMobileNavViewport() {
@@ -449,6 +577,10 @@ class HeaderComponent extends HTMLElement {
         if (firstLink && typeof firstLink.focus === 'function') {
             requestAnimationFrame(() => firstLink.focus());
         }
+
+        let logo = this.shadowRoot.querySelector("#Logo");
+        this.shadowRoot.querySelector("header").style.paddingTop = "8.5%";
+        this.shadowRoot.querySelector("header").style.paddingLeft = "7%";
     }
 
     closeMobileMenu() {
@@ -474,6 +606,9 @@ class HeaderComponent extends HTMLElement {
         if (this.getAttribute('active') === 'true') {
             this.resetIdleHideTimer();
         }
+
+        this.shadowRoot.querySelector("header").style.paddingTop = "0";
+        this.shadowRoot.querySelector("header").style.paddingLeft = "2%";
     }
 
     toggleMobileMenu() {
@@ -595,10 +730,7 @@ class HeaderComponent extends HTMLElement {
             const href = a.getAttribute('href');
             if (href && navLabels[href] != null) a.textContent = navLabels[href];
         });
-        const signIn = root.querySelector('.headerRectBtn[data-href="/sign-in"]');
-        const reg = root.querySelector('.headerRectBtn[data-href="/register"]');
-        if (signIn) signIn.textContent = en ? 'SIGN-IN' : 'サインイン';
-        if (reg) reg.textContent = en ? 'REGISTER' : '登録';
+        this._fillAuthPair();
         this._syncActiveNavLink();
     }
 
@@ -628,7 +760,23 @@ class HeaderComponent extends HTMLElement {
             const rectBtn = e.target.closest('.headerRectBtn');
             if (rectBtn) {
                 e.preventDefault();
+                const action = rectBtn.getAttribute('data-action');
+                if (action === 'sign-in') {
+                    this.closeMobileMenu();
+                    window.dispatchEvent(new CustomEvent('fusion-open-sign-in'));
+                    return;
+                }
+                if (action === 'sign-out') {
+                    this.closeMobileMenu();
+                    void import('../../utils/icAuth.js').then((m) => m.logoutInternetIdentity());
+                    return;
+                }
                 const href = rectBtn.getAttribute('data-href');
+                if (action === 'register' || href === '/register') {
+                    this.closeMobileMenu();
+                    window.dispatchEvent(new CustomEvent('fusion-open-join-network'));
+                    return;
+                }
                 if (href) {
                     this.closeMobileMenu();
                     activateDeactivate(href);
@@ -678,7 +826,7 @@ class HeaderComponent extends HTMLElement {
                     display: grid;
                     /* Logo (wide asset) | nav (flex) | CTAs — middle column absorbs shrink */
                     grid-template-columns:
-                    minmax(14rem, min(42vw, 42rem))
+                    minmax(14rem, min(42vw, 40rem))
                     minmax(0, 1fr)
                     minmax(9.25rem, max-content);
                     grid-template-rows: 1fr;
@@ -698,6 +846,7 @@ class HeaderComponent extends HTMLElement {
                     box-shadow: 0 1px 0 rgba(0, 0, 0, 0.07);
                     will-change: transform, opacity;
                     border-bottom: 1px solid var(--c2, #000);
+                    user-select: none;
                 }
 
                 a {
@@ -790,115 +939,6 @@ class HeaderComponent extends HTMLElement {
                     display: none;
                 }
 
-                @media (max-width: ${MOBILE_NAV_MAX_PX}px) {
-                    :host([data-mobile-nav-open]) header {
-                        z-index: 165;
-                    }
-
-                    :host([data-mobile-nav-open]) #logoHeader {
-                        opacity: 0 !important;
-                    }
-
-                    header {
-                        display: flex;
-                        flex-direction: row;
-                        flex-wrap: nowrap;
-                        align-items: center;
-                        justify-content: space-between;
-                        column-gap: 0.75rem;
-                    }
-
-                    #logo {
-                        flex: 1 1 auto;
-                        min-width: 0;
-                    }
-
-                    #logo .header-logo-wide {
-                        display: none;
-                    }
-
-                    #logo .header-logo-symbol {
-                        display: block;
-                    }
-
-                    #headerMenuToggle {
-                        display: inline-flex !important;
-                    }
-
-                    #headerNavCluster {
-                        display: flex;
-                        flex-direction: column;
-                        position: fixed;
-                        top: 0;
-                        right: 0;
-                        bottom: 0;
-                        width: min(100%, 22rem);
-                        max-width: 100vw;
-                        z-index: 160;
-                        background-color: var(--bg);
-                        box-shadow: -4px 0 20px rgba(0, 0, 0, 0.08);
-                        padding: clamp(4rem, 12vw, 5rem) 1.25rem 1.5rem;
-                        gap: 1.25rem;
-                        overflow-y: auto;
-                        -webkit-overflow-scrolling: touch;
-                        transform: translateX(100%);
-                        transition: transform 0.3s ease;
-                        pointer-events: none;
-                        visibility: hidden;
-                    }
-
-                    #headerNavCluster.header-nav-cluster--open {
-                        transform: translateX(0);
-                        pointer-events: auto;
-                        visibility: visible;
-                    }
-
-                    #headerNavLinks {
-                        flex-direction: column;
-                        flex-wrap: nowrap;
-                        align-items: flex-start;
-                        gap: 1rem;
-                        margin-right: 0;
-                        font-size: clamp(0.95rem, 3.5vw, 1.125rem);
-                    }
-
-                    a.headerNavLink {
-                        white-space: normal;
-                        padding: 0.25rem 0;
-                    }
-
-                    #headerCtas {
-                        margin-top: auto;
-                        margin-left: 0;
-                        flex-direction: column;
-                        align-items: stretch;
-                        gap: 0.75rem;
-                    }
-
-                    #headerCtas .headerRectBtn {
-                        width: 100%;
-                        text-align: center;
-                    }
-
-                    #headerDrawerBackdrop {
-                        display: block;
-                        position: fixed;
-                        inset: 0;
-                        z-index: 159;
-                        background: rgba(0, 0, 0, 0.35);
-                        opacity: 0;
-                        pointer-events: none;
-                        visibility: hidden;
-                        transition: opacity 0.25s ease, visibility 0.25s;
-                    }
-
-                    #headerDrawerBackdrop.header-drawer-backdrop--open {
-                        opacity: 1;
-                        pointer-events: auto;
-                        visibility: visible;
-                    }
-                }
-
                 #logoHeader {
                     box-sizing: border-box;
                     max-height: 150px;
@@ -957,12 +997,18 @@ class HeaderComponent extends HTMLElement {
                     align-items: center;
                 }
 
+                .header-auth-pair {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 0.5rem 0.75rem;
+                    align-items: center;
+                }
+
                 #headerNavLinks {
                     display: flex;
                     flex-wrap: wrap;
                     gap: 0.75rem 1.25rem;
-                    margin-right: auto;
-                    align-items: center;
+                    align-items: end;
                     justify-content: flex-start;
                     font-size: clamp(0.75rem, 1.1vw, 1rem);
                 }
@@ -1045,6 +1091,154 @@ class HeaderComponent extends HTMLElement {
                     outline: 1px solid var(--c2, #000);
                     outline-offset: 2px;
                 }
+
+                @media (max-width: ${MOBILE_NAV_MAX_PX}px) {
+                    :host([data-mobile-nav-open]) header {
+                        z-index: 165;
+                    }
+
+                    :host([data-mobile-nav-open]) #logoHeader {
+                        opacity: 0 !important;
+                    }
+
+                    /* Open drawer: show full wordmark in the bar */
+                    :host([data-mobile-nav-open]) #logo .header-logo-wide {
+                        display: block !important;
+                    }
+
+                    :host([data-mobile-nav-open]) #logo .header-logo-symbol {
+                        display: none !important;
+                    }
+
+                    :host([data-mobile-nav-open]) #headerNavLinks {
+                        font-size: clamp(1.8rem, 2vw, 1.35rem);
+                    }
+
+                    #headerAuthPair {
+                        padding-bottom: 2rem;
+                    }
+
+                    header {
+                        display: flex;
+                        flex-direction: row;
+                        flex-wrap: nowrap;
+                        align-items: center;
+                        justify-content: space-between;
+                        column-gap: 0.75rem;
+                        padding-right: 7%;
+                    }
+
+                    #logo {
+                        flex: 1 1 auto;
+                        min-width: 0;
+                    }
+
+                    #logo .header-logo-wide {
+                        display: none;
+                    }
+
+                    #logo .header-logo-symbol {
+                        display: block;
+                    }
+
+                    #headerMenuToggle {
+                        display: inline-flex !important;
+                        width: 4rem;
+                        height: 4rem;
+                        min-width: 4rem;
+                        min-height: 4rem;
+                    }
+
+                    #headerMenuToggle.header-menu-toggle--open .header-menu-toggle__bar:nth-child(1) {
+                        transform: translateY(13px) rotate(45deg);
+                    }
+
+                    #headerMenuToggle.header-menu-toggle--open .header-menu-toggle__bar:nth-child(3) {
+                        transform: translateY(-13px) rotate(-45deg);
+                    }
+
+                    #headerNavCluster {
+                        display: flex;
+                        flex-direction: column;
+                        position: fixed;
+                        top: 0;
+                        right: 0;
+                        bottom: 0;
+                        height: 82.5vh;
+                        min-height: 100%;
+                        width: min(100%, 23.5rem);
+                        max-width: 100vw;
+                        z-index: -1;
+                        background-color: var(--bg);
+                        box-shadow: -4px 0 20px rgba(0, 0, 0, 0.08);
+                        padding: clamp(8rem, 12vw, 5rem) 2.25rem 1.5rem;
+                        gap: 1.25rem;
+                        overflow-y: auto;
+                        -webkit-overflow-scrolling: touch;
+                        transform: translateX(100%);
+                        transition: transform 0.3s ease;
+                        pointer-events: none;
+                        visibility: hidden;
+                    }
+
+                    #headerNavCluster.header-nav-cluster--open {
+                        transform: translateX(0);
+                        pointer-events: auto;
+                        visibility: visible;
+                    }
+
+                    #headerNavLinks {
+                        flex-direction: column;
+                        flex-wrap: nowrap;
+                        align-items: end;
+                        gap: 1rem;
+                        margin-right: 0;
+                        font-size: clamp(0.95rem, 3.5vw, 1.125rem);
+                    }
+
+                    a.headerNavLink {
+                        white-space: normal;
+                        padding: 0.25rem 0;
+                    }
+
+                    #headerCtas {
+                        margin-top: auto;
+                        margin-left: 0;
+                        flex-direction: column;
+                        align-items: stretch;
+                        gap: 0.75rem;
+                        align-items: end;
+                    }
+
+                    #headerCtas .header-auth-pair {
+                        width: 100%;
+                        flex-direction: column;
+                        align-items: stretch;
+                    }
+
+                    #headerCtas .headerRectBtn {
+                        width: 100%;
+                        text-align: center;
+                    }
+
+                    #headerDrawerBackdrop {
+                        display: block;
+                        position: fixed;
+                        inset: 0;
+                        z-index: 159;
+                        background: rgba(0, 0, 0, 0.35);
+                        opacity: 0;
+                        pointer-events: none;
+                        visibility: hidden;
+                        transition: opacity 0.25s ease, visibility 0.25s;
+                    }
+
+                    #headerDrawerBackdrop.header-drawer-backdrop--open {
+                        opacity: 1;
+                        pointer-events: auto;
+                        visibility: visible;
+                    }
+                }
             </style>
             <header>
                 <div id="logo">
@@ -1067,8 +1261,7 @@ class HeaderComponent extends HTMLElement {
                         <a class="headerNavLink" href="/context">${en ? 'Context' : 'コンテキスト'}</a>
                     </nav>
                     <div id="headerCtas">
-                        <button type="button" class="headerRectBtn" data-href="/sign-in">${en ? 'SIGN-IN' : 'サインイン'}</button>
-                        <button type="button" class="headerRectBtn headerRectBtn--register" data-href="/register">${en ? 'REGISTER' : '登録'}</button>
+                        <div id="headerAuthPair" class="header-auth-pair"></div>
                         <button type="button" id="headerLangBtn" class="headerLangBtn" aria-label="Language: English. Click to switch to Japanese.">${en ? 'EN' : 'JP'}</button>
                     </div>
                 </div>

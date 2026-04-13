@@ -37,12 +37,24 @@ class GalleryAccessCtaComponent extends HTMLElement {
     }
 
     createCTA() {
-        const cta = this.data[window.getLocale()].cta;
-        const ctaLink = this.data.ctaLink;
-        const ctaHeadText = this.data[window.getLocale()].ctaHeadText;
-        const ctaSubText = this.data[window.getLocale()].ctaSubText;
+        const root = this.shadowRoot;
+        if (!root || !this.data || typeof this.data !== 'object') return;
 
-        let ctaEl = document.createElement('div');
+        const loc =
+            typeof window !== 'undefined' && typeof window.getLocale === 'function'
+                ? window.getLocale()
+                : 'en';
+        const slice = this.data[loc] || this.data.en || this.data.ja || {};
+        const cta = slice.cta ?? '';
+        const ctaLink = this.data.ctaLink ?? '#';
+        const ctaHeadText = slice.ctaHeadText ?? '';
+        const ctaSubText = slice.ctaSubText ?? '';
+
+        const content = root.querySelector('.content');
+        if (!content) return;
+        content.replaceChildren();
+
+        const ctaEl = document.createElement('div');
         ctaEl.classList.add('gallery-access-cta');
 
         ctaEl.innerHTML = `
@@ -56,7 +68,7 @@ class GalleryAccessCtaComponent extends HTMLElement {
                 </div>
             </div>
         `;
-        this.shadowRoot.querySelector('.content').appendChild(ctaEl);
+        content.appendChild(ctaEl);
     }
 
     openRequestModal() {
@@ -195,6 +207,24 @@ class GalleryAccessCtaComponent extends HTMLElement {
                         min-height: 48vh;
                         grid-template-rows: auto 1fr;
                         padding-bottom: 2rem;
+                        margin-top: 10%;
+                    }
+
+                    .gallery-access-cta > .header {
+                        display: none;
+                    }
+
+                    .gallery-access-cta-content {
+                        width: 100%;
+                        padding-left: 10%;
+                        padding-right: 10%;
+                        box-sizing: border-box;
+                    }
+
+                    .gallery-access-cta-head-text {
+                        line-height: 1.2;
+                        font-size: clamp(2rem, 4.2vw, 10rem);
+                        margin-bottom: 5%;
                     }
 
                     .gallery-access-cta-button {

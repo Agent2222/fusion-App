@@ -1,10 +1,14 @@
 // Info band: head + sub copy (no header row, no CTA). Styled like gallery-access-cta text.
-import { testData } from '../../testData.js';
+import { getContentBundleForStudio, subscribeDataSource } from '../../utils/database.js';
 
 class InfoComponent extends HTMLElement {
     constructor() {
         super();
         this.shadow = this.attachShadow({ mode: 'open' });
+        /** @type {Record<string, unknown> | null} */
+        this._infoBundle = null;
+        /** @type {(() => void) | null} */
+        this._unsubData = null;
         this._onLocaleChange = () => this.render();
     }
 
@@ -31,16 +35,28 @@ class InfoComponent extends HTMLElement {
 
     connectedCallback() {
         window.addEventListener('fusion-localechange', this._onLocaleChange);
-        this.render();
+        if (this._unsubData) this._unsubData();
+        this._unsubData = subscribeDataSource(() => void this._loadInfo());
+        void this._loadInfo();
     }
 
     disconnectedCallback() {
         window.removeEventListener('fusion-localechange', this._onLocaleChange);
+        if (this._unsubData) {
+            this._unsubData();
+            this._unsubData = null;
+        }
+    }
+
+    async _loadInfo() {
+        const raw = await getContentBundleForStudio('site-info');
+        this._infoBundle = raw && typeof raw === 'object' ? /** @type {Record<string, unknown>} */ (raw) : null;
+        this.render();
     }
 
     _getContextSlice() {
         const ctx = this.getAttribute('context') || 'home';
-        const block = testData.info;
+        const block = this._infoBundle;
         if (!block || !block[ctx]) return null;
         return block[ctx];
     }

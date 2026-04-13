@@ -1,6 +1,11 @@
 // Placeholder — structure, content, and styles TBD
 import { navigate } from '../../router.js';
-import { artistEnglishBlock, artistLocaleBlock, artistSlugFromName } from '../../utils/artistSlug.js';
+import {
+    artistDisplayDiscipline,
+    artistDisplayName,
+    artistEnglishBlock,
+    artistSlugFromName,
+} from '../../utils/artistSlug.js';
 
 class FeaturedArtistComponent extends HTMLElement {
     constructor() {
@@ -41,20 +46,22 @@ class FeaturedArtistComponent extends HTMLElement {
     }
 
     createArtistCard(length) {
+        const content = this.shadowRoot?.querySelector('.content');
+        if (content) content.innerHTML = '';
         for (let i=0; i<length; i++) {
             const artist = this.data.artists[i];
             const locale = typeof window.getLocale === 'function' ? window.getLocale() : 'en';
-            const loc = artistLocaleBlock(artist, locale);
-            const artistName = loc?.name ?? '';
+            const artistName = artistDisplayName(artist, locale);
             const artistImage = artist.image;
-            const artistDiscipline = loc?.discipline ?? '';
+            const artistDiscipline = artistDisplayDiscipline(artist, locale);
 
             let card = document.createElement('div');
             card.classList.add('artist-card');
 
             card.addEventListener('click', () => {
                 const en = artistEnglishBlock(artist);
-                const slug = artist.slug || artistSlugFromName(en?.name ?? '');
+                const slug =
+                    artist.slug || artistSlugFromName(en?.name ?? artistDisplayName(artist, 'en'));
                 navigate(`/profile/${encodeURIComponent(slug)}`);
             });
 
@@ -254,13 +261,29 @@ class FeaturedArtistComponent extends HTMLElement {
                 }
 
                 @media (max-width: 768px) {
-                    .content {
-                        grid-template-columns: 1fr;
+                    .featured-artist {
+                        padding-bottom: 15%;
+                        padding-top: 1rem;
                     }
 
-                    .featured-artist {
-                        padding-bottom: 3rem;
-                        padding-top: 1rem;
+                    .header {
+                        height: auto;
+                    }
+
+                    .content {
+                        grid-template-columns: 1fr 1fr;
+                    }
+
+                    .button-cta {
+                        height: 100px;
+                        margin-top: 5vh;
+                        justify-content: end;
+                    }
+
+                    #allArtistsButton {
+                        width: 50%;
+                        min-width: 0;
+                        max-width: none;
                     }
 
                     .button-cta:has(#allArtistsButton:hover) {

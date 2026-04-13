@@ -470,6 +470,14 @@ class JournalHeroComponent extends HTMLElement {
                         grid-template-rows: minmax(0, 42vh) minmax(0, 1fr);
                     }
 
+                    .journal-card .right-content {
+                        grid-row: 1;
+                    }
+
+                    .journal-card .left-content {
+                        grid-row: 2;
+                    }
+
                     .left-content-description {
                         width: 95%;
                     }
@@ -499,6 +507,15 @@ class JournalHeroComponent extends HTMLElement {
 
                     .header {
                         font-size: 1.2rem;
+                        height: auto;
+                    }
+
+                    .ctaButton {
+                        width: min(100%, 180px);
+                    }
+
+                    .programCTA {
+                        margin-top: 15%;
                     }
                 }
             </style>

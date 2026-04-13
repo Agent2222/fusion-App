@@ -1,4 +1,4 @@
-import { testData } from '../testData.js';
+import { getEditions, subscribeDataSource } from '../utils/database.js';
 
 /**
  * @param {string} pathname e.g. `/editions/stone-garden`
@@ -57,28 +57,44 @@ function applyEdition(edition) {
     document.title = `${title || 'Edition'} · Fusion`;
 }
 
+/** @type {(() => void) | null} */
+let _unsubEditionView = null;
+
 export default function initEditionView() {
-    const pathname = window.location.pathname;
-    const items = testData.editions?.items || [];
-    const edition = findEditionByPathname(pathname, items);
-
-    const article = document.getElementById('editionDetail');
-    const notFound = document.getElementById('editionDetailNotFound');
-
-    const show = (el, on) => {
-        if (!el) return;
-        if (on) el.removeAttribute('hidden');
-        else el.setAttribute('hidden', '');
-    };
-
-    if (!edition) {
-        show(article, false);
-        show(notFound, true);
-        document.title = 'Edition not found · Fusion';
-        return;
+    if (_unsubEditionView) {
+        _unsubEditionView();
+        _unsubEditionView = null;
     }
 
-    show(article, true);
-    show(notFound, false);
-    applyEdition(edition);
+    const pathname = window.location.pathname;
+
+    const run = async () => {
+        const items = await getEditions();
+        const edition = findEditionByPathname(pathname, items);
+
+        const article = document.getElementById('editionDetail');
+        const notFound = document.getElementById('editionDetailNotFound');
+
+        const show = (el, on) => {
+            if (!el) return;
+            if (on) el.removeAttribute('hidden');
+            else el.setAttribute('hidden', '');
+        };
+
+        if (!edition) {
+            show(article, false);
+            show(notFound, true);
+            document.title = 'Edition not found · Fusion';
+            return;
+        }
+
+        show(article, true);
+        show(notFound, false);
+        applyEdition(edition);
+    };
+
+    void run();
+    _unsubEditionView = subscribeDataSource(() => {
+        void run();
+    });
 }

@@ -1,0 +1,4275 @@
+{
+  "artists": [
+    {
+      "id": "legacy-a-000",
+      "slug": "bradley-theodore",
+      "image": "",
+      "featuredOrder": 0,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.989Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2017,
+        "disciplineKey": "visual-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2017,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Bradley Theodore",
+          "discipline": "Visual Arts",
+          "bio": "Bradley Theodore is a visual artist. Born in the Turks and Caicos Islands, he now resides in New York City. Theodore gained prominence as an artist through the popularity of a street art murals of fashion icons Anna Wintour and Karl Lagerfeld.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Bradley Theodore · Fusion",
+            "description": "Bradley Theodore is a visual artist. Born in the Turks and Caicos Islands, he now resides in New York City. Theodore gained prominence as an artist through the popularity of a street art murals of fas"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.bradleytheodore.com/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-001",
+      "slug": "iman-omari",
+      "image": "",
+      "featuredOrder": 1,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.990Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2017,
+        "disciplineKey": "performance-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2017,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Iman Omari",
+          "discipline": "Performance Arts",
+          "bio": "Iman Omari is an American singer, record producer and DJ from Los Angeles, California. Beginning as a producer for artists such as Kendrick Lamar and OverDoz., Omari was convinced to become his own artist by friends. He released his debut album, Energy, in 2011, which received positive reviews.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Iman Omari · Fusion",
+            "description": "Iman Omari is an American singer, record producer and DJ from Los Angeles, California. Beginning as a producer for artists such as Kendrick Lamar and OverDoz., Omari was convinced to become his own ar"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.imanomari.com/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-002",
+      "slug": "bliss-lau",
+      "image": "",
+      "featuredOrder": 2,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.990Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2017,
+        "disciplineKey": "fine-jewelry",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2017,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Bliss Lau",
+          "discipline": "Fine Jewelry",
+          "bio": "Bliss Lau’s approach is centered around the idea that jewelry is a physical experience, one that is inspired by sensuality and structure. Through this ideology and the combination of her Chinese and American culture, she has evolved her collection from leather goods to the trademark fine, body, and semi-fine jewelry of today.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Bliss Lau · Fusion",
+            "description": "Bliss Lau’s approach is centered around the idea that jewelry is a physical experience, one that is inspired by sensuality and structure. Through this ideology and the combination of her Chinese and A"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.blisslau.com/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-003",
+      "slug": "tripp-barnes",
+      "image": "",
+      "featuredOrder": 3,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2017,
+        "disciplineKey": "visual-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2017,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Tripp Barnes",
+          "discipline": "Visual Arts",
+          "bio": "Tripp Derrick Barnes is a South Carolina-born, New York City-based multimedia artist working at the intersection of Art, Entertainment and Technology.Tripp’s Pop Art portraits are an act of recognition and preservation along with escapism, placing his subjects in a sort of alternate world.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Tripp Barnes · Fusion",
+            "description": "Tripp Derrick Barnes is a South Carolina-born, New York City-based multimedia artist working at the intersection of Art, Entertainment and Technology.Tripp’s Pop Art portraits are an act of recognitio"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.trippart.com/about",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-004",
+      "slug": "sho-ishikura",
+      "image": "",
+      "featuredOrder": 4,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2019,
+        "disciplineKey": "performance-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2019,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Sho Ishikura",
+          "discipline": "Performance Arts",
+          "bio": "Shochan (Sho Ishikura) is a Soul Singer who writes and produces his own music. Son of an American mother and a Japanese father, his parents met in Japan while his mother was teaching abroad. From a young age he displayed dedication as a self-styled artist, following in the footsteps of his mother, a working painter.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Sho Ishikura · Fusion",
+            "description": "Shochan (Sho Ishikura) is a Soul Singer who writes and produces his own music. Son of an American mother and a Japanese father, his parents met in Japan while his mother was teaching abroad. From a yo"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.instagram.com/jan3t.is.online/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-005",
+      "slug": "genard-blair",
+      "image": "",
+      "featuredOrder": 5,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2018,
+        "disciplineKey": "performance-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2018,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Genard Blair",
+          "discipline": "Performance Arts",
+          "bio": "1st generation American artist infused with a Caribbean, Asian and Irish heritage. Being homeless before he built his art inspired by his life experience in the streets of Papine to Copenhagen. Ptah comes to Ishikawa to present a unique performance piece to provoke thoughts on a concept exploring worth in terms of cultural and artistic exchange.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Genard Blair · Fusion",
+            "description": "1st generation American artist infused with a Caribbean, Asian and Irish heritage. Being homeless before he built his art inspired by his life experience in the streets of Papine to Copenhagen. Ptah c"
+          },
+          "links": []
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-006",
+      "slug": "rachel-schultz",
+      "image": "",
+      "featuredOrder": 6,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2017,
+        "disciplineKey": "visual-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2017,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Rachel Schultz",
+          "discipline": "Visual Arts",
+          "bio": "Rachel Schultz is a New York-based artist and Creative Associate at Idun. Rachel's art work spans various subject matters but most often explores the human psyche. She is interested in juxtaposing color and subject matter, like that of anxiety and mental health, which can be veiled, dark and elusive with a lighter, more buoyant palette.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Rachel Schultz · Fusion",
+            "description": "Rachel Schultz is a New York-based artist and Creative Associate at Idun. Rachel's art work spans various subject matters but most often explores the human psyche. She is interested in juxtaposing col"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://rachelschultzstudio.com/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-007",
+      "slug": "shenna-vaughn",
+      "image": "",
+      "featuredOrder": 7,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2017,
+        "disciplineKey": "visual-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2017,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Shenna Vaughn",
+          "discipline": "Visual Arts",
+          "bio": "I'am a contemporary artist I enjoy textures, geometric shapes, jolted lines and deep rich colors. My visual rhythmic cadence sets the stage for the expression of personal thoughts that all must confront. It invites my audience to enter a personal conversation of reflection and confession.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Shenna Vaughn · Fusion",
+            "description": "I'am a contemporary artist I enjoy textures, geometric shapes, jolted lines and deep rich colors. My visual rhythmic cadence sets the stage for the expression of personal thoughts that all must confro"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://shenna-vaughn.com/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-008",
+      "slug": "matheus-goulart",
+      "image": "",
+      "featuredOrder": 8,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2017,
+        "disciplineKey": "visual-arts",
+        "locationKey": "brazil"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2017,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Matheus Goulart",
+          "discipline": "Visual Arts",
+          "bio": "Matheus is greatly influenced by the city he now calls home -- New York has long been the epicenter of fashion, hip hop, and street art, where he feels his interest in contemporary art, architecture, and interior design has grown exponentially.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "Brazil",
+            "display": "Brazil"
+          },
+          "seo": {
+            "title": "Matheus Goulart · Fusion",
+            "description": "Matheus is greatly influenced by the city he now calls home -- New York has long been the epicenter of fashion, hip hop, and street art, where he feels his interest in contemporary art, architecture, "
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.matheusgoulart.com/about-2",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-009",
+      "slug": "henry-boit",
+      "image": "",
+      "featuredOrder": 9,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2017,
+        "disciplineKey": "visual-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2017,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Henry Boit",
+          "discipline": "Visual Arts",
+          "bio": "Born in Boston, Massachusetts, TRIHUMPH began painting with stencils at 15 before leaving school at 17 pursue art professionally. Now based in Brooklyn, New York, TRIHUMPH has since exhibited his works in galleries around the world. Basing his creative explorations in the unpredictable essence of scribbling, TRIHUMPH paints with plasticity and a spirit of adventure.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Henry Boit · Fusion",
+            "description": "Born in Boston, Massachusetts, TRIHUMPH began painting with stencils at 15 before leaving school at 17 pursue art professionally. Now based in Brooklyn, New York, TRIHUMPH has since exhibited his work"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://henry-boit.squarespace.com/about",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-010",
+      "slug": "franco-cuttica",
+      "image": "",
+      "featuredOrder": 10,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2017,
+        "disciplineKey": "visual-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2017,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Franco Cuttica",
+          "discipline": "Visual Arts",
+          "bio": "Franco’s work manifests itself in a variety of mediums, all intended to express the cycles of nature and what he calls “the flat circularity of time.” Franco’s “Driftwood” series “is an intervened extension of a journey”. The wood that has traveled from faraway lands, like Africa, that by happenstance ends up on a beach in Long Island, artificially “blends” in an extended expression, a final suggestion of the influence of man.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Franco Cuttica · Fusion",
+            "description": "Franco’s work manifests itself in a variety of mediums, all intended to express the cycles of nature and what he calls “the flat circularity of time.” Franco’s “Driftwood” series “is an intervened ext"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.francocuttica.art/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-011",
+      "slug": "alessandra-rehder",
+      "image": "",
+      "featuredOrder": 11,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2017,
+        "disciplineKey": "visual-arts",
+        "locationKey": "brazil"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2017,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Alessandra Rehder",
+          "discipline": "Visual Arts",
+          "bio": "Alessandra's pieces articulate, like nymphets from a mobile garden by meansof space. The artist shows a succession of simultaneous occurrences, which may be understood as the negative and the positive. The artist plays with these, erasing, isolating and/or dissolving the parts while still maintaining their identifiably due to the representation of margins.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "Brazil",
+            "display": "Brazil"
+          },
+          "seo": {
+            "title": "Alessandra Rehder · Fusion",
+            "description": "Alessandra's pieces articulate, like nymphets from a mobile garden by meansof space. The artist shows a succession of simultaneous occurrences, which may be understood as the negative and the positive"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://alessandrarehder.com/biography",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-012",
+      "slug": "janusz-gilewicz",
+      "image": "",
+      "featuredOrder": 12,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2017,
+        "disciplineKey": "visual-arts",
+        "locationKey": "poland"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2017,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Janusz Gilewicz",
+          "discipline": "Visual Arts",
+          "bio": "My desire is to express mystery and beauty through art while awaking recognition of those qualities in the viewer. The painting then becomes a mirror that awakens the artist and the viewer while transporting each beyond the boundaries of politics, culture, and religion. Gilewicz has learned that, through his art, he can share with the viewer his appreciation of beauty, mystery, and harmony.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "Poland",
+            "display": "Poland"
+          },
+          "seo": {
+            "title": "Janusz Gilewicz · Fusion",
+            "description": "My desire is to express mystery and beauty through art while awaking recognition of those qualities in the viewer. The painting then becomes a mirror that awakens the artist and the viewer while trans"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://januszgilewicz.com/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-013",
+      "slug": "eric-klein",
+      "image": "",
+      "featuredOrder": 13,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2017,
+        "disciplineKey": "visual-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2017,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Eric Klein",
+          "discipline": "Visual Arts",
+          "bio": "By cutting snippets of tape with a razor blade, adding them to Plexiglas and lacquering a half-inch hardening glaze of poly-urethane for a stained glass effect.He erected a host house called the Chocolate Factory, a 20,000 sq. ft loft that hosted 550 people in its time and was the chosen locale for the Justina Valentine ft. Fetty Wap music video.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Eric Klein · Fusion",
+            "description": "By cutting snippets of tape with a razor blade, adding them to Plexiglas and lacquering a half-inch hardening glaze of poly-urethane for a stained glass effect.He erected a host house called the Choco"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.enhance.art/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-014",
+      "slug": "patrick-smith",
+      "image": "",
+      "featuredOrder": 14,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2019,
+        "disciplineKey": "visual-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2019,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Patrick Smith",
+          "discipline": "Visual Arts",
+          "bio": "Patrick Smith is a realist painter who defies conventional standard of beauty, gender and sexuality.  His method consists of a maniacal, layered, detailed obsessed, chiaroscuro technique. Because of the ambiguous quality of its surface, paper is his canvas of choice, giving the viewer the illusion of staring at a photograph at a first glance.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Patrick Smith · Fusion",
+            "description": "Patrick Smith is a realist painter who defies conventional standard of beauty, gender and sexuality.  His method consists of a maniacal, layered, detailed obsessed, chiaroscuro technique. Because of t"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.instagram.com/theartistpatricksmith/?hl=en",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-015",
+      "slug": "charlotte-dos-santos",
+      "image": "",
+      "featuredOrder": 15,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2018,
+        "disciplineKey": "performance-arts",
+        "locationKey": "berlin"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2018,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Charlotte Dos Santos",
+          "discipline": "Performance Arts",
+          "bio": "Charlotte Hall Dos Santos is a Brazilian-Norwegian jazz singer, composer, and arranger, currently based in Berlin. Her music mixes South-American traditions, jazz, neo soul, and tasty beats, with music history samples in a colorful way. Dos Santos released her debut solo album Cleo in 2017 on the label Fresh Selects.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "Berlin",
+            "display": "Berlin"
+          },
+          "seo": {
+            "title": "Charlotte Dos Santos · Fusion",
+            "description": "Charlotte Hall Dos Santos is a Brazilian-Norwegian jazz singer, composer, and arranger, currently based in Berlin. Her music mixes South-American traditions, jazz, neo soul, and tasty beats, with musi"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://charlottedossantos.com/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-016",
+      "slug": "nancy-valentine",
+      "image": "",
+      "featuredOrder": 16,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2018,
+        "disciplineKey": "visual-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2018,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Nancy Valentine",
+          "discipline": "Visual Arts",
+          "bio": "Nancy XiáoRong Valentine is a self-taught multi-disciplinary artist from Fergus Falls, Minnesota. Drawing technical inspiration from her Chinese heritage, Nancy strives to reveal hidden connections to her audience through implied design. Many of her works communicate an affinity and appreciation for the simplistic, the natural and the feminine form; her themes often revolve around the connection point of the natural and the spiritual.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Nancy Valentine · Fusion",
+            "description": "Nancy XiáoRong Valentine is a self-taught multi-disciplinary artist from Fergus Falls, Minnesota. Drawing technical inspiration from her Chinese heritage, Nancy strives to reveal hidden connections to"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.nancyxvalentine.com/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-017",
+      "slug": "mike-larry-draw",
+      "image": "",
+      "featuredOrder": 17,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2018,
+        "disciplineKey": "performance-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2018,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Mike Larry Draw",
+          "discipline": "Performance Arts",
+          "bio": "Mike Larry Draw is combination of Hip Hop/Rock/Soul has created a positive movement in music that influences. He is a Polymath; and his unique approach combines cross genre sounds with an artistic vision that cultivates into a noteworthy media experiences.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Mike Larry Draw · Fusion",
+            "description": "Mike Larry Draw is combination of Hip Hop/Rock/Soul has created a positive movement in music that influences. He is a Polymath; and his unique approach combines cross genre sounds with an artistic vis"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.mikelarrydraw.me/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-018",
+      "slug": "jayden-pyram",
+      "image": "",
+      "featuredOrder": 18,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2018,
+        "disciplineKey": "performance-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2018,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Jayden Pyram",
+          "discipline": "Performance Arts",
+          "bio": "Jayden Pyram is a generation-z  influencer, widely recognized for his widely recognized children’s modeling campaigns with major fashion labels from film to print. Jayden now sets his sights on conquering the music industry and fashion industry on an international scale with creative developments in London and Japan.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Jayden Pyram · Fusion",
+            "description": "Jayden Pyram is a generation-z  influencer, widely recognized for his widely recognized children’s modeling campaigns with major fashion labels from film to print. Jayden now sets his sights on conque"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.instagram.com/jaydenpyram/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-019",
+      "slug": "melanie-charles",
+      "image": "",
+      "featuredOrder": 19,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2019,
+        "disciplineKey": "performance-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2019,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Melanie Charles",
+          "discipline": "Performance Arts",
+          "bio": "Melanie Charles is a Brooklyn-born singer-songwriter, actress, and flutist of Haitian descent, with a creative fluidity spanning jazz, soul, experimental, and Haitian roots music. Charles latest release “The Girl with the Green shoes” established Charles as a progressive voice in Jazz catching the attention of India Arie and a feature in The New York Times Sunday routine, as well as The Village Voice. You can hear her collaging her musical DNA into jazz-studded multi-instrumentalism and dipping a toe into the experimental... there's an uncanny cohesion to Charles' music.\" - Village Voice<br><br> Charles graduated from the New School for Jazz and Contemporary Music with a BFA in vocal jazz performance and trained under the tutelage of jazz masters Reggie Workman, Charles Tolliver, Junior Mance, Janet Lawson, Carla Cook, and Billy Harper, has worked with Herlin Riley, Ellis Marsalis, Pedrito Martinez, ELEW, Jean Grae, SZA, and the Gorillaz. Her recent television appearances include Good Morning America, SNL, and The Late Show with Stephen Colbert.<br><br>Under the moniker D’flower,a new experience has been born using Roland SPs, loop pedals, and the flute to create a Chaka Khan meets Badu-esque “sonic collage “ fusing RnB, jazz, samples and Haitian folk songs. This project aims to blur the lines between social classes, cultures, genders, genres, and theories to create a world where opposing elements can co-exist.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Melanie Charles · Fusion",
+            "description": "Melanie Charles is a Brooklyn-born singer-songwriter, actress, and flutist of Haitian descent, with a creative fluidity spanning jazz, soul, experimental, and Haitian roots music. Charles latest relea"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.melaniecharles.com/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-020",
+      "slug": "mark-de-clive-lowe",
+      "image": "",
+      "featuredOrder": 20,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2019,
+        "disciplineKey": "performance-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2019,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Mark De Clive Lowe",
+          "discipline": "Performance Arts",
+          "bio": "Half Japanese, half New Zealander musician Mark de Clive-Lowe has called LA home for the past 10 years. Equal parts composer, jazz musician, found-sound remixer and club music producer, de Clive-Lowe tours his multi-faceted live show in both solo and band configurations internationally. He has released over a dozen albums and hundreds of collaborations and remixes creating with musicians, artists and DJs from all around the world and across a broad range of genres.   De Clive-Lowe has been featured artist at numerous festivals since his international recording debut in 2000 including Yerba Buena Centre for the Arts, SF Jazz, Montreal Jazz Festival, Grand Performances, Lincoln Center, North Sea Jazz Festival, Tokyo Crossover Jazz Festival, Capetown Jazz Festival. His critically acclaimed club night CHURCH, which he describes as a mash up of jazz club, live remix experiment and dance party, has seen him on stage with multiple generations of the world’s most respected jazz, soul and hip hop artists, and his latest project HERITAGE sees him making a deep dive into his own Japanese roots, interpreting it through the lens of jazz and electronica. <br><br>(the) avant-garde soulful Pianist/DJ/Producer delivers his lifetime of journeys to different musical ports in a concise package, seamlessly... transporting not just in genre but in emotion and spirit. - HuffingtonPost",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Mark De Clive Lowe · Fusion",
+            "description": "Half Japanese, half New Zealander musician Mark de Clive-Lowe has called LA home for the past 10 years. Equal parts composer, jazz musician, found-sound remixer and club music producer, de Clive-Lowe "
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.mdcl.tv/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-021",
+      "slug": "mange-helberg",
+      "image": "",
+      "featuredOrder": 21,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2019,
+        "disciplineKey": "visual-arts",
+        "locationKey": "sweden"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2019,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Mange Helberg",
+          "discipline": "Visual Arts",
+          "bio": "Mange Hellberg is a multi-discipline artist from Sweden. Mange's work reflects his childhood experiences with his father, using painting and singing as an outlet to communicate the hardships of their relationship.<br><br>Since 2015 manges has painted everyday, with a series of exibitions in Sweden, Norway and New York, after experiencing life homeless and afflicted by drugs and alcohol. Prior to Mange's visual arts exploration, Mange released an album of work as a musician in 2012,  topping the Spotify charts in Sweden with millions of streams.<br><br>Mange has partnered with celebrity actor Peter Stormare, and Tattoo artist Oscar Åkermo to launch an arts and music foundation for kids experiencing troubles with sex and violence abuse.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "Sweden",
+            "display": "Sweden"
+          },
+          "seo": {
+            "title": "Mange Helberg · Fusion",
+            "description": "Mange Hellberg is a multi-discipline artist from Sweden. Mange's work reflects his childhood experiences with his father, using painting and singing as an outlet to communicate the hardships of their "
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.instagram.com/mangehellberg/?hl=en",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-022",
+      "slug": "kaira-widodo",
+      "image": "",
+      "featuredOrder": 22,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2019,
+        "disciplineKey": "visual-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2019,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Kaira Widodo",
+          "discipline": "Visual Arts",
+          "bio": "Kaira Widodo is a rising Indonesian Muslim American photographer based in Hoboken, New Jersey and raised in New York City. She is currently studying at the School Of Visual Arts taking a Bachelor of Fine Arts in Photography and Video.<br><br>Following the steps of her family; both visual artists, Kaira found a passion for the arts as well. Born in America and raised in Indonesia for 4 years, Kaira seeks time as a missing period if it not captured. She believes that if we do not capture every moment of time, it would not exist. Kaira's work is identified as a photojournalistic approach that describes culture and identity through the environment and traditions of the street or personal life. She pursues her work as a collection of photographs that resemble a life that once was or could have never happened. Kaira works with mixed media such as photography mainly analog and solar powered photography. She creates a variety in media such as creating a short video that shares the same themes as her photography.<br><br>Her recent video work, 'Duplicity' is based on her own personal life and the confusion of being raised as a Muslim American. It shares both ends of the of who she is as a Muslim and who she is as an American. It explains further if the impact of being a Muslim in America has increased or decreased the view of her own religion.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Kaira Widodo · Fusion",
+            "description": "Kaira Widodo is a rising Indonesian Muslim American photographer based in Hoboken, New Jersey and raised in New York City. She is currently studying at the School Of Visual Arts taking a Bachelor of F"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.kairawidodo.com/#0",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-023",
+      "slug": "hiten-bawa",
+      "image": "",
+      "featuredOrder": 23,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2019,
+        "disciplineKey": "visual-arts",
+        "locationKey": "south-africa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2019,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Hiten Bawa",
+          "discipline": "Visual Arts",
+          "bio": "Hiten Bawa is an artist, architect and Accessibility Consultant based in Johannesburg, South Africa. Hiten is a profoundly deaf person with bilateral cochlear implants. He works primarily with acrylic paints, watercolours and inks to express his cultural identity and perspectives of people with disabilities. Bawa's artwork overlaps his interest in the South African Indian diaspora and South Africa's Apartheid based architectural structures which manipulate access as a medium of control. Bawa also goes on to parallel the hand signals of sign language with Classical Indian Dance hand movements and local taxi hand directions in a creole styled visual language from his unique perspective.<br><br>He holds a Master of Architecture (Prof) degree from the University of Cape Town and runs his own creative practice called Studio HB. He is currently working on designing barrier-free environments for people with disabilities across housing, transportation, interior design, urban design and landscape design. Bawa was a finalist for the inaugural SA TAXI Foundation Art Award in 2015 and is a part of the J.P. Morgan Chase Art Collection.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "South Africa",
+            "display": "South Africa"
+          },
+          "seo": {
+            "title": "Hiten Bawa · Fusion",
+            "description": "Hiten Bawa is an artist, architect and Accessibility Consultant based in Johannesburg, South Africa. Hiten is a profoundly deaf person with bilateral cochlear implants. He works primarily with acrylic"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://hitenbawa.co.za/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-024",
+      "slug": "bria-whitney",
+      "image": "",
+      "featuredOrder": 24,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2019,
+        "disciplineKey": "visual-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2019,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Bria Whitney",
+          "discipline": "Visual Arts",
+          "bio": "Whitney (b. 1993, Brooklyn) lives and works in Brooklyn, NYC. Being a New York native made the art world easily accessible, enabling exploration within the ever-present diversity and vibrant culture of the city. After being awarded scholarships to attend the Fine Art Intensive programs at New York University and Pratt College, Whitney received her Bachelor’s of Fine Arts with a minor in Art History from the Fashion Institute of Technology. Now Whitney works as a Mixed Media Artist, using both mediums of painting and printmaking in her works that investigate notions of identity - “who or what a person or thing is”. Whitney's works are an expressive experience employing heavy brush strokes that gives texture and movement in each work. With great admiration, Whitney has become heavily influenced by numerous artists, in particular Schiele, Saville, Marden and Walker.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Bria Whitney · Fusion",
+            "description": "Whitney (b. 1993, Brooklyn) lives and works in Brooklyn, NYC. Being a New York native made the art world easily accessible, enabling exploration within the ever-present diversity and vibrant culture o"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.briawhitney.com/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-025",
+      "slug": "natalie-foucauld",
+      "image": "",
+      "featuredOrder": 25,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2019,
+        "disciplineKey": "performance-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2019,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Natalie Foucauld",
+          "discipline": "Performance Arts",
+          "bio": "Le Poodle is a singer-songwriter, producer, creative director, visual artist, and doctor based in Miami, FL. Her main focus is combining her knowledge of the arts and sciences in order to address social issues while working with or inspiring others to do the same. To her, art is synonymous with social movement.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Natalie Foucauld · Fusion",
+            "description": "Le Poodle is a singer-songwriter, producer, creative director, visual artist, and doctor based in Miami, FL. Her main focus is combining her knowledge of the arts and sciences in order to address soci"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.instagram.com/le_poodle/?hl=en",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-026",
+      "slug": "yazmine-graham",
+      "image": "",
+      "featuredOrder": 26,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2019,
+        "disciplineKey": "visual-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2019,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Yazmine Graham",
+          "discipline": "Visual Arts",
+          "bio": "Yazmine Graham is born and raised in Newark New Jersey. Graham is an alumni of Arts High School where she attended as an Visual Arts major and is current working as a Teaching-Artist for GlassRoots Inc; a non for profit glass arts studio. She is also a full-time student of the Michael Graves College School of Public Architecture at Kean University. Grahams work is peppered with lots of color and takes on the various forms of weird, vulnerable, playful and sometimes political aspects of American cultures. In a similar way, fashion and music references are layered throughout Graham's work as she challenges herself to pair daydreams and visuals from some of her favorite experiences, people and visual artist along with materials like marker, watercolor and acrylic paint, or glass to create beautiful visuals. With Graham's work she hopes to provoke adventure where inspiration has faded, begin journeys by acknowledging existing life and the understanding that every moment should start with a tabula rasa.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Yazmine Graham · Fusion",
+            "description": "Yazmine Graham is born and raised in Newark New Jersey. Graham is an alumni of Arts High School where she attended as an Visual Arts major and is current working as a Teaching-Artist for GlassRoots In"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.thejerseyslice.com/artiststatement",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-027",
+      "slug": "besmira-rraci",
+      "image": "",
+      "featuredOrder": 27,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2019,
+        "disciplineKey": "visual-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2019,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Besmira Rraci",
+          "discipline": "Visual Arts",
+          "bio": "Besmira desires for her work to communicate to audiences that there are things that everyone sees, but there are also things people pretend they don't see. I explore not only why that is but how long can it last. How long can someone be presented with such raw truths and emotions and just blatantly reject them? Besmira looks to this phenomenon in reference to the identity of a person and aims to convey the deeper meanings behind people's eyes, and what they wish everyone could see.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Besmira Rraci · Fusion",
+            "description": "Besmira desires for her work to communicate to audiences that there are things that everyone sees, but there are also things people pretend they don't see. I explore not only why that is but how long "
+          },
+          "links": []
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-028",
+      "slug": "kaira-villanueva",
+      "image": "",
+      "featuredOrder": 28,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2019,
+        "disciplineKey": "visual-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2019,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Kaira Villanueva",
+          "discipline": "Visual Arts",
+          "bio": "Kaira Villanueva explores boundaries between science fiction narratives and natural phenomena in oil and digital paintings. Her work in engineering strongly influences her paintings, often depicting themes that push the limitations of current scientific progress. Majority of her pieces implement a combination of negative space and tonalism that grounds the central theme of Auribus teneo lupum. Her art opens up the anxiety that exists in the liminal state between the present and the future.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Kaira Villanueva · Fusion",
+            "description": "Kaira Villanueva explores boundaries between science fiction narratives and natural phenomena in oil and digital paintings. Her work in engineering strongly influences her paintings, often depicting t"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.instagram.com/kaira.villanueva/?hl=en&img_index=1",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-029",
+      "slug": "kayla-vasquez",
+      "image": "",
+      "featuredOrder": 29,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2019,
+        "disciplineKey": "visual-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2019,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Kayla Vasquez",
+          "discipline": "Visual Arts",
+          "bio": "Kayla Vasquez is photographer born and raised in New York City. Kayla often travels to places like Pennsylvania and Florida, USA to capture landscapes. Kayla recently finished her first year at the School of Visual Arts which has greatly helped assisted in the development of her photography style and progression. I mostly work with digital photography but my roots with photography start with analog photography. Before attending SVA, Kayla studied black and white photography. Although most of my new work is dominated by digital, film will always be my favorite form of photography.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Kayla Vasquez · Fusion",
+            "description": "Kayla Vasquez is photographer born and raised in New York City. Kayla often travels to places like Pennsylvania and Florida, USA to capture landscapes. Kayla recently finished her first year at the Sc"
+          },
+          "links": []
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-030",
+      "slug": "skylar-davis",
+      "image": "",
+      "featuredOrder": 30,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2019,
+        "disciplineKey": "visual-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2019,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Skylar Davis",
+          "discipline": "Visual Arts",
+          "bio": "Skylar Davis, is a multi discipline artist living in Louisville, KY. Growing up in a fundamentalist Christian majority small town in Kentucky, Skylar was raised to be a lady and remain pure until marriage in order to be seen as a holier person. It wasn’t until she was older, that she 'saw the light” and realized just be yourself and embrace your desires. Feeling herself is Skylar's playful response.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Skylar Davis · Fusion",
+            "description": "Skylar Davis, is a multi discipline artist living in Louisville, KY. Growing up in a fundamentalist Christian majority small town in Kentucky, Skylar was raised to be a lady and remain pure until marr"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.instagram.com/theskylardavis/?hl=en",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-031",
+      "slug": "chuck-wilt",
+      "image": "",
+      "featuredOrder": 31,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2019,
+        "disciplineKey": "performance-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2019,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Chuck Wilt",
+          "discipline": "Performance Arts",
+          "bio": "Chuck was raised in San Francisco CA and is the Artistic Director/Choreographer of bicoastal dance company, UNA - creating work in NYC and San Francisco. Chuck holds a BFA in dance from NYU’s Tisch School of the Arts and am also a certified GYROTONIC® teacher. <br><br>As Artistic Director/Choreographer of UNA, Chuck investigates ways to increase people-to-people connections while illuminating the diversity of human experience. Chuck is interested in how topics of gender, identity and unity can be involved in dance and dance film, transforming the way we can experience ourselves and our connection to others. <br><br></br>In 2017 Chuck was a selected choreographic fellow for the Alvin Ailey Dance Foundation New Directions Choreography Lab made possible by generous support from the Ford Foundation. I was an Artist in Residence at the 92nd St. Y’s Harkness Dance Center (2018-2019) and in the coming year will be a CUNY artist in residence at Brooklyn College (2019-2020). He was also a selected Dance Initiative Artist In Residence in Carbondale Colorado (2018) the recipient of the Rainin Opportunity Fund, premiering his evening-length work COLORING at and in association with the ODC Theater (San Francisco, 2019). I have taught technique, improvisation and set repertory for the NYU Tisch Summer High School Program (2017-2019). Along with UNA company members, I have taught at Malashock Dance, Dance PAW, Velocity Dance Center, Gibney Dance Center, Lowell High School, ODC Dance Commons, SF Arts Institute, LAB Sessions/IATI Studios and Booker T. Washington High School for Performing and Visual Arts. Additionally, the company has done outreach in NYC including lec-dems and workshops with Williamsburg Charter, Brooklyn International, Beacon High Schools and the Professional Performing Arts School. My dance training includes studying at the San Francisco Ballet School, ODC, LINES Ballet, SEAD in Austria, American Dance Festival, Jacob's Pillow Contemporary Program and Springboard Dance Montreal. I have studied Ohad Naharin's movement language, Gaga, in San Francisco, NYC, Montreal and Israel and attended Hofesh Shechter's Professional Intensive in London. I have had the pleasure of performing professionally for companies and artists such as Jérôme Bel's The Show Must Go On at the Joyce, Martin Løfsnes/360° Dance Company, Rebecca Margolick/Maxx Berkowitz's birds sing a pretty song in NYC, Vancouver, Sofia, Jerusalem and San Diego, From the Horse's Mouth, MADBOOTS DANCE at the Jacob's Pillow Festival and in Vancouver, Zoe|Juniper, Katharine Hawthorne, Danaka Dance, GroundWorks DanceTheater performing the work of Noa Zuk, as well as Chihiro Shimizu and Artists among others.  I was the recipient of the Homer Avila Award and the Jacob’s Pillow School Professional Advancement Award.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Chuck Wilt · Fusion",
+            "description": "Chuck was raised in San Francisco CA and is the Artistic Director/Choreographer of bicoastal dance company, UNA - creating work in NYC and San Francisco. Chuck holds a BFA in dance from NYU’s Tisch Sc"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.una.productions/company",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-032",
+      "slug": "kyle-filley",
+      "image": "",
+      "featuredOrder": 32,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2019,
+        "disciplineKey": "performance-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2019,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Kyle Filley",
+          "discipline": "Performance Arts",
+          "bio": "I grew up in San Diego, CA and moved to NYC in 2011 to pursue Dance and Psychology at NYU. I have been living here since graduating in 2015. I am a freelance professional dancer, certified and practicing yoga teacher, and visual artist currently residing in Brooklyn, NY. I received a BA in Psychology and a BFA in Dance from NYU, with additional training at the Salzburg Experimental Academy of Dance. I have been performing and collaborating for Chuck Wilt's Company, UNA, since 2015 - and have been a Rehearsal Assistant for the company since 2017.  I have been a company member with Helen Simoneau Danse since January 2018 and previously danced with the Stephen Petronio Company from 2015-2017. With the Stephen Petronio Company I performed nationally and in Slovakia, Croatia, Bulgaria, Thailand, Vietnam, and Singapore. While in Southeast Asia, through the historic Dance Motion USA organization, I was a part of many teaching experiences with disabled populations. I have also assisted dance classes for the blind at the Lighthouse Guild in NYC.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Kyle Filley · Fusion",
+            "description": "I grew up in San Diego, CA and moved to NYC in 2011 to pursue Dance and Psychology at NYU. I have been living here since graduating in 2015. I am a freelance professional dancer, certified and practic"
+          },
+          "links": []
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-033",
+      "slug": "andres-alvarez",
+      "image": "",
+      "featuredOrder": 33,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2019,
+        "disciplineKey": "visual-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2019,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Andres Alvarez",
+          "discipline": "Visual Arts",
+          "bio": "Andres Alvarez is a self-taught visual artist born in the Dominican Republic. He moved at the age of 13 to live in Puerto Rico, and then made a move to NYC at the age of 18, where he still resides.<br><br>He had manifested his artistic abilities through drawing since a very early age, but it wasn’t until 2013 that he decided to further develop his technical skills and expand his range as an artist by exploring and learning about the techniques used by the old masters, such as Bouguereau, Alma-Tadema, Diego Velazquez, etc., and some of his modern-day art heroes, such as Frank Frazetta, Cesar Santos, Donato Giancola, Jeremy Mann, Simon Bizley, and others.<br><br>His early work began as a rediscovery of himself as an artist and a still ongoing search for his place in the visual art spectrum. As a result, this search highlighted a passion for portraiture work through the use of oil paint on canvas but also has a constant need to capture various subjects and elements that are the makeup of his interests and sparks of curiosity.<br><br>As Andres grows as an artist, so does the physical scale of his pieces, which drove him to inevitably seek out mural artwork, a field that he is looking to further develop as part of his repertoire of services as a professional artist, which already includes portrait commissions, the sale of original art, digital art direction and graphic design.<br><br>His goal is to be able to help people get in touch with their higher selves through the art experience, and enjoy the art journey as much as possible.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Andres Alvarez · Fusion",
+            "description": "Andres Alvarez is a self-taught visual artist born in the Dominican Republic. He moved at the age of 13 to live in Puerto Rico, and then made a move to NYC at the age of 18, where he still resides.<br"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.andresalvarezart.com/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-034",
+      "slug": "ameer-carter",
+      "image": "",
+      "featuredOrder": 34,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2024,
+        "disciplineKey": "digital-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2024,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Ameer Carter",
+          "discipline": "Digital Arts",
+          "bio": "Featured in the Chicago Design Museum, SCAD Permanent Collection and several self-hosted shows, “Sirsu” is a mixed media artist who works with portraits, physical objects and digital works in abstract...or at least feels more abstracted than organic. Borrowing heavily from the works of Jason Thielke and Ashley Wood, Sirsu looks to evoke emotion through dynamic lines and raw energy with compositions that look ethereal and light.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Ameer Carter · Fusion",
+            "description": "Featured in the Chicago Design Museum, SCAD Permanent Collection and several self-hosted shows, “Sirsu” is a mixed media artist who works with portraits, physical objects and digital works in abstract"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://twitter.com/sirsuhayb?ref_src=twsrc%5Egoogle%7Ctwcamp%5Eserp%7Ctwgr%5Eauthor",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-035",
+      "slug": "george-baker",
+      "image": "",
+      "featuredOrder": 35,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2024,
+        "disciplineKey": "murals-installation",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2024,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "George Baker",
+          "discipline": "Murals & Installation",
+          "bio": "George F. Baker III is an Atlanta-based Muralist, Illustrator, and Public Speaker who infuses a child-like joy into all of his creative endeavors. Over the course of 6 years practicing muralism, he has painted over 50 murals across the United States (as well as a couple in London) and has produced numerous illustrations. Regardless of the medium, he is always eager to offer encouragement to individuals, urging them to embrace their inner-child more in their daily lives. He firmly believes that by doing so, people become the most authentic versions of themselves. ",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "George Baker · Fusion",
+            "description": "George F. Baker III is an Atlanta-based Muralist, Illustrator, and Public Speaker who infuses a child-like joy into all of his creative endeavors. Over the course of 6 years practicing muralism, he ha"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.gfbthree.com/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-036",
+      "slug": "aries-ballard",
+      "image": "",
+      "featuredOrder": 36,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2024,
+        "disciplineKey": "mixed-media",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2024,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Aries Ballard",
+          "discipline": "Mixed Media",
+          "bio": "\"I use my art to express who I am, how I think, and what my personal experience is. I grew up in a very small town and felt very different from everyone around me, so I've used my art to comfort me and explores how my mind works.\"",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Aries Ballard · Fusion",
+            "description": "\"I use my art to express who I am, how I think, and what my personal experience is. I grew up in a very small town and felt very different from everyone around me, so I've used my art to comfort me an"
+          },
+          "links": []
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-037",
+      "slug": "matthew-loyd",
+      "image": "",
+      "featuredOrder": 37,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2024,
+        "disciplineKey": "illustration-design",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2024,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Matthew Loyd",
+          "discipline": "Illustration & Design",
+          "bio": "Matthew Loyd is an artist specializing in illustration and design. Alongside his creative pursuits, he is the founder of 20XX Magazine, an art and culture publication. His work spans print and digital media, showcasing his talent in oil pastel, marker, and pen and pencil drawings. Inspired by comic books and manga, his art features captivating narratives and original characters. Currently, he's exploring acrylic painting on MTA MetroCards, aiming to create a unique body of work.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Matthew Loyd · Fusion",
+            "description": "Matthew Loyd is an artist specializing in illustration and design. Alongside his creative pursuits, he is the founder of 20XX Magazine, an art and culture publication. His work spans print and digital"
+          },
+          "links": []
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-038",
+      "slug": "sarah-ferrer",
+      "image": "",
+      "featuredOrder": 38,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2024,
+        "disciplineKey": "fine-art-visual-art",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2024,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Sarah Ferrer",
+          "discipline": "Fine Art / Visual Art",
+          "bio": "Sarah was born and raised in Miami, she graduated with a dean's award from the Visual Art department of New world school of the Arts in 2013. After high school she graduated from the Kansas City Art Institute majoring in Ceramics and completed a certificate program focused on Asian art. Through the influence of the certificate program, after graduating in 2017 Sarah was accepted into the JET program to move and start a life in Japan. Through the JET program Sarah had the opportunity to work in a high school in Amami Ōshima (奄美大島), Japan. While working a full time job as an English teacher and volunteering as an assistant in the school's art club she also began an apprenticeship in the ceramic studio, Yachaboyaki (野茶坊焼). She studied under the ceramic master Junichi Ikenomi (池波陶柳) for three years becoming his first and last apprentice.  Since returning to the US in 2020 Sarah has continued actively making art and became a founding member of 2win! Studio in 2021. ",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Sarah Ferrer · Fusion",
+            "description": "Sarah was born and raised in Miami, she graduated with a dean's award from the Visual Art department of New world school of the Arts in 2013. After high school she graduated from the Kansas City Art I"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.sarahferrer.com/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-039",
+      "slug": "samantha-ferrer",
+      "image": "",
+      "featuredOrder": 39,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2024,
+        "disciplineKey": "painting-and-ceramics",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2024,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Samantha Ferrer",
+          "discipline": "Painting and Ceramics",
+          "bio": "Miami born artist Samantha Noelia Ferrer uses her Cuban roots to make a variety of work. She is a current graduate of the Kansas City Art Institute receiving a BFA in Ceramics with a minor in Asian Studies. Samantha has worked with local and international artists through internships and has interest working abroad. Her interest in Asian art and ceramics is used as a stylistic influence within her work.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Samantha Ferrer · Fusion",
+            "description": "Miami born artist Samantha Noelia Ferrer uses her Cuban roots to make a variety of work. She is a current graduate of the Kansas City Art Institute receiving a BFA in Ceramics with a minor in Asian St"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "http://samanthaferrer.com/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-040",
+      "slug": "marie-northington",
+      "image": "",
+      "featuredOrder": 40,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2024,
+        "disciplineKey": "artist-guest",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2024,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Marie Northington",
+          "discipline": "Artist Guest",
+          "bio": "Marie is an artist based in Atlanta, GA. With an eclectic background in production and geology, she’s built innovation programs for R/GA, Comcast, REI, and UConn; working with all kinds of startups from outdoor retail to climate tech. She’s on a journey from corporate girlie to freelance explorer, currently deep diving into her artistic interests in photography, pottery, and nail art.  ",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Marie Northington · Fusion",
+            "description": "Marie is an artist based in Atlanta, GA. With an eclectic background in production and geology, she’s built innovation programs for R/GA, Comcast, REI, and UConn; working with all kinds of startups fr"
+          },
+          "links": []
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-041",
+      "slug": "kamauu",
+      "image": "",
+      "featuredOrder": 41,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2024,
+        "disciplineKey": "musician",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2024,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Kamauu *",
+          "discipline": "Musician",
+          "bio": " Washington D.C.-born and New York-based artist KAMAUU, a multifaceted talent as a rapper, poet, and thinker, intertwines his higher calling of service with his creative expressions, believing deeply in contributing to something greater than oneself. Influenced by a childhood rich with diverse musical and artistic exposures, thanks to his parents, KAMAUU's journey in music began from an early age, leading to his significant debut on No Wyld's \"QUEEN\" and subsequent successes with singles like \"Jusfayu\" and his own EPs and albums. His music, a blend of rap, reggae, soul, and more, serves as a platform for growth and introspection, encapsulated in his latest project, \"TheKAMAUU-CASSETTE: MíXD GRēēNS,\" which symbolizes his fertile and burgeoning creativity. Through his work, KAMAUU aims to inspire growth and resilience, sharing his journey not as a teacher but as a fellow traveler in the art of living and serving.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Kamauu * · Fusion",
+            "description": " Washington D.C.-born and New York-based artist KAMAUU, a multifaceted talent as a rapper, poet, and thinker, intertwines his higher calling of service with his creative expressions, believing deeply "
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.kamauu.world/?frontpage=true",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-042",
+      "slug": "logan-martinez",
+      "image": "",
+      "featuredOrder": 42,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2024,
+        "disciplineKey": "writing-illustration-and-macrame-jewelry",
+        "locationKey": "dominican-republic"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2024,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Logan Martinez",
+          "discipline": "Writing, Illustration and Macramé jewelry",
+          "bio": "Logan Martinez is a multidisciplinary artist whose talents flourish in the realms of novel writing, illustrating, and macramé jewelry design. With a profound ability to breathe life into stories, Logan weaves narratives not just through captivating prose but also through expressive brush strokes and intricate threads. At the heart of Logan's artistic expression is a vibrant, nature-inspired passion, fueling a creative journey that transcends mediums to evoke the vivid tapestry of the natural world.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "Dominican Republic",
+            "display": "Dominican Republic"
+          },
+          "seo": {
+            "title": "Logan Martinez · Fusion",
+            "description": "Logan Martinez is a multidisciplinary artist whose talents flourish in the realms of novel writing, illustrating, and macramé jewelry design. With a profound ability to breathe life into stories, Loga"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.loganwolfarts.com/themadman",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-043",
+      "slug": "javon-angela",
+      "image": "",
+      "featuredOrder": 43,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2024,
+        "disciplineKey": "visual-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2024,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Javon Angela",
+          "discipline": "Visual Arts",
+          "bio": "Javon Angela, a visual artist from Nashville, Tennessee, crafts artwork that weaves together complex details with a spectrum of colors. For Javon, creating art is a deeply reflective process, serving as a channel for tranquility that imbues her pieces with a calming influence. ",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Javon Angela · Fusion",
+            "description": "Javon Angela, a visual artist from Nashville, Tennessee, crafts artwork that weaves together complex details with a spectrum of colors. For Javon, creating art is a deeply reflective process, serving "
+          },
+          "links": []
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-044",
+      "slug": "dillon-mccraw",
+      "image": "",
+      "featuredOrder": 44,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2024,
+        "disciplineKey": "digital-art-design",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2024,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Dillon McCraw",
+          "discipline": "Digital Art /Design",
+          "bio": "Dillon McCraw is a digitally native graphic artist renowned for his dynamic storytelling and intricate worldbuilding. His artistic style is ever-evolving, seamlessly oscillating between realistic illustration and contemporary iconography, making each of his creations a unique exploration of visual narrative.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Dillon McCraw · Fusion",
+            "description": "Dillon McCraw is a digitally native graphic artist renowned for his dynamic storytelling and intricate worldbuilding. His artistic style is ever-evolving, seamlessly oscillating between realistic illu"
+          },
+          "links": []
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-a-045",
+      "slug": "miguel-flores",
+      "image": "",
+      "featuredOrder": 45,
+      "visibility": "public",
+      "updatedAt": "2026-04-12T07:41:43.991Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2024,
+        "disciplineKey": "visual-arts",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2024,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Miguel Flores",
+          "discipline": "Visual Arts",
+          "bio": "Miguel Flores, originally from the slums of Ecuador, found his early years marked by the country's financial crisis before moving to New Jersey. His art, deeply rooted in the human condition, navigates the complex interplay between realistic and abstract portrayals of people, set against the backdrop of contemporary societal issues and future anxieties. Flores' distinctive backgrounds are abstract impressionist collages, weaving together elements like newspaper headlines, scientific papers, and mixed media to reflect the chaotic tapestry of modern life. Working primarily with acrylic layers before adding oil paint, Miguel is now exploring the integration of electronic waste into his paintings and employing \"collaborative intelligence\" to democratize the creative process via social media, inviting a global community to shape his art",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Miguel Flores · Fusion",
+            "description": "Miguel Flores, originally from the slums of Ecuador, found his early years marked by the country's financial crisis before moving to New Jersey. His art, deeply rooted in the human condition, navigate"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.tiktok.com/@waiting4suns",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-2WPMKaxIJeczCAMx6r9QAiGxciG2",
+      "slug": "hannah-webb-2wpmkaxi",
+      "image": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/profile-images%2F2WPMKaxIJeczCAMx6r9QAiGxciG2%2Fprofile-1757187774970.jpg?alt=media&token=f1cd08ec-260f-49d2-96d9-8fcfe7ed0edf",
+      "featuredOrder": 46,
+      "visibility": "public",
+      "updatedAt": "2025-10-27T01:14:53.893Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2026,
+        "disciplineKey": "painting",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2026,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Hannah Webb",
+          "discipline": "painting",
+          "bio": "I’m a painter currently living in Los Angeles, California.  I'm a full-time studio artist, producing work for a variety of clients in education, food, tech, and more.  I also travel to produce large-scale public murals around the world.  \n\nMy personal art style is defined by technique in application and dynamic color, and is blocky, pixellated, and bright. My work usually represents animals, human features, or objects up close, broken down into interpretations of light and color. My paintings are designed to exist carefully between mechanical and fluid, representational and abstracted.  ",
+          "status": "active",
+          "location": {
+            "city": "Los Angeles",
+            "state": "",
+            "country": "USA",
+            "display": "Los Angeles, USA"
+          },
+          "seo": {
+            "title": "Hannah Webb · Fusion",
+            "description": "I’m a painter currently living in Los Angeles, California.  I'm a full-time studio artist, producing work for a variety of clients in education, food, tech, and more.  I also travel to produce large-s"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.theobanoth.com/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-4NWheAHthiRnUERfVdT9FDH3S3u2",
+      "slug": "eve-eggleston-4nwheaht",
+      "image": "",
+      "featuredOrder": 47,
+      "visibility": "public",
+      "updatedAt": "2025-10-20T23:22:57.167Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2025,
+        "disciplineKey": "painting",
+        "locationKey": "united-states"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2025,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Eve Eggleston",
+          "discipline": "painting",
+          "bio": "Eve V Eggleston is a working artist, educator, and LMT living in Portland, Oregon. Eggleston earned a dual Bachelors of Science degrees in Studio Fine Arts and Psychology from the University of Indianapolis; and later returned to her alma-mater, earning a MA in Social Practice Art in 2019.  Blossoming from the artistic relationships forged during this graduate work, Eve worked as the beekeeper in residence and part-time event staff at Tube Factory Artspace for BigCar Collaborative. This connection to Big Car Media further blossomed in 2020 when Eve co-curated a series of in person and virtual events with Eduardo Luna as a part of the 10 East Arts 2020 Summer Fellowship.\nStarting during the world’s quarantine, from 2020 through 2022 Eve instructed Beginning Drawing courses at Ivy Tech Community College in an adjunct capacity, focusing on fundamentals, still life drawing, and figure drawing with live models.  This materialized in a growing fascination for studying realistic drawing and painting; a humanitarian endeavor in an ever-growing digital AI world. Noticing a lack of public spaces to work with models outside of academia, Eggleston created the Indianapolis Figure Guild through the Indiana Arts Commission's 2021-2022 On-Ramp Fellowship.   Eggleston has since taught Ethics and Massage Clinic during 2024 and 2025 at East West College of the Healing Arts in downtown Portland, and is currently enrolled at Point of View Tattoo School.  Most recently in July 2025 Eve co-facilitated, alongside Joanne Kollman, a charcoal figure drawing workshop led by guest artist and educator Henry Yan at the Oregon Society of Artists. \nSince moving to Portland Oregon, Eve’s need to improve and explore has only multiplied; from traveling to rural France with the Chateaux Orquevaux artist residency in 2023, to an island off of Spain to attend Quarantine Events during their 2024 Interzone residency; and now with unbridled joy in 2025 going to Japan to participate in the FUSION artist residency. \n\nwww.eveveggleston.com\n",
+          "status": "active",
+          "location": {
+            "city": "Portland",
+            "state": "",
+            "country": "United States",
+            "display": "Portland, United States"
+          },
+          "seo": {
+            "title": "Eve Eggleston · Fusion",
+            "description": "Eve V Eggleston is a working artist, educator, and LMT living in Portland, Oregon. Eggleston earned a dual Bachelors of Science degrees in Studio Fine Arts and Psychology from the University of Indian"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://eveveggleston.com/",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2F4NWheAHthiRnUERfVdT9FDH3S3u2%2Fgallery-1761002398541.JPG?alt=media&token=27393511-4736-4bc8-89a9-66f27cfb2e46",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2F4NWheAHthiRnUERfVdT9FDH3S3u2%2Fgallery-1761002409859.jpg?alt=media&token=e87e34aa-f7a4-454d-b87f-a293b0791044",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2F4NWheAHthiRnUERfVdT9FDH3S3u2%2Fgallery-1761002482985.JPG?alt=media&token=58b90f84-7b44-46c6-a819-a0f53f56e410",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-5ViLev6khafiN3alRkoubtivKCf2",
+      "slug": "jah-nyah-spencer-5vilev6k",
+      "image": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artists-thumb%2F2025%2FJah'Nyah-2.jpg?alt=media&token=9afe4e0c-7226-4db0-999f-1de54fdd80eb",
+      "featuredOrder": 48,
+      "visibility": "public",
+      "updatedAt": "2025-09-03T16:41:42.941Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2025,
+        "disciplineKey": "mixed-media",
+        "locationKey": "artist"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2025,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Jah'Nyah Spencer",
+          "discipline": "mixed-media",
+          "bio": "Jah’Nyah Spencer is a Lynn, Massachusetts based illustrator, muralist and creative director, with a strong focus in eccentric portraiture and character design. Currently a full-time student at Lesley University, Spencer’s creative practice is rooted in affirming the identities of marginalized youth, helping them step into their power through representation, storytelling, and self exploration. Her murals often depict empowering stories resembling a shot from an animated show, creating movement, and leaving viewers eager to see what’ll happen next.  Dedicated to bridging gaps in communities, Spencer also works part-time as the Creative Engagement Producer at the Lynn Museum & Art Center, where she directs Final Fridays: an ongoing programming initiative dedicated to empowering the next generation of artists and creatives, actively shaping the arts infrastructure in the city of Lynn, MA. ",
+          "status": "active",
+          "location": {
+            "city": "Lynn, MA",
+            "state": "",
+            "country": "",
+            "display": "Lynn, MA"
+          },
+          "seo": {
+            "title": "Jah'Nyah Spencer · Fusion",
+            "description": "Jah’Nyah Spencer is a Lynn, Massachusetts based illustrator, muralist and creative director, with a strong focus in eccentric portraiture and character design. Currently a full-time student at Lesley "
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.jahnyahstudios.com",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2F5ViLev6khafiN3alRkoubtivKCf2%2Fgallery-1756916336320.png?alt=media&token=42237584-af74-462f-8928-55550f4794c5",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2F5ViLev6khafiN3alRkoubtivKCf2%2Fgallery-1756916356243.png?alt=media&token=b190b872-11fd-4a57-9a85-6be24edf9772",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2F5ViLev6khafiN3alRkoubtivKCf2%2Fgallery-1756916494188.JPG?alt=media&token=0376addb-008f-4758-b72c-10d9f913d64b",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-5rhOuM26ptOHH6HYJYDBRxE6AtB3",
+      "slug": "kiyomi-kimura-5rhoum26",
+      "image": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/profile-images%2F5rhOuM26ptOHH6HYJYDBRxE6AtB3%2Fprofile-1756923214909.png?alt=media&token=a9ba7ff2-0dc1-47ef-91e6-15035f4c2edf",
+      "featuredOrder": 49,
+      "visibility": "public",
+      "updatedAt": "2025-09-03T18:15:45.764Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2026,
+        "disciplineKey": "other",
+        "locationKey": "united-states"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2026,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Kiyomi Kimura",
+          "discipline": "other",
+          "bio": "I am a Japanese-Korean American writer working on my debut novel, a dystopian narrative set in a future where literature and creative thought are endangered. With the mentorship of award-winning novelist Ernesto Mestre, this work is both a protest and a love letter—to the written word, to resistance, and to identity reclaimed.\n\nGrowing up in the United States with a Japanese father and Korean mother, I inherited fragmented versions of their cultures. I often felt like a ghost in both—visible, but not fully seen. When I visited Korea last year with my mother, I felt something begin to reconfigure in my self-understanding. Japan, however, is more complicated. My relationship with my father is strained, and when I distanced myself from him, I unknowingly distanced myself from the culture that shaped him. \n\nReturning to Japan last year on my own terms, I began to reclaim that part of myself, not as his daughter, but as a woman, a writer, and an artist.",
+          "status": "active",
+          "location": {
+            "city": "On the run",
+            "state": "",
+            "country": "United States",
+            "display": "On the run, United States"
+          },
+          "seo": {
+            "title": "Kiyomi Kimura · Fusion",
+            "description": "I am a Japanese-Korean American writer working on my debut novel, a dystopian narrative set in a future where literature and creative thought are endangered. With the mentorship of award-winning novel"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.instagram.com/midnightdice",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2F5rhOuM26ptOHH6HYJYDBRxE6AtB3%2Fgallery-1756922070516.jpg?alt=media&token=1dc11873-06bc-4c19-8bf4-e37e028e6c6f",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2F5rhOuM26ptOHH6HYJYDBRxE6AtB3%2Fgallery-1756922091356.jpg?alt=media&token=18dbd94a-6d64-4247-a101-3259dad36961",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2F5rhOuM26ptOHH6HYJYDBRxE6AtB3%2Fgallery-1756922094529.jpg?alt=media&token=2ce73e4b-7903-47ca-a99c-239705e90a04",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-5yxh1dhRYHQawQ7NhjRPAArKJUG2",
+      "slug": "ren-buenviaje-5yxh1dhr",
+      "image": "https://storage.googleapis.com/fusion-intl.appspot.com/profile-images/5yxh1dhRYHQawQ7NhjRPAArKJUG2.jpg",
+      "featuredOrder": 50,
+      "visibility": "public",
+      "updatedAt": "2026-01-09T19:39:50.531Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2026,
+        "disciplineKey": "photography",
+        "locationKey": "united-states"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2026,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Ren Buenviaje",
+          "discipline": "photography",
+          "bio": "Ren is a photographer, streetwear designer, essayist, and producer/songwriter. She is an avid traveler and her brand Common Skies was inspired by the joy and color of the places she visits. As a photographer, Ren invites you to get to know the subject more intimately, whether a person or place. What has this person done and seen? What has happened here? Her work aims to create inclusive spaces and encourage discovery, eschewing virality for authenticity. ",
+          "status": "active",
+          "location": {
+            "city": "Chicago",
+            "state": "",
+            "country": "United States",
+            "display": "Chicago, United States"
+          },
+          "seo": {
+            "title": "Ren Buenviaje · Fusion",
+            "description": "Ren is a photographer, streetwear designer, essayist, and producer/songwriter. She is an avid traveler and her brand Common Skies was inspired by the joy and color of the places she visits. As a photo"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.common-skies.com",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2F5yxh1dhRYHQawQ7NhjRPAArKJUG2%2Fgallery-1764351866144.jpeg?alt=media&token=a7fa1fd5-dd38-4079-9a53-363e382134cc",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2F5yxh1dhRYHQawQ7NhjRPAArKJUG2%2Fgallery-1764351874420.jpeg?alt=media&token=c8cfb91f-0b2f-4e5d-8537-2f64115b6268",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2F5yxh1dhRYHQawQ7NhjRPAArKJUG2%2Fgallery-1764351970898.jpeg?alt=media&token=8b08d857-949a-4f26-a9ed-e622ba6ffc9e",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-641plqOHW8hwJ1172OJh0k8sM3B3",
+      "slug": "suwichada-busamrong-press-641plqoh",
+      "image": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/profile-images%2F641plqOHW8hwJ1172OJh0k8sM3B3%2Fprofile-1766245581527.jpg?alt=media&token=583d43bb-3fc2-460f-832e-c8fc149e7c62",
+      "featuredOrder": 51,
+      "visibility": "public",
+      "updatedAt": "2025-12-20T15:47:18.162Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2026,
+        "disciplineKey": "other",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2026,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Suwichada Busamrong-Press",
+          "discipline": "other",
+          "bio": "Suwichada is a Thai American artist based in Joshua Tree, California.  She is an interdisciplinary artist who begins by recalling her memories in writings and transfers them into paintings, sculpture and performance.\n\n\"My art practice is focused on expressing the relationship between ourselves and the natural world.   I believe the disconnect between our basic primitive human state and today’s refined human condition is causing unconscious melancholy. \n I construct a visual and emotional space where axiological narratives of pain and beauty intersect.  Translating my experiences and emotions into an immersive visual form helping viewers better understand themselves and the world around them.\"\n",
+          "status": "active",
+          "location": {
+            "city": "Joshua Tree",
+            "state": "",
+            "country": "USA",
+            "display": "Joshua Tree, USA"
+          },
+          "seo": {
+            "title": "Suwichada Busamrong-Press · Fusion",
+            "description": "Suwichada is a Thai American artist based in Joshua Tree, California.  She is an interdisciplinary artist who begins by recalling her memories in writings and transfers them into paintings, sculpture "
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "Https://www.suwichada.com",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2F641plqOHW8hwJ1172OJh0k8sM3B3%2Fgallery-1766245621478.jpg?alt=media&token=bc6d3946-b6b5-4b08-a1a9-a5c0debc2326",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-66NQa5LcL8cHsEZOUERV1P8j9cE2",
+      "slug": "george-baker-66nqa5lc",
+      "image": "",
+      "featuredOrder": 52,
+      "visibility": "public",
+      "updatedAt": "2025-09-04T15:34:26.827Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2026,
+        "disciplineKey": "artist",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2026,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "George Baker",
+          "discipline": "",
+          "bio": "George F. Baker III is an Atlanta-based Muralist, Illustrator, and Public Speaker who infuses a child-like joy into all of his creative endeavors. Over the course of 6 years practicing muralism, he has painted over 50 murals across the United States (as well as a couple in London) and has produced numerous illustrations. Regardless of the medium, he is always eager to offer encouragement to individuals, urging them to embrace their inner-child more in their daily lives. He firmly believes that by doing so, people become the most authentic versions of themselves. ",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "George Baker · Fusion",
+            "description": "George F. Baker III is an Atlanta-based Muralist, Illustrator, and Public Speaker who infuses a child-like joy into all of his creative endeavors. Over the course of 6 years practicing muralism, he ha"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.gfbthree.com/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-F3Uph6Rkrtf8eFNUnMjZEcs3V092",
+      "slug": "jess-fendo-f3uph6rk",
+      "image": "",
+      "featuredOrder": 53,
+      "visibility": "public",
+      "updatedAt": "2025-09-01T20:52:41.821Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2025,
+        "disciplineKey": "painting",
+        "locationKey": "artist"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2025,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Jess Fendo",
+          "discipline": "painting",
+          "bio": "Jess Fendo is a Detroit-based artist and designer whose work bridges brand design and large-scale murals. Her paintings focus on the depth of human experience and emotion, translating raw feeling into bold visual narratives. Whether developing design systems for major brands or bringing color to Detroit’s walls, Jess creates work that connects people through shared stories and vibrant expression.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "",
+            "display": ""
+          },
+          "seo": {
+            "title": "Jess Fendo · Fusion",
+            "description": "Jess Fendo is a Detroit-based artist and designer whose work bridges brand design and large-scale murals. Her paintings focus on the depth of human experience and emotion, translating raw feeling into"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://artbyfendo.com/",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FF3Uph6Rkrtf8eFNUnMjZEcs3V092%2Fgallery-0-1756784158121.jpg?alt=media&token=bb428ffb-789a-4f01-b9f3-b3a46a5a263c",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FF3Uph6Rkrtf8eFNUnMjZEcs3V092%2Fgallery-1-1756784158721.jpg?alt=media&token=40ecbb5b-1667-486a-81d3-319f2e4219dc",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FF3Uph6Rkrtf8eFNUnMjZEcs3V092%2Fgallery-2-1756784159427.jpg?alt=media&token=fcae7ccd-42b9-4709-a61b-09cb3b2ec527",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-I8d4gju2hIhp8P9YMvWchA3SjOJ2",
+      "slug": "hannah-driscoll-i8d4gju2",
+      "image": "https://storage.googleapis.com/fusion-intl.appspot.com/profile-images/I8d4gju2hIhp8P9YMvWchA3SjOJ2.jpg",
+      "featuredOrder": 54,
+      "visibility": "public",
+      "updatedAt": "2025-08-12T03:45:44.449Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2025,
+        "disciplineKey": "visual-arts",
+        "locationKey": "artist"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2025,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Hannah Driscoll",
+          "discipline": "Visual Arts",
+          "bio": "Hannah Driscoll is a Japanese American artist based in Dallas, Texas, whose work explores themes of silent separation and the tension of public spaces. Hannah’s practice is deeply inspired by Japanese and American culture and the complex nuances surrounding isolation and observation. ",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "",
+            "display": ""
+          },
+          "seo": {
+            "title": "Hannah Driscoll · Fusion",
+            "description": "Hannah Driscoll is a Japanese American artist based in Dallas, Texas, whose work explores themes of silent separation and the tension of public spaces. Hannah’s practice is deeply inspired by Japanese"
+          },
+          "links": []
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-IU5w3nyVu4NG5i5DJthWgv6smLW2",
+      "slug": "vic-martinez-iu5w3nyv",
+      "image": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/profile-images%2FIU5w3nyVu4NG5i5DJthWgv6smLW2%2Fprofile-1765256490323.jpeg?alt=media&token=a2595ca8-8289-4c84-ab58-61bfe0fceb3c",
+      "featuredOrder": 55,
+      "visibility": "public",
+      "updatedAt": "2026-01-08T23:02:32.519Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2026,
+        "disciplineKey": "music",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2026,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Vic Martinez",
+          "discipline": "music",
+          "bio": "Vic Martinez, aka FutureVic, has been in PHX punk bands since '94.\nGone Solo, he's now recording and releasing sonic slices of life and its struggles, while offering up hopeful and empowering perspectives in the wake.\nUpbeat and with a surf/skate punk inspired style, his songs drop Old-School knowledge using Nu-Skool hooks.\nWorking album title: Apostate Perorate Resonator\n",
+          "status": "active",
+          "location": {
+            "city": "PHX",
+            "state": "",
+            "country": "USA",
+            "display": "PHX, USA"
+          },
+          "seo": {
+            "title": "Vic Martinez · Fusion",
+            "description": "Vic Martinez, aka FutureVic, has been in PHX punk bands since '94.\nGone Solo, he's now recording and releasing sonic slices of life and its struggles, while offering up hopeful and empowering perspect"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://on.soundcloud.com/U7zPqKWGnu6x1yyCr0",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FIU5w3nyVu4NG5i5DJthWgv6smLW2%2Fgallery-1762581042276.jpeg?alt=media&token=2ae395ce-c2ac-4d42-a960-172a770ebebf",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-JmzOOoa0OOS9ctALZoIsQ1a7VIr2",
+      "slug": "el-jngl-jmzoooa0",
+      "image": "",
+      "featuredOrder": 56,
+      "visibility": "public",
+      "updatedAt": "2026-01-05T20:51:44.197Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2026,
+        "disciplineKey": "artist",
+        "locationKey": "costa-rica"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2026,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "el JNGL",
+          "discipline": "",
+          "bio": "el JNGL (Jose Andres Carmiol), from Limon, Costa Rica, has evolved from a naturally talented youth into a versatile post-modern artist, influenced by a blend of graffiti, fine art, and tattooing traditions. His work, reflecting a wide range of styles and mediums, showcases a journey through personal and musical inspirations. With over fifteen years in tattooing and contributions to international art scenes, he now seeks new opportunities in South Florida, aiming to share his dynamic artistry with a broader audience.",
+          "status": "active",
+          "location": {
+            "city": "Miami / Los Angeles / San Jose ",
+            "state": "",
+            "country": "Costa Rica ",
+            "display": "Miami / Los Angeles / San Jose , Costa Rica "
+          },
+          "seo": {
+            "title": "el JNGL · Fusion",
+            "description": "el JNGL (Jose Andres Carmiol), from Limon, Costa Rica, has evolved from a naturally talented youth into a versatile post-modern artist, influenced by a blend of graffiti, fine art, and tattooing tradi"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.eljngl.com/",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FJmzOOoa0OOS9ctALZoIsQ1a7VIr2%2Fgallery-1767634179993.jpg?alt=media&token=81441199-1558-40e4-9622-7d96937baac3",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FJmzOOoa0OOS9ctALZoIsQ1a7VIr2%2Fgallery-1767634844545.jpg?alt=media&token=f9bc594b-a5a9-4053-9b04-e45a9bcf23b2",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FJmzOOoa0OOS9ctALZoIsQ1a7VIr2%2Fgallery-1767635881421.jpg?alt=media&token=dc385802-a389-46d2-b40b-51d33ddd114f",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-MaW6MobSmPgVCiyJ9Wak6Rlgh933",
+      "slug": "maltese-holder-maw6mobs",
+      "image": "",
+      "featuredOrder": 57,
+      "visibility": "public",
+      "updatedAt": "2025-08-27T17:33:33.958Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2025,
+        "disciplineKey": "artist",
+        "locationKey": "artist"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2025,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Maltese Holder",
+          "discipline": "",
+          "bio": "Maltese Holder is a technical designer and engineer with a background in Public Architecture, who explores the human experience through film photography and life drawing. Inspired by candid moments, Maltese’s street photography captures unguarded glimpses of people and the often-overlooked details of daily life, using the tactile nature of analog cameras to slow down and embrace patience. Their life drawings take a complementary approach, focusing on fleeting emotions and subtleties that photography might miss, creating a body of work that celebrates the raw and unfiltered essence of humanity.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "",
+            "display": ""
+          },
+          "seo": {
+            "title": "Maltese Holder · Fusion",
+            "description": "Maltese Holder is a technical designer and engineer with a background in Public Architecture, who explores the human experience through film photography and life drawing. Inspired by candid moments, M"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.plaiyet.com/about-1",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-NcQZIhETQSQNbFMZ9nFTyQIiGFo1",
+      "slug": "anthony-r-manzo-ncqzihet",
+      "image": "",
+      "featuredOrder": 58,
+      "visibility": "public",
+      "updatedAt": "2025-10-21T22:10:20.362Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2025,
+        "disciplineKey": "mixed-media",
+        "locationKey": "us"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2025,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Anthony R. Manzo",
+          "discipline": "mixed-media",
+          "bio": "Anthony R. Manzo is a graphic designer known for his innovative approach to visual arts. He gained recognition for printing small images on a large scale, effectively transforming everyday visuals into impactful statements. His work was featured in the 2006 \"Art in Odd Places\" festival in New York City, an event that showcases art in unconventional public spaces. Manzo's work often challenges traditional perceptions of scale and context, inviting viewers to engage with familiar images in new and thought-provoking ways.",
+          "status": "active",
+          "location": {
+            "city": "BK",
+            "state": "",
+            "country": "US",
+            "display": "BK, US"
+          },
+          "seo": {
+            "title": "Anthony R. Manzo · Fusion",
+            "description": "Anthony R. Manzo is a graphic designer known for his innovative approach to visual arts. He gained recognition for printing small images on a large scale, effectively transforming everyday visuals int"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "http://www.brooklynpostcards.com",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FNcQZIhETQSQNbFMZ9nFTyQIiGFo1%2Fgallery-1761084542412.jpeg?alt=media&token=9892b43b-dc2d-42fe-bb20-c261259c5106",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FNcQZIhETQSQNbFMZ9nFTyQIiGFo1%2Fgallery-1761084542424.jpeg?alt=media&token=9e7f55be-a40b-4bae-9d37-c2307f7bf380",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FNcQZIhETQSQNbFMZ9nFTyQIiGFo1%2Fgallery-1761084618751.jpg?alt=media&token=73350ba9-d21d-4d82-a37e-0ef4d4bffb35",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-R3C8gRUJAGZunclWKmG3B3KkyLr2",
+      "slug": "austin-wafer-r3c8gruj",
+      "image": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/profile-images%2FR3C8gRUJAGZunclWKmG3B3KkyLr2%2Fprofile-1764206935223.png?alt=media&token=396e1c6c-b4e7-4aa4-956c-529a5719e6fb",
+      "featuredOrder": 59,
+      "visibility": "public",
+      "updatedAt": "2026-01-03T19:27:50.218Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2026,
+        "disciplineKey": "mixed-media",
+        "locationKey": "united-states"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2026,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "austin wafer",
+          "discipline": "mixed-media",
+          "bio": "Louisiana born and Texas raised, Austin Wafer's work spans across \nvarious different mediums. This includes painting, writing, and \nillustration, graphic design and 3D modeling. By not limiting himself to \none form of expression, he's seen his imagination grow to new heights, \nand insists on transporting his audience into a new world filled with \nquestions on the human experience.  \nFrom his sporadically colorful paintings, to his diverse, yet mindful \nwriting and welcoming illustrations, Austin strives to present original \nwork that inspires his audience to create, think, question, and imagine \nthe unimaginable.  ",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "United States",
+            "display": "United States"
+          },
+          "seo": {
+            "title": "austin wafer · Fusion",
+            "description": "Louisiana born and Texas raised, Austin Wafer's work spans across \nvarious different mediums. This includes painting, writing, and \nillustration, graphic design and 3D modeling. By not limiting himsel"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.austinwafer.com/",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FR3C8gRUJAGZunclWKmG3B3KkyLr2%2Fgallery-1765254424652.png?alt=media&token=ed7db733-1d45-4c0c-a367-25013937795f",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FR3C8gRUJAGZunclWKmG3B3KkyLr2%2Fgallery-1765254433029.jpg?alt=media&token=d8624ea8-fbdb-49f8-99e6-f09b72be030a",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FR3C8gRUJAGZunclWKmG3B3KkyLr2%2Fgallery-1765254873516.jpg?alt=media&token=c0d704ad-f91c-4ec7-ae8c-bb973e779d6c",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-UD85EKqWGZQZpLifscwD2YSqIxm1",
+      "slug": "zac-foster-ud85ekqw",
+      "image": "",
+      "featuredOrder": 60,
+      "visibility": "public",
+      "updatedAt": "2025-08-14T15:52:06.630Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2025,
+        "disciplineKey": "painting",
+        "locationKey": "united-states"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2025,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Zac Foster",
+          "discipline": "painting",
+          "bio": "Zac Foster is a dynamic artist whose expertise lies in transforming concepts into accessible and impactful visual narratives. With a focus on composition, craftsmanship, and execution, Zac’s work is both readable and deeply resonant, connecting audiences to his artistic vision. His distinctive illustrative style is malleable, fluid, and uniquely customizable, allowing him to create works that captivate and engage target audiences by drawing them into his intricate designs and compelling compositions.",
+          "status": "active",
+          "location": {
+            "city": "Indianapolis",
+            "state": "",
+            "country": "United States",
+            "display": "Indianapolis, United States"
+          },
+          "seo": {
+            "title": "Zac Foster · Fusion",
+            "description": "Zac Foster is a dynamic artist whose expertise lies in transforming concepts into accessible and impactful visual narratives. With a focus on composition, craftsmanship, and execution, Zac’s work is b"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.bossillustrations.com/",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FUD85EKqWGZQZpLifscwD2YSqIxm1%2Fgallery-0-1756784165003.jpg?alt=media&token=f5a03d26-7be5-47b6-a5f5-7fef90c3425d",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FUD85EKqWGZQZpLifscwD2YSqIxm1%2Fgallery-1-1756784165679.jpg?alt=media&token=1c659805-b6fc-417a-bfbf-a1a1c76b439b",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FUD85EKqWGZQZpLifscwD2YSqIxm1%2Fgallery-2-1756784166400.jpg?alt=media&token=53ea6ce5-ecbb-4920-861d-449c10f839ec",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-Ve28SsWZOFVetnoIV3AFKhysX313",
+      "slug": "alfonso-cervera-ve28sswz",
+      "image": "",
+      "featuredOrder": 61,
+      "visibility": "public",
+      "updatedAt": "2025-09-05T12:12:37.364Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2025,
+        "disciplineKey": "dance",
+        "locationKey": "united-states"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2025,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Alfonso Cervera",
+          "discipline": "dance",
+          "bio": "Alfonso Abraham Cervera is a first-generation Queer Mexican American performer, educator, curator, and artivist. Currently a professor at The Ohio State University, Alfonso’s work bridges Queerness, Ballet Folklorico, and Afro-Latine social dances through a contemporary autobiographical practice known as Poc-Chuc. This inclusive technique has been celebrated for its ability to connect “the sociality of the audience with the isolated frigidity of the concert stage...resulting in a world of untethered Mexican modernity” (Enrique Manuel). In addition to his artistic pursuits, Alfonso is a certified yoga teacher, reiki healer, co-director of the non-profit Show Box L.A., and a founding member of the Primera Generación Dance Collective.",
+          "status": "active",
+          "location": {
+            "city": "Columbus ",
+            "state": "",
+            "country": "United States",
+            "display": "Columbus , United States"
+          },
+          "seo": {
+            "title": "Alfonso Cervera · Fusion",
+            "description": "Alfonso Abraham Cervera is a first-generation Queer Mexican American performer, educator, curator, and artivist. Currently a professor at The Ohio State University, Alfonso’s work bridges Queerness, B"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.cerveraalfonso.com",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FVe28SsWZOFVetnoIV3AFKhysX313%2Fgallery-0-1756784174741.jpg?alt=media&token=29b0b9f1-b2d9-4b38-b758-6fdcbcfccc29",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FVe28SsWZOFVetnoIV3AFKhysX313%2Fgallery-1-1756784175455.jpg?alt=media&token=8549a2f7-7d02-492c-8e5d-84eb9b6beed3",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-YHJNzNbH0Mb5J1sV8JgPX3JkduQ2",
+      "slug": "danielle-dj-laoshi-jadusingh-yhjnznbh",
+      "image": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/profile-images%2FYHJNzNbH0Mb5J1sV8JgPX3JkduQ2%2Fprofile-1763604746951.jpeg?alt=media&token=e433ade8-b5c7-4da2-86a0-27415fb4f70f",
+      "featuredOrder": 62,
+      "visibility": "public",
+      "updatedAt": "2026-01-07T02:20:06.361Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2026,
+        "disciplineKey": "mixed-media",
+        "locationKey": "u-s-a"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2026,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Danielle (DJ-Laoshi) Jadusingh",
+          "discipline": "mixed-media",
+          "bio": "DJ-Laoshi [dee-jay lao-sih] is a multidisciplinary artist who currently lives and works in South Florida. Through mixed media and techniques drawn from diverse realms of visual arts and textiles, she create immersive and interactive experiences that engage, inspire and spark meaningful conversations that resonate across boundaries.\nHer art collections spans various themes, from explorations of social and political issues to personal and intimate journeys that touch on eroticism. These works reflect her love for comic books, politics, current events, and the arts. Her academic pursuits and multicultural upbringing shaped by life in Jamaica, the United States, and the United Kingdom greatly shape the methodology for the approach behind the work.\nFrom 2013 to present, she has had exhibitions in no particular order – Northern Iraq, USA, Switzerland, Italy, Spain, Germany, Japan, Grenada, France and Australia. DJ-Laoshi has been published in various newspapers and comic anthologies between Colombia, Jamaica, China, Australia and the USA over the last 20 years.",
+          "status": "active",
+          "location": {
+            "city": "Plantation",
+            "state": "",
+            "country": "U.S.A",
+            "display": "Plantation, U.S.A"
+          },
+          "seo": {
+            "title": "Danielle (DJ-Laoshi) Jadusingh · Fusion",
+            "description": "DJ-Laoshi [dee-jay lao-sih] is a multidisciplinary artist who currently lives and works in South Florida. Through mixed media and techniques drawn from diverse realms of visual arts and textiles, she "
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://dj-laoshi.com/wp/",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FYHJNzNbH0Mb5J1sV8JgPX3JkduQ2%2Fgallery-1763604840626.jpg?alt=media&token=66fb3e61-2242-47f5-b67b-17faa2dac854",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FYHJNzNbH0Mb5J1sV8JgPX3JkduQ2%2Fgallery-1763604840629.jpeg?alt=media&token=971e1706-dd22-42c3-aad4-c089e5fb0c96",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FYHJNzNbH0Mb5J1sV8JgPX3JkduQ2%2Fgallery-1763604840637.jpeg?alt=media&token=795b2429-b265-4827-9334-1179b0c7070d",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-Yx4JxN3FmEZKGj7989uYfHbCr012",
+      "slug": "rodolfo-rueda-yx4jxn3f",
+      "image": "https://storage.googleapis.com/fusion-intl.appspot.com/profile-images/Yx4JxN3FmEZKGj7989uYfHbCr012.jpg",
+      "featuredOrder": 63,
+      "visibility": "public",
+      "updatedAt": "2025-09-04T15:26:07.873Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2025,
+        "disciplineKey": "music",
+        "locationKey": "peru"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2025,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Rodolfo Rueda",
+          "discipline": "music",
+          "bio": "Rodolfo Rueda is a Peruvian multidisciplinary artist whose work thrives on the unconventional and the unexpected. With a childlike approach to storytelling and an insatiable curiosity for exploring new concepts, Rodolfo’s art defies categorization, constantly morphing between nuanced subtlety and chaotic intricacies. From soft, detailed sonic landscapes to rhythmic confusion and bold visual expressions, his craft embraces the unfamiliar, rejecting traditional academic boundaries in favor of boundless exploration.",
+          "status": "active",
+          "location": {
+            "city": "Lima",
+            "state": "",
+            "country": "Peru",
+            "display": "Lima, Peru"
+          },
+          "seo": {
+            "title": "Rodolfo Rueda · Fusion",
+            "description": "Rodolfo Rueda is a Peruvian multidisciplinary artist whose work thrives on the unconventional and the unexpected. With a childlike approach to storytelling and an insatiable curiosity for exploring ne"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "http://rodolforueda.com/",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FYx4JxN3FmEZKGj7989uYfHbCr012%2Fgallery-0-1756784178122.jpg?alt=media&token=93fddb4f-37df-4c23-b7aa-30f943460729",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FYx4JxN3FmEZKGj7989uYfHbCr012%2Fgallery-1756838572715.JPG?alt=media&token=5fb06c18-5c33-4348-aa51-0d8ffa4deb24",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FYx4JxN3FmEZKGj7989uYfHbCr012%2Fgallery-1756838587032.JPG?alt=media&token=eb3ebc4a-d32e-4ce8-8748-79539c85cda5",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-j2KUS0zoFDd6HucDF7S8sqlS2CZ2",
+      "slug": "hector-velderraint-j2kus0zo",
+      "image": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/profile-images%2Fj2KUS0zoFDd6HucDF7S8sqlS2CZ2%2Fprofile-1760465829033.JPG?alt=media&token=7d039057-1b60-4230-ad17-281ddd6f06ae",
+      "featuredOrder": 64,
+      "visibility": "public",
+      "updatedAt": "2025-10-16T02:17:43.961Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2026,
+        "disciplineKey": "painting",
+        "locationKey": "united-states"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2026,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Hector Velderraint",
+          "discipline": "painting",
+          "bio": "Hello all, my name is Hector and im a 31 year old from the Coachella Valley. I did take some art classes from middle school to high school and even some college courses for screenprint and printmaking but I have lots of experience in drawing and painting. I also dabble in toy making, rug making, clay sculptures, print making and even do graphic design and  merchandise designing for companies and other artists/brands. I've been doing art professionally since around 2014 but I've been creating, all my life. I got a chance to help paint some murals for Coachella fest last year and I've helped another artist in this years exhibition of  DESERTX , and helped artists for jobs for \"Volkswagen\" and \"LA Clippers\" but I have done so many cool shows and festivals along the way. I am very inspired by the \"old world\" and visionary styles. My work is kind of psychedelic at times but I am always looking to learn and am a student of life. I am super friendly and easy going, so when you see me come say hi! I will be coming out to throw some paint around and hope I get a chance to collaborate with as many talented individuals as possible. See you in Japan (:",
+          "status": "active",
+          "location": {
+            "city": "Cathedral city",
+            "state": "",
+            "country": "United States",
+            "display": "Cathedral city, United States"
+          },
+          "seo": {
+            "title": "Hector Velderraint · Fusion",
+            "description": "Hello all, my name is Hector and im a 31 year old from the Coachella Valley. I did take some art classes from middle school to high school and even some college courses for screenprint and printmaking"
+          },
+          "links": [],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2Fj2KUS0zoFDd6HucDF7S8sqlS2CZ2%2Fgallery-1760473849369.jpg?alt=media&token=547718c7-b9f5-4ca1-a7ab-5c9c4ee777d6",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2Fj2KUS0zoFDd6HucDF7S8sqlS2CZ2%2Fgallery-1760473856991.PNG?alt=media&token=f250548d-5961-4084-acde-692a67bd855c",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2Fj2KUS0zoFDd6HucDF7S8sqlS2CZ2%2Fgallery-1760473861882.PNG?alt=media&token=a220fc41-5fc0-4e8b-9381-3163310acec3",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-kh1PrUcCbbeSpdUpKMYYsx78OOv2",
+      "slug": "tatiana-morejon-kh1prucc",
+      "image": "",
+      "featuredOrder": 65,
+      "visibility": "public",
+      "updatedAt": "2025-09-02T13:44:39.794Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2025,
+        "disciplineKey": "painting",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2025,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Tatiana Morejon",
+          "discipline": "painting",
+          "bio": "Tatiana Morejon, born and raised in the city of Miami, Florida, reimagines cultural stories and mythologies, celebrating the richness and diversity of minority experiences. By positioning underrepresented individuals as central figures in mythological narratives, she challenges traditional portrayals and redefines their significance in history. Through her art, Tatiana invites viewers to see these cultures not as marginalized, but as vibrant, integral threads in the larger human narrative, offering a fresh perspective on their timeless importance.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Tatiana Morejon · Fusion",
+            "description": "Tatiana Morejon, born and raised in the city of Miami, Florida, reimagines cultural stories and mythologies, celebrating the richness and diversity of minority experiences. By positioning underreprese"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.instagram.com/__museofthesouth.gallery?igsh=MXdzMmoyNDRtOHVqMA%3D%3D&utm_source=qr",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2Fkh1PrUcCbbeSpdUpKMYYsx78OOv2%2Fgallery-0-1756784181106.jpg?alt=media&token=0038fa3d-072e-4064-9619-53f80e045542",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2Fkh1PrUcCbbeSpdUpKMYYsx78OOv2%2Fgallery-1-1756784182088.jpg?alt=media&token=d272eceb-b152-404d-b6aa-59c2091500a5",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2Fkh1PrUcCbbeSpdUpKMYYsx78OOv2%2Fgallery-1756820399072.jpeg?alt=media&token=cd52b4b4-9f11-43ba-ab6f-854eaa8c081f",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-ky4xDkHUzUZOSpnu6aF4dR7rD5A2",
+      "slug": "tessa-carson-ky4xdkhu",
+      "image": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artists-thumb%2F2025%2Ftessa.jpg?alt=media&token=bd2ca4b6-19c1-4752-8c09-2d8598c60fcc",
+      "featuredOrder": 66,
+      "visibility": "public",
+      "updatedAt": "2025-09-02T19:55:29.594Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2025,
+        "disciplineKey": "sculpture",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2025,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Tessa Carson",
+          "discipline": "sculpture",
+          "bio": "Tessa Carson is a sculptor whose work explores the interplay between the material and the metaphysical, using art as a means of grounding their expansive internal world within the shared reality of human experience. Their sculptures serve as a bridge between discomfort, trauma, and complex emotions, approached with humor and a light touch, creating an intimate dialogue between themself and the viewer.",
+          "status": "active",
+          "location": {
+            "city": "Tucson",
+            "state": "",
+            "country": "USA",
+            "display": "Tucson, USA"
+          },
+          "seo": {
+            "title": "Tessa Carson · Fusion",
+            "description": "Tessa Carson is a sculptor whose work explores the interplay between the material and the metaphysical, using art as a means of grounding their expansive internal world within the shared reality of hu"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://tecarson.com/",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2Fky4xDkHUzUZOSpnu6aF4dR7rD5A2%2Fgallery-1756842821113.jpeg?alt=media&token=fb9424c2-05d6-48ff-87b1-f5c074d75486",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2Fky4xDkHUzUZOSpnu6aF4dR7rD5A2%2Fgallery-1756842821119.jpeg?alt=media&token=374bc79d-e4ee-431d-86a6-e470245b57e6",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2Fky4xDkHUzUZOSpnu6aF4dR7rD5A2%2Fgallery-1756842821120.jpeg?alt=media&token=215e2c51-5856-4b83-89e7-5987ffa16728",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-lOb5Xx6R1vdy0wg0wxUF89ImdtB2",
+      "slug": "tashonda-wright-lob5xx6r",
+      "image": "",
+      "featuredOrder": 67,
+      "visibility": "public",
+      "updatedAt": "2025-09-10T16:32:43.245Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2025,
+        "disciplineKey": "artist",
+        "locationKey": "united-states"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2025,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Tashonda Wright",
+          "discipline": "",
+          "bio": "Tashonda (Sephine) Wright is a multidisciplinary artist and educator with a diverse background in traditional and contemporary art forms. A graduate of Central Piedmont Community College (AA) and Appalachian State University (BFA), Tashonda also studied traditional painting at the China Academy of Art in Hangzhou, China. While trained in traditional painting, her artistic practice spans digital painting, comics, sculpting, printmaking, videography, music, and dance, reflecting her belief that expression and experiences take many forms. She approaches each medium as a dialogue, allowing the art itself to reveal meaning and guide her understanding of self and surroundings.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "United States",
+            "display": "United States"
+          },
+          "seo": {
+            "title": "Tashonda Wright · Fusion",
+            "description": "Tashonda (Sephine) Wright is a multidisciplinary artist and educator with a diverse background in traditional and contemporary art forms. A graduate of Central Piedmont Community College (AA) and Appa"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.sephenieart.com/",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FlOb5Xx6R1vdy0wg0wxUF89ImdtB2%2Fgallery-1757521263189.JPG?alt=media&token=b0a5465c-81df-4f78-90de-3d439608eb56",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FlOb5Xx6R1vdy0wg0wxUF89ImdtB2%2Fgallery-1757521296803.JPG?alt=media&token=574926da-8dd0-4a0d-a3f5-bc217c1f39b1",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FlOb5Xx6R1vdy0wg0wxUF89ImdtB2%2Fgallery-1757521328059.jpg?alt=media&token=4ce8f17e-a038-4b9a-9077-3d10d3b20776",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-mvcmzZHQJkTL0lAPT9p0GnYOJFE2",
+      "slug": "jade-van-den-hout-mvcmzzhq",
+      "image": "https://storage.googleapis.com/fusion-intl.appspot.com/profile-images/mvcmzZHQJkTL0lAPT9p0GnYOJFE2.jpg",
+      "featuredOrder": 68,
+      "visibility": "public",
+      "updatedAt": "2025-08-31T15:55:58.353Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2025,
+        "disciplineKey": "dance",
+        "locationKey": "tilburg"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2025,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Jade van den Hout",
+          "discipline": "dance",
+          "bio": "Jade is active as a performer, maker and teacher working at the intersection of movement, interaction, and experience. Her practice weaves between various activities but always returns to dance and a deep curiosity about human connection and communication. She began her dance education at Fontys Art Academy (2010–2014), which led her to the Fighting Monkey practice (2015–present), a major influence on her approach to movement and embodiment. For the past ten years Jade has been a core-member of The100Hands, known for its interactive and site-specific work. Jade is currently developing her own artistic voice, creating accessible, transformative spaces that explore themes of social connection, wonder, and shared experience. Her work invites audiences into interactive performances and informal settings—spaces designed to spark curiosity, openness, and new encounters. Since 2021 she has been immersed in the project Cracking the Shell of Dance—an ongoing exploration into the origins of the motivation to dance.",
+          "status": "active",
+          "location": {
+            "city": "Netherlands",
+            "state": "",
+            "country": "Tilburg",
+            "display": "Netherlands, Tilburg"
+          },
+          "seo": {
+            "title": "Jade van den Hout · Fusion",
+            "description": "Jade is active as a performer, maker and teacher working at the intersection of movement, interaction, and experience. Her practice weaves between various activities but always returns to dance and a "
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.jadevandenhout.com/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-nh5DHZ1oz0R1OYCBNjvjpe8CQaw1",
+      "slug": "pascale-blanchard-nh5dhz1o",
+      "image": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artists-thumb%2F2025%2FPascale.jpg?alt=media&token=630edfc3-5c12-4efd-b79b-a88d59eec2aa",
+      "featuredOrder": 69,
+      "visibility": "public",
+      "updatedAt": "2025-09-03T02:46:42.769Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2025,
+        "disciplineKey": "ceramics",
+        "locationKey": "artist"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2025,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Pascale Blanchard",
+          "discipline": "Ceramics",
+          "bio": "Pascale Blanchard is a multidisciplinary artist whose practice revolves around the exploration of the line as an independent entity, much like a living form—be it a person, a tree, or a flower. Working primarily with porcelain, she adapts her techniques based on emotional states and the dynamics of collaboration, embracing both structure and spontaneity in her process. Her curiosity extends to a wide range of materials, from the fragility of paper to the impermanence of lines drawn in sand, each chosen for its unique ability to reveal transformation and tension.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "",
+            "display": ""
+          },
+          "seo": {
+            "title": "Pascale Blanchard · Fusion",
+            "description": "Pascale Blanchard is a multidisciplinary artist whose practice revolves around the exploration of the line as an independent entity, much like a living form—be it a person, a tree, or a flower. Workin"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.LaPascale.com",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2Fnh5DHZ1oz0R1OYCBNjvjpe8CQaw1%2Fgallery-1756867595942.jpg?alt=media&token=27a18553-c0d8-4e9c-9e71-51c97916f5c2",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-oI4DgCx2ckbhUNqL5BG8JKDAGsf1",
+      "slug": "priscilla-cabrera-oi4dgcx2",
+      "image": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/profile-images%2FoI4DgCx2ckbhUNqL5BG8JKDAGsf1%2Fprofile-1765495108121.JPG?alt=media&token=f12670a8-365f-4ece-b196-ef61bedeabc3",
+      "featuredOrder": 70,
+      "visibility": "public",
+      "updatedAt": "2025-12-11T23:18:29.142Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2026,
+        "disciplineKey": "painting",
+        "locationKey": "united-states"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2026,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Priscilla Cabrera",
+          "discipline": "painting",
+          "bio": "I am a Mexican American artist based in Orange County, CA, and a recent graduate of California State University, Long Beach. I specialize in creating vibrant, custom murals that bring spaces to life, working on both residential and commercial projects. Whether it’s a bold mural or a thoughtful design project, I am passionate about creating visually compelling pieces that leave a lasting impression.",
+          "status": "active",
+          "location": {
+            "city": "Westminster",
+            "state": "",
+            "country": "United States",
+            "display": "Westminster, United States"
+          },
+          "seo": {
+            "title": "Priscilla Cabrera · Fusion",
+            "description": "I am a Mexican American artist based in Orange County, CA, and a recent graduate of California State University, Long Beach. I specialize in creating vibrant, custom murals that bring spaces to life, "
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://sunshinerainz.myportfolio.com/work",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FoI4DgCx2ckbhUNqL5BG8JKDAGsf1%2Fgallery-1765222972179.jpg?alt=media&token=2dd28e25-b3be-4f01-974a-57190ef88399",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FoI4DgCx2ckbhUNqL5BG8JKDAGsf1%2Fgallery-1765223046830.jpg?alt=media&token=accfd771-383f-4e44-b350-e5425b4834ef",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FoI4DgCx2ckbhUNqL5BG8JKDAGsf1%2Fgallery-1765223219580.png?alt=media&token=f107971f-fc43-48c3-877c-4d7a7f23bf28",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-p496CnX0QQho1zWgCJ7fgpGezfC3",
+      "slug": "alexis-johnson-p496cnx0",
+      "image": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/profile-images%2Fp496CnX0QQho1zWgCJ7fgpGezfC3%2Fprofile-1757207459616.jpeg?alt=media&token=ea27f487-d32e-4602-9ea4-a233cf5532f4",
+      "featuredOrder": 71,
+      "visibility": "public",
+      "updatedAt": "2025-09-07T03:07:10.107Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2025,
+        "disciplineKey": "mixed-media",
+        "locationKey": "artist"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2025,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Alexis Johnson",
+          "discipline": "mixed-media",
+          "bio": "Alexis Johnson is an artist and creator whose work explores the fluid and ever-evolving landscapes of identity, emotion, and transformation. Raised in a small shoreline town in Connecticut, Alexis’s lifelong connection to art began with an early scholarship to study oil painting, evolving into an insatiable desire to learn and experiment across multiple disciplines. Although life initially led her away from the arts, Alexis’s journey through International Affairs, Anthropology, and a master’s degree in International Human Rights Law ultimately brought her back to art as a means of discovery, exploration, and emotional expression.",
+          "status": "active",
+          "location": {
+            "city": "Old Saybrook",
+            "state": "",
+            "country": "",
+            "display": "Old Saybrook"
+          },
+          "seo": {
+            "title": "Alexis Johnson · Fusion",
+            "description": "Alexis Johnson is an artist and creator whose work explores the fluid and ever-evolving landscapes of identity, emotion, and transformation. Raised in a small shoreline town in Connecticut, Alexis’s l"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.alexisvictoriajohnson.com/",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2Fp496CnX0QQho1zWgCJ7fgpGezfC3%2Fgallery-1757207632784.jpeg?alt=media&token=eddda9df-d8bf-4a55-9815-17ee9ab4e974",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2Fp496CnX0QQho1zWgCJ7fgpGezfC3%2Fgallery-1757207632785.jpeg?alt=media&token=d4fa5096-23e1-45ac-9228-44e1352f7514",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2Fp496CnX0QQho1zWgCJ7fgpGezfC3%2Fgallery-1757214423511.jpeg?alt=media&token=55b751b6-e252-4640-86a4-40090e95b5af",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-pg2lZPmCxFNci1OcibOMBnFCH5Q2",
+      "slug": "yumi-tateno-pg2lzpmc",
+      "image": "",
+      "featuredOrder": 72,
+      "visibility": "public",
+      "updatedAt": "2025-08-12T03:21:03.280Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2025,
+        "disciplineKey": "illustrator",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2025,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Yumi Tateno",
+          "discipline": "Illustrator",
+          "bio": "Yumi is an illustrator with a special interest in Visual Development and character design with a focus on costume design. They specialize in watercolor, gothic themes, and exploring queer identity through their art.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "USA",
+            "display": "USA"
+          },
+          "seo": {
+            "title": "Yumi Tateno · Fusion",
+            "description": "Yumi is an illustrator with a special interest in Visual Development and character design with a focus on costume design. They specialize in watercolor, gothic themes, and exploring queer identity thr"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.yumi-illustration.com/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-qCGobVQkr7MVGi6FmmxXPND4DrC2",
+      "slug": "melissa-jean-charles-qcgobvqk",
+      "image": "",
+      "featuredOrder": 73,
+      "visibility": "public",
+      "updatedAt": "2025-09-03T17:31:58.467Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2025,
+        "disciplineKey": "digital",
+        "locationKey": "artist"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2025,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Melissa Jean-Charles",
+          "discipline": "digital",
+          "bio": "Melissa Jean-Charles is a photographer and content creator with roots in Guyana and Haiti, born and raised in Newark, NJ. Melissa’s love for photography began in middle school when she received her first digital camera. She quickly became the class photographer, documenting moments and creating scrapbooks adorned with her signature doodles. This passion for storytelling guided her to William Paterson University, where she majored in media production. Today, Melissa’s brand, Guyatian Narrative, is a blend of her cultural heritage and dedication to capturing portraits, events, and landscapes that amplify voices and tell meaningful stories.",
+          "status": "active",
+          "location": {
+            "city": "",
+            "state": "",
+            "country": "",
+            "display": ""
+          },
+          "seo": {
+            "title": "Melissa Jean-Charles · Fusion",
+            "description": "Melissa Jean-Charles is a photographer and content creator with roots in Guyana and Haiti, born and raised in Newark, NJ. Melissa’s love for photography began in middle school when she received her fi"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://guyatiannarrative.wixsite.com/mysite",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FqCGobVQkr7MVGi6FmmxXPND4DrC2%2Fgallery-1756912985828.jpg?alt=media&token=75a680d6-149b-4399-ac81-0337d63b691e",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FqCGobVQkr7MVGi6FmmxXPND4DrC2%2Fgallery-1756913506217.jpg?alt=media&token=4e140edf-dfa1-4849-aed5-6deca3394cc2",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FqCGobVQkr7MVGi6FmmxXPND4DrC2%2Fgallery-1756913521521.jpg?alt=media&token=a5e4c317-addc-4ddb-be6f-45961ceefd02",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-tcR8G6dAxqXDMg6lboJVv2tihve2",
+      "slug": "graciela-cassel-tcr8g6da",
+      "image": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/profile-images%2FtcR8G6dAxqXDMg6lboJVv2tihve2%2Fprofile-1765565821809.png?alt=media&token=876d6e3a-1303-44a3-91aa-1f2f778cacc7",
+      "featuredOrder": 74,
+      "visibility": "public",
+      "updatedAt": "2025-12-12T18:57:04.909Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2026,
+        "disciplineKey": "mixed-media",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2026,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Graciela Cassel",
+          "discipline": "mixed-media",
+          "bio": "Graciela Cassel, originally from Buenos Aires, Argentina, is a multidisciplinary artist living in New York City. She received a Bachelor of Arts from the University of Buenos Aires, a Master’s in Education from Yeshiva University, a Master of Arts in Studio Art from New York University, and a Master of Fine Arts from the School of Visual Arts.\nCassel’s works are in the collections of Citibank NY, NewSeguros (Brazil) Museo del Grabado (Buenos Aires) Shunck Collection, (Nederland) Lilac Museum (New York) Blue Brothers Collection, (New York) Her work is also in private collections in Argentina, Colombia and Brazil. \nCassel has received numerous accolades, including the 2022 NYFA Work Award, the Altamira Museum Fellowship, and fellowships with organizations like the Queens Botanical Garden and Anklave. She was also awarded a New York Historical Society fellowship in 2020 and was a Queens Council Grantee in 2016 and 2020. She participated in residencies at Residency Unlimited in 2016 and the Lower Manhattan Council for the Arts in 2024.\nCassel's work has been exhibited at the Bartow-Pell Mansion Museum in 2025-2026, Art on Paper Fair, the Museo de la Naturaleza in Cantabria, Spain, in 2023, and at Brooklyn's Urban Glass Gallery in 2020. It was also showcased at Museo del Barrio in 2016 and at Weather the Weather, Hall of Science in New York in 2019. She held solo exhibitions at NYLAAT Governors Island in 2023 and the Lilac Museum Ship in 2022. Her work was featured in prominent events like Nuit Blanche Paris in 2023 and the Venice Biennial in 2024. \n",
+          "status": "active",
+          "location": {
+            "city": "Long Island City",
+            "state": "",
+            "country": "USA",
+            "display": "Long Island City, USA"
+          },
+          "seo": {
+            "title": "Graciela Cassel · Fusion",
+            "description": "Graciela Cassel, originally from Buenos Aires, Argentina, is a multidisciplinary artist living in New York City. She received a Bachelor of Arts from the University of Buenos Aires, a Master’s in Educ"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.gracielacassel.com",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FtcR8G6dAxqXDMg6lboJVv2tihve2%2Fgallery-0-1756784188007.jpg?alt=media&token=2ebfd8ff-802d-4d39-b216-f97a07cc782e",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FtcR8G6dAxqXDMg6lboJVv2tihve2%2Fgallery-1-1756784188882.jpg?alt=media&token=596119b1-cb18-4915-904c-0ab6ca812482",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FtcR8G6dAxqXDMg6lboJVv2tihve2%2Fgallery-2-1756784189587.jpg?alt=media&token=d7ce48c8-1814-4c0a-8c62-7110c1e6be71",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-uWTzPexeEwWYHYdE3EEip7Wfjpu2",
+      "slug": "dominique-hollis-uwtzpexe",
+      "image": "https://storage.googleapis.com/fusion-intl.appspot.com/profile-images/uWTzPexeEwWYHYdE3EEip7Wfjpu2.jpg",
+      "featuredOrder": 75,
+      "visibility": "public",
+      "updatedAt": "2025-09-09T00:52:19.553Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2025,
+        "disciplineKey": "artist",
+        "locationKey": "united-states"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2025,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Dominique Hollis",
+          "discipline": "",
+          "bio": "Dominique is a Philadelphia based multi-modal artist who practices printmaking, ceramics, and painting. As a conceptual artist, Dominique uses these mediums to explore concepts of identity and social ecosystems. Dominique received their BS in Anthropology and BFA in Art education from the University of West Georgia. They later graduated from the University of Michigan with their MSW. Dominique creates art to transmute abstract experiences explored in their work as a grief therapist and culture worker. Through their art, they aim to engage their audience to explore their orientation in the world. ",
+          "status": "active",
+          "location": {
+            "city": "Philadelphia",
+            "state": "",
+            "country": "United States",
+            "display": "Philadelphia, United States"
+          },
+          "seo": {
+            "title": "Dominique Hollis · Fusion",
+            "description": "Dominique is a Philadelphia based multi-modal artist who practices printmaking, ceramics, and painting. As a conceptual artist, Dominique uses these mediums to explore concepts of identity and social "
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.folxhealth.com/ad-pages/mental-health-google?utm_source=google&utm_medium=paidsearch&utm_campaign=NB-LGBTQMentalHealth-Broad&utm_term=lgbt%20psychiatrist&utm_content=9007307&gad_source=1&gad_campaignid=20416245575&gbraid=0AAAAACKk9pfs2llst9MZxEucNJf5bvYr9&gclid=CjwKCAjw_fnFBhB0EiwAH_MfZuuzKd45lJ460BA3R2ubiCf975sSRPpdMUEde0jP0a3OfmCYlABXPBoCB4gQAvD_BwE",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FuWTzPexeEwWYHYdE3EEip7Wfjpu2%2Fgallery-1757377493286.jpg?alt=media&token=48ce9220-a159-454b-a011-1d1cfd00f650",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FuWTzPexeEwWYHYdE3EEip7Wfjpu2%2Fgallery-1757377493360.jpg?alt=media&token=e564546f-af59-484b-9088-7259b0bc9e76",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FuWTzPexeEwWYHYdE3EEip7Wfjpu2%2Fgallery-1757377493380.jpg?alt=media&token=2c5569df-cc10-4715-bb6e-16df491656a8",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-udF5ze8QaOOWTy9O98zUOyFWakR2",
+      "slug": "vidushi-gupta-udf5ze8q",
+      "image": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/profile-images%2FudF5ze8QaOOWTy9O98zUOyFWakR2%2Fprofile-1767690035559.jpg?alt=media&token=0d33d5f6-8645-4aa9-8298-3e5e9ce18aa7",
+      "featuredOrder": 76,
+      "visibility": "public",
+      "updatedAt": "2026-01-06T09:11:00.375Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2026,
+        "disciplineKey": "mixed-media",
+        "locationKey": "india-uk"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2026,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Vidushi Gupta",
+          "discipline": "mixed-media",
+          "bio": "I make work that often begins with ordinary things, a cup left behind, a room filled with light, an object that has already served its purpose. I’m drawn to what remains after the main event: the trace, the pause, the slightly uncanny feeling that something has happened here.\nMy practice moves between surreal painting, sculpture, and installation. Painting is where my thinking first takes shape. My current paintings lean into surreal, dreamlike spaces where colour, distortion, and atmosphere take precedence over realism. They aren’t scenes so much as states, built from intuition, memory, and subconscious associations rather than logic or narrative.\nAlongside painting, I work with everyday materials and functional objects-glasses, disposables, light, interested in how they hold quiet histories. Once removed from their original use, these objects shift from background to presence. I like that tension: between usefulness and stillness, intention and accident, familiarity and strangeness.\nI’m less interested in explaining meaning than in creating moments of attention. My work asks viewers to slow down, to notice something slightly off or unexpectedly tender. Often the work only fully exists in the encounter, completed by the viewer’s own memories, mood, or distractions.",
+          "status": "active",
+          "location": {
+            "city": "Delhi, London",
+            "state": "",
+            "country": "India, UK",
+            "display": "Delhi, London, India, UK"
+          },
+          "seo": {
+            "title": "Vidushi Gupta · Fusion",
+            "description": "I make work that often begins with ordinary things, a cup left behind, a room filled with light, an object that has already served its purpose. I’m drawn to what remains after the main event: the trac"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "http://zincwhitestudio.com",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FudF5ze8QaOOWTy9O98zUOyFWakR2%2Fgallery-1767690061365.jpg?alt=media&token=6da1f704-4eb9-456e-9918-bfc435616bb1",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FudF5ze8QaOOWTy9O98zUOyFWakR2%2Fgallery-1767690072551.jpg?alt=media&token=95f3faa1-dc8f-4859-a9d5-3bc881cbc296",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FudF5ze8QaOOWTy9O98zUOyFWakR2%2Fgallery-1767690084436.jpg?alt=media&token=1d3def94-3d66-4319-bcf5-398de0212965",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-vMt381hXlmQXa7TVGDSLxmXTeR43",
+      "slug": "megumi-ohata-vmt381hx",
+      "image": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/profile-images%2FvMt381hXlmQXa7TVGDSLxmXTeR43%2Fprofile-1757451364285.jpg?alt=media&token=27244e2e-87ad-4bb9-a0b6-fca708adb121",
+      "featuredOrder": 77,
+      "visibility": "public",
+      "updatedAt": "2025-12-17T22:21:59.659Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2026,
+        "disciplineKey": "sculpture",
+        "locationKey": "united-kingdom"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2026,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Megumi Ohata",
+          "discipline": "sculpture",
+          "bio": "Megumi Ohata is a London-based interdisciplinary artist and special effects practitioner with Japanese and Korean roots. They create hyperreal, wearable sculptures from artificial skin textiles imprinted from their own skin. Framing the body as a living archive, Ohata’s practice examines body memory, dissociation, and care through posthuman perspectives shaped by lived experiences of child abuse, gender struggle and racialised discrimination. Using prosthetics and SFX methodologies, they stage installations where wearable skin-objects and life-sized forms converge, drawing on Japanese yōkai folklore and shapeshifting to imagine hybrid bodies and alternative embodiments. Skin functions as both surface and threshold; by reconfiguring seams and interfaces, Ohata blurs boundaries between self and other, human and non-human, material and body. These environments invite intimacy and calibrated touch, rehearsing the ethics of contact. For Ohata, art is an extension of the body, holding trauma and transformation while asking: What makes a body relatable?",
+          "status": "active",
+          "location": {
+            "city": "London",
+            "state": "",
+            "country": "United Kingdom",
+            "display": "London, United Kingdom"
+          },
+          "seo": {
+            "title": "Megumi Ohata · Fusion",
+            "description": "Megumi Ohata is a London-based interdisciplinary artist and special effects practitioner with Japanese and Korean roots. They create hyperreal, wearable sculptures from artificial skin textiles imprin"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.megumiohata.com/",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FvMt381hXlmQXa7TVGDSLxmXTeR43%2Fgallery-1757539218121.jpg?alt=media&token=a8bc1069-6b2d-44dc-b162-7669caa08c80",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FvMt381hXlmQXa7TVGDSLxmXTeR43%2Fgallery-1757539273640.jpg?alt=media&token=4adf55c4-081e-43b0-a0d2-e28c15fc8609",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FvMt381hXlmQXa7TVGDSLxmXTeR43%2Fgallery-1757539299714.jpg?alt=media&token=6706c4bf-a989-44be-a61b-0e76116717ef",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-wBUYOmX6m9TLEtlQe1S6uI60ZK23",
+      "slug": "nada-hatamleh-wbuyomx6",
+      "image": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/profile-images%2FwBUYOmX6m9TLEtlQe1S6uI60ZK23%2Fprofile-1764100153364.jpeg?alt=media&token=ef68123c-b1c9-4597-bd19-58f30146b6d1",
+      "featuredOrder": 78,
+      "visibility": "public",
+      "updatedAt": "2025-11-25T20:05:03.228Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2026,
+        "disciplineKey": "other",
+        "locationKey": "united-states"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2026,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Nada Hatamleh",
+          "discipline": "other",
+          "bio": "Nada Hatamleh is an emerging Jordanian American designer whose work bridges architecture, travel photography, sketching, and collage to explore how environments grow, decay, and remember. Her practice centers on material memory, adaptive landscapes, and the ways culture and community shape spatial identity. Through her multidisciplinary approach, she investigates how design can honor the past while imagining new forms of connection and belonging.",
+          "status": "active",
+          "location": {
+            "city": "Manhattan, Kansas, United States",
+            "state": "",
+            "country": "United States",
+            "display": "Manhattan, Kansas, United States, United States"
+          },
+          "seo": {
+            "title": "Nada Hatamleh · Fusion",
+            "description": "Nada Hatamleh is an emerging Jordanian American designer whose work bridges architecture, travel photography, sketching, and collage to explore how environments grow, decay, and remember. Her practice"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://archofnh.com/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-yF2WCGJs7hYd7CuGr2HeNZPSEd63",
+      "slug": "lady-pluuto-yf2wcgjs",
+      "image": "https://storage.googleapis.com/fusion-intl.appspot.com/profile-images/yF2WCGJs7hYd7CuGr2HeNZPSEd63.jpg",
+      "featuredOrder": 79,
+      "visibility": "public",
+      "updatedAt": "2025-08-12T16:59:09.030Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2025,
+        "disciplineKey": "painting",
+        "locationKey": "united-states"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2025,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Lady Pluuto",
+          "discipline": "painting",
+          "bio": "Lady Pluuto is a self taught artist based in Spartanburg, SC. Her style of artwork is inspired by Japanese anime and kawaii culture. Through her love of painting, Lady Pluuto uses her creative process to explore her subconscious mind using different mediums: acrylic, digital, oil, watercolor, gouache, and murals. She expresses herself through spiritual symbolism, dreamlike themes and the color Pink.\n\nThrough her art, she hopes to inspire others to reflect on the creation of their authentic selves.",
+          "status": "active",
+          "location": {
+            "city": "Spartanburg",
+            "state": "",
+            "country": "United States",
+            "display": "Spartanburg, United States"
+          },
+          "seo": {
+            "title": "Lady Pluuto · Fusion",
+            "description": "Lady Pluuto is a self taught artist based in Spartanburg, SC. Her style of artwork is inspired by Japanese anime and kawaii culture. Through her love of painting, Lady Pluuto uses her creative process"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.ladypluuto.com/",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FyF2WCGJs7hYd7CuGr2HeNZPSEd63%2Fgallery-0-1756784192286.jpg?alt=media&token=1bd83abd-5253-4330-aaa2-27689bbaccae",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FyF2WCGJs7hYd7CuGr2HeNZPSEd63%2Fgallery-1-1756784193114.jpg?alt=media&token=39429436-fbc2-4a18-9562-78b9a0c5b738",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FyF2WCGJs7hYd7CuGr2HeNZPSEd63%2Fgallery-2-1756784193797.jpg?alt=media&token=4be64ccf-140d-447c-895d-79d6d7870bcb",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-yLe4A7pEzWO76gbsAei5SYxYeIN2",
+      "slug": "bria-strothers-yle4a7pe",
+      "image": "",
+      "featuredOrder": 80,
+      "visibility": "public",
+      "updatedAt": "2025-08-31T22:00:57.723Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2025,
+        "disciplineKey": "other",
+        "locationKey": "usa"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2025,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Bria Strothers",
+          "discipline": "other",
+          "bio": "Bria Strothers is a writer/comic creator of speculative and romance stories who is currently based in the Bronx, New York. Her work has appeared in *midnight & indigo’s* Speculative/Horror edition, *Apparition Literary Magazine’s* Issue 5: Resistance, the Ringo-nominated comic anthology *Hairology*, and *The Water Behind Us* by Porchwater Press. Bria explores narratives centered on Blackness as myth, crafting her own archive of mythologies through projects like her short story collection *For Dark Figures vol. 1* and her comic *The Serpent’s Daughter*. She holds an MFA in Creative Writing from Pratt Institute.",
+          "status": "active",
+          "location": {
+            "city": "Bronx, NY",
+            "state": "",
+            "country": "USA",
+            "display": "Bronx, NY, USA"
+          },
+          "seo": {
+            "title": "Bria Strothers · Fusion",
+            "description": "Bria Strothers is a writer/comic creator of speculative and romance stories who is currently based in the Bronx, New York. Her work has appeared in *midnight & indigo’s* Speculative/Horror edition, *A"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.fordarkfigures.com/",
+              "label": "Website"
+            }
+          ]
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-ysRZaHOi1YRt3WPKRy9dzV39QPA3",
+      "slug": "isaac-caruso-ysrzahoi",
+      "image": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/profile-images%2FysRZaHOi1YRt3WPKRy9dzV39QPA3%2Fprofile-1758300074674.jpg?alt=media&token=48f3c0ae-f13e-4cae-9a66-217aa97663aa",
+      "featuredOrder": 81,
+      "visibility": "public",
+      "updatedAt": "2025-09-19T16:42:36.368Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2026,
+        "disciplineKey": "other",
+        "locationKey": "united-states"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2026,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Isaac Caruso",
+          "discipline": "other",
+          "bio": "Hello, my name is Isaac Nicholas Caruso. I am an artist and creative director based in the Southwest with 14 years of professional experience. I create public art to engage and communicate with communities. The imagery I create is powerful and uplifting, aiming to transform my surroundings with positivity. My humble service as an artist is to craft visual narratives that bring people together. I view creating public art as a performance, showing my love for the neighborhoods I work with and striving to involve the community as much as possible in the process. Whether for placemaking, entertainment, or enhancing the urban landscape, I strive to make our world feel more connected through public art.",
+          "status": "active",
+          "location": {
+            "city": "Phoenix",
+            "state": "",
+            "country": "United States",
+            "display": "Phoenix, United States"
+          },
+          "seo": {
+            "title": "Isaac Caruso · Fusion",
+            "description": "Hello, my name is Isaac Nicholas Caruso. I am an artist and creative director based in the Southwest with 14 years of professional experience. I create public art to engage and communicate with commun"
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://isaacncaruso.com/",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FysRZaHOi1YRt3WPKRy9dzV39QPA3%2Fgallery-1758298659144.jpg?alt=media&token=b46a4e29-79d9-4293-9328-9b51c89673ae",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FysRZaHOi1YRt3WPKRy9dzV39QPA3%2Fgallery-1758298670685.jpg?alt=media&token=b1e42de2-582c-4219-b8fa-e5283d696eae",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FysRZaHOi1YRt3WPKRy9dzV39QPA3%2Fgallery-1758298679068.jpg?alt=media&token=a425b382-078c-49c0-9f51-aa37fe639666",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    },
+    {
+      "id": "legacy-u-zNUqXKSevcg3BStjDwZnvVWNtIK2",
+      "slug": "laura-laurens-znuqxkse",
+      "image": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/profile-images%2FzNUqXKSevcg3BStjDwZnvVWNtIK2%2Fprofile-1768650392820.png?alt=media&token=dc3117f7-fb69-4e75-86da-ec120b1cda49",
+      "featuredOrder": 82,
+      "visibility": "public",
+      "updatedAt": "2026-01-23T00:17:42.004Z",
+      "filter": {
+        "connection": "artist",
+        "cohortYear": 2026,
+        "disciplineKey": "mixed-media",
+        "locationKey": "colombia"
+      },
+      "galleryFilter": {
+        "accessType": "",
+        "season": 2026,
+        "view": ""
+      },
+      "locales": {
+        "en": {
+          "name": "Laura Laurens",
+          "discipline": "mixed-media",
+          "bio": "Laura is a Colombian artist and designer whose practice moves between fashion, art, and social engagement. She sees textiles as political tools—vessels of memory, resistance, and healing. Her work is rooted in collaboration with Indigenous and artisan communities, co-creating processes grounded in creative dialogue. Each garment, installation, or textile performance becomes both a story and a space: a narrative body that confronts colonial legacies and celebrates cultural emancipation. She often works with overlooked materials, such as upcycled military fabrics, transforming symbols of violence into acts of expansion and reconciliation. Her practice is about Sewing the imPOSSIBLE: embracing paradox and envisioning imaginative collective futures.",
+          "status": "active",
+          "location": {
+            "city": "Bogota",
+            "state": "",
+            "country": "Colombia",
+            "display": "Bogota, Colombia"
+          },
+          "seo": {
+            "title": "Laura Laurens · Fusion",
+            "description": "Laura is a Colombian artist and designer whose practice moves between fashion, art, and social engagement. She sees textiles as political tools—vessels of memory, resistance, and healing. Her work is "
+          },
+          "links": [
+            {
+              "type": "website",
+              "url": "https://www.lauralaurens.com/",
+              "label": "Website"
+            }
+          ],
+          "world": {
+            "introGallery": [
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FzNUqXKSevcg3BStjDwZnvVWNtIK2%2Fgallery-1768651217116.jpg?alt=media&token=03134f5f-d02c-4b1e-af9c-2531078fa1bd",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FzNUqXKSevcg3BStjDwZnvVWNtIK2%2Fgallery-1768651253603.jpg?alt=media&token=a032c884-2771-4d79-b0da-6ff17d0f086d",
+                "alt": ""
+              },
+              {
+                "src": "https://firebasestorage.googleapis.com/v0/b/fusion-intl.appspot.com/o/artist-content%2FzNUqXKSevcg3BStjDwZnvVWNtIK2%2Fgallery-1768651534791.jpg?alt=media&token=f415b908-1378-44a5-b926-e240c9d7d58e",
+                "alt": ""
+              }
+            ]
+          }
+        },
+        "ja": {}
+      },
+      "imported": true,
+      "accessCode": ""
+    }
+  ]
+}

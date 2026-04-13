@@ -34,6 +34,12 @@ import './components/subComponents/journalRow.js';
 import './components/subComponents/quoteRow.js';
 import './components/subComponents/audioRow.js';
 import './components/subComponents/joinNetwork.js';
+import './components/subComponents/signInModal.js';
+import { initIcAuth } from './utils/icAuth.js';
+/** Warm Stripe.js so the join-network payment step does not wait on first dynamic import. */
+void import('@stripe/stripe-js');
+
+void initIcAuth().catch(() => {});
 import './components/subComponents/artistsFeed.js';
 import './components/subComponents/artistsGAFeed.js';
 import './components/subComponents/program-block.js';

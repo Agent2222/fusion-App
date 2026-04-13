@@ -1807,7 +1807,14 @@ button:hover {
   overflow: hidden;
 }
 
-.program-detail-hero img {
+.program-detail-hero .program-detail-hero-media {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.program-detail-hero .program-detail-hero-media img,
+.program-detail-hero .program-detail-hero-media video {
   width: 100%;
   height: 100%;
   max-width: none;
@@ -1815,6 +1822,10 @@ button:hover {
   object-fit: cover;
   display: block;
   margin: 0;
+}
+
+.program-intro-cta {
+  cursor: pointer;
 }
 
 #programIntroSection {
@@ -2079,6 +2090,37 @@ button:hover {
   text-align: center;
 }
 
+#contextEcosystemPartnersGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 1.25rem 1.5rem;
+  width: 100%;
+  max-width: min(100%, 72rem);
+  margin: 0 auto;
+  padding: 0 4%;
+  box-sizing: border-box;
+}
+
+.context-ecosystem-card__link,
+.context-ecosystem-card__static {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  text-decoration: none;
+  color: var(--c2);
+  font-variation-settings: var(--fv-label);
+  font-size: clamp(0.75rem, 0.9vw, 0.9rem);
+  text-align: center;
+}
+
+.context-ecosystem-card__link img,
+.context-ecosystem-card__static img {
+  width: 100%;
+  max-height: 120px;
+  object-fit: contain;
+}
+
 #contextSubHeadlineSection {
   width: 100%;
   min-height: 70vh;
@@ -2227,6 +2269,19 @@ button:hover {
 }
 
 @media (max-width: 768px) {
+  #homeMainContent {
+    padding-top: 110px;
+  }
+
+  #homeMainContent.feed-container {
+    scrollbar-width: none;
+  }
+
+  #homeMainContent.feed-container::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+
   #programIntroSection {
     height: auto;
     min-height: 0;

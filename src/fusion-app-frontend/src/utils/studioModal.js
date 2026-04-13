@@ -12,14 +12,17 @@ function escapeHtml(s) {
 
 /**
  * @param {string} innerHtml trusted HTML for modal body
- * @param {{ title?: string, onClose?: () => void, wide?: boolean }} [opts]
+ * @param {{ title?: string, onClose?: () => void, wide?: boolean, compact?: boolean }} [opts]
  * @returns {{ close: () => void, root: HTMLElement }}
  */
 export function openStudioModal(innerHtml, opts = {}) {
     const title = opts.title ? escapeHtml(opts.title) : '';
-    const panelClass = opts.wide
-        ? 'studio-modal-panel studio-modal-panel--wide'
-        : 'studio-modal-panel';
+    let panelClass = 'studio-modal-panel';
+    if (opts.wide) {
+        panelClass = 'studio-modal-panel studio-modal-panel--wide';
+    } else if (opts.compact) {
+        panelClass = 'studio-modal-panel studio-modal-panel--compact';
+    }
     const root = document.createElement('div');
     root.className = 'studio-modal-root';
     root.innerHTML = `

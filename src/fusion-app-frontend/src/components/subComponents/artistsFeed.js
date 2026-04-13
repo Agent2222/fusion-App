@@ -1,5 +1,10 @@
 import { navigate } from '../../router.js';
-import { artistEnglishBlock, artistLocaleBlock, artistSlugFromName } from '../../utils/artistSlug.js';
+import {
+    artistDisplayDiscipline,
+    artistDisplayName,
+    artistEnglishBlock,
+    artistSlugFromName,
+} from '../../utils/artistSlug.js';
 
 /** 20 cards per page, 5 columns × 4 rows */
 const PAGE_SIZE = 20;
@@ -23,22 +28,34 @@ function dedupeArtistsById(artists) {
 }
 
 /**
- * Dedupe by artist id, then shuffle. No padding/repeats — avoids duplicate cards when filtering.
+ * @param {unknown} a
+ * @returns {number}
+ */
+function featuredOrderOf(a) {
+    if (!a || typeof a !== 'object') return Number.POSITIVE_INFINITY;
+    const n = Number(/** @type {{ featuredOrder?: unknown }} */ (a).featuredOrder);
+    return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
+}
+
+/**
+ * Dedupe by artist id, then stable sort (featuredOrder asc, then slug, then id). No padding/repeats.
  * @param {Array} artists — same shape as testData.allArtists.artists
  * @returns {Array}
  */
 export function buildFeedPool(artists) {
     if (!artists || artists.length === 0) return [];
     const unique = dedupeArtistsById(artists);
-    return shuffleInPlace([...unique]);
-}
-
-function shuffleInPlace(arr) {
-    for (let i = arr.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    return arr;
+    return [...unique].sort((a, b) => {
+        const fo = featuredOrderOf(a) - featuredOrderOf(b);
+        if (fo !== 0) return fo;
+        const sa = a && typeof a === 'object' && a.slug != null ? String(a.slug) : '';
+        const sb = b && typeof b === 'object' && b.slug != null ? String(b.slug) : '';
+        const sc = sa.localeCompare(sb);
+        if (sc !== 0) return sc;
+        const ia = a && typeof a === 'object' && a.id != null ? String(a.id) : '';
+        const ib = b && typeof b === 'object' && b.id != null ? String(b.id) : '';
+        return ia.localeCompare(ib);
+    });
 }
 
 function escapeHtml(s) {
@@ -297,16 +314,16 @@ class ArtistsFeedElement extends HTMLElement {
 
         for (let i = 0; i < slice.length; i++) {
             const artist = slice[i];
-            const loc = artistLocaleBlock(artist, locale);
-            const artistName = loc?.name ?? '';
+            const artistName = artistDisplayName(artist, locale);
             const artistImage = artist.image;
-            const artistDiscipline = loc?.discipline ?? '';
+            const artistDiscipline = artistDisplayDiscipline(artist, locale);
 
             const card = document.createElement('div');
             card.classList.add('artist-card');
             card.addEventListener('click', () => {
                 const en = artistEnglishBlock(artist);
-                const slug = artist.slug || artistSlugFromName(en?.name ?? '');
+                const slug =
+                    artist.slug || artistSlugFromName(en?.name ?? artistDisplayName(artist, 'en'));
                 navigate(`/profile/${encodeURIComponent(slug)}`);
             });
 

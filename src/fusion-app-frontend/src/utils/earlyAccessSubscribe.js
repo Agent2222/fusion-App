@@ -1,11 +1,64 @@
 /**
  * Shared Fusion backend actor + early-access subscribe (same flow as loadscreen `#csCTAForm` / `#csCTASubscribe`).
  */
-import { DEV_MODE, createICActor, getHost } from '../config.js';
+import { DEV_MODE, createICActor, createAuthenticatedICActor, getHost } from '../config.js';
 
 let _resolvedActor = null;
 let _actorPromise = null;
 let _decl = null;
+
+/** @type {import('@dfinity/agent').ActorSubclass | null} */
+let _authenticatedActor = null;
+/** @type {string | null} */
+let _authenticatedActorPrincipalText = null;
+
+export function clearFusionBackendActorCache() {
+    _resolvedActor = null;
+    _actorPromise = null;
+}
+
+export function clearAuthenticatedFusionBackendActorCache() {
+    _authenticatedActor = null;
+    _authenticatedActorPrincipalText = null;
+}
+
+/**
+ * Backend actor using Internet Identity when a session exists; otherwise `null`.
+ * @returns {Promise<import('@dfinity/agent').ActorSubclass | null>}
+ */
+export async function getAuthenticatedFusionBackendActor() {
+    const { getIdentityIfAuthenticated } = await import('./icAuth.js');
+    const identity = await getIdentityIfAuthenticated();
+    if (!identity) return null;
+    const pid = identity.getPrincipal().toText();
+    if (_authenticatedActor && _authenticatedActorPrincipalText === pid) {
+        return _authenticatedActor;
+    }
+    try {
+        if (!_decl) {
+            _decl = await import('declarations/fusion-app-backend');
+        }
+        if (!_decl?.canisterId || !_decl?.idlFactory) return null;
+        const actor = await createAuthenticatedICActor(_decl.idlFactory, _decl.canisterId, identity);
+        _authenticatedActor = actor;
+        _authenticatedActorPrincipalText = pid;
+        return actor;
+    } catch (err) {
+        if (DEV_MODE) console.warn('[IC] getAuthenticatedFusionBackendActor', err);
+        return null;
+    }
+}
+
+/**
+ * Start resolving the backend actor in the background (same singleton as coming-soon submit).
+ * Call when the join dialog opens so `fetchRootKey` / agent setup runs earlier — mirrors having
+ * interacted with the loadscreen first. Safe to call repeatedly; errors are swallowed.
+ */
+export function prefetchFusionBackendActor() {
+    void getFusionBackendActor().catch((err) => {
+        if (DEV_MODE) console.warn('[EarlyAccess] prefetchFusionBackendActor', err);
+    });
+}
 
 export async function getFusionBackendActor() {
     if (_resolvedActor) return _resolvedActor;
@@ -47,14 +100,27 @@ export function normalizeEarlyAccessCategory(raw) {
 }
 
 /**
+ * Exact canister write used by loadscreen `#csCTAForm` (`getBackendActor` + `upsertSubscriber`).
+ * Join network and other flows should call this (or {@link upsertEarlyAccessSubscriber}) so behavior stays in sync.
+ *
+ * @param {string} email
+ * @param {string} category
+ * @param {string} [fullName]
+ * @param {string} [intent]
+ */
+export async function submitEarlyAccessToCanister(email, category, fullName = '', intent = '') {
+    const actor = await getFusionBackendActor();
+    const timestamp = new Date().toISOString();
+    return actor.upsertSubscriber(email, category, timestamp, fullName, intent);
+}
+
+/**
  * @param {string} email
  * @param {string} category
  * @param {{ fullName?: string, intent?: string }} [opts]
  */
 export async function upsertEarlyAccessSubscriber(email, category, opts = {}) {
-    const actor = await getFusionBackendActor();
-    const timestamp = new Date().toISOString();
     const fullName = typeof opts.fullName === 'string' ? opts.fullName : '';
     const intent = typeof opts.intent === 'string' ? opts.intent : '';
-    return actor.upsertSubscriber(email, category, timestamp, fullName, intent);
+    return submitEarlyAccessToCanister(email, category, fullName, intent);
 }

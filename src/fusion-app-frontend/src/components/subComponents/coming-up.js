@@ -248,6 +248,17 @@ class ComingUpComponent extends HTMLElement {
                         font-size: 1.15rem;
                     }
                 }
+
+                @media (max-width: 768px) {
+                    .header {
+                        margin-bottom: 6%;
+                    }
+
+                    .programFocus {
+                        width: 60%;
+                        top: 0;
+                    }
+                }
             </style>
             <div class="coming-up">
                  <div class="header">Current & Upcoming</div>

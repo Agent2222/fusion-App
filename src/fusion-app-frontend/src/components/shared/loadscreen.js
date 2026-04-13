@@ -1,9 +1,8 @@
 import { gsap } from "gsap";
 import fusionNature2 from '../../assets/fusion-nature2.mp4';
 import { DEV_MODE, getHost, config } from '../../config.js';
-import { getDataSource, setDataSource } from '../../utils/database.js';
 import { activateDeactivate, navigate } from '../../router.js';
-import { getFusionBackendActor } from '../../utils/earlyAccessSubscribe.js';
+import { submitEarlyAccessToCanister } from '../../utils/earlyAccessSubscribe.js';
 
 // Load Screen Custom Element Component
 class LoadScreenComponent extends HTMLElement {
@@ -286,6 +285,10 @@ class LoadScreenComponent extends HTMLElement {
         };
         // Default selection for the debug UI: matches the circle CSS default in `render()`.
         this.selectedConfig = "comingSoon2";
+        this._loadscreenIsAdmin = false;
+        /** After a successful “click to enter”, do not let `_applyLoadscreenWelcomeMode` reveal #enterAction again (e.g. on `fusion-auth-change`). */
+        this._userHasEnteredSite = false;
+        this._onFusionAuthChange = null;
     }
 
     get visible() {
@@ -315,6 +318,9 @@ class LoadScreenComponent extends HTMLElement {
     attributeChangedCallback(prop, oldVal, newVal) {
         if (prop === 'visible' || prop === 'message') {
             this.render();
+            if (this._userHasEnteredSite) {
+                this._applyLoadscreenWelcomeMode();
+            }
         }
     }
 
@@ -559,6 +565,7 @@ class LoadScreenComponent extends HTMLElement {
         const nameInput = this.shadowRoot.querySelector('#debug-config-name');
         const copyBtn = this.shadowRoot.querySelector('#debug-copy-config');
         const openStudioBtn = this.shadowRoot.querySelector('#debug-open-studio');
+        const openProfileSettingsBtn = this.shadowRoot.querySelector('#debug-open-profile-settings');
 
         if (!panel || !toggleButton) return;
 
@@ -566,24 +573,9 @@ class LoadScreenComponent extends HTMLElement {
             navigate('/studio');
         });
 
-        const dataSourceSelect = panel.querySelector('#debug-data-source');
-        if (dataSourceSelect) {
-            dataSourceSelect.value = getDataSource();
-            dataSourceSelect.addEventListener('change', (e) => {
-                const t = e.target;
-                const v = t && 'value' in t ? String(t.value) : '';
-                if (v === 'test' || v === 'live') {
-                    setDataSource(v);
-                }
-            });
-            window.addEventListener('fusion-data-source-change', (ev) => {
-                const d = ev && 'detail' in ev ? ev.detail : null;
-                const src = d && typeof d === 'object' && d.source ? d.source : getDataSource();
-                if (src === 'test' || src === 'live') {
-                    dataSourceSelect.value = src;
-                }
-            });
-        }
+        openProfileSettingsBtn?.addEventListener('click', () => {
+            navigate('/settings/profile');
+        });
 
         const circlesConfig =
             typeof this.selectedConfig === 'string'
@@ -804,48 +796,165 @@ class LoadScreenComponent extends HTMLElement {
         this.setupComingSoonSelectors();
         this.setupEarlyAccessSubscription();
         this.eventListeners();
+        this.setupLoadscreenFooterAuth();
+        this._applyLoadscreenWelcomeMode();
+        void this.refreshLoadscreenAdminState();
         this.dynamicCircles("comingSoon2");
     }
 
     disconnectedCallback() {
-        console.log("disconnectedCallback");
+        if (this._onFusionAuthChange) {
+            window.removeEventListener('fusion-auth-change', this._onFusionAuthChange);
+            this._onFusionAuthChange = null;
+        }
+    }
+
+    performEnterSite() {
+        if (!this.fontsReady) return;
+        if (!config.siteActive && !this._loadscreenIsAdmin) return;
+
+        this.shadowRoot.host.style.zIndex = '0';
+
+        const header = document.getElementById('header');
+        const footer = document.getElementById('footer');
+
+        if (header) {
+            header.setAttribute('active', 'true');
+        }
+
+        if (footer) {
+            footer.setAttribute('active', 'true');
+        }
+
+        document.querySelectorAll('.main-cont').forEach(el => {
+            el.style.zIndex = '1';
+            el.style.pointerEvents = 'none';
+        });
+
+        this.shadowRoot.querySelector('.loadscreen-container').style.zIndex = '-1';
+        let path = window.location.pathname;
+        if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
+        activateDeactivate(path);
+
+        const enterText = this.shadowRoot.querySelector('#enterAction');
+        if (enterText) {
+            enterText.classList.add('hidden');
+        }
+        this._userHasEnteredSite = true;
+    }
+
+    async refreshLoadscreenAdminState() {
+        let isAdmin = false;
+        try {
+            const { getAuthSnapshot } = await import('../../utils/icAuth.js');
+            const snap = await getAuthSnapshot();
+            if (!snap.authenticated) {
+                this._loadscreenIsAdmin = false;
+                this._applyLoadscreenWelcomeMode();
+                return;
+            }
+            const { getAuthenticatedFusionBackendActor } = await import('../../utils/earlyAccessSubscribe.js');
+            const actor = await getAuthenticatedFusionBackendActor();
+            if (!actor) {
+                this._loadscreenIsAdmin = false;
+                this._applyLoadscreenWelcomeMode();
+                return;
+            }
+            try {
+                if (typeof actor.isCallerAdmin === 'function') {
+                    isAdmin = await actor.isCallerAdmin();
+                }
+            } catch (_) {
+                /* ignore */
+            }
+            if (!isAdmin) {
+                let acc = null;
+                try {
+                    if (typeof actor.getAccountForCaller === 'function') {
+                        const raw = await actor.getAccountForCaller();
+                        acc = Array.isArray(raw) ? (raw.length ? raw[0] : null) : raw;
+                    }
+                } catch (_) {
+                    /* ignore */
+                }
+                if (acc != null) {
+                    const role = acc.role;
+                    if (role && typeof role === 'object' && 'admin' in role) {
+                        isAdmin = true;
+                    }
+                }
+            }
+            this._loadscreenIsAdmin = isAdmin;
+        } catch (_) {
+            this._loadscreenIsAdmin = false;
+        }
+        this._applyLoadscreenWelcomeMode();
+    }
+
+    /**
+     * When the site is in coming-soon mode but the caller is an admin, mirror `siteActive` UI:
+     * hide the welcome column and show the normal #enterAction overlay (CLICK TO ENTER).
+     */
+    _applyLoadscreenWelcomeMode() {
+        if (this._userHasEnteredSite) {
+            const comingSoon = this.shadowRoot?.querySelector('#comingSoon');
+            const enterAction = this.shadowRoot?.querySelector('#enterAction');
+            if (comingSoon) comingSoon.style.display = 'none';
+            if (enterAction) {
+                enterAction.style.display = 'none';
+                enterAction.classList.add('hidden');
+            }
+            const adminEnterFooter = this.shadowRoot?.querySelector('#loadscreenCsAdminEnter');
+            if (adminEnterFooter) adminEnterFooter.setAttribute('hidden', '');
+            return;
+        }
+        const siteActive = !!config.siteActive;
+        const treatAsActive = siteActive || this._loadscreenIsAdmin;
+        const comingSoon = this.shadowRoot?.querySelector('#comingSoon');
+        const enterAction = this.shadowRoot?.querySelector('#enterAction');
+        if (comingSoon) {
+            comingSoon.style.display = treatAsActive ? 'none' : 'grid';
+        }
+        if (enterAction) {
+            enterAction.style.display = treatAsActive ? 'flex' : 'none';
+            if (treatAsActive) {
+                enterAction.classList.remove('hidden');
+            }
+        }
+        const adminEnterFooter = this.shadowRoot?.querySelector('#loadscreenCsAdminEnter');
+        if (adminEnterFooter) {
+            adminEnterFooter.setAttribute('hidden', '');
+        }
+    }
+
+    setupLoadscreenFooterAuth() {
+        const signIn = this.shadowRoot.querySelector('#loadscreenCsSignIn');
+        if (signIn) {
+            signIn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                window.dispatchEvent(new CustomEvent('fusion-open-sign-in'));
+            });
+        }
+        const adminEnter = this.shadowRoot.querySelector('#loadscreenCsAdminEnter');
+        if (adminEnter) {
+            adminEnter.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.performEnterSite();
+            });
+        }
+        this._onFusionAuthChange = () => {
+            void this.refreshLoadscreenAdminState();
+        };
+        window.addEventListener('fusion-auth-change', this._onFusionAuthChange);
     }
 
     eventListeners() {
         console.log("eventListeners");
         this.shadowRoot.querySelector(".loadscreen-container").addEventListener('click', () => {
-            if (!this.fontsReady) return;
-            if (!config.siteActive) return;
-
-            this.shadowRoot.host.style.zIndex = '0';
-
-            const header = document.getElementById('header');
-            const footer = document.getElementById('footer');
-            
-            if (header) {
-                header.setAttribute('active', 'true');
-            }
-            
-            if (footer) {
-                footer.setAttribute('active', 'true');
-            }
-
-            document.querySelectorAll('.main-cont').forEach(el => {
-                el.style.zIndex = '1';
-                el.style.pointerEvents = 'none';
-            });
-            
-            this.shadowRoot.querySelector('.loadscreen-container').style.zIndex = '-1';
-            // Match the current URL’s feed (home, programs, artists, …), not only home.
-            let path = window.location.pathname;
-            if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
-            activateDeactivate(path);
-
-            let enterText = this.shadowRoot.querySelector('#enterAction');
-
-            enterText.classList.add('hidden');
-            
-        })
+            this.performEnterSite();
+        });
     }
 
     setupComingSoonSelectors() {
@@ -979,10 +1088,6 @@ class LoadScreenComponent extends HTMLElement {
         this.setSubscriptionConfirmationState(false);
     }
 
-    async getBackendActor() {
-        return getFusionBackendActor();
-    }
-
     setupEarlyAccessSubscription() {
         // Avoid attaching multiple listeners on re-connect / re-render flows.
         if (this._earlyAccessSubscriptionAttached) return;
@@ -1025,9 +1130,7 @@ class LoadScreenComponent extends HTMLElement {
             this.setCTAStatus('Submitting your email...');
 
             try {
-                const actor = await this.getBackendActor();
-                const timestamp = new Date().toISOString();
-                const ok = await actor.upsertSubscriber(email, category, timestamp, '', '');
+                await submitEarlyAccessToCanister(email, category, '', '');
 
                 // Hide the transient status and show the stored-email confirmation.
                 this.hideCTAStatus();
@@ -1256,6 +1359,23 @@ class LoadScreenComponent extends HTMLElement {
                     font-variation-settings: var(--fv-title);
                     padding-right: 2%;
                     transition: all 0.5s ease-in-out;
+                }
+
+                @media (max-width: 768px) {
+                    #enterAction {
+                        width: 100%;
+                        align-items: center;
+                        justify-content: center;
+                        padding-right: 0;
+                        padding-left: 0;
+                        box-sizing: border-box;
+                    }
+
+                    #cteE,
+                    #cteJ {
+                        width: 100%;
+                        text-align: center;
+                    }
                 }
 
                 #enterAction.hidden {
@@ -1637,6 +1757,60 @@ class LoadScreenComponent extends HTMLElement {
                     text-decoration: underline;
                 }
 
+                .cs-footer-bar {
+                    margin-top: 1.25rem;
+                    padding-top: 1.25rem;
+                    border-top: 1px solid rgba(0, 0, 0, 0.12);
+                    display: flex;
+                    flex-direction: column;
+                    align-items: flex-start;
+                    gap: 1rem;
+                    width: 100%;
+                    box-sizing: border-box;
+                }
+
+                .loadscreen-cs-sign-in {
+                    box-sizing: border-box;
+                    font-family: inherit;
+                    font-variation-settings: var(--fv-nav-active);
+                    font-size: clamp(0.65rem, 0.95vw, 0.8rem);
+                    letter-spacing: 0.06em;
+                    text-transform: uppercase;
+                    border: 1.5px solid var(--c2, #000);
+                    background: transparent;
+                    color: var(--c2, #000);
+                    padding: 0.45rem 0.85rem;
+                    min-height: 2.25rem;
+                    cursor: pointer;
+                    -webkit-appearance: none;
+                    appearance: none;
+                }
+
+                .loadscreen-cs-sign-in:hover {
+                    opacity: 0.88;
+                }
+
+                #loadscreenCsAdminEnter {
+                    cursor: pointer;
+                    user-select: none;
+                }
+
+                #loadscreenCsAdminEnter[hidden] {
+                    display: none !important;
+                }
+
+                .loadscreen-cs-enter-en {
+                    font-size: 1.1rem;
+                    font-variation-settings: var(--fv-title);
+                    color: var(--c2);
+                }
+
+                .loadscreen-cs-enter-ja {
+                    font-size: 0.95rem;
+                    opacity: 0.85;
+                    margin-top: 0.25rem;
+                }
+
                 @media (max-width: 1650px) {
                     #comingSoon {
                         width: 50%;
@@ -1839,6 +2013,13 @@ class LoadScreenComponent extends HTMLElement {
                             rel="noopener noreferrer"
                         >Follow us on Instagram @fusion_intl</a>
                     </div>
+                    <div id="csFooterBar" class="cs-footer-bar">
+                        <button type="button" id="loadscreenCsSignIn" class="loadscreen-cs-sign-in">SIGN-IN</button>
+                        <div id="loadscreenCsAdminEnter" class="loadscreen-cs-admin-enter" hidden>
+                            <div class="loadscreen-cs-enter-en">CLICK TO ENTER</div>
+                            <div class="loadscreen-cs-enter-ja">クリックして入場</div>
+                        </div>
+                    </div>
                 </div>
             </div>
             <button class="debug-toggle" type="button" style="display:${DEV_MODE ? 'block' : 'none'}">Debug</button>
@@ -1857,13 +2038,7 @@ class LoadScreenComponent extends HTMLElement {
                     </div>
                     <div class="debug-actions">
                         <button id="debug-open-studio" type="button">Open Studio</button>
-                    </div>
-                    <div class="config-row">
-                        <label for="debug-data-source">Data</label>
-                        <select id="debug-data-source" aria-label="Data source: test JSON or live canister">
-                            <option value="test">Test JSON</option>
-                            <option value="live">Live canister</option>
-                        </select>
+                        <button id="debug-open-profile-settings" type="button">Profile settings</button>
                     </div>
 
                     ${circleKeys.map((key, index) => {

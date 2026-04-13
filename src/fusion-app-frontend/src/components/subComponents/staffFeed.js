@@ -1,7 +1,7 @@
 /**
- * Staff grid for the Context page — `testData.context.en` merged with `context.ja` when locale is `ja`.
+ * Staff grid for the Context page — CMS `context` bundle, EN merged with active locale.
  */
-import { testData } from '../../testData.js';
+import { getContentBundleForStudio, subscribeDataSource } from '../../utils/database.js';
 
 function escapeHtml(s) {
     return String(s)
@@ -11,10 +11,14 @@ function escapeHtml(s) {
         .replace(/"/g, '&quot;');
 }
 
-function getContextCopy() {
+/**
+ * @param {Record<string, unknown> | null} bundle
+ */
+function getContextCopyFromBundle(bundle) {
+    if (!bundle || typeof bundle !== 'object') return {};
     const locale = typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
-    const base = testData.context?.en || {};
-    const loc = testData.context?.[locale] || {};
+    const base = /** @type {Record<string, unknown>} */ (bundle).en || {};
+    const loc = /** @type {Record<string, unknown>} */ (bundle)[locale] || {};
     return { ...base, ...loc };
 }
 
@@ -22,7 +26,17 @@ class StaffFeedComponent extends HTMLElement {
     constructor() {
         super();
         this.shadow = this.attachShadow({ mode: 'open' });
+        /** @type {Record<string, unknown> | null} */
+        this._contextBundle = null;
+        /** @type {(() => void) | null} */
+        this._unsubData = null;
         this._onLocaleChange = () => this.render();
+        /** @param {Event} ev */
+        this._onFusionCms = (ev) => {
+            const slug = /** @type {CustomEvent<{ slug?: string }>} */ (ev).detail?.slug;
+            if (slug && slug !== 'context') return;
+            void this._loadContext();
+        };
     }
 
     get active() {
@@ -48,15 +62,28 @@ class StaffFeedComponent extends HTMLElement {
 
     connectedCallback() {
         window.addEventListener('fusion-localechange', this._onLocaleChange);
-        this.render();
+        window.addEventListener('fusion-content-pages-changed', this._onFusionCms);
+        if (this._unsubData) this._unsubData();
+        this._unsubData = subscribeDataSource(() => void this._loadContext());
+        void this._loadContext();
     }
 
     disconnectedCallback() {
         window.removeEventListener('fusion-localechange', this._onLocaleChange);
+        window.removeEventListener('fusion-content-pages-changed', this._onFusionCms);
+        if (this._unsubData) {
+            this._unsubData();
+            this._unsubData = null;
+        }
+    }
+
+    async _loadContext() {
+        this._contextBundle = await getContentBundleForStudio('context', { forStudio: false });
+        this.render();
     }
 
     render() {
-        const ctx = getContextCopy();
+        const ctx = getContextCopyFromBundle(this._contextBundle);
         const headline = ctx.staffHeadline ?? '';
         const cards = Array.isArray(ctx.staffCards) ? ctx.staffCards : [];
 
@@ -85,6 +112,7 @@ class StaffFeedComponent extends HTMLElement {
             .join('');
 
         const empty = cards.length === 0;
+        const first = cards[0];
 
         this.shadow.innerHTML = `
             <style>
@@ -265,21 +293,21 @@ class StaffFeedComponent extends HTMLElement {
             </style>
             ${
                 empty
-                    ? `<div class="staff-feed staff-feed--empty" part="staff-feed">No staff cards in testData.context</div>`
+                    ? `<div class="staff-feed staff-feed--empty" part="staff-feed">No staff cards in context content.</div>`
                     : `<section class="staff-feed" part="staff-feed">
-                        <h2 class="staff-feed-headline">${escapeHtml(testData.context.en.staffHeadline)}</h2>
+                        <h2 class="staff-feed-headline">${escapeHtml(headline)}</h2>
                         <div class="staff-feed-grid">${cardsHtml}</div>
                         <div id="staffDetailsExpanded">
                             <div class="staff-card-content">
                                 <div class="staff-card-meta-container">
                                     <div id="metacontLeft">
-                                        <p class="staff-card-meta">Location:${escapeHtml(testData.context.en.staffCards[0].location)}</p>
-                                        <p class="staff-card-meta">Languages:${escapeHtml(testData.context.en.staffCards[0].languages)}</p>
-                                        <p class="staff-card-focus">Focus:${escapeHtml(testData.context.en.staffCards[0].focus)}</p>
+                                        <p class="staff-card-meta">Location:${escapeHtml(first?.location)}</p>
+                                        <p class="staff-card-meta">Languages:${escapeHtml(first?.languages)}</p>
+                                        <p class="staff-card-focus">Focus:${escapeHtml(first?.focus)}</p>
                                     </div>
-                                    <p class="staff-card-brief">${escapeHtml(testData.context.en.staffCards[0].brief)}</p>
+                                    <p class="staff-card-brief">${escapeHtml(first?.brief)}</p>
                                 </div>
-                                <blockquote class="staff-card-quote">"${escapeHtml(testData.context.en.staffCards[0].quote)}"</blockquote>
+                                <blockquote class="staff-card-quote">"${escapeHtml(first?.quote)}"</blockquote>
                             </div>
                         </div>
                     </section>`

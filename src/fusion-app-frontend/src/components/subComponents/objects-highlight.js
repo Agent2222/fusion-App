@@ -37,36 +37,52 @@ class ObjectsHighlightComponent extends HTMLElement {
     }
 
     createObjects() {
-        for (let i=0; i<4; i++) {
-            const objectName = this.data.objects[i][window.getLocale()].name;
-            const objectImage = this.data.objects[i].image;
-            const objectAlt = this.data.objects[i][window.getLocale()].alt;
-            const objectCredit = this.data.objects[i][window.getLocale()].credit;
-            const objectDescription = this.data.objects[i][window.getLocale()].description;
-            const objectCopy = this.data.objects[i][window.getLocale()].copy;
-            const objectLink = this.data.objects[i][window.getLocale()].link;
+        const root = this.shadowRoot;
+        if (!root || !this.data) return;
+        const objects = Array.isArray(this.data.objects) ? this.data.objects : [];
+        const count = Math.min(4, objects.length);
+        if (count === 0) return;
 
-            let objectCard = document.createElement('div');
+        const loc =
+            typeof window !== 'undefined' && typeof window.getLocale === 'function'
+                ? window.getLocale()
+                : 'en';
+        const localeSlice = (row) => {
+            if (!row || typeof row !== 'object') return {};
+            return row[loc] || row.en || row.ja || {};
+        };
+
+        const targets = [
+            () => root.querySelector('.sect1'),
+            () => root.querySelector('.sect2-content1'),
+            () => root.querySelector('.sect2-content2'),
+            () => root.querySelector('.sect3'),
+        ];
+
+        for (let i = 0; i < count; i++) {
+            const row = objects[i];
+            const slice = localeSlice(row);
+            const objectImage = row.image;
+            const objectAlt = slice.alt ?? '';
+            const objectLink = slice.link ?? row.link ?? '';
+
+            if (objectImage == null || objectImage === '') continue;
+
+            const objectCard = document.createElement('div');
             objectCard.classList.add('object-card');
             objectCard.innerHTML = `
-                <div class="object-card-image" id="object-card-${objectName}">
+                <div class="object-card-image" id="object-card-${i}">
                     <img src="${objectImage}" alt="${objectAlt}">
                 </div>
             `;
 
-            switch (i) {
-                case 0:
-                    this.shadowRoot.querySelector('.sect1').appendChild(objectCard);
-                    break;
-                case 1:
-                    this.shadowRoot.querySelector('.sect2').appendChild(objectCard);
-                    break;
-                case 2:
-                    this.shadowRoot.querySelector('.sect2').appendChild(objectCard);
-                    break;
-                case 3:
-                    this.shadowRoot.querySelector('.sect3').appendChild(objectCard);
-                    break;
+            const parent = targets[i]();
+            if (parent) parent.appendChild(objectCard);
+
+            if (objectLink) {
+                objectCard.addEventListener('click', () => {
+                    window.location.href = objectLink;
+                });
             }
         }
     }
@@ -191,12 +207,32 @@ class ObjectsHighlightComponent extends HTMLElement {
                         grid-template-rows: auto 1fr;
                     }
 
+                    .header {
+                        margin-bottom: 5%;
+                    }
+
                     .content {
-                        grid-template-columns: 1fr;
-                        width: 90%;
-                        margin-left: 5%;
-                        margin-right: 5%;
-                        min-height: 50vh;
+                        width: 100%;
+                        margin-left: 0;
+                        margin-right: 0;
+                        min-height: 0;
+                        grid-template-columns: 1fr 1fr;
+                        grid-template-rows: auto;
+                        align-items: stretch;
+                    }
+
+                    .sect1 {
+                        grid-column: 1 / 3;
+                    }
+
+                    .sect2 {
+                        grid-column: 1 / 3;
+                        grid-template-columns: 1fr 1fr;
+                        grid-template-rows: 1fr;
+                    }
+
+                    .sect3 {
+                        grid-column: 1 / 3;
                     }
                 }
             </style>

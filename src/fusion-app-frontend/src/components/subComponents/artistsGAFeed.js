@@ -1,5 +1,11 @@
 import { navigate } from '../../router.js';
-import { artistEnglishBlock, artistLocaleBlock, artistSlugFromName } from '../../utils/artistSlug.js';
+import {
+    artistDisplayDiscipline,
+    artistDisplayName,
+    artistEnglishBlock,
+    artistLocaleBlock,
+    artistSlugFromName,
+} from '../../utils/artistSlug.js';
 
 import prepIcon from '../../assets/icon-cal.png';
 import showingIcon from '../../assets/icon-loc.png';
@@ -345,10 +351,10 @@ class ArtistsGAFeedElement extends HTMLElement {
 
         for (let i = 0; i < slice.length; i++) {
             const artist = slice[i];
-            const loc = artistLocaleBlock(artist, locale);
-            const artistName = loc?.name ?? '';
+            const artistName = artistDisplayName(artist, locale);
             const artistImage = artist.image;
-            const artistDiscipline = loc?.discipline ?? '';
+            const artistDiscipline = artistDisplayDiscipline(artist, locale);
+            const loc = artistLocaleBlock(artist, locale);
             const artistStatus = loc?.status;
             const card = document.createElement('div');
             card.classList.add('artist-card');

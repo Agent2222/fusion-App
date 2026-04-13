@@ -9,6 +9,9 @@ import {
     getAllProgramsBlock,
 } from '../utils/database.js';
 
+/** Cached home bundle so returning to `/` can paint immediately without NaN/empty flashes. */
+let _homeBlocksCache = null;
+
 export function render() {
     return `
         <div class="page home-page">
@@ -29,56 +32,107 @@ export function render() {
     `;
 }
 
+/** Studio → Content saves fire this; refresh blocks that read CMS or legacy site JSON. */
+/** @param {Event} ev */
+function onFusionContentPagesChanged(ev) {
+    const d = /** @type {CustomEvent<{ slug?: string }>} */ (ev).detail;
+    const slug = d?.slug;
+    if (
+        slug &&
+        slug !== 'program-hero' &&
+        slug !== 'objects-highlight' &&
+        slug !== 'gallery-access-cta'
+    ) {
+        return;
+    }
+    _homeBlocksCache = null;
+    void loadHomeBlocks();
+}
+
+function applyHomeBlocks(
+    programHeroData,
+    allPrograms,
+    featured,
+    objectsHl,
+    galleryCta,
+    journalsBlock
+) {
+    const programHero = document.getElementById('programHero');
+    if (programHero && typeof programHero.setProgram === 'function') {
+        programHero.setProgram(programHeroData);
+    }
+
+    const comingUp = document.getElementById('comingUp');
+    if (comingUp && typeof comingUp.setComingUp === 'function') {
+        comingUp.setComingUp(allPrograms);
+        comingUp.createCards();
+    }
+
+    const featuredArtist = document.getElementById('featuredArtist');
+    if (featuredArtist && typeof featuredArtist.setFeaturedArtist === 'function') {
+        featuredArtist.setFeaturedArtist({ artists: featured || [] });
+        featuredArtist.createArtistCard((featured || []).length);
+        featuredArtist.showAllArtistsButton();
+    }
+
+    const objectsHighlight = document.getElementById('objectsHighlight');
+    if (objectsHighlight && typeof objectsHighlight.setObjectsHighlight === 'function') {
+        objectsHighlight.setObjectsHighlight(objectsHl);
+        objectsHighlight.createObjects();
+    }
+
+    const galleryAccessCta = document.getElementById('galleryAccessCta');
+    if (galleryAccessCta && typeof galleryAccessCta.setGalleryAccessCta === 'function') {
+        galleryAccessCta.setGalleryAccessCta(galleryCta);
+        galleryAccessCta.createCTA();
+    }
+
+    const journalHero = document.getElementById('journalHero');
+    if (journalHero && typeof journalHero.setJournalHero === 'function') {
+        journalHero.setJournalHero(journalsBlock);
+        journalHero.createJournals();
+    }
+}
+
+async function loadHomeBlocks() {
+    if (_homeBlocksCache) {
+        applyHomeBlocks(..._homeBlocksCache);
+    }
+    const bundle = await Promise.all([
+        getProgramHero(),
+        getAllProgramsBlock(),
+        getFeaturedArtists(),
+        getObjectsHighlight(),
+        getGalleryAccessCta(),
+        getJournalsHeroBlock(),
+    ]);
+    _homeBlocksCache = bundle;
+    applyHomeBlocks(...bundle);
+}
+
+/** @type {((ev: Event) => void) | null} */
+let _homeCmsListener = null;
+/** @type {((ev: Event) => void) | null} */
+let _homeFeaturedMetaListener = null;
+
 export default function initHome() {
     console.log('Home page initialized');
 
-    void (async () => {
-        const [programHeroData, allPrograms, featured, objectsHl, galleryCta, journalsBlock] =
-            await Promise.all([
-                getProgramHero(),
-                getAllProgramsBlock(),
-                getFeaturedArtists(),
-                getObjectsHighlight(),
-                getGalleryAccessCta(),
-                getJournalsHeroBlock(),
-            ]);
+    void loadHomeBlocks();
 
-        const programHero = document.getElementById('programHero');
-        if (programHero && typeof programHero.setProgram === 'function') {
-            programHero.setProgram(programHeroData);
-        }
+    if (_homeCmsListener) {
+        window.removeEventListener('fusion-content-pages-changed', _homeCmsListener);
+    }
+    _homeCmsListener = onFusionContentPagesChanged;
+    window.addEventListener('fusion-content-pages-changed', _homeCmsListener);
 
-        const comingUp = document.getElementById('comingUp');
-        if (comingUp && typeof comingUp.setComingUp === 'function') {
-            comingUp.setComingUp(allPrograms);
-            comingUp.createCards();
-        }
-
-        const featuredArtist = document.getElementById('featuredArtist');
-        if (featuredArtist && typeof featuredArtist.setFeaturedArtist === 'function') {
-            featuredArtist.setFeaturedArtist({ artists: featured || [] });
-            featuredArtist.createArtistCard((featured || []).length);
-            featuredArtist.showAllArtistsButton();
-        }
-
-        const objectsHighlight = document.getElementById('objectsHighlight');
-        if (objectsHighlight && typeof objectsHighlight.setObjectsHighlight === 'function') {
-            objectsHighlight.setObjectsHighlight(objectsHl);
-            objectsHighlight.createObjects();
-        }
-
-        const galleryAccessCta = document.getElementById('galleryAccessCta');
-        if (galleryAccessCta && typeof galleryAccessCta.setGalleryAccessCta === 'function') {
-            galleryAccessCta.setGalleryAccessCta(galleryCta);
-            galleryAccessCta.createCTA();
-        }
-
-        const journalHero = document.getElementById('journalHero');
-        if (journalHero && typeof journalHero.setJournalHero === 'function') {
-            journalHero.setJournalHero(journalsBlock);
-            journalHero.createJournals();
-        }
-    })();
+    if (_homeFeaturedMetaListener) {
+        window.removeEventListener('fusion-artist-featured-meta-change', _homeFeaturedMetaListener);
+    }
+    _homeFeaturedMetaListener = () => {
+        _homeBlocksCache = null;
+    };
+    window.addEventListener('fusion-artist-featured-meta-change', _homeFeaturedMetaListener);
 
     const homeButton = document.getElementById('homeButton');
     if (homeButton) {

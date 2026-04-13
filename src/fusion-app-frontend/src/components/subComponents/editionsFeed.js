@@ -1,5 +1,4 @@
 // Editions feed: rows of 1, 2, 3, 4, then 5 tiles (15 items per page); paginated.
-import { testData } from '../../testData.js';
 import { navigate } from '../../router.js';
 
 /** 1 + 2 + 3 + 4 + 5 = 15 items per page */
@@ -61,9 +60,6 @@ class EditionsFeedComponent extends HTMLElement {
 
     connectedCallback() {
         window.addEventListener('fusion-localechange', this._onLocaleChange);
-        if (!this.pool.length && testData.editions?.items?.length) {
-            this.pool = [...testData.editions.items];
-        }
         this.ensureShell();
         this.updatePage();
     }

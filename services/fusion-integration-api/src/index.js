@@ -9,6 +9,7 @@ import Stripe from 'stripe';
 import { Resend } from 'resend';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { getIntegrationActor, pushSubscriptionToCanister } from './canisterActor.js';
 
 const PORT = Number(process.env.PORT || 8787);
 /** If "1" / "true", only allow DEFAULT + CORS_ORIGINS. Otherwise reflect any Origin (browser CORS always OK; POST still needs API key when set). */
@@ -27,6 +28,13 @@ const corsOriginsFromEnv = (process.env.CORS_ORIGINS || '')
     .filter(Boolean);
 const corsAllowList = [...new Set([...DEFAULT_CORS_ORIGINS, ...corsOriginsFromEnv])];
 const apiKey = process.env.INTEGRATION_API_KEY || '';
+const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET || '';
+const fusionBackendCanisterId = process.env.FUSION_BACKEND_CANISTER_ID || '';
+const integrationIdentityConfigured = Boolean(
+    fusionBackendCanisterId &&
+        (process.env.INTEGRATION_IC_IDENTITY_PEM?.trim() ||
+            process.env.INTEGRATION_IC_IDENTITY_JSON?.trim()),
+);
 
 const stripeSecret = process.env.STRIPE_SECRET_KEY || '';
 const stripe = stripeSecret ? new Stripe(stripeSecret) : null;
@@ -79,7 +87,68 @@ app.use(
         },
     })
 );
+
+/**
+ * Stripe webhooks need the raw body for signature verification — must run before `express.json`.
+ */
+app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
+    try {
+        if (!stripe || !stripeWebhookSecret) {
+            return res.status(503).json({ error: 'Stripe webhook not configured' });
+        }
+        const sig = req.headers['stripe-signature'];
+        if (!sig || typeof sig !== 'string') {
+            return res.status(400).json({ error: 'Missing stripe-signature' });
+        }
+        let event;
+        try {
+            event = stripe.webhooks.constructEvent(req.body, sig, stripeWebhookSecret);
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error('[stripe webhook] verify failed:', msg);
+            return res.status(400).json({ error: `Webhook: ${msg}` });
+        }
+        try {
+            await handleStripeWebhookEvent(event);
+        } catch (e) {
+            console.error('[stripe webhook] handler', e);
+            return res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+        }
+        return res.json({ received: true });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return res.status(500).json({ error: msg });
+    }
+});
+
 app.use(express.json({ limit: '512kb' }));
+
+/**
+ * @param {import('stripe').Stripe.Event} event
+ */
+async function handleStripeWebhookEvent(event) {
+    switch (event.type) {
+        case 'customer.subscription.created':
+        case 'customer.subscription.updated':
+        case 'customer.subscription.deleted': {
+            const sub = /** @type {import('stripe').Stripe.Subscription} */ (event.data.object);
+            await pushSubscriptionToCanister(sub);
+            break;
+        }
+        case 'invoice.paid':
+        case 'invoice.payment_failed': {
+            const inv = /** @type {import('stripe').Stripe.Invoice} */ (event.data.object);
+            const subId = inv.subscription;
+            if (typeof subId === 'string' && stripe) {
+                const sub = await stripe.subscriptions.retrieve(subId);
+                await pushSubscriptionToCanister(sub);
+            }
+            break;
+        }
+        default:
+            break;
+    }
+}
 
 function requireApiKey(req, res, next) {
     if (!apiKey) return next();
@@ -95,6 +164,9 @@ app.get('/health', (_req, res) => {
     res.json({
         ok: true,
         stripe: stripeSecret ? 'configured' : 'missing',
+        stripeWebhook: stripeWebhookSecret ? 'configured' : 'optional',
+        stripePrice: process.env.STRIPE_PRICE_ID ? 'configured' : 'missing',
+        fusionCanister: integrationIdentityConfigured ? 'configured' : 'missing',
         resend: resendApiKey ? 'configured' : 'missing',
         s3: s3Client && s3Bucket ? 'configured' : 'missing',
         /** Hint for Render etc.: set IAM keys when not using a local AWS profile. */
@@ -132,6 +204,177 @@ app.post('/stripe/create-payment-intent', requireApiKey, async (req, res) => {
             metadata,
         });
         return res.json({ clientSecret: pi.client_secret });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return res.status(500).json({ error: msg });
+    }
+});
+
+/** Bi-monthly (or any) recurring Price from Stripe Dashboard — `price_…` */
+app.post('/stripe/create-subscription', requireApiKey, async (req, res) => {
+    try {
+        if (!stripe) {
+            return res.status(503).json({ error: 'Stripe not configured' });
+        }
+        const priceId = process.env.STRIPE_PRICE_ID || '';
+        if (!priceId) {
+            return res.status(503).json({ error: 'STRIPE_PRICE_ID not configured' });
+        }
+        const principal = req.body?.principal;
+        const email = req.body?.email;
+        if (typeof principal !== 'string' || !principal.trim()) {
+            return res.status(400).json({ error: 'principal required' });
+        }
+        if (typeof email !== 'string' || !email.includes('@')) {
+            return res.status(400).json({ error: 'valid email required' });
+        }
+        const rawMeta = req.body?.metadata && typeof req.body.metadata === 'object' ? req.body.metadata : {};
+        /** @type {Record<string, string>} */
+        const metadata = { principal: principal.trim().slice(0, 500) };
+        for (const [k, v] of Object.entries(rawMeta)) {
+            if (typeof k !== 'string' || !k.length) continue;
+            metadata[k.slice(0, 40)] =
+                typeof v === 'string' ? v.slice(0, 500) : String(v ?? '').slice(0, 500);
+        }
+
+        const existing = await stripe.customers.list({ email: email.trim(), limit: 1 });
+        let customer;
+        if (existing.data.length > 0) {
+            customer = existing.data[0];
+            if (!customer.metadata?.principal) {
+                customer = await stripe.customers.update(customer.id, {
+                    metadata: { ...customer.metadata, principal: metadata.principal },
+                });
+            }
+        } else {
+            customer = await stripe.customers.create({
+                email: email.trim(),
+                metadata,
+            });
+        }
+
+        const subscription = await stripe.subscriptions.create({
+            customer: customer.id,
+            items: [{ price: priceId }],
+            payment_behavior: 'default_incomplete',
+            payment_settings: { save_default_payment_method: 'on_subscription' },
+            expand: ['latest_invoice.payment_intent'],
+            metadata: { principal: metadata.principal },
+        });
+
+        const invoice = subscription.latest_invoice;
+        let clientSecret = null;
+        if (invoice && typeof invoice === 'object' && invoice.payment_intent) {
+            const pi = invoice.payment_intent;
+            if (typeof pi === 'object' && pi && pi.client_secret) {
+                clientSecret = pi.client_secret;
+            }
+        }
+        if (!clientSecret) {
+            return res.status(500).json({ error: 'No client_secret on subscription invoice' });
+        }
+
+        try {
+            await pushSubscriptionToCanister(subscription, customer.id);
+        } catch (e) {
+            console.warn('[stripe] create-subscription canister sync (webhook may follow):', e);
+        }
+
+        return res.json({
+            clientSecret,
+            subscriptionId: subscription.id,
+            customerId: customer.id,
+        });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return res.status(500).json({ error: msg });
+    }
+});
+
+/**
+ * Stripe Customer Search — escape single quotes and backslashes in metadata values.
+ * @param {string} s
+ */
+function escapeStripeMetadataQueryValue(s) {
+    return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+/**
+ * Find customer by `metadata.principal`, pick the best subscription (active/trialing first), push to canister.
+ * @param {import('stripe').Stripe} stripeClient
+ * @param {string} principalText
+ */
+async function syncStripeSubscriptionForPrincipal(stripeClient, principalText) {
+    const trimmed = principalText.trim();
+    if (!trimmed) {
+        return { synced: false, reason: 'invalid_principal' };
+    }
+    const escaped = escapeStripeMetadataQueryValue(trimmed);
+    const search = await stripeClient.customers.search({
+        query: `metadata['principal']:'${escaped}'`,
+        limit: 1,
+    });
+    if (!search.data.length) {
+        return { synced: false, reason: 'no_stripe_customer' };
+    }
+    const customer = search.data[0];
+    const subs = await stripeClient.subscriptions.list({
+        customer: customer.id,
+        status: 'all',
+        limit: 100,
+    });
+    if (!subs.data.length) {
+        return { synced: false, reason: 'no_subscription', customerId: customer.id };
+    }
+    /** @param {import('stripe').Stripe.Subscription} s */
+    const rank = (s) => {
+        if (s.status === 'active' || s.status === 'trialing') return 0;
+        if (s.status === 'past_due') return 1;
+        if (s.status === 'unpaid') return 2;
+        return 3;
+    };
+    const sorted = [...subs.data].sort((a, b) => {
+        const d = rank(a) - rank(b);
+        if (d !== 0) return d;
+        return b.created - a.created;
+    });
+    const best = sorted[0];
+    const meta =
+        best.metadata && typeof best.metadata === 'object'
+            ? /** @type {Record<string, string>} */ ({ ...best.metadata })
+            : {};
+    meta.principal = trimmed;
+    const subForPush = {
+        id: best.id,
+        status: best.status,
+        customer: customer.id,
+        metadata: meta,
+    };
+    await pushSubscriptionToCanister(subForPush, customer.id);
+    return {
+        synced: true,
+        status: best.status,
+        subscriptionId: best.id,
+        customerId: customer.id,
+    };
+}
+
+/** Pull latest Stripe subscription for this principal and upsert the backend (works alongside webhooks). */
+app.post('/stripe/sync-subscription', requireApiKey, async (req, res) => {
+    try {
+        if (!stripe) {
+            return res.status(503).json({ error: 'Stripe not configured' });
+        }
+        const principal = req.body?.principal;
+        if (typeof principal !== 'string' || !principal.trim()) {
+            return res.status(400).json({ error: 'principal required' });
+        }
+        const actor = await getIntegrationActor();
+        if (!actor) {
+            return res.status(503).json({ error: 'Canister integration not configured' });
+        }
+        const result = await syncStripeSubscriptionForPrincipal(stripe, principal);
+        return res.json(result);
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         return res.status(500).json({ error: msg });
@@ -179,6 +422,7 @@ app.post('/email/send', requireApiKey, async (req, res) => {
         }
         const { data, error } = await resend.emails.send(payload);
         if (error) {
+            console.error('[email/send] Resend rejected:', error);
             return res.status(502).json({ error: error.message || 'Resend error' });
         }
         return res.json({ ok: true, id: data?.id });

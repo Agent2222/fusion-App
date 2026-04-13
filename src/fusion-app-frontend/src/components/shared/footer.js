@@ -411,11 +411,16 @@ class FooterComponent extends HTMLElement {
 
                 @media (max-width: 768px) {
                     footer {
-                        padding: 1rem 5% 1.5rem;
+                        width: 100%;
+                        left: 0%;
+                        right: auto;
+                        padding: 1rem 10% 1.5rem;
+                        box-sizing: border-box;
                     }
 
                     #footerLogo img {
-                        width: min(160px, 50vw);
+                        width: min(85px, 50vw);
+                        height: auto;
                     }
 
                     .fcBottom {

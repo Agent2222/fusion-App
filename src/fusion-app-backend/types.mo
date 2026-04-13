@@ -64,13 +64,43 @@ module {
         #suspended;
     };
 
+    /// Stable / legacy row — same layout as the original five-field `UserAccount` (upgrade-safe).
+    public type UserAccountCore = {
+        role : UserRole;
+        status : AccountStatus;
+        linkedArtistId : ?Text;
+        linkedOrgId : ?Text;
+        updatedAt : Text;
+    };
+
+    /// Stripe subscription + manual exemption (stored in `membershipByPrincipal` stable map).
+    public type MembershipFields = {
+        stripeCustomerId : ?Text;
+        stripeSubscriptionId : ?Text;
+        stripeSubscriptionStatus : ?Text;
+        membershipExemptManual : Bool;
+    };
+
     /// Authenticated user profile (Principal -> account). Admin list in actor still gates destructive ops.
+    /// Merged from `UserAccountCore` + `MembershipFields` for API responses.
     public type UserAccount = {
         role : UserRole;
         status : AccountStatus;
         linkedArtistId : ?Text;
         linkedOrgId : ?Text;
         updatedAt : Text;
+        stripeCustomerId : ?Text;
+        stripeSubscriptionId : ?Text;
+        stripeSubscriptionStatus : ?Text;
+        membershipExemptManual : Bool;
+    };
+
+    /// Site access vs billing: used after login to gate paywall / join modal.
+    public type MembershipAccessResult = {
+        #noAccount;
+        #exempt;
+        #ok;
+        #needsSubscription;
     };
 
     /// Full artist row for canister + Studio: public `profile` + optional JSON blob for locales (versioned).
@@ -134,5 +164,24 @@ module {
         status : ApplicantStatus;
         createdAt : Text;
         payloadJson : Text;
+    };
+
+    // --- Profile plan: explicit names for JSON blobs (full locale trees stay in `ArtistRecord.localesJson`) ---
+
+    /// Canonical per-locale payload is JSON inside `ArtistRecord.localesJson` (en/ja blocks). Motoko keeps it opaque
+    /// so we do not lose polymorphic fields (e.g. `world.*` string vs array) before frontend normalization.
+    public type LocalesJsonBlob = Text;
+
+    /// Future owner-only account bucket (bookmarks, inbox, subscription) — not merged into public reads.
+    public type AccountPrivateJson = Text;
+
+    /// Non-artist member profile (collectors / future roles). Not stored in actor yet — schema for routing + APIs.
+    public type CollectorProfileRecord = {
+        id : Text;
+        slug : Text;
+        displayName : Text;
+        updatedAt : Text;
+        visibility : Text;
+        localesJson : ?Text;
     };
 };

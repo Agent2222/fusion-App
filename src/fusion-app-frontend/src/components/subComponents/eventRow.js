@@ -1,5 +1,5 @@
-// Event row: `data-event-id` selects `testData.events[]`; copy comes from `en` / `ja` on that item.
-import { testData } from '../../testData.js';
+// Event row: `data-event-id` selects an item from CMS events list; copy from `en` / `ja` on that item.
+import { getEventsList, subscribeDataSource } from '../../utils/database.js';
 import { navigate } from '../../router.js';
 
 function escapeHtml(s) {
@@ -14,6 +14,10 @@ class EventRowComponent extends HTMLElement {
     constructor() {
         super();
         this.shadow = this.attachShadow({ mode: 'open' });
+        /** @type {Array<unknown> | null} */
+        this._eventsList = null;
+        /** @type {(() => void) | null} */
+        this._unsubData = null;
         this._onLocaleChange = () => this.render();
     }
 
@@ -40,7 +44,9 @@ class EventRowComponent extends HTMLElement {
 
     connectedCallback() {
         window.addEventListener('fusion-localechange', this._onLocaleChange);
-        this.render();
+        if (this._unsubData) this._unsubData();
+        this._unsubData = subscribeDataSource(() => void this._loadEvents());
+        void this._loadEvents();
         if (!this._eventNavBound) {
             this._eventNavBound = true;
             this.shadow.addEventListener('click', (e) => {
@@ -62,6 +68,15 @@ class EventRowComponent extends HTMLElement {
 
     disconnectedCallback() {
         window.removeEventListener('fusion-localechange', this._onLocaleChange);
+        if (this._unsubData) {
+            this._unsubData();
+            this._unsubData = null;
+        }
+    }
+
+    async _loadEvents() {
+        this._eventsList = await getEventsList();
+        this.render();
     }
 
     _getEventId() {
@@ -72,7 +87,7 @@ class EventRowComponent extends HTMLElement {
     /** @returns {{ event: object, loc: object } | null} */
     _resolveEventData() {
         const id = this._getEventId();
-        const list = testData.events;
+        const list = this._eventsList;
         if (id == null || !Array.isArray(list)) return null;
         const event = list.find((e) => String(e.id) === id);
         if (!event) return null;

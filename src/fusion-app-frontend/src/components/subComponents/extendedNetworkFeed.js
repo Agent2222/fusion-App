@@ -1,8 +1,8 @@
 /**
  * Extended network grid — same card rhythm as `artistsFeed` (image + text), no pagination.
- * Data: `testData.context` merged by locale (`extendedNetworkTitle`, `extendedNetworkHeadline`, `extendedNetworkCards`).
+ * Data: CMS `context` bundle merged by locale.
  */
-import { testData } from '../../testData.js';
+import { getContentBundleForStudio, subscribeDataSource } from '../../utils/database.js';
 
 function escapeHtml(s) {
     return String(s)
@@ -12,10 +12,14 @@ function escapeHtml(s) {
         .replace(/"/g, '&quot;');
 }
 
-function getContextCopy() {
+/**
+ * @param {Record<string, unknown> | null} bundle
+ */
+function getContextCopyFromBundle(bundle) {
+    if (!bundle || typeof bundle !== 'object') return {};
     const locale = typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
-    const base = testData.context?.en || {};
-    const loc = testData.context?.[locale] || {};
+    const base = /** @type {Record<string, unknown>} */ (bundle).en || {};
+    const loc = /** @type {Record<string, unknown>} */ (bundle)[locale] || {};
     return { ...base, ...loc };
 }
 
@@ -24,7 +28,17 @@ class ExtendedNetworkFeedElement extends HTMLElement {
         super();
         this.attachShadow({ mode: 'open' });
         this._shellReady = false;
+        /** @type {Record<string, unknown> | null} */
+        this._contextBundle = null;
+        /** @type {(() => void) | null} */
+        this._unsubData = null;
         this._onLocaleChange = () => this.render();
+        /** @param {Event} ev */
+        this._onFusionCms = (ev) => {
+            const slug = /** @type {CustomEvent<{ slug?: string }>} */ (ev).detail?.slug;
+            if (slug && slug !== 'context') return;
+            void this._loadContext();
+        };
     }
 
     get active() {
@@ -50,12 +64,25 @@ class ExtendedNetworkFeedElement extends HTMLElement {
 
     connectedCallback() {
         window.addEventListener('fusion-localechange', this._onLocaleChange);
-        this.ensureShell();
-        this.render();
+        window.addEventListener('fusion-content-pages-changed', this._onFusionCms);
+        if (this._unsubData) this._unsubData();
+        this._unsubData = subscribeDataSource(() => void this._loadContext());
+        void this._loadContext();
     }
 
     disconnectedCallback() {
         window.removeEventListener('fusion-localechange', this._onLocaleChange);
+        window.removeEventListener('fusion-content-pages-changed', this._onFusionCms);
+        if (this._unsubData) {
+            this._unsubData();
+            this._unsubData = null;
+        }
+    }
+
+    async _loadContext() {
+        this._contextBundle = await getContentBundleForStudio('context', { forStudio: false });
+        this.ensureShell();
+        this.render();
     }
 
     ensureShell() {
@@ -196,7 +223,7 @@ class ExtendedNetworkFeedElement extends HTMLElement {
     render() {
         if (!this._shellReady) this.ensureShell();
 
-        const ctx = getContextCopy();
+        const ctx = getContextCopyFromBundle(this._contextBundle);
         const title = ctx.extendedNetworkTitle ?? '';
         const description = ctx.extendedNetworkHeadline ?? '';
         const cards = Array.isArray(ctx.extendedNetworkCards) ? ctx.extendedNetworkCards : [];
@@ -218,7 +245,7 @@ class ExtendedNetworkFeedElement extends HTMLElement {
         grid.innerHTML = '';
 
         if (cards.length === 0) {
-            grid.innerHTML = `<div class="feed-empty">No extended network cards in testData.context</div>`;
+            grid.innerHTML = `<div class="feed-empty">No extended network cards in context content.</div>`;
             return;
         }
 

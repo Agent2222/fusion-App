@@ -73,6 +73,11 @@ export function buildServerEnvSnippet(skTest, skLive, extra = {}) {
     if (re) lines.push('RESEND_API_KEY=' + re, '');
     else lines.push('# RESEND_API_KEY=re_...', '');
     lines.push(
+        '# STRIPE_PRICE_ID=price_...',
+        '# STRIPE_WEBHOOK_SECRET=whsec_...',
+        '# FUSION_BACKEND_CANISTER_ID=...',
+        '# INTEGRATION_IC_IDENTITY_JSON=[...]',
+        '# IC_HOST=http://127.0.0.1:4943',
         '# RESEND_FROM="Fusion <onboarding@resend.dev>"',
         String(extra.awsRegion || '').trim()
             ? `AWS_REGION=${String(extra.awsRegion).trim()}`

@@ -1,7 +1,7 @@
 import { renderHeader } from './shared/header.js';
 import { renderFooter } from './shared/footer.js';
 
-import { testData } from '../testData.js';
+import { getAllProgramsBlock, subscribeDataSource } from '../utils/database.js';
 
 function toProgramBlockData(enCard, jaCard) {
     return {
@@ -44,26 +44,41 @@ export function render() {
     `;
 }
 
+/** @type {(() => void) | null} */
+let _unsubPrograms = null;
+
 export default function initPrograms() {
     console.log('Programs page initialized');
 
-    const blocksHost = document.getElementById('programsBlocks');
-    if (blocksHost) {
+    if (_unsubPrograms) {
+        _unsubPrograms();
+        _unsubPrograms = null;
+    }
+
+    const mount = async () => {
+        const blocksHost = document.getElementById('programsBlocks');
+        if (!blocksHost) return;
         blocksHost.innerHTML = '';
-        const enCards = testData.allPrograms?.programs?.en || [];
-        const jaCards = testData.allPrograms?.programs?.ja || [];
+        const block = await getAllProgramsBlock();
+        const enCards = block?.programs?.en || [];
+        const jaCards = block?.programs?.ja || [];
         for (let i = 0; i < enCards.length; i++) {
             const enCard = enCards[i];
             const jaCard = jaCards[i] || enCard;
-            const block = document.createElement('app-program-block');
-            block.setAttribute('active', 'true');
-            block.setAttribute('layout', i % 2 === 0 ? 'left' : 'right');
-            if (typeof block.setProgramBlock === 'function') {
-                block.setProgramBlock(toProgramBlockData(enCard, jaCard));
+            const el = document.createElement('app-program-block');
+            el.setAttribute('active', 'true');
+            el.setAttribute('layout', i % 2 === 0 ? 'left' : 'right');
+            if (typeof el.setProgramBlock === 'function') {
+                el.setProgramBlock(toProgramBlockData(enCard, jaCard));
             }
-            blocksHost.appendChild(block);
+            blocksHost.appendChild(el);
         }
-    }
+    };
+
+    void mount();
+    _unsubPrograms = subscribeDataSource(() => {
+        void mount();
+    });
 }
 
 export function generateProgramsContent() {
