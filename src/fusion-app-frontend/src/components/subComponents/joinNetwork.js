@@ -755,8 +755,11 @@ class JoinNetworkComponent extends HTMLElement {
             const [{ loadStripe }, subRes] = await Promise.all([
                 import('@stripe/stripe-js'),
                 createSubscription({
-                    ...(principalOpt ? { principal: principalOpt } : {}),
                     email: emailForSub,
+                    payFirst: this._joinMode !== 'resubscribe',
+                    ...(this._joinMode === 'resubscribe' && principalOpt
+                        ? { principal: principalOpt }
+                        : {}),
                     metadata: {
                         category: cat || '',
                         intent: this._modalType,

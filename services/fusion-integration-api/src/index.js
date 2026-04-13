@@ -262,13 +262,18 @@ app.post('/stripe/create-subscription', requireApiKey, async (req, res) => {
         const principalRaw = req.body?.principal;
         const principal =
             typeof principalRaw === 'string' && principalRaw.trim() ? principalRaw.trim().slice(0, 500) : '';
+        const payFirstFlag =
+            req.body?.payFirst === true ||
+            req.body?.payFirst === 'true' ||
+            String(req.body?.payFirst || '').toLowerCase() === 'true';
         const email = req.body?.email;
         if (typeof email !== 'string' || !email.includes('@')) {
             return res.status(400).json({ error: 'valid email required' });
         }
         const rawMeta = req.body?.metadata && typeof req.body.metadata === 'object' ? req.body.metadata : {};
 
-        const payFirstPending = !principal;
+        /** Pay-first checkout: explicit flag and/or no principal (resubscribe sends principal only). */
+        const payFirstPending = payFirstFlag || !principal;
         const fusionPendingId = payFirstPending ? randomUUID() : '';
 
         /** @type {Record<string, string>} */

@@ -64,11 +64,12 @@ export const FUSION_PENDING_MEMBERSHIP_LINK_KEY = 'fusion-pending-membership-lin
 /**
  * Create a Stripe Subscription (bi-monthly Price) and return the first invoice PaymentIntent client secret.
  * Omit `principal` for **pay-first** checkout: response includes `fusionPendingId` until the user links II.
- * @param {{ principal?: string, email: string, metadata?: Record<string, string> }} opts
+ * @param {{ principal?: string, email: string, metadata?: Record<string, string>, payFirst?: boolean }} opts
  * @returns {Promise<{ clientSecret: string, subscriptionId: string, customerId: string, fusionPendingId?: string }>}
  */
 export async function createSubscription(opts) {
     const principal = opts?.principal;
+    const payFirst = opts?.payFirst === true;
     const email = opts?.email;
     const metadata = opts?.metadata && typeof opts.metadata === 'object' ? opts.metadata : {};
     if (typeof email !== 'string' || !email.includes('@')) {
@@ -78,12 +79,14 @@ export async function createSubscription(opts) {
     if (!base) {
         throw new Error('Integration API URL not configured.');
     }
-    /** @type {Record<string, string>} */
+    /** @type {Record<string, string | boolean | Record<string, string>>} */
     const body = {
         email: email.trim(),
         metadata,
     };
-    if (typeof principal === 'string' && principal.trim()) {
+    if (payFirst) {
+        body.payFirst = true;
+    } else if (typeof principal === 'string' && principal.trim()) {
         body.principal = principal.trim();
     }
     const res = await fetch(`${base}/stripe/create-subscription`, {
@@ -93,7 +96,13 @@ export async function createSubscription(opts) {
     });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `Create subscription HTTP ${res.status}`);
+        const msg = typeof err.error === 'string' ? err.error : '';
+        if (msg === 'principal required' || /principal required/i.test(msg)) {
+            throw new Error(
+                'Payment service is an older build: redeploy fusion-integration-api (pay-first needs POST /stripe/create-subscription without principal). Check VITE_INTEGRATION_API_URL / Studio → Services points at the updated server.'
+            );
+        }
+        throw new Error(msg || `Create subscription HTTP ${res.status}`);
     }
     const data = await res.json();
     if (!data.clientSecret) {
