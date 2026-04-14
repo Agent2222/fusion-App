@@ -1,4 +1,19 @@
-// Placeholder — structure, content, and styles TBD
+import { navigate } from '../../router.js';
+
+/** @param {unknown} raw */
+function resolveGalleryAccessCtaHref(raw) {
+    const s = raw == null || raw === '' ? '' : String(raw).trim();
+    if (!s || s === '#' || s === '/request/gallery-access') return '/gallery-access';
+    return s;
+}
+
+/** @param {string} s */
+function escapeAttr(s) {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;');
+}
+
 class GalleryAccessCtaComponent extends HTMLElement {
     constructor() {
         super();
@@ -46,7 +61,7 @@ class GalleryAccessCtaComponent extends HTMLElement {
                 : 'en';
         const slice = this.data[loc] || this.data.en || this.data.ja || {};
         const cta = slice.cta ?? '';
-        const ctaLink = this.data.ctaLink ?? '#';
+        const ctaHref = resolveGalleryAccessCtaHref(this.data.ctaLink);
         const ctaHeadText = slice.ctaHeadText ?? '';
         const ctaSubText = slice.ctaSubText ?? '';
 
@@ -64,10 +79,19 @@ class GalleryAccessCtaComponent extends HTMLElement {
             </div>
             <div class="gallery-access-cta-button">
                 <div class="gallery-access-cta-button-link" id="gallery-access-cta-button-link">
-                    <a href="${ctaLink}">${cta}</a>
+                    <a href="${escapeAttr(ctaHref)}">${cta}</a>
                 </div>
             </div>
         `;
+        const a = ctaEl.querySelector('.gallery-access-cta-button-link a');
+        if (a) {
+            a.addEventListener('click', (e) => {
+                if (ctaHref.startsWith('/') && !ctaHref.startsWith('//')) {
+                    e.preventDefault();
+                    navigate(ctaHref);
+                }
+            });
+        }
         content.appendChild(ctaEl);
     }
 

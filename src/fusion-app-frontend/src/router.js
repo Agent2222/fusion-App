@@ -79,10 +79,10 @@ const routes = {
         contentGenerator: 'generateSignInContent'
     },
     '/register': {
-        loader: () => import('./components/navPages.js'),
-        title: 'Register',
-        description: 'Register',
-        contentGenerator: 'generateRegisterContent'
+        loader: () => import('./components/settingsProfile.js'),
+        title: 'Account',
+        description: 'Your profile and account',
+        contentGenerator: 'generateSettingsProfileContent',
     },
     '/contact': {
         loader: () => import('./components/contact.js'),
@@ -264,7 +264,15 @@ class Router {
     }
 
     async handleRoute() {
-        const path = window.location.pathname;
+        let path = window.location.pathname;
+        if (path.length > 1 && path.endsWith('/')) {
+            path = path.slice(0, -1);
+            window.history.replaceState(
+                {},
+                '',
+                path + window.location.search + window.location.hash,
+            );
+        }
         const route = matchContentRoute(path) || this.routes['/404'];
         if (path !== '/studio' && typeof document !== 'undefined') {
             document.body.style.overflow = '';

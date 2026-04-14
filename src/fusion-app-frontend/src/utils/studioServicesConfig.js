@@ -12,9 +12,52 @@ export const LS_STRIPE_PK_LIVE = 'fusion-studio-stripe-pk-live';
 export const LS_RESEND_TEST_TO = 'fusion-studio-resend-test-to';
 /** Optional Resend From override for Studio test email (must be allowed in Resend) */
 export const LS_RESEND_FROM_OVERRIDE = 'fusion-studio-resend-from-override';
+/** Comma/newline-separated admin recipients for new application notifications (merged with {@link DEFAULT_APPLICATION_STAFF_EMAIL}). */
+export const LS_APPLICATION_ADMIN_EMAILS = 'fusion-studio-application-admin-emails';
+
+/** Always receives new-application notifications in addition to {@link getApplicationAdminEmails} entries. */
+export const DEFAULT_APPLICATION_STAFF_EMAIL = 'info@fusionart.world';
 export const LS_S3_REGION = 'fusion-studio-s3-region-note';
 export const LS_S3_BUCKET = 'fusion-studio-s3-bucket-note';
 export const LS_S3_PUBLIC_BASE = 'fusion-studio-s3-public-base-note';
+
+/**
+ * @returns {string[]}
+ */
+export function getApplicationAdminEmails() {
+    try {
+        const raw = localStorage.getItem(LS_APPLICATION_ADMIN_EMAILS) || '';
+        return String(raw)
+            .split(/[\n,]+/)
+            .map((s) => s.trim())
+            .filter((s) => s.includes('@'));
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Staff inboxes for new program applications: primary {@link DEFAULT_APPLICATION_STAFF_EMAIL} plus Studio list, deduped (case-insensitive).
+ * @returns {string[]}
+ */
+export function getApplicationStaffNotificationEmails() {
+    /** @type {string[]} */
+    const out = [];
+    const seen = new Set();
+    const push = (addr) => {
+        const a = String(addr || '').trim();
+        if (!a.includes('@')) return;
+        const k = a.toLowerCase();
+        if (seen.has(k)) return;
+        seen.add(k);
+        out.push(a);
+    };
+    push(DEFAULT_APPLICATION_STAFF_EMAIL);
+    for (const e of getApplicationAdminEmails()) {
+        push(e);
+    }
+    return out;
+}
 
 /** @returns {'test'|'live'} */
 export function getStripeMode() {

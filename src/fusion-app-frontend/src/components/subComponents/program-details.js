@@ -1,7 +1,5 @@
-import {
-    PROGRAM_APPLICATION_VIEWPORT_TOP_GAP_PX,
-    scrollElementTopToViewportGap,
-} from '../../utils/scrollAnchorToViewportGap.js';
+import { programApplicationCtaLabelForAuth, programApplicationReviewLabel } from '../../utils/programApplicationCta.js';
+import { revealProgramApplicationOrOpenJoin } from '../../utils/scrollAnchorToViewportGap.js';
 
 /**
  * Program residency details: timeline (key dates) + sidebar (location, facilities, cost).
@@ -10,12 +8,12 @@ class ProgramDetailsComponent extends HTMLElement {
     constructor() {
         super();
         this.shadow = this.attachShadow({ mode: 'open' });
-        /** @type {null | { headline: string, keyDates: Array<{ date?: string, description?: string }>, location: string, facilitiesText: string, costText: string, additionalInfo?: object | null }} */
+        /** @type {null | { programId?: string, applicationsOpen?: boolean, headline: string, keyDates: Array<{ date?: string, description?: string }>, locations?: string[], facilities?: string[], costText: string, additionalInfo?: object | null }} */
         this._data = null;
     }
 
     /**
-     * @param {{ headline: string, keyDates: Array<{ date?: string, description?: string }>, location: string, facilitiesText: string, costText: string, additionalInfo?: { faq?: object[], programNotes?: object[], refundPolicy?: object[] } | null }} payload
+     * @param {{ programId?: string, applicationsOpen?: boolean, headline: string, keyDates: Array<{ date?: string, description?: string }>, locations?: string[], facilities?: string[], costText: string, additionalInfo?: { faq?: object[], programNotes?: object[], refundPolicy?: object[] } | null }} payload
      */
     setProgramDetails(payload) {
         this._data = payload;
@@ -48,10 +46,9 @@ class ProgramDetailsComponent extends HTMLElement {
         const locale = typeof window.getLocale === 'function' ? window.getLocale() : 'en';
         if (locale === 'ja') {
             return {
-                location: '開催地',
+                locations: '開催地',
                 facilities: '施設',
                 cost: '費用',
-                beginApplication: '応募を始める',
                 additionalInformation: '追加情報',
                 faq: 'よくある質問',
                 programNotes: 'プログラム備考',
@@ -59,10 +56,9 @@ class ProgramDetailsComponent extends HTMLElement {
             };
         }
         return {
-            location: 'LOCATION',
+            locations: 'LOCATIONS',
             facilities: 'FACILITIES',
             cost: 'COST',
-            beginApplication: 'Begin Application',
             additionalInformation: 'Additional Information',
             faq: 'FAQ',
             programNotes: 'Program Notes',
@@ -72,11 +68,11 @@ class ProgramDetailsComponent extends HTMLElement {
 
     _hasMainDetails() {
         if (!this._data) return false;
-        const { keyDates, location, facilitiesText, costText } = this._data;
+        const { keyDates, locations, facilities, costText } = this._data;
         const hasDates = Array.isArray(keyDates) && keyDates.some((d) => (d?.date || d?.description || '').trim());
         const hasSidebar = Boolean(
-            (location && String(location).trim()) ||
-                (facilitiesText && String(facilitiesText).trim()) ||
+            (Array.isArray(locations) && locations.some((x) => String(x || '').trim())) ||
+                (Array.isArray(facilities) && facilities.some((x) => String(x || '').trim())) ||
                 (costText && String(costText).trim()),
         );
         return hasDates || hasSidebar;
@@ -223,7 +219,7 @@ class ProgramDetailsComponent extends HTMLElement {
         }
         this.style.display = '';
 
-        const { headline, keyDates, location, facilitiesText, costText, additionalInfo } = this._data;
+        const { headline, keyDates, locations, facilities, costText, additionalInfo } = this._data;
         const L = this._labels();
         const head = (headline || '').trim();
         const hasMain = this._hasMainDetails();
@@ -269,12 +265,16 @@ class ProgramDetailsComponent extends HTMLElement {
         }
 
         if (sidebarEl) {
-            const loc = (location || '').trim();
-            const fac = (facilitiesText || '').trim();
+            const loc = Array.isArray(locations)
+                ? locations.map((x) => String(x || '').trim()).filter(Boolean)
+                : [];
+            const fac = Array.isArray(facilities)
+                ? facilities.map((x) => String(x || '').trim()).filter(Boolean)
+                : [];
             const cost = (costText || '').trim();
             sidebarEl.innerHTML = '';
             const blocks = [
-                [L.location, loc],
+                [L.locations, loc],
                 [L.facilities, fac],
                 [L.cost, cost],
             ];
@@ -285,9 +285,17 @@ class ProgramDetailsComponent extends HTMLElement {
                 const lab = document.createElement('div');
                 lab.className = 'sidebar-label';
                 lab.textContent = label;
-                const p = document.createElement('p');
-                p.className = 'sidebar-value';
-                p.textContent = val;
+                const p = Array.isArray(val) ? document.createElement('ul') : document.createElement('p');
+                p.className = Array.isArray(val) ? 'sidebar-value-list' : 'sidebar-value';
+                if (Array.isArray(val)) {
+                    for (const row of val) {
+                        const li = document.createElement('li');
+                        li.textContent = `- ${row}`;
+                        p.appendChild(li);
+                    }
+                } else {
+                    p.textContent = val;
+                }
                 block.appendChild(lab);
                 block.appendChild(p);
                 sidebarEl.appendChild(block);
@@ -295,13 +303,17 @@ class ProgramDetailsComponent extends HTMLElement {
             sidebarEl.hidden = sidebarEl.children.length === 0;
         }
 
+        const applicationsOpen = this._data.applicationsOpen !== false;
         if (beginBtn) {
-            beginBtn.textContent = L.beginApplication;
-            beginBtn.hidden = !hasMain;
-            beginBtn.onclick = () => {
-                const section = document.getElementById('programApplicationSection');
-                scrollElementTopToViewportGap(section, PROGRAM_APPLICATION_VIEWPORT_TOP_GAP_PX);
-            };
+            beginBtn.hidden = !hasMain || !applicationsOpen;
+            if (applicationsOpen) {
+                beginBtn.onclick = () => void revealProgramApplicationOrOpenJoin();
+                void this._syncBeginApplicationButtonLabel(beginBtn);
+            } else {
+                beginBtn.onclick = null;
+                beginBtn.textContent = '';
+                beginBtn.classList.remove('program-application-cta--review');
+            }
         }
 
         const hasAdd = this._hasAdditionalInfo();
@@ -383,7 +395,56 @@ class ProgramDetailsComponent extends HTMLElement {
         this._closeAllAiPanels();
     }
 
+    /**
+     * Match intro CTAs: “Sign up & apply” for guests, “Begin application” when signed in.
+     * @param {HTMLButtonElement} beginBtn
+     */
+    async _syncBeginApplicationButtonLabel(beginBtn) {
+        try {
+            const { getAuthSnapshot } = await import('../../utils/icAuth.js');
+            const { getMyArtistRecord } = await import('../../utils/database.js');
+            const snap = await getAuthSnapshot();
+            let alreadyApplied = false;
+            const pid = String(this._data?.programId || '').trim();
+            if (pid && snap.authenticated) {
+                try {
+                    const rec = await getMyArtistRecord();
+                    const raw = rec ? rec.applied_json ?? rec.appliedJson : null;
+                    if (raw) {
+                        const j = typeof raw === 'string' ? JSON.parse(raw) : raw;
+                        alreadyApplied = Boolean(j && typeof j === 'object' && j[pid]);
+                    }
+                } catch {
+                    alreadyApplied = false;
+                }
+            }
+            beginBtn.textContent = alreadyApplied
+                ? programApplicationReviewLabel()
+                : programApplicationCtaLabelForAuth(snap.authenticated);
+            beginBtn.classList.toggle('program-application-cta--review', alreadyApplied);
+        } catch {
+            beginBtn.textContent = programApplicationCtaLabelForAuth(false);
+            beginBtn.classList.remove('program-application-cta--review');
+        }
+    }
+
+    _refreshBeginApplicationCtaLabel() {
+        const root = this.shadowRoot;
+        if (!root || !this._data) return;
+        if (this._data.applicationsOpen === false) return;
+        const beginBtn = root.querySelector('.begin-application');
+        if (!beginBtn || beginBtn.hidden) return;
+        void this._syncBeginApplicationButtonLabel(beginBtn);
+    }
+
     connectedCallback() {
+        if (!this._programCtaRefreshBound) {
+            this._programCtaRefreshBound = true;
+            this._onProgramCtaRefresh = () => this._refreshBeginApplicationCtaLabel();
+            window.addEventListener('fusion-auth-change', this._onProgramCtaRefresh);
+            window.addEventListener('fusion-localechange', this._onProgramCtaRefresh);
+            window.addEventListener('fusion-program-application-submitted', this._onProgramCtaRefresh);
+        }
         if (!this._navBound) {
             this._navBound = true;
         }
@@ -401,6 +462,16 @@ class ProgramDetailsComponent extends HTMLElement {
                     this._openAiPanel(key);
                 }
             });
+        }
+    }
+
+    disconnectedCallback() {
+        if (this._programCtaRefreshBound && this._onProgramCtaRefresh) {
+            window.removeEventListener('fusion-auth-change', this._onProgramCtaRefresh);
+            window.removeEventListener('fusion-localechange', this._onProgramCtaRefresh);
+            window.removeEventListener('fusion-program-application-submitted', this._onProgramCtaRefresh);
+            this._programCtaRefreshBound = false;
+            this._onProgramCtaRefresh = null;
         }
     }
 
@@ -536,6 +607,31 @@ class ProgramDetailsComponent extends HTMLElement {
                     transform: translateY(-1px);
                 }
 
+                @keyframes program-application-cta-review-blink {
+                    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(0, 0, 0, 0.08); }
+                    50% { opacity: 0.88; box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.06); }
+                }
+
+                .begin-application.program-application-cta--review {
+                    background: var(--c5);
+                    color: var(--c2);
+                    border-color: rgba(0, 0, 0, 0.14);
+                    animation: program-application-cta-review-blink 1.2s ease-in-out infinite;
+                }
+
+                .begin-application.program-application-cta--review:hover {
+                    background: var(--c5);
+                    color: var(--c2);
+                    opacity: 0.95;
+                    transform: translateY(-1px);
+                }
+
+                @media (prefers-reduced-motion: reduce) {
+                    .begin-application.program-application-cta--review {
+                        animation: none;
+                    }
+                }
+
                 .sidebar {
                     background: var(--bg);
                     padding: clamp(1.25rem, 3vw, 1.75rem);
@@ -561,6 +657,17 @@ class ProgramDetailsComponent extends HTMLElement {
 
                 .sidebar-value {
                     margin: 0;
+                    font-size: clamp(0.9rem, 1.15vw, 1.05rem);
+                    font-variation-settings: var(--fv-body-wide);
+                    color: var(--c2);
+                    line-height: 1.5;
+                    letter-spacing: 0.02em;
+                }
+
+                .sidebar-value-list {
+                    margin: 0;
+                    padding: 0;
+                    list-style: none;
                     font-size: clamp(0.9rem, 1.15vw, 1.05rem);
                     font-variation-settings: var(--fv-body-wide);
                     color: var(--c2);

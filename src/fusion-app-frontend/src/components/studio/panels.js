@@ -12,6 +12,7 @@ import {
     deleteJournalStudio,
     deleteProgramStudio,
     deleteSubscriberRow,
+    deleteArtistByIdStudio,
     getAccountsForStudio,
     getApplicants,
     getArtists,
@@ -84,6 +85,7 @@ import {
 } from '../../utils/studioArtistForm.js';
 import { collectAccessCodesFromArtists, normalizeArtistImportRow } from '../../utils/studioBatchImport.js';
 import {
+    LS_APPLICATION_ADMIN_EMAILS,
     LS_INTEGRATION_API_KEY,
     LS_INTEGRATION_API_URL,
     LS_RESEND_FROM_OVERRIDE,
@@ -892,6 +894,13 @@ function renderServices() {
                                 <span>From (optional)</span>
                                 <input type="text" id="studio-svc-resend-from" class="studio-input" placeholder='Fusion &lt;onboarding@resend.dev&gt; — must be allowed in Resend' autocomplete="off" />
                             </label>
+                            <label class="studio-field studio-field--full">
+                                <span>Additional application notification recipients</span>
+                                <textarea id="studio-svc-application-admin-emails" class="studio-input studio-textarea-mono" rows="3" placeholder="extra1@example.com, extra2@example.com"></textarea>
+                            </label>
+                            <p class="studio-muted studio-field--full">
+                                <code>info@fusionart.world</code> always receives new program-application notifications. Use the field above to add more staff addresses (comma or newline separated).
+                            </p>
                             <div class="studio-field studio-field--full studio-services-actions">
                                 <button type="button" class="studio-btn-ghost" id="studio-svc-help-resend">How to set up Resend</button>
                                 <button type="button" class="studio-btn-primary" id="studio-svc-send-test">Send test email</button>
@@ -1788,6 +1797,26 @@ async function initArtists(mainEl) {
                     const pool = collectAccessCodesFromArtists(await getArtistsForStudio());
                     const rec = normalizeArtistImportRow(raw, pool, { forceImported: false });
                     await bulkUpsertArtistsStudio([rec]);
+                    close();
+                    await load();
+                } catch (e) {
+                    alert(e instanceof Error ? e.message : String(e));
+                }
+            });
+
+            root.querySelector('#studio-art-delete')?.addEventListener('click', async () => {
+                const id = String(full.id ?? '').trim();
+                if (!id) return;
+                const label = String(full.slug ?? id);
+                if (
+                    !confirm(
+                        `Delete artist "${label}" permanently?\n\nLinked member accounts will be unlinked and set to pending. This cannot be undone.`
+                    )
+                ) {
+                    return;
+                }
+                try {
+                    await deleteArtistByIdStudio(id);
                     close();
                     await load();
                 } catch (e) {
@@ -3103,6 +3132,7 @@ async function initServices(mainEl) {
     const skLive = mainEl.querySelector('#studio-svc-sk-live');
     const resendTo = mainEl.querySelector('#studio-svc-resend-to');
     const resendFrom = mainEl.querySelector('#studio-svc-resend-from');
+    const appNotify = mainEl.querySelector('#studio-svc-application-admin-emails');
     const s3r = mainEl.querySelector('#studio-svc-s3-region');
     const s3b = mainEl.querySelector('#studio-svc-s3-bucket');
     const s3p = mainEl.querySelector('#studio-svc-s3-public');
@@ -3119,6 +3149,7 @@ async function initServices(mainEl) {
             if (pkLive) pkLive.value = localStorage.getItem(LS_STRIPE_PK_LIVE) || '';
             if (resendTo) resendTo.value = localStorage.getItem(LS_RESEND_TEST_TO) || '';
             if (resendFrom) resendFrom.value = localStorage.getItem(LS_RESEND_FROM_OVERRIDE) || '';
+            if (appNotify) appNotify.value = localStorage.getItem(LS_APPLICATION_ADMIN_EMAILS) || '';
             if (s3r) s3r.value = localStorage.getItem(LS_S3_REGION) || '';
             if (s3b) s3b.value = localStorage.getItem(LS_S3_BUCKET) || '';
             if (s3p) s3p.value = localStorage.getItem(LS_S3_PUBLIC_BASE) || '';
@@ -3141,6 +3172,7 @@ async function initServices(mainEl) {
             if (pkLive) localStorage.setItem(LS_STRIPE_PK_LIVE, pkLive.value.trim());
             if (resendTo) localStorage.setItem(LS_RESEND_TEST_TO, resendTo.value.trim());
             if (resendFrom) localStorage.setItem(LS_RESEND_FROM_OVERRIDE, resendFrom.value.trim());
+            if (appNotify) localStorage.setItem(LS_APPLICATION_ADMIN_EMAILS, appNotify.value.trim());
             if (s3r) localStorage.setItem(LS_S3_REGION, s3r.value.trim());
             if (s3b) localStorage.setItem(LS_S3_BUCKET, s3b.value.trim());
             if (s3p) localStorage.setItem(LS_S3_PUBLIC_BASE, s3p.value.trim());

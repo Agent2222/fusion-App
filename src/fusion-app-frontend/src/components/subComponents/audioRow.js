@@ -3,6 +3,7 @@
  * Source: CMS `audio` list + `data-audio-id`.
  */
 import { getContentBundleForStudio, subscribeDataSource } from '../../utils/database.js';
+import { isJournalListingPage } from '../../utils/journalListingPage.js';
 
 function escapeHtml(s) {
     return String(s)
@@ -164,6 +165,11 @@ class AudioRowComponent extends HTMLElement {
         const label = entry?.title ? String(entry.title) : 'Audio';
 
         if (!entry || !src) {
+            if (isJournalListingPage()) {
+                this.style.display = 'none';
+                this.shadow.innerHTML = `<style>:host { display: none !important; }</style>`;
+                return;
+            }
             const id = this._getAudioId();
             const msg =
                 id != null ? `No audio entry for id “${escapeHtml(id)}”.` : 'Missing or invalid audio source.';
@@ -173,6 +179,7 @@ class AudioRowComponent extends HTMLElement {
             `;
             return;
         }
+        this.style.display = '';
 
         this.shadow.innerHTML = `
             <style>

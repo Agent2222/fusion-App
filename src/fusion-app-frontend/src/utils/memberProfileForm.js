@@ -114,7 +114,11 @@ export function readLocalesFromDom(prev, active, val) {
     const pb = localeBlock(out, active);
     /** @type {Record<string, unknown>} */
     const nb = { ...pb };
-    nb.name = val('mpd_name') ?? '';
+    const fn = String(val('mpd_first_name') ?? '').trim();
+    const ln = String(val('mpd_last_name') ?? '').trim();
+    nb.firstName = fn;
+    nb.lastName = ln;
+    nb.name = [fn, ln].filter(Boolean).join(' ');
     nb.discipline = val('mpd_discipline') ?? '';
     nb.bio = val('mpd_bio') ?? '';
     nb.bioLong = val('mpd_bioLong') ?? '';
@@ -124,10 +128,6 @@ export function readLocalesFromDom(prev, active, val) {
         state: val('mpd_loc_state') ?? '',
         country: val('mpd_loc_country') ?? '',
         display: val('mpd_loc_display') ?? '',
-    };
-    nb.seo = {
-        title: val('mpd_seo_title') ?? '',
-        description: val('mpd_seo_desc') ?? '',
     };
     const w0 =
         nb.world && typeof nb.world === 'object' && !Array.isArray(nb.world) ? nb.world : {};
@@ -151,6 +151,32 @@ export function readLocalesFromDom(prev, active, val) {
     nb.world = w;
     nb.links = readLinksFromContainer('#mpd-links');
     out[active] = nb;
+    return normalizeLocalesWorldForStorage(/** @type {Record<string, unknown>} */ (out));
+}
+
+/**
+ * Copy intro gallery from the locale that was just edited to both `en` and `ja`
+ * so public profile shows intro media in any UI language.
+ *
+ * @param {Record<string, unknown>} locales
+ * @param {'en'|'ja'} sourceLocale
+ */
+export function syncIntroGalleryToAllLocales(locales, sourceLocale) {
+    const out = JSON.parse(JSON.stringify(locales && typeof locales === 'object' ? locales : {}));
+    const src = localeBlock(out, sourceLocale === 'ja' ? 'ja' : 'en');
+    const srcW = src.world && typeof src.world === 'object' && !Array.isArray(src.world) ? src.world : {};
+    const ig = Array.isArray(srcW.introGallery) ? JSON.parse(JSON.stringify(srcW.introGallery)) : [];
+    for (const code of ['en', 'ja']) {
+        const block = localeBlock(out, code);
+        const w0 = block.world && typeof block.world === 'object' && !Array.isArray(block.world) ? block.world : {};
+        out[code] = {
+            ...block,
+            world: {
+                ...w0,
+                introGallery: ig,
+            },
+        };
+    }
     return normalizeLocalesWorldForStorage(/** @type {Record<string, unknown>} */ (out));
 }
 

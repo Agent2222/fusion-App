@@ -21,9 +21,11 @@ import {
     FUSION_PENDING_MEMBERSHIP_LINK_KEY,
     getIntegrationBaseUrl,
     linkSubscriptionToPrincipal,
+    mapIntegrationUserMessage,
     sendEmail,
 } from '../../utils/integrationApi.js';
 import { getStripePublishableKeyResolved } from '../../utils/studioServicesConfig.js';
+import { saveProfileSetupDraft } from '../../utils/profileSetupDraft.js';
 
 /**
  * Set by `fusion-open-join-network` with `detail.logoutIfDismissedWithoutAccount` (post–II login with no account).
@@ -47,6 +49,7 @@ function parseMoneyToCents(raw) {
 
 const CONTEXT_TO_MODAL = /** @type {Record<string, ModalType>} */ ({
     home: 'membership',
+    register: 'membership',
     artists: 'access',
     profile: 'access',
     editions: 'access',
@@ -102,6 +105,7 @@ class JoinNetworkComponent extends HTMLElement {
         this._onFusionAuthChange = () => {
             void this._syncBandOpenButtonAuth();
             void this._tryCompletePendingLink();
+            void this._syncPageJoinVisibility();
         };
         this._joinNetworkSubmitting = false;
         /** Opened after sign-in with no account — close without completing join logs out of II. */
@@ -236,6 +240,7 @@ class JoinNetworkComponent extends HTMLElement {
         if (this._unsubData) this._unsubData();
         this._unsubData = subscribeDataSource(() => void this._reloadJoinCopy());
         void this._reloadJoinCopy();
+        void this._syncPageJoinVisibility();
     }
 
     disconnectedCallback() {
@@ -324,6 +329,28 @@ class JoinNetworkComponent extends HTMLElement {
         return this.hasAttribute('data-gate-band');
     }
 
+    /**
+     * Hide inline / page-level join bands when the user has an Internet Identity session.
+     * The header bridge (`data-header-bridge`) stays in the tree so Register / `fusion-open-join-network` still work.
+     */
+    _shouldHideHostWhenAuthenticated() {
+        return !this.hasAttribute('data-header-bridge');
+    }
+
+    async _syncPageJoinVisibility() {
+        if (!this._shouldHideHostWhenAuthenticated()) {
+            this.hidden = false;
+            return;
+        }
+        try {
+            const { getAuthSnapshot } = await import('../../utils/icAuth.js');
+            const { authenticated } = await getAuthSnapshot();
+            this.hidden = authenticated;
+        } catch {
+            this.hidden = false;
+        }
+    }
+
     async _syncBandOpenButtonAuth() {
         if (!this.hasAttribute('data-hide-band-open-when-authenticated')) return;
         const openBtn = this.shadowRoot?.querySelector('#bandOpenBtn');
@@ -391,7 +418,12 @@ class JoinNetworkComponent extends HTMLElement {
             set('#jnEntryTitle', entry.dialogTitle);
             set('#jnEntrySubtitle', entry.subtitle);
             set('#jnRenewHint', entry.renewHint);
-            set('#jnEntryFooter', entry.footerDisclaimer);
+            const entryFoot = this.shadowRoot?.querySelector('#jnEntryFooter');
+            if (entryFoot) {
+                const fd = entry.footerDisclaimer ?? '';
+                entryFoot.textContent = fd;
+                entryFoot.style.whiteSpace = fd.includes('\n') ? 'pre-line' : '';
+            }
             const inpName = this.shadowRoot?.querySelector('#jnFullName');
             const inpEmail = this.shadowRoot?.querySelector('#jnEmail');
             if (inpName) inpName.placeholder = entry.namePlaceholder || '';
@@ -408,9 +440,29 @@ class JoinNetworkComponent extends HTMLElement {
             set('#jnPeriodLabel', value.periodLabel);
             set('#jnIncludesTitle', value.includesTitle);
             set('#jnRenewLine', value.renewLine);
-            set('#jnValueDisclaimer', value.disclaimer);
+            const ev = this.shadowRoot?.querySelector('#jnValueEvolving');
+            const evo = typeof value.evolvingLine === 'string' ? value.evolvingLine.trim() : '';
+            if (ev) {
+                ev.textContent = evo;
+                ev.hidden = !evo;
+            }
+            let d1 = value.disclaimer ?? '';
+            let d2 = value.disclaimerFee ?? '';
+            if (!String(d2).trim() && String(d1).includes('Program fee')) {
+                const idx = d1.indexOf('Program fee');
+                if (idx > 0) {
+                    d2 = d1.slice(idx).trim();
+                    d1 = d1.slice(0, idx).replace(/\.\s*$/, '').trim();
+                }
+            }
+            set('#jnValueDisclaimer', d1);
+            set('#jnValueDisclaimerFee', d2);
+            const feeEl = this.shadowRoot?.querySelector('#jnValueDisclaimerFee');
+            if (feeEl) feeEl.hidden = !String(d2 || '').trim();
             const vc = this.shadowRoot?.querySelector('#jnValueContinue');
             if (vc) vc.textContent = value.continueLabel || 'Continue';
+            const vb = this.shadowRoot?.querySelector('#jnValueBack');
+            if (vb) vb.textContent = value.backLabel || '← Back';
             const ul = this.shadowRoot?.querySelector('#jnIncludesList');
             if (ul && Array.isArray(value.includes)) {
                 ul.innerHTML = value.includes
@@ -421,6 +473,9 @@ class JoinNetworkComponent extends HTMLElement {
 
         if (payment) {
             this._paymentAmountCents = parseMoneyToCents(payment.amount);
+            this._paymentCompleteLabel = payment.completeLabel || 'Secure Access';
+            this._paymentProcessingLabel =
+                typeof payment.processingLabel === 'string' ? payment.processingLabel : 'Processing…';
             set('#jnPayTitle', payment.title);
             set('#jnPaySubtitle', payment.subtitle);
             set('#jnOrderBrand', payment.orderLabel);
@@ -429,11 +484,19 @@ class JoinNetworkComponent extends HTMLElement {
             set('#jnOrderTotal', payment.amount);
             set('#jnTotalLabel', payment.totalLabel);
             set('#jnPayComplete', payment.completeLabel);
-            set('#jnPayFooter', payment.footerNote);
+            set('#jnPayFooter', payment.footerNote ?? '');
+            const pf2 = this.shadowRoot?.querySelector('#jnPayFooter2');
+            if (pf2) {
+                const t2 = payment.footerNote2 ?? '';
+                pf2.textContent = t2;
+                pf2.hidden = !String(t2).trim();
+            }
             const devSkip = this.shadowRoot?.querySelector('#jnPayDevSkip');
             if (devSkip && payment.devCompleteLabel) {
                 devSkip.textContent = payment.devCompleteLabel;
             }
+            const pb = this.shadowRoot?.querySelector('#jnPayBack');
+            if (pb) pb.textContent = payment.backLabel || '← Back';
         }
 
         {
@@ -441,19 +504,49 @@ class JoinNetworkComponent extends HTMLElement {
                 linkAccount ||
                 (loc === 'ja'
                     ? {
+                          paymentSuccessLine: 'お支払いが完了しました。',
+                          iiExplainer:
+                              'Internet Identity はパスワードを使わず、このアクセスをあなたのログインに安全に紐づけます。',
+                          linkKicker: '',
                           title: 'アカウントをリンク',
-                          lead: 'メンバーシップを有効にするには、Internet Identity でサインインしてください。',
+                          lead: 'Internet Identity でサインインし、アクセスをログインに紐づけてください。',
+                          help: '',
                           signInLabel: 'Internet Identity で続行',
                       }
                     : {
-                          title: 'Link your account',
-                          lead: 'Sign in with Internet Identity to activate your membership and sync it to your profile.',
+                          paymentSuccessLine: 'Payment successful.',
+                          iiExplainer:
+                              'Internet Identity ties this access to a secure login—no separate Fusion password.',
+                          linkKicker: '',
+                          title: 'Activate your access',
+                          lead: 'Sign in with Internet Identity to link your access to your login.',
+                          help: '',
                           signInLabel: 'Continue with Internet Identity',
                       });
+            set('#jnLinkPaymentOk', la.paymentSuccessLine ?? '');
+            const payOk = this.shadowRoot?.querySelector('#jnLinkPaymentOk');
+            if (payOk) payOk.hidden = !String(la.paymentSuccessLine ?? '').trim();
+            set('#jnLinkIiWhy', la.iiExplainer ?? '');
+            const iiWhy = this.shadowRoot?.querySelector('#jnLinkIiWhy');
+            if (iiWhy) iiWhy.hidden = !String(la.iiExplainer ?? '').trim();
+            set('#jnLinkKicker', la.linkKicker ?? '');
+            const kick = this.shadowRoot?.querySelector('#jnLinkKicker');
+            if (kick) kick.hidden = !String(la.linkKicker ?? '').trim();
             set('#jnLinkTitle', la.title);
             set('#jnLinkLead', la.lead);
+            set('#jnLinkHelp', la.help ?? '');
+            const helpEl = this.shadowRoot?.querySelector('#jnLinkHelp');
+            if (helpEl) helpEl.hidden = !String(la.help ?? '').trim();
+            const linkStat = this.shadowRoot?.querySelector('#jnLinkLinking');
+            if (linkStat) {
+                linkStat.textContent = '';
+                linkStat.hidden = true;
+            }
             const si = this.shadowRoot?.querySelector('#jnLinkSignIn');
-            if (si) si.textContent = la.signInLabel || 'Continue with Internet Identity';
+            if (si) {
+                si.textContent = la.signInLabel || 'Continue with Internet Identity';
+                si.hidden = false;
+            }
         }
 
         if (conf) {
@@ -462,6 +555,12 @@ class JoinNetworkComponent extends HTMLElement {
             set('#jnWelcomeBody', conf.welcomeBody);
             const pc = this.shadowRoot?.querySelector('#jnPrimaryCta');
             if (pc) pc.textContent = conf.primaryCta || '';
+            const ar = this.shadowRoot?.querySelector('#jnApplyResidency');
+            const arLabel = conf.applyResidencyLabel;
+            if (ar) {
+                ar.textContent = typeof arLabel === 'string' ? arLabel : 'Apply to Residency';
+                ar.hidden = !String(arLabel || '').trim();
+            }
             set('#jnSecondaryLine', conf.secondaryLine);
             const wrap = this.shadowRoot?.querySelector('#jnConfLinks');
             if (wrap && Array.isArray(conf.links)) {
@@ -512,6 +611,9 @@ class JoinNetworkComponent extends HTMLElement {
                 void this._prepareStripePayment();
             }
         }
+        if (stage === 'linkAccount') {
+            void this._tryCompletePendingLink();
+        }
     }
 
     _computeStripePrepareKeySync() {
@@ -561,11 +663,18 @@ class JoinNetworkComponent extends HTMLElement {
         if (this._stage !== 'linkAccount' || !this._fusionPendingId) return;
         const root = this.shadowRoot;
         const errEl = root?.querySelector('#jnLinkErr');
+        const linkingEl = root?.querySelector('#jnLinkLinking');
+        const signInBtn = root?.querySelector('#jnLinkSignIn');
         if (errEl) errEl.textContent = '';
         try {
             const { getIdentityIfAuthenticated } = await import('../../utils/icAuth.js');
             const identity = await getIdentityIfAuthenticated();
             if (!identity) return;
+            if (linkingEl) {
+                linkingEl.textContent = 'Linking your access…';
+                linkingEl.hidden = false;
+            }
+            if (signInBtn) signInBtn.hidden = true;
             const principal = identity.getPrincipal().toText();
             const email = this._getEmailForSubscription();
             await linkSubscriptionToPrincipal({
@@ -581,6 +690,12 @@ class JoinNetworkComponent extends HTMLElement {
             if (actor && typeof actor.registerOrUpdateAccount === 'function') {
                 await actor.registerOrUpdateAccount(categoryToUserRole(cat));
             }
+            try {
+                const { ensureMyLinkedArtistProfile } = await import('../../utils/database.js');
+                await ensureMyLinkedArtistProfile();
+            } catch (ensErr) {
+                if (DEV_MODE) console.warn('[JoinNetwork] ensureMyLinkedArtistProfile', ensErr);
+            }
             this._fusionPendingId = null;
             this._fusionSubscriptionId = null;
             this._preStripeCanisterSyncDone = true;
@@ -592,6 +707,11 @@ class JoinNetworkComponent extends HTMLElement {
             await this._afterJoinSaved();
         } catch (e) {
             if (DEV_MODE) console.error('[JoinNetwork] link pending', e);
+            if (linkingEl) {
+                linkingEl.textContent = '';
+                linkingEl.hidden = true;
+            }
+            if (signInBtn) signInBtn.hidden = false;
             if (errEl) {
                 errEl.textContent =
                     e instanceof Error ? e.message : 'Could not link your account. Try again.';
@@ -607,6 +727,7 @@ class JoinNetworkComponent extends HTMLElement {
         const email = this._getEmailForSubscription() || this._formEmail.trim();
         const cat = this._getSelectedCategoryNormalized();
         const fullName = (this.shadowRoot?.querySelector('#jnFullName')?.value || this._formFullName || '').trim();
+        saveProfileSetupDraft({ fullName, email });
         if (!this._preStripeCanisterSyncDone) {
             try {
                 await submitEarlyAccessToCanister(email, cat, fullName, this._modalType);
@@ -641,8 +762,15 @@ class JoinNetworkComponent extends HTMLElement {
             try {
                 await sendEmail({
                     to: email,
-                    subject: 'Welcome to FUSION',
-                    text: 'Thank you — your FUSION signup was received.',
+                    subject: "You're in — next: link Internet Identity",
+                    text: [
+                        "Thanks — your FUSION access is recorded.",
+                        '',
+                        'Next step: sign in with Internet Identity on the site (Register) so we can tie this access to a login you can reuse.',
+                        "If II doesn't open or fails, try again in the same browser, or continue later from Register with this email.",
+                        '',
+                        'Questions? Reply to this email or use Contact on the site.',
+                    ].join('\n'),
                 });
             } catch (e) {
                 const msg = e instanceof Error ? e.message : String(e);
@@ -708,13 +836,20 @@ class JoinNetworkComponent extends HTMLElement {
         const hint = root.querySelector('#jnPayStripeHint');
         const devSkip = root.querySelector('#jnPayDevSkip');
         const payBtn = root.querySelector('#jnPayComplete');
+        const setHintBusy = (busy) => {
+            if (hint) hint.classList.toggle('jn-pay-stripe-hint--busy', !!busy);
+        };
         if (payBtn) payBtn.disabled = true;
-        if (hint) hint.textContent = 'Preparing payment…';
+        if (hint) {
+            hint.textContent = 'Preparing payment…';
+            setHintBusy(true);
+        }
         if (devSkip) devSkip.style.display = 'none';
 
         const pk = getStripePublishableKeyResolved();
         const base = getIntegrationBaseUrl();
         if (!pk || !base) {
+            setHintBusy(false);
             if (hint) {
                 hint.textContent = !base
                     ? 'Configure Integration API URL in Studio → Services (or VITE_INTEGRATION_API_URL).'
@@ -727,9 +862,20 @@ class JoinNetworkComponent extends HTMLElement {
 
         try {
             const cat = this._getSelectedCategoryNormalized();
-            if (hint) hint.textContent = 'Connecting to payment service…';
+            // _ensureAccountBeforeStripe is often the slow part for full join (IC upsertSubscriber), not Stripe yet.
+            if (hint) {
+                hint.textContent =
+                    this._joinMode === 'resubscribe'
+                        ? 'Verifying your account…'
+                        : 'Saving your signup…';
+                setHintBusy(true);
+            }
 
             await this._ensureAccountBeforeStripe();
+            if (hint) {
+                hint.textContent = 'Connecting to payment service…';
+                setHintBusy(true);
+            }
             const { getIdentityIfAuthenticated } = await import('../../utils/icAuth.js');
             const emailForSub = this._getEmailForSubscription();
             if (!emailForSub.includes('@')) {
@@ -773,7 +919,10 @@ class JoinNetworkComponent extends HTMLElement {
             }
             if (myGen !== this._stripePrepareGen || this._stage !== 'payment') return;
 
-            if (hint) hint.textContent = 'Loading secure card form…';
+            if (hint) {
+                hint.textContent = 'Loading secure card form…';
+                setHintBusy(true);
+            }
             const stripe = await loadStripe(pk);
             if (!stripe) throw new Error('Stripe failed to load');
             if (myGen !== this._stripePrepareGen || this._stage !== 'payment') return;
@@ -805,15 +954,20 @@ class JoinNetworkComponent extends HTMLElement {
 
             this._stripePaymentReady = true;
             this._stripePrepareKey = this._computeStripePrepareKeySync();
+            setHintBusy(false);
             if (hint) hint.textContent = '';
             if (payBtn) payBtn.disabled = false;
         } catch (e) {
             if (myGen !== this._stripePrepareGen) return;
             this._teardownStripePayment();
             if (DEV_MODE) console.error('[JoinNetwork] Stripe init', e);
+            setHintBusy(false);
             if (hint) {
-                hint.textContent =
-                    e instanceof Error ? e.message : 'Could not start payment. Try Studio → Services.';
+                const raw = e instanceof Error ? e.message : '';
+                hint.textContent = mapIntegrationUserMessage(
+                    raw || 'Could not start payment. Try Studio → Services.',
+                    0,
+                );
             }
             if (devSkip) devSkip.style.display = DEV_MODE ? 'block' : 'none';
             if (payBtn) payBtn.disabled = !DEV_MODE;
@@ -891,6 +1045,9 @@ class JoinNetworkComponent extends HTMLElement {
                     transition: opacity 0.2s ease;
                 }
                 #bandOpenBtn { width: auto; max-width: 22rem; }
+                :host-context(html[data-theme="dark"]) #bandOpenBtn {
+                    color: #000000;
+                }
                 #bandOpenBtn:hover,
                 .jn-btn-primary:hover:not(:disabled) {
                     opacity: 0.88;
@@ -1204,6 +1361,78 @@ class JoinNetworkComponent extends HTMLElement {
                     line-height: 1.45;
                     min-height: 1.25em;
                 }
+                #jnPayStripeHint.jn-pay-stripe-hint--busy {
+                    animation: jnStripeHintPulse 1.1s ease-in-out infinite;
+                }
+                @keyframes jnStripeHintPulse {
+                    0%, 100% { opacity: 0.42; }
+                    50% { opacity: 1; }
+                }
+                .jn-link-payment-ok {
+                    font-size: clamp(0.9rem, 1.05vw, 1rem);
+                    font-variation-settings: var(--fv-emphasis);
+                    margin: 0 0 0.5rem;
+                    color: var(--jn-c4);
+                }
+                .jn-link-ii-why {
+                    font-size: clamp(0.8rem, 1vw, 0.9rem);
+                    margin: 0 0 0.75rem;
+                    line-height: 1.45;
+                    color: color-mix(in srgb, var(--jn-c2) 88%, var(--jn-bg));
+                    font-variation-settings: var(--fv-caption);
+                }
+                .jn-link-linking {
+                    font-size: clamp(0.85rem, 1vw, 0.95rem);
+                    text-align: center;
+                    margin: 0 0 0.5rem;
+                    font-variation-settings: var(--fv-label);
+                    color: var(--jn-c2);
+                }
+                .jn-btn-ghost.jn-apply-residency {
+                    width: 100%;
+                    max-width: 100%;
+                    margin-top: 0.65rem;
+                    padding: 0.45rem 1rem;
+                    border: 1.5px solid var(--jn-c2);
+                    background: transparent;
+                    color: var(--jn-c2);
+                    cursor: pointer;
+                    font-family: inherit;
+                    font-variation-settings: var(--fv-nav);
+                }
+                .jn-btn-ghost.jn-apply-residency:hover {
+                    opacity: 0.85;
+                }
+                .jn-link-kicker {
+                    font-size: clamp(1rem, 1.2vw, 1.15rem);
+                    font-variation-settings: var(--fv-emphasis);
+                    margin: 0 0 0.35rem;
+                    color: var(--jn-c2);
+                }
+                .jn-link-help {
+                    font-size: clamp(0.8rem, 1vw, 0.88rem);
+                    margin-top: 0.75rem;
+                    line-height: 1.45;
+                    color: color-mix(in srgb, var(--jn-c2) 85%, var(--jn-bg));
+                    font-variation-settings: var(--fv-caption);
+                }
+                .jn-value-evolving {
+                    font-size: clamp(0.82rem, 1vw, 0.9rem);
+                    margin: 0.5rem 0 0.25rem;
+                    font-variation-settings: var(--fv-caption);
+                    color: color-mix(in srgb, var(--jn-c2) 82%, var(--jn-bg));
+                    line-height: 1.45;
+                }
+                #jnEntryFooter {
+                    white-space: pre-line;
+                }
+                #jnPayFooter2 {
+                    font-size: clamp(0.82rem, 1vw, 0.9rem);
+                    text-align: center;
+                    margin: 0.15rem 0 0;
+                    color: color-mix(in srgb, var(--jn-c2) 88%, var(--jn-bg));
+                    font-variation-settings: var(--fv-caption);
+                }
                 .jn-live {
                     font-size: 0.8rem;
                     text-align: center;
@@ -1278,7 +1507,7 @@ class JoinNetworkComponent extends HTMLElement {
                             <div class="jn-field">
                                 <input type="email" id="jnEmail" name="jn-email" autocomplete="email" placeholder="Email" />
                     </div>
-                            <p class="jn-role-label" id="jnRoleLabel">I am:</p>
+                            <p class="jn-role-label" id="jnRoleLabel">I'm joining as:</p>
                             <div id="jnRoleRow">
                                 <button type="button" class="categoryButton active" data-role="Artist">Artist</button>
                                 <button type="button" class="categoryButton" data-role="Gallery">Gallery</button>
@@ -1303,9 +1532,11 @@ class JoinNetworkComponent extends HTMLElement {
                             <div id="jnIncludesTitle"></div>
                             <ul id="jnIncludesList"></ul>
                             <p id="jnRenewLine"></p>
+                            <p id="jnValueEvolving" class="jn-value-evolving"></p>
                             <p id="jnValueDisclaimer"></p>
+                            <p id="jnValueDisclaimerFee"></p>
                             <button type="button" class="jn-btn-primary" id="jnValueContinue">Continue</button>
-                            <button type="button" class="jn-btn-back" id="jnValueBack">Back</button>
+                            <button type="button" class="jn-btn-back" id="jnValueBack">← Back</button>
                         </div>
 
                         <div class="jn-panel" data-jn-panel="payment" hidden>
@@ -1329,15 +1560,21 @@ class JoinNetworkComponent extends HTMLElement {
                             <button type="button" class="jn-btn-primary" id="jnPayComplete"></button>
                             <button type="button" class="jn-btn-back" id="jnPayDevSkip" style="display:none;margin-top:0.5rem">Skip payment (dev)</button>
                             <p id="jnPayFooter"></p>
+                            <p id="jnPayFooter2"></p>
                             <p id="jnPayErr" class="jn-live" aria-live="polite"></p>
-                            <button type="button" class="jn-btn-back" id="jnPayBack">Back</button>
+                            <button type="button" class="jn-btn-back" id="jnPayBack">← Back</button>
                         </div>
 
                         <div class="jn-panel" data-jn-panel="linkAccount" hidden>
                             <div class="jn-panel-head">
+                                <p id="jnLinkPaymentOk" class="jn-link-payment-ok"></p>
+                                <p id="jnLinkIiWhy" class="jn-link-ii-why"></p>
+                                <p id="jnLinkKicker" class="jn-link-kicker"></p>
                                 <h2 id="jnLinkTitle"></h2>
                                 <p id="jnLinkLead"></p>
+                                <p id="jnLinkHelp" class="jn-link-help"></p>
                             </div>
+                            <p id="jnLinkLinking" class="jn-link-linking" hidden></p>
                             <button type="button" class="jn-btn-primary" id="jnLinkSignIn">Continue with Internet Identity</button>
                             <p id="jnLinkErr" class="jn-live" aria-live="polite"></p>
                         </div>
@@ -1352,6 +1589,7 @@ class JoinNetworkComponent extends HTMLElement {
                                 <p id="jnWelcomeBody"></p>
                             </div>
                             <button type="button" class="jn-btn-primary" id="jnPrimaryCta"></button>
+                            <button type="button" class="jn-btn-ghost jn-apply-residency" id="jnApplyResidency"></button>
                             <p id="jnSecondaryLine"></p>
                             <div id="jnConfLinks"></div>
                     </div>
@@ -1403,6 +1641,7 @@ class JoinNetworkComponent extends HTMLElement {
             this._joinMode = 'resubscribe';
             this._stage = 'payment';
             this._logoutIfDismissedWithoutJoin = false;
+            void import('@stripe/stripe-js');
         } else {
             this._joinMode = 'full';
             this._stage = 'entry';
@@ -1499,12 +1738,15 @@ class JoinNetworkComponent extends HTMLElement {
             }
             this._formFullName = name;
             this._formEmail = email;
+            saveProfileSetupDraft({ fullName: name, email });
             prefetchFusionBackendActor();
             this._showStage('value');
         });
 
         root.querySelector('#jnValueContinue')?.addEventListener('click', () => {
             prefetchFusionBackendActor();
+            // Warm Stripe.js module while the user reads the payment step (overlaps with paint).
+            void import('@stripe/stripe-js');
             this._showStage('payment');
         });
         root.querySelector('#jnValueBack')?.addEventListener('click', () => {
@@ -1553,7 +1795,14 @@ class JoinNetworkComponent extends HTMLElement {
                     }
                     return;
                 }
+                const payBtn = root.querySelector('#jnPayComplete');
+                const doneLabel = this._paymentCompleteLabel || payBtn?.textContent?.trim() || 'Secure Access';
+                const procLabel = this._paymentProcessingLabel || 'Processing…';
                 this._joinNetworkSubmitting = true;
+                if (payBtn) {
+                    payBtn.disabled = true;
+                    payBtn.textContent = procLabel;
+                }
                 try {
                     const { error } = await this._stripe.confirmPayment({
                         elements: this._stripeElements,
@@ -1584,6 +1833,10 @@ class JoinNetworkComponent extends HTMLElement {
                     }
                 } finally {
                     this._joinNetworkSubmitting = false;
+                    if (payBtn) {
+                        payBtn.disabled = false;
+                        payBtn.textContent = doneLabel;
+                    }
                 }
                 return;
             }
@@ -1623,7 +1876,13 @@ class JoinNetworkComponent extends HTMLElement {
 
         root.querySelector('#jnPrimaryCta')?.addEventListener('click', () => {
             this._joinFlowCompleted = true;
-            navigate('/register');
+            navigate('/settings/profile');
+            if (dlg && typeof dlg.close === 'function') dlg.close();
+        });
+
+        root.querySelector('#jnApplyResidency')?.addEventListener('click', () => {
+            this._joinFlowCompleted = true;
+            navigate('/program/kaga-ishikawa');
             if (dlg && typeof dlg.close === 'function') dlg.close();
         });
 

@@ -5,6 +5,7 @@ import {
     artistEnglishBlock,
     artistSlugFromName,
 } from '../../utils/artistSlug.js';
+import { applyArtistCardImage } from '../../utils/artistCardPlaceholder.js';
 
 /** 20 cards per page, 5 columns × 4 rows */
 const PAGE_SIZE = 20;
@@ -159,6 +160,12 @@ class ArtistsFeedElement extends HTMLElement {
                     transition: transform 0.35s ease;
                 }
 
+                .artist-card-image img.artist-card-img--placeholder {
+                    object-fit: contain;
+                    object-position: center;
+                    background: var(--c3);
+                }
+
                 .artist-card-content {
                     display: flex;
                     flex-direction: column;
@@ -184,6 +191,13 @@ class ArtistsFeedElement extends HTMLElement {
                     line-height: 1.2;
                     text-align: center;
                     opacity: 0.9;
+                }
+
+                .feed-nav-row--top {
+                    display: flex;
+                    justify-content: center;
+                    margin-bottom: 1.25rem;
+                    padding-bottom: 0.35rem;
                 }
 
                 .feed-footer {
@@ -264,6 +278,15 @@ class ArtistsFeedElement extends HTMLElement {
             </style>
             <div class="artists-feed">
                 <div class="header">All Artists</div>
+                <div class="feed-nav-row feed-nav-row--top">
+                    <div class="feed-nav">
+                        <div class="feed-nav-buttons">
+                            <button type="button" class="nav-btn" id="btnBackTop" aria-label="Previous page">Back</button>
+                            <button type="button" class="nav-btn" id="btnNextTop" aria-label="Next page">Next</button>
+                        </div>
+                        <div class="feed-page-label" id="feedPageLabelTop" aria-hidden="true">Pg. 1</div>
+                    </div>
+                </div>
                 <div class="feed-grid" id="feedGrid"></div>
                 <div class="feed-footer">
                     <div class="feed-nav">
@@ -280,10 +303,15 @@ class ArtistsFeedElement extends HTMLElement {
         this.gridEl = this.shadowRoot.getElementById('feedGrid');
         this.btnBack = this.shadowRoot.getElementById('btnBack');
         this.btnNext = this.shadowRoot.getElementById('btnNext');
+        this.btnBackTop = this.shadowRoot.getElementById('btnBackTop');
+        this.btnNextTop = this.shadowRoot.getElementById('btnNextTop');
         this.pageLabelEl = this.shadowRoot.getElementById('feedPageLabel');
+        this.pageLabelTopEl = this.shadowRoot.getElementById('feedPageLabelTop');
 
         this.btnBack.addEventListener('click', () => this.goPrev());
         this.btnNext.addEventListener('click', () => this.goNext());
+        this.btnBackTop.addEventListener('click', () => this.goPrev());
+        this.btnNextTop.addEventListener('click', () => this.goNext());
     }
 
     goPrev() {
@@ -315,7 +343,6 @@ class ArtistsFeedElement extends HTMLElement {
         for (let i = 0; i < slice.length; i++) {
             const artist = slice[i];
             const artistName = artistDisplayName(artist, locale);
-            const artistImage = artist.image;
             const artistDiscipline = artistDisplayDiscipline(artist, locale);
 
             const card = document.createElement('div');
@@ -329,22 +356,31 @@ class ArtistsFeedElement extends HTMLElement {
 
             card.innerHTML = `
                 <div class="artist-card-image">
-                    <img src="${artistImage}" alt="${escapeHtml(artistName)}">
+                    <img alt="${escapeHtml(artistName)}" loading="lazy" decoding="async">
                 </div>
                 <div class="artist-card-content">
                     <div class="artist-card-title">${escapeHtml(artistName)}</div>
                     <div class="artist-card-discipline">${escapeHtml(artistDiscipline)}</div>
                 </div>
             `;
+            const cardImg = card.querySelector('.artist-card-image img');
+            applyArtistCardImage(cardImg, artist.image);
             grid.appendChild(card);
         }
 
-        this.btnBack.disabled = this.currentPage <= 0;
-        this.btnNext.disabled = total === 0 || this.currentPage >= totalPages - 1;
+        const backDisabled = this.currentPage <= 0;
+        const nextDisabled = total === 0 || this.currentPage >= totalPages - 1;
+        this.btnBack.disabled = backDisabled;
+        this.btnNext.disabled = nextDisabled;
+        this.btnBackTop.disabled = backDisabled;
+        this.btnNextTop.disabled = nextDisabled;
 
+        const pageLabelText = total === 0 ? 'Pg. 1' : `Pg. ${this.currentPage + 1}`;
         if (this.pageLabelEl) {
-            const pageNum = total === 0 ? 1 : this.currentPage + 1;
-            this.pageLabelEl.textContent = `Pg. ${pageNum}`;
+            this.pageLabelEl.textContent = pageLabelText;
+        }
+        if (this.pageLabelTopEl) {
+            this.pageLabelTopEl.textContent = pageLabelText;
         }
     }
 }

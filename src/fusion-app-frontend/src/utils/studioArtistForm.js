@@ -324,7 +324,8 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
       </div>
     </div>
   </div>
-  <div class="studio-modal-actions">
+  <div class="studio-modal-actions studio-modal-actions--artist">
+    <button type="button" class="studio-btn-danger" id="studio-art-delete">Delete artist</button>
     <button type="submit" class="studio-btn-primary" id="studio-art-form-save">Save artist</button>
   </div>
 </form>`;

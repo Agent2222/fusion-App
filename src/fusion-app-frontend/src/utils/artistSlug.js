@@ -8,6 +8,35 @@ export function artistSlugFromName(name) {
 }
 
 /**
+ * URL segment for member profile: lowercase [a-z0-9-], max 128 chars.
+ * @param {string} raw
+ * @returns {string}
+ */
+export function sanitizePublicSlugSegment(raw) {
+    return String(raw ?? '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '-')
+        .replace(/[^a-z0-9-]/g, '')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 128);
+}
+
+/**
+ * Preferred public slug from English first + last name (empty if both empty).
+ * @param {string} [firstName]
+ * @param {string} [lastName]
+ */
+export function publicSlugFromEnglishFirstLast(firstName, lastName) {
+    const fn = String(firstName ?? '').trim();
+    const ln = String(lastName ?? '').trim();
+    if (!fn && !ln) return '';
+    const combined = [fn, ln].filter(Boolean).join(' ');
+    return sanitizePublicSlugSegment(artistSlugFromName(combined));
+}
+
+/**
  * English copy block (canonical name for slug derivation).
  * Supports legacy `{ en }` or `{ locales: { en } }`.
  * @param {object | null | undefined} artist

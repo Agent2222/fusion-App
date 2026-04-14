@@ -3,6 +3,7 @@
  * Select via `data-journal-id` or `data-journal-index`, or call `setJournalRow(entry)`.
  */
 import { getJournalEntries, subscribeDataSource } from '../../utils/database.js';
+import { isJournalListingPage } from '../../utils/journalListingPage.js';
 import { navigate } from '../../router.js';
 import { escapeHtml, previewPlainText } from '../../utils/textPreview.js';
 
@@ -109,6 +110,11 @@ class JournalRowComponent extends HTMLElement {
         const locale = typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
 
         if (!entry) {
+            if (isJournalListingPage()) {
+                this.style.display = 'none';
+                this.shadow.innerHTML = `<style>:host { display: none !important; }</style>`;
+                return;
+            }
             const id = this._getJournalId();
             const hint =
                 id != null
@@ -120,6 +126,7 @@ class JournalRowComponent extends HTMLElement {
             `;
             return;
         }
+        this.style.display = '';
 
         const loc = entry[locale] || entry.en;
         const journalImage = entry.imageSrc;
@@ -248,7 +255,7 @@ class JournalRowComponent extends HTMLElement {
 
                 .left-content-description {
                     width: 90%;
-                    font-size: clamp(0.9rem, 1.2vw, 1.45rem);
+                    font-size: clamp(1.04rem, 1.2vw, 1.45rem);
                     font-variation-settings: var(--fv-emphasis);
                     letter-spacing: 0.02em;
                     line-height: 1.35;
@@ -304,6 +311,12 @@ class JournalRowComponent extends HTMLElement {
                         grid-template-columns: 1fr;
                         grid-template-rows: auto auto;
                         min-height: unset;
+                    }
+                    .left-content {
+                        margin-top: 5%;
+                    }
+                    .left-content-description {
+                        font-size: clamp(1.04rem, 1.2vw, 1.45rem);
                     }
                     .right-content {
                         order: -1;

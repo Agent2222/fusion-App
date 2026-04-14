@@ -2,6 +2,7 @@
  * Large left-aligned quote with a small right-aligned attribution link below.
  * Copy from CMS `quote-row` bundle keyed by `context`.
  */
+import { navigate } from '../../router.js';
 import { getContentBundleForStudio, subscribeDataSource } from '../../utils/database.js';
 
 function escapeHtml(s) {
@@ -143,7 +144,7 @@ class QuoteRowComponent extends HTMLElement {
 
                 @media (max-width: 640px) {
                     .quote-text {
-                        font-size: clamp(1.1rem, 4.2vw, 1.85rem);
+                        font-size: clamp(1.85rem, 4.2vw, 2.1rem);
                     }
 
                     .quote-attribution {
@@ -158,6 +159,18 @@ class QuoteRowComponent extends HTMLElement {
                 </footer>
             </blockquote>
         `;
+
+        const attrLink = this.shadowRoot?.querySelector('.quote-attribution a');
+        if (attrLink instanceof HTMLAnchorElement) {
+            attrLink.addEventListener('click', (e) => {
+                const raw = attrLink.getAttribute('href') || '';
+                const u = String(raw).trim();
+                if (u.startsWith('/') && !u.startsWith('//')) {
+                    e.preventDefault();
+                    navigate(u);
+                }
+            });
+        }
     }
 }
 

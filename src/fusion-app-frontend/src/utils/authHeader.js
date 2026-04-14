@@ -32,7 +32,7 @@ export function unwrapOpt(opt) {
  * @returns {Promise<string>}
  */
 export async function resolveProfilePathForAccount(account) {
-    if (!account || typeof account !== 'object') return '/register';
+    if (!account || typeof account !== 'object') return '/settings/profile';
     const role = /** @type {Record<string, unknown>} */ (account.role);
     if (role && typeof role === 'object') {
         if ('admin' in role || 'staff' in role) return '/studio';
@@ -48,5 +48,5 @@ export async function resolveProfilePathForAccount(account) {
             /* fallback */
         }
     }
-    return '/register';
+    return '/settings/profile';
 }

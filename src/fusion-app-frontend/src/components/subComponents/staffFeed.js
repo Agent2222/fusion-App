@@ -22,6 +22,9 @@ function getContextCopyFromBundle(bundle) {
     return { ...base, ...loc };
 }
 
+/** Viewport width at which staff detail panel moves under the selected card (see `_placeStaffDetailsPanel`). */
+const STAFF_DETAIL_MOBILE_MAX_PX = 768;
+
 class StaffFeedComponent extends HTMLElement {
     constructor() {
         super();
@@ -30,6 +33,10 @@ class StaffFeedComponent extends HTMLElement {
         this._contextBundle = null;
         /** @type {(() => void) | null} */
         this._unsubData = null;
+        /** @type {(() => void) | null} */
+        this._unsubStaffDetailMql = null;
+        /** Selected staff index for detail panel (desktop + mobile placement). */
+        this._selectedStaffIndex = 0;
         this._onLocaleChange = () => this.render();
         /** @param {Event} ev */
         this._onFusionCms = (ev) => {
@@ -71,6 +78,10 @@ class StaffFeedComponent extends HTMLElement {
     disconnectedCallback() {
         window.removeEventListener('fusion-localechange', this._onLocaleChange);
         window.removeEventListener('fusion-content-pages-changed', this._onFusionCms);
+        if (this._unsubStaffDetailMql) {
+            this._unsubStaffDetailMql();
+            this._unsubStaffDetailMql = null;
+        }
         if (this._unsubData) {
             this._unsubData();
             this._unsubData = null;
@@ -82,29 +93,124 @@ class StaffFeedComponent extends HTMLElement {
         this.render();
     }
 
+    /**
+     * Move `#staffDetailsExpanded` after the grid (desktop) or into the selected card’s
+     * `.staff-card-mobile-detail` (narrow viewports) so mobile users see copy without scrolling past the grid.
+     */
+    _placeStaffDetailsPanel() {
+        const root = this.shadowRoot;
+        if (!root) return;
+        const details = root.getElementById('staffDetailsExpanded');
+        const grid = root.querySelector('.staff-feed-grid');
+        const feed = root.querySelector('.staff-feed');
+        if (!details || !grid || !feed) return;
+
+        const mobile =
+            typeof window !== 'undefined' &&
+            window.matchMedia(`(max-width: ${STAFF_DETAIL_MOBILE_MAX_PX}px)`).matches;
+        const idx = Math.min(Math.max(0, this._selectedStaffIndex), root.querySelectorAll('.staff-card').length - 1);
+        const articles = root.querySelectorAll('.staff-card');
+
+        if (mobile && articles[idx]) {
+            const slot = articles[idx].querySelector('.staff-card-mobile-detail');
+            if (slot) {
+                slot.appendChild(details);
+                return;
+            }
+        }
+        grid.insertAdjacentElement('afterend', details);
+    }
+
+    /**
+     * @param {Array<Record<string, unknown>>} cards
+     */
+    _wireStaffCardInteractions(cards) {
+        const root = this.shadowRoot;
+        if (!root || !cards.length) return;
+
+        const articles = root.querySelectorAll('.staff-card');
+        const names = root.querySelectorAll('.staff-card-name');
+        const metacont = root.getElementById('metacontLeft');
+        const briefEl = root.querySelector('.staff-card-brief');
+        const quoteEl = root.querySelector('.staff-card-quote');
+        if (!metacont || !briefEl || !quoteEl) return;
+
+        const locEl = metacont.querySelector('[data-staff-field="location"]');
+        const langEl = metacont.querySelector('[data-staff-field="languages"]');
+        const focusEl = metacont.querySelector('[data-staff-field="focus"]');
+
+        if (this._unsubStaffDetailMql) {
+            this._unsubStaffDetailMql();
+            this._unsubStaffDetailMql = null;
+        }
+        if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+            const mql = window.matchMedia(`(max-width: ${STAFF_DETAIL_MOBILE_MAX_PX}px)`);
+            const onMq = () => this._placeStaffDetailsPanel();
+            if (typeof mql.addEventListener === 'function') {
+                mql.addEventListener('change', onMq);
+                this._unsubStaffDetailMql = () => mql.removeEventListener('change', onMq);
+            } else {
+                mql.addListener(onMq);
+                this._unsubStaffDetailMql = () => mql.removeListener(onMq);
+            }
+        }
+
+        const apply = (index) => {
+            const c = cards[index];
+            if (!c) return;
+
+            this._selectedStaffIndex = index;
+
+            if (locEl) locEl.textContent = `Location:${String(c.location ?? '')}`;
+            if (langEl) langEl.textContent = `Languages:${String(c.languages ?? '')}`;
+            if (focusEl) focusEl.textContent = `Focus:${String(c.focus ?? '')}`;
+            briefEl.textContent = String(c.brief ?? '');
+            const q = String(c.quote ?? '');
+            quoteEl.textContent = q ? `"${q}"` : '';
+
+            names.forEach((el, i) => {
+                el.classList.toggle('staff-card-name--selected', i === index);
+            });
+            articles.forEach((el, i) => {
+                el.setAttribute('aria-pressed', i === index ? 'true' : 'false');
+            });
+
+            this._placeStaffDetailsPanel();
+        };
+
+        articles.forEach((article, index) => {
+            const open = () => apply(index);
+            article.addEventListener('click', open);
+            article.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    open();
+                }
+            });
+        });
+
+        apply(0);
+    }
+
     render() {
         const ctx = getContextCopyFromBundle(this._contextBundle);
         const headline = ctx.staffHeadline ?? '';
         const cards = Array.isArray(ctx.staffCards) ? ctx.staffCards : [];
 
         const cardsHtml = cards
-            .map((card) => {
+            .map((card, index) => {
                 const name = card.name ?? '';
                 const title = card.title ?? '';
-                const location = card.location ?? '';
-                const languages = card.languages ?? '';
-                const focus = card.focus ?? '';
-                const brief = card.brief ?? '';
-                const quote = card.quote ?? '';
                 const imageSrc = card.image ?? '';
                 return `
-                    <article class="staff-card" part="staff-card">
+                    <article class="staff-card" part="staff-card" data-staff-index="${index}" tabindex="0" role="button" aria-pressed="${index === 0 ? 'true' : 'false'}">
                         <div class="staff-card-image">
                             <img src="${escapeHtml(imageSrc)}" alt="${escapeHtml(name)}" width="400" height="480" />
                         </div>
                         <div class="staff-card-body">
-                            <h3 class="staff-card-name">${escapeHtml(name)}</h3>
+                            <h3 class="staff-card-name${index === 0 ? ' staff-card-name--selected' : ''}">${escapeHtml(name)}</h3>
                             <p class="staff-card-title">${escapeHtml(title)}</p>
+                            <div class="staff-card-mobile-detail" aria-live="polite"></div>
                         </div>
                     </article>
                 `;
@@ -162,6 +268,7 @@ class StaffFeedComponent extends HTMLElement {
                     gap: 1rem;
                     box-sizing: border-box;
                     overflow: hidden;
+                    cursor: pointer;
                 }
 
                 .staff-card-image {
@@ -180,6 +287,20 @@ class StaffFeedComponent extends HTMLElement {
                     max-width: none;
                     max-height: none;
                     margin: 0;
+                    transform-origin: center top;
+                }
+
+                .staff-card:hover > .staff-card-image > img {
+                    animation: staffScaleImage 15s ease forwards;
+                }
+
+                @keyframes staffScaleImage {
+                    from {
+                        transform: scale(1);
+                    }
+                    to {
+                        transform: scale(1.2);
+                    }
                 }
 
                 .staff-card-body {
@@ -189,6 +310,17 @@ class StaffFeedComponent extends HTMLElement {
                     gap: 0.35rem;
                 }
 
+                /* Filled on narrow viewports only — holds the shared #staffDetailsExpanded under the active card */
+                .staff-card-mobile-detail {
+                    display: none;
+                }
+
+                @media (min-width: 769px) {
+                    .staff-card-mobile-detail {
+                        display: none !important;
+                    }
+                }
+
                 .staff-card-name {
                     margin: 0;
                     font-size: clamp(1rem, 1.5vw, 1.8rem);
@@ -196,6 +328,16 @@ class StaffFeedComponent extends HTMLElement {
                     letter-spacing: 0.04em;
                     line-height: 1.2;
                     color: var(--c2, #000);
+                }
+
+                .staff-card-name--selected {
+                    text-decoration: underline;
+                    text-underline-offset: 0.15em;
+                }
+
+                .staff-card:hover .staff-card-name {
+                    text-decoration: underline;
+                    text-underline-offset: 0.15em;
                 }
 
                 .staff-card-title {
@@ -290,6 +432,58 @@ class StaffFeedComponent extends HTMLElement {
                         grid-template-columns: 1fr;
                     }
                 }
+
+                @media (max-width: 768px) {
+                    .staff-card-mobile-detail:not(:empty) {
+                        display: block;
+                        width: 100%;
+                        margin-top: 0.5rem;
+                    }
+
+                    .staff-card-mobile-detail #staffDetailsExpanded {
+                        width: 100%;
+                        margin-left: 0;
+                        margin-right: 0;
+                        min-height: 0;
+                    }
+
+                    .staff-card-name {
+                        text-align: center;
+                        font-size: clamp(1.4rem, 1.5vw, 1.8rem);
+                    }
+
+                    .staff-card-title {
+                        text-align: center;
+                        font-size: clamp(0.9rem, 1.1vw, 1.2rem);
+                    }
+
+                    #staffDetailsExpanded {
+                        width: 94%;
+                        margin-left: 3%;
+                        margin-right: 3%;
+                        min-height: 28vh;
+                        height: auto;
+                        padding: 1.5rem 1.25rem;
+                    }
+
+                    .staff-card-meta,
+                    .staff-card-focus {
+                        font-size: clamp(0.85rem, 1.05vw, 1.05rem);
+                    }
+
+                    .staff-card-brief {
+                        font-size: clamp(0.85rem, 1.1vw, 1.15rem);
+                        width: 100%;
+                        padding-left: 0;
+                        padding-right: 0;
+                    }
+
+                    .staff-card-quote {
+                        font-size: clamp(1rem, 3.2vw, 1.85rem);
+                        padding-left: 4%;
+                        padding-right: 4%;
+                    }
+                }
             </style>
             ${
                 empty
@@ -301,18 +495,22 @@ class StaffFeedComponent extends HTMLElement {
                             <div class="staff-card-content">
                                 <div class="staff-card-meta-container">
                                     <div id="metacontLeft">
-                                        <p class="staff-card-meta">Location:${escapeHtml(first?.location)}</p>
-                                        <p class="staff-card-meta">Languages:${escapeHtml(first?.languages)}</p>
-                                        <p class="staff-card-focus">Focus:${escapeHtml(first?.focus)}</p>
+                                        <p class="staff-card-meta" data-staff-field="location">Location:${escapeHtml(first?.location)}</p>
+                                        <p class="staff-card-meta" data-staff-field="languages">Languages:${escapeHtml(first?.languages)}</p>
+                                        <p class="staff-card-focus" data-staff-field="focus">Focus:${escapeHtml(first?.focus)}</p>
                                     </div>
                                     <p class="staff-card-brief">${escapeHtml(first?.brief)}</p>
                                 </div>
-                                <blockquote class="staff-card-quote">"${escapeHtml(first?.quote)}"</blockquote>
+                                <blockquote class="staff-card-quote"></blockquote>
                             </div>
                         </div>
                     </section>`
             }
         `;
+
+        if (!empty) {
+            this._wireStaffCardInteractions(cards);
+        }
     }
 }
 

@@ -145,9 +145,10 @@ function rowLines2(escapeHtml, label, path, enRoot, jaRoot) {
 }
 
 const OFFERING_COUNT = 3;
-const FACILITY_COUNT = 2;
+const FACILITY_ROWS = 15;
+const LOCATION_ROWS = 3;
 const KEY_DATE_ROWS = 6;
-const FAQ_ROWS = 4;
+const FAQ_ROWS = 16;
 
 /**
  * @param {(s: string) => string} escapeHtml
@@ -206,17 +207,13 @@ export function renderProgramLocaleFormHtml(escapeHtml, enRaw, jaRaw) {
   <details class="studio-prog-details">
     <summary class="studio-prog-subhead">Program details — facilities, costs, dates</summary>
 `;
-    for (let i = 0; i < FACILITY_COUNT; i++) {
+    for (let i = 0; i < LOCATION_ROWS; i++) {
+        html += `<p class="studio-prog-card-slot">Location ${i + 1}</p>`;
+        html += row2(escapeHtml, 'Label', `programPage.programDetails.locations.${i}`, en, ja);
+    }
+    for (let i = 0; i < FACILITY_ROWS; i++) {
         html += `<p class="studio-prog-card-slot">Facility ${i + 1}</p>`;
-        html += row2(escapeHtml, 'Title', `programPage.programDetails.facilities.${i}.title`, en, ja);
-        html += row2(escapeHtml, 'Description', `programPage.programDetails.facilities.${i}.description`, en, ja, 'textarea');
-        html += rowLines2(
-            escapeHtml,
-            'Gallery URLs',
-            `programPage.programDetails.facilities.${i}.gallery`,
-            en,
-            ja
-        );
+        html += row2(escapeHtml, 'Line', `programPage.programDetails.facilityList.${i}`, en, ja);
     }
     html += row2(escapeHtml, 'Cost — base', 'programPage.programDetails.costs.base', en, ja);
     html += row2(escapeHtml, 'Cost — additional', 'programPage.programDetails.costs.additional', en, ja);

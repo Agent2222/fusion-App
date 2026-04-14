@@ -26,6 +26,8 @@ import {
     needsIntroGallerySync,
 } from './studioLegacyProfileUrls.js';
 import { normalizeLocalesWorldForStorage } from './worldNormalize.js';
+import { sendEmail } from './integrationApi.js';
+import { getApplicationStaffNotificationEmails } from './studioServicesConfig.js';
 
 const STORAGE_KEY = 'fusion-data-source';
 
@@ -796,6 +798,57 @@ function fakeArtistRecordFromTestArtist(a) {
     };
 }
 
+/**
+ * @param {string} programId
+ * @param {Record<string, string>} payloadFields
+ * @param {string} submittedAt
+ */
+async function notifyProgramApplicationSubmittedByEmail(programId, payloadFields, submittedAt) {
+    const pid = String(programId || '').trim();
+    const applicantName = `${String(payloadFields.firstName || '').trim()} ${String(payloadFields.lastName || '').trim()}`
+        .trim();
+    const applicantEmail = String(payloadFields.email || '').trim();
+    const staffRecipients = getApplicationStaffNotificationEmails();
+    const staffSummary = [
+        `Program ID: ${pid}`,
+        applicantName ? `Applicant: ${applicantName}` : null,
+        applicantEmail ? `Email: ${applicantEmail}` : null,
+        `Submitted at: ${submittedAt}`,
+    ]
+        .filter(Boolean)
+        .join('\n');
+    const tasks = [];
+    if (applicantEmail) {
+        tasks.push(
+            sendEmail({
+                to: applicantEmail,
+                subject: `We received your application (${pid})`,
+                text: [
+                    'Thank you — your program application was received.',
+                    '',
+                    `Program: ${pid}`,
+                    applicantName ? `Name: ${applicantName}` : null,
+                    `Submitted: ${submittedAt}`,
+                    '',
+                    'You can track progress in your profile dashboard when signed in.',
+                ]
+                    .filter(Boolean)
+                    .join('\n'),
+            })
+        );
+    }
+    for (const to of staffRecipients) {
+        tasks.push(
+            sendEmail({
+                to,
+                subject: `New program application (${pid})`,
+                text: staffSummary,
+            })
+        );
+    }
+    await Promise.allSettled(tasks);
+}
+
 /** Preflight failure codes for {@link submitProgramApplication} (UI maps to copy). */
 export const PROGRAM_APPLICATION_ERROR_CODE = {
     NO_ACCOUNT: 'no_account',
@@ -850,9 +903,27 @@ export async function submitProgramApplication(programId, payloadFields) {
         perArtist[pid] = { submittedAt, payload: { ...payloadFields } };
         next[id] = perArtist;
         writeStudioLs('artistApplications', next);
+        const curApps = readStudioLs(LS_APPLICANTS);
+        const list = Array.isArray(curApps) ? [...curApps] : [];
+        const appId = `${id}|${pid}`;
+        const row = {
+            id: appId,
+            programId: pid,
+            email: String(payloadFields.email || ''),
+            fullName: `${String(payloadFields.firstName || '').trim()} ${String(payloadFields.lastName || '').trim()}`
+                .trim(),
+            status: 'pending',
+            createdAt: submittedAt,
+            payloadJson,
+        };
+        const idx = list.findIndex((x) => String(x?.id || '') === appId);
+        if (idx >= 0) list[idx] = row;
+        else list.push(row);
+        writeStudioLs(LS_APPLICANTS, list);
         if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('fusion-data-source-change', { detail: { source: 'test' } }));
         }
+        await notifyProgramApplicationSubmittedByEmail(pid, payloadFields, submittedAt);
         return;
     }
     const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
@@ -862,6 +933,7 @@ export async function submitProgramApplication(programId, payloadFields) {
     }
     await assertProgramApplicationPreflight(actor);
     await actor.submitProgramApplication(pid, payloadJson, submittedAt);
+    await notifyProgramApplicationSubmittedByEmail(pid, payloadFields, submittedAt);
 }
 
 /**
@@ -883,6 +955,80 @@ export async function getMembershipAccessForCaller() {
         if ('exempt' in r) return 'exempt';
         if ('ok' in r) return 'ok';
         if ('needsSubscription' in r) return 'needsSubscription';
+    }
+    return 'ok';
+}
+
+/**
+ * Caller account (role, linked artist id, membership fields). Test mode returns a stub.
+ * @returns {Promise<Record<string, unknown> | null>}
+ */
+export async function getAccountForCaller() {
+    if (getDataSource() === 'test') {
+        const lid = getProfileSettingsDevArtistId();
+        return {
+            role: { artist: null },
+            status: { active: null },
+            linkedArtistId: lid ? [lid] : [],
+            updatedAt: new Date().toISOString(),
+        };
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.getAccountForCaller !== 'function') return null;
+    const raw = await actor.getAccountForCaller();
+    const acc = Array.isArray(raw) ? (raw.length ? raw[0] : null) : raw;
+    return acc && typeof acc === 'object' ? /** @type {Record<string, unknown>} */ (acc) : null;
+}
+
+/**
+ * Create a minimal linked roster row when membership allows (`#ok` / `#exempt`). Idempotent.
+ * Test mode: creates a local overlay artist and selects it when none is selected.
+ * @returns {Promise<'ok' | 'alreadyLinked' | 'needsSubscription' | 'noAccount'>}
+ */
+export async function ensureMyLinkedArtistProfile() {
+    if (getDataSource() === 'test') {
+        let id = getProfileSettingsDevArtistId();
+        if (id) {
+            const artists = await getArtists();
+            if (artists.some((x) => x.id === id)) return 'alreadyLinked';
+        }
+        const ts = new Date().toISOString();
+        const nid = `mpd-local-${
+            typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID().slice(0, 8) : String(Date.now())
+        }`;
+        const minimal = normalizeArtistDefaults({
+            id: nid,
+            slug: nid,
+            image: '',
+            featuredOrder: 999_999,
+            visibility: 'public',
+            updatedAt: ts,
+            locales: { en: {}, ja: {} },
+            imported: false,
+            accessCode: '',
+        });
+        const overlay = readStudioLs(LS_ARTISTS_OVERLAY) || {};
+        overlay[nid] = minimal;
+        writeStudioLs(LS_ARTISTS_OVERLAY, overlay);
+        setProfileSettingsDevArtistId(nid);
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('fusion-data-source-change', { detail: { source: 'test' } }));
+        }
+        return 'ok';
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor) return 'noAccount';
+    if (typeof actor.ensureMyLinkedArtistProfile !== 'function') {
+        return 'alreadyLinked';
+    }
+    const raw = await actor.ensureMyLinkedArtistProfile();
+    if (raw && typeof raw === 'object') {
+        if ('ok' in raw) return 'ok';
+        if ('alreadyLinked' in raw) return 'alreadyLinked';
+        if ('needsSubscription' in raw) return 'needsSubscription';
+        if ('noAccount' in raw) return 'noAccount';
     }
     return 'ok';
 }
@@ -995,6 +1141,105 @@ export async function updateMyArtistProfilePatch(imageUrl, updatedAt) {
         throw new Error('updateMyArtistProfilePatch unavailable — sign in and run dfx generate fusion-app-backend.');
     }
     await actor.updateMyArtistProfilePatch(url, ts);
+}
+
+/**
+ * @param {string} preferred
+ * @param {string} ownId
+ * @param {object[]} artists
+ */
+function uniqueMemberSlug(preferred, ownId, artists) {
+    const taken = (slug) =>
+        artists.some(
+            (a) =>
+                a &&
+                a.id !== ownId &&
+                String(a.slug || '')
+                    .trim()
+                    .toLowerCase() === String(slug).trim().toLowerCase()
+        );
+    if (!taken(preferred)) return preferred;
+    let n = 2;
+    while (n < 200) {
+        const c = `${preferred}-${n}`;
+        if (!taken(c)) return c;
+        n += 1;
+    }
+    return preferred;
+}
+
+/**
+ * Set public profile URL slug for the caller's linked artist (member path).
+ * @param {string} preferredSlug — normalized [a-z0-9-]+
+ * @returns {Promise<string>} final slug applied
+ */
+export async function updateMyArtistPublicSlug(preferredSlug) {
+    const raw = String(preferredSlug ?? '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, '')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 128);
+    if (!raw) {
+        throw new Error('Slug is empty after normalization.');
+    }
+    if (getDataSource() === 'test') {
+        const id = getProfileSettingsDevArtistId();
+        if (!id) {
+            throw new Error('Select which artist profile to edit (test mode).');
+        }
+        const artists = await getArtists();
+        const base = artists.find((x) => x.id === id);
+        if (!base) throw new Error('Artist not found');
+        const unique = uniqueMemberSlug(raw, id, artists);
+        if (String(base.slug || '') === unique) return unique;
+        const merged = normalizeArtistDefaults({
+            ...base,
+            slug: unique,
+            updatedAt: new Date().toISOString(),
+        });
+        const overlay = readStudioLs(LS_ARTISTS_OVERLAY) || {};
+        overlay[id] = merged;
+        writeStudioLs(LS_ARTISTS_OVERLAY, overlay);
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('fusion-data-source-change', { detail: { source: 'test' } }));
+        }
+        return unique;
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.updateMyArtistPublicSlug !== 'function') {
+        throw new Error('updateMyArtistPublicSlug unavailable — deploy backend and run dfx generate fusion-app-backend.');
+    }
+    const out = await actor.updateMyArtistPublicSlug(raw);
+    return typeof out === 'string' ? out : String(out ?? raw);
+}
+
+/**
+ * Staff/admin: delete roster row; unlinks linked member accounts to pending (canister).
+ * @param {string} artistId
+ * @returns {Promise<boolean>}
+ */
+export async function deleteArtistByIdStudio(artistId) {
+    const id = String(artistId || '').trim();
+    if (!id) throw new Error('Artist id required');
+    if (getDataSource() === 'test') {
+        const overlay = readStudioLs(LS_ARTISTS_OVERLAY) || {};
+        if (overlay[id]) {
+            delete overlay[id];
+            writeStudioLs(LS_ARTISTS_OVERLAY, overlay);
+        }
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('fusion-data-source-change', { detail: { source: 'test' } }));
+        }
+        return true;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.deleteArtistById !== 'function') {
+        throw new Error('deleteArtistById unavailable — sign in as staff and run dfx generate fusion-app-backend.');
+    }
+    return actor.deleteArtistById(id);
 }
 
 /**

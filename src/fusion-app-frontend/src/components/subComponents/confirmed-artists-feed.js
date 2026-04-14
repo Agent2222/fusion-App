@@ -5,10 +5,20 @@ import {
     artistEnglishBlock,
     artistSlugFromName,
 } from '../../utils/artistSlug.js';
+import { applyArtistCardImage } from '../../utils/artistCardPlaceholder.js';
 
 const MAX_ARTISTS = 30;
 const MAX_PAGES = 3;
 const PER_PAGE = 10;
+
+/** When there are no confirmed artists yet — center card copy. */
+function phantomPlaceholderCopy() {
+    const loc = typeof window.getLocale === 'function' ? window.getLocale() : 'en';
+    if (loc === 'ja') {
+        return 'アーティストの確定を進めています';
+    }
+    return 'Artists are being confirmed';
+}
 
 class ConfirmedArtistsFeedComponent extends HTMLElement {
     constructor() {
@@ -66,7 +76,6 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
     _createArtistCard(artist) {
         const locale = typeof window.getLocale === 'function' ? window.getLocale() : 'en';
         const artistName = artistDisplayName(artist, locale);
-        const artistImage = artist.image;
         const artistDiscipline = artistDisplayDiscipline(artist, locale);
 
         const card = document.createElement('div');
@@ -82,13 +91,15 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
 
         card.innerHTML = `
             <div class="artist-card-image">
-                <img src="${artistImage}" alt="${artistName}">
+                <img alt="${artistName}" loading="lazy" decoding="async">
             </div>
             <div class="artist-card-content">
                 <div class="artist-card-title">${artistName}</div>
                 <div class="artist-card-discipline">${artistDiscipline}</div>
             </div>
         `;
+        const cfImg = card.querySelector('.artist-card-image img');
+        applyArtistCardImage(cfImg, artist.image);
 
         return card;
     }
@@ -175,7 +186,8 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
             typeof totalSlots === 'number' &&
             Number.isFinite(totalSlots);
 
-        const hostHidden = !hasHeadline && list.length === 0;
+        const showPhantomPlaceholders = list.length === 0;
+        const hostHidden = showPhantomPlaceholders ? false : !hasHeadline && list.length === 0;
         this.style.display = hostHidden ? 'none' : '';
 
         const headlineEl = root.querySelector('.confirmed-headline');
@@ -195,7 +207,7 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
             }
         }
 
-        const pageCount = this._numPages(list.length);
+        const pageCount = showPhantomPlaceholders ? 1 : this._numPages(list.length);
         this._slideCount = pageCount;
         this._activeIndex = 0;
 
@@ -203,21 +215,53 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
             scrollEl.innerHTML = '';
             scrollEl.scrollLeft = 0;
 
-            for (let p = 0; p < pageCount; p++) {
-                const slice = this._sliceForPage(list, p);
+            if (showPhantomPlaceholders) {
                 const slide = document.createElement('div');
                 slide.className = 'confirmed-slide';
-                slide.setAttribute('data-slide-index', String(p));
+                slide.setAttribute('data-slide-index', '0');
 
                 const grid = document.createElement('div');
-                grid.className = 'confirmed-grid';
+                grid.className = 'confirmed-grid confirmed-grid--phantom';
 
-                slice.forEach((artist) => {
-                    grid.appendChild(this._createArtistCard(artist));
-                });
+                for (let i = 0; i < 5; i++) {
+                    if (i === 0 || i === 4) {
+                        const sp = document.createElement('div');
+                        sp.className = 'confirmed-phantom-spacer';
+                        sp.setAttribute('aria-hidden', 'true');
+                        grid.appendChild(sp);
+                        continue;
+                    }
+                    const card = document.createElement('div');
+                    card.className = 'artist-card artist-card--phantom';
+                    card.setAttribute('aria-hidden', 'true');
+                    if (i === 2) {
+                        const msg = document.createElement('p');
+                        msg.className = 'artist-card--phantom-message';
+                        msg.textContent = phantomPlaceholderCopy();
+                        card.appendChild(msg);
+                    }
+                    grid.appendChild(card);
+                }
 
                 slide.appendChild(grid);
                 scrollEl.appendChild(slide);
+            } else {
+                for (let p = 0; p < pageCount; p++) {
+                    const slice = this._sliceForPage(list, p);
+                    const slide = document.createElement('div');
+                    slide.className = 'confirmed-slide';
+                    slide.setAttribute('data-slide-index', String(p));
+
+                    const grid = document.createElement('div');
+                    grid.className = 'confirmed-grid';
+
+                    slice.forEach((artist) => {
+                        grid.appendChild(this._createArtistCard(artist));
+                    });
+
+                    slide.appendChild(grid);
+                    scrollEl.appendChild(slide);
+                }
             }
         }
 
@@ -257,9 +301,19 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
             this._teardownPagination();
             this._teardownPagination = null;
         }
+        if (this._onLocaleChangeConfirmed) {
+            window.removeEventListener('fusion-localechange', this._onLocaleChangeConfirmed);
+            this._onLocaleChangeConfirmed = null;
+        }
     }
 
     connectedCallback() {
+        if (!this._onLocaleChangeConfirmed) {
+            this._onLocaleChangeConfirmed = () => {
+                if (this._data) this._populate();
+            };
+            window.addEventListener('fusion-localechange', this._onLocaleChangeConfirmed);
+        }
         if (!this._navBound) {
             this._navBound = true;
             this.shadowRoot.addEventListener('click', (e) => {
@@ -378,6 +432,66 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
                     width: 100%;
                 }
 
+                /* Phantom row: only the middle 3 cards are visible; outer columns are spacers. */
+                .confirmed-grid.confirmed-grid--phantom {
+                    grid-template-columns: minmax(0, 1fr) repeat(3, minmax(0, 1fr)) minmax(0, 1fr);
+                    gap: clamp(0.65rem, 2vw, 1.25rem);
+                    box-sizing: border-box;
+                }
+
+                .confirmed-phantom-spacer {
+                    min-width: 0;
+                    pointer-events: none;
+                }
+
+                .artist-card--phantom {
+                    cursor: default;
+                    min-height: 0;
+                    min-width: 0;
+                    border: 2px dashed rgba(0, 0, 0, 0.2);
+                    box-sizing: border-box;
+                    background: transparent;
+                    border-radius: 2px;
+                    aspect-ratio: 3 / 4;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: clamp(0.65rem, 2vw, 1.1rem);
+                }
+
+                .artist-card--phantom:hover {
+                    opacity: 1;
+                }
+
+                @keyframes confirmed-phantom-blink {
+                    0%,
+                    100% {
+                        opacity: 1;
+                    }
+                    50% {
+                        opacity: 0.35;
+                    }
+                }
+
+                .artist-card--phantom-message {
+                    margin: 0;
+                    text-align: center;
+                    font-size: clamp(0.72rem, 1.05vw, 0.95rem);
+                    font-variation-settings: var(--fv-body-wide);
+                    color: var(--c2);
+                    line-height: 1.35;
+                    letter-spacing: 0.02em;
+                    opacity: 1;
+                    animation: confirmed-phantom-blink 1.25s ease-in-out infinite;
+                }
+
+                @media (prefers-reduced-motion: reduce) {
+                    .artist-card--phantom-message {
+                        animation: none;
+                        opacity: 0.92;
+                    }
+                }
+
                 .artist-card {
                     display: flex;
                     flex-direction: column;
@@ -408,6 +522,12 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
                     display: block;
                     transform-origin: center top;
                     transition: transform 12s ease;
+                }
+
+                .artist-card-image img.artist-card-img--placeholder {
+                    object-fit: contain;
+                    object-position: center;
+                    background: var(--c2);
                 }
 
                 .artist-card-content {
@@ -456,8 +576,8 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
                 }
 
                 .confirmed-pagination-dot {
-                    width: 15px;
-                    height: 15px;
+                    width: 28px;
+                    height: 28px;
                     padding: 0;
                     border: none;
                     border-radius: 50%;
@@ -476,7 +596,7 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
                 }
 
                 @media (max-width: 1024px) {
-                    .confirmed-grid {
+                    .confirmed-grid:not(.confirmed-grid--phantom) {
                         grid-template-columns: repeat(3, minmax(0, 1fr));
                     }
 
@@ -486,7 +606,7 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
                 }
 
                 @media (max-width: 768px) {
-                    .confirmed-grid {
+                    .confirmed-grid:not(.confirmed-grid--phantom) {
                         grid-template-columns: repeat(2, minmax(0, 1fr));
                     }
 
@@ -506,13 +626,28 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
                 }
 
                 @media (max-width: 520px) {
-                    .confirmed-grid {
+                    .confirmed-grid:not(.confirmed-grid--phantom) {
                         grid-template-columns: 1fr;
                     }
 
+                    .confirmed-grid.confirmed-grid--phantom {
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        gap: clamp(0.65rem, 2vw, 1rem);
+                    }
+
+                    .confirmed-grid.confirmed-grid--phantom .confirmed-phantom-spacer {
+                        display: none;
+                    }
+
+                    .confirmed-grid.confirmed-grid--phantom .artist-card--phantom {
+                        width: min(100%, 240px);
+                    }
+
                     .confirmed-pagination-dot {
-                        width: 12px;
-                        height: 12px;
+                        width: 22px;
+                        height: 22px;
                     }
 
                     .confirmed-pagination-dot-container {
@@ -522,8 +657,23 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
                 }
 
                 @container confirmed-artists (max-width: 520px) {
-                    .confirmed-grid {
+                    .confirmed-grid:not(.confirmed-grid--phantom) {
                         grid-template-columns: 1fr;
+                    }
+
+                    .confirmed-grid.confirmed-grid--phantom {
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        gap: clamp(0.65rem, 2vw, 1rem);
+                    }
+
+                    .confirmed-grid.confirmed-grid--phantom .confirmed-phantom-spacer {
+                        display: none;
+                    }
+
+                    .confirmed-grid.confirmed-grid--phantom .artist-card--phantom {
+                        width: min(100%, 240px);
                     }
                 }
             </style>

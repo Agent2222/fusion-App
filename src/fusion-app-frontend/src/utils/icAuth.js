@@ -5,6 +5,14 @@
 import { AuthClient, ERROR_USER_INTERRUPT } from '@dfinity/auth-client';
 import { DEV_MODE, getInternetIdentityUrl } from '../config.js';
 import { FUSION_PENDING_MEMBERSHIP_LINK_KEY } from './integrationApi.js';
+import { getProfileSetupDraft } from './profileSetupDraft.js';
+
+function linkedArtistIdFromAccount(acc) {
+    if (!acc || typeof acc !== 'object') return '';
+    const raw = acc.linkedArtistId ?? acc.linked_artist_id;
+    if (Array.isArray(raw)) return raw.length ? String(raw[0] ?? '').trim() : '';
+    return raw != null ? String(raw).trim() : '';
+}
 
 /** @returns {string} */
 function requireInternetIdentityUrl() {
@@ -155,6 +163,19 @@ export async function runPostLoginPipeline() {
         window.dispatchEvent(
             new CustomEvent('fusion-open-join-network', {
                 detail: { logoutIfDismissedWithoutAccount: true },
+            })
+        );
+        return;
+    }
+    const linkedArtistId = linkedArtistIdFromAccount(acc);
+    if (!linkedArtistId) {
+        const draft = getProfileSetupDraft();
+        window.dispatchEvent(
+            new CustomEvent('fusion-open-profile-setup', {
+                detail: {
+                    fullName: draft.fullName,
+                    email: draft.email,
+                },
             })
         );
         return;

@@ -1,9 +1,10 @@
-// Placeholder — structure, content, and styles TBD
 class ObjectsHighlightComponent extends HTMLElement {
     constructor() {
         super();
         this.shadow = this.attachShadow({ mode: 'open' });
         this.data = null;
+        /** @type {(() => void) | null} */
+        this._teardownLightbox = null;
     }
 
     get active() {
@@ -36,6 +37,129 @@ class ObjectsHighlightComponent extends HTMLElement {
         }
     }
 
+    /** @param {ShadowRoot} root */
+    _centerLightboxScroll(root) {
+        const scrollEl = root.querySelector('.oh-lightbox-scroll');
+        const img = root.querySelector('.oh-lightbox-img');
+        if (!scrollEl || !img) return;
+
+        const apply = () => {
+            const sh = scrollEl.scrollHeight;
+            const ch = scrollEl.clientHeight;
+            if (sh > ch) {
+                scrollEl.scrollTop = Math.max(0, (sh - ch) / 2);
+            } else {
+                scrollEl.scrollTop = 0;
+            }
+        };
+
+        if (img.complete && img.naturalHeight > 0) {
+            requestAnimationFrame(() => requestAnimationFrame(apply));
+        } else {
+            img.addEventListener(
+                'load',
+                () => requestAnimationFrame(() => requestAnimationFrame(apply)),
+                { once: true }
+            );
+            requestAnimationFrame(() => requestAnimationFrame(apply));
+        }
+    }
+
+    _closeObjectLightbox() {
+        if (this._teardownLightbox) {
+            this._teardownLightbox();
+            this._teardownLightbox = null;
+        }
+        const lb = this.shadowRoot?.getElementById('ohLightbox');
+        if (lb) {
+            lb.hidden = true;
+            lb.setAttribute('aria-hidden', 'true');
+        }
+        if (typeof document !== 'undefined') {
+            document.body.style.overflow = '';
+        }
+    }
+
+    /**
+     * @param {string} imageSrc
+     * @param {string} imageAlt
+     * @param {Record<string, unknown>} slice — locale block (name, artist, credit, description, copy)
+     */
+    _openObjectLightbox(imageSrc, imageAlt, slice) {
+        const root = this.shadowRoot;
+        if (!root) return;
+
+        const lb = root.getElementById('ohLightbox');
+        const img = root.querySelector('.oh-lightbox-img');
+        const titleEl = root.querySelector('.oh-lightbox-title');
+        const artistEl = root.querySelector('.oh-lightbox-artist');
+        const creditEl = root.querySelector('.oh-lightbox-credit');
+        const descEl = root.querySelector('.oh-lightbox-desc');
+        const copyEl = root.querySelector('.oh-lightbox-copy');
+        if (!lb || !img || !titleEl || !artistEl || !creditEl || !descEl || !copyEl) return;
+
+        const name = String(slice.name ?? '');
+        const artist = String(slice.artist ?? '');
+        const credit = String(slice.credit ?? '');
+        const description = String(slice.description ?? '');
+        const copy = String(slice.copy ?? '');
+
+        img.src = imageSrc;
+        img.alt = imageAlt;
+
+        const setBlock = (el, text, className) => {
+            const t = text.trim();
+            if (!t) {
+                el.hidden = true;
+                el.innerHTML = '';
+            } else {
+                el.hidden = false;
+                el.className = className;
+                el.textContent = t;
+            }
+        };
+
+        setBlock(titleEl, name, 'oh-lightbox-title');
+        setBlock(artistEl, artist, 'oh-lightbox-artist');
+        setBlock(creditEl, credit, 'oh-lightbox-credit');
+        setBlock(descEl, description, 'oh-lightbox-desc');
+        setBlock(copyEl, copy, 'oh-lightbox-copy');
+
+        lb.hidden = false;
+        lb.setAttribute('aria-hidden', 'false');
+
+        if (typeof document !== 'undefined') {
+            document.body.style.overflow = 'hidden';
+        }
+
+        if (this._teardownLightbox) {
+            this._teardownLightbox();
+            this._teardownLightbox = null;
+        }
+
+        const onKey = (e) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                this._closeObjectLightbox();
+            }
+        };
+        const closeBtn = root.querySelector('.oh-lightbox-close');
+        const onCloseClick = () => this._closeObjectLightbox();
+        const onImgClick = () => this._closeObjectLightbox();
+
+        document.addEventListener('keydown', onKey);
+        closeBtn?.addEventListener('click', onCloseClick);
+        img.addEventListener('click', onImgClick);
+
+        this._centerLightboxScroll(root);
+
+        this._teardownLightbox = () => {
+            document.removeEventListener('keydown', onKey);
+            closeBtn?.removeEventListener('click', onCloseClick);
+            img.removeEventListener('click', onImgClick);
+        };
+    }
+
     createObjects() {
         const root = this.shadowRoot;
         if (!root || !this.data) return;
@@ -64,26 +188,36 @@ class ObjectsHighlightComponent extends HTMLElement {
             const slice = localeSlice(row);
             const objectImage = row.image;
             const objectAlt = slice.alt ?? '';
-            const objectLink = slice.link ?? row.link ?? '';
 
             if (objectImage == null || objectImage === '') continue;
 
             const objectCard = document.createElement('div');
             objectCard.classList.add('object-card');
+            objectCard.setAttribute('role', 'button');
+            objectCard.setAttribute('tabindex', '0');
+            objectCard.setAttribute('aria-label', String(slice.name ?? objectAlt ?? 'View object'));
             objectCard.innerHTML = `
                 <div class="object-card-image" id="object-card-${i}">
-                    <img src="${objectImage}" alt="${objectAlt}">
+                    <img alt="" />
                 </div>
             `;
+            const thumbImg = objectCard.querySelector('img');
+            if (thumbImg) {
+                thumbImg.src = String(objectImage);
+                thumbImg.alt = String(objectAlt);
+            }
 
             const parent = targets[i]();
             if (parent) parent.appendChild(objectCard);
 
-            if (objectLink) {
-                objectCard.addEventListener('click', () => {
-                    window.location.href = objectLink;
-                });
-            }
+            const open = () => this._openObjectLightbox(String(objectImage), String(objectAlt), slice);
+            objectCard.addEventListener('click', open);
+            objectCard.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    open();
+                }
+            });
         }
     }
 
@@ -91,7 +225,25 @@ class ObjectsHighlightComponent extends HTMLElement {
         this.render();
     }
 
+    disconnectedCallback() {
+        if (this._teardownLightbox) {
+            this._teardownLightbox();
+            this._teardownLightbox = null;
+        }
+        if (typeof document !== 'undefined') {
+            document.body.style.overflow = '';
+        }
+    }
+
     render() {
+        if (this._teardownLightbox) {
+            this._teardownLightbox();
+            this._teardownLightbox = null;
+        }
+        if (typeof document !== 'undefined') {
+            document.body.style.overflow = '';
+        }
+
         this.shadow.innerHTML = `
             <style>
                 :host {
@@ -178,9 +330,9 @@ class ObjectsHighlightComponent extends HTMLElement {
                     min-height: 0;
                     display: grid;
                     grid-template-columns: 1fr;
-                    grid-template-rows: 1fr 1fr;
+                    grid-template-rows: 50% 50%;
                 }
-                
+
                 .sect3 {
                     width: 100%;
                     height: 100%;
@@ -216,24 +368,164 @@ class ObjectsHighlightComponent extends HTMLElement {
                         margin-left: 0;
                         margin-right: 0;
                         min-height: 0;
-                        grid-template-columns: 1fr 1fr;
+                        grid-template-columns: 1fr;
                         grid-template-rows: auto;
                         align-items: stretch;
                     }
 
-                    .sect1 {
-                        grid-column: 1 / 3;
+                    .sect1,
+                    .sect2,
+                    .sect3 {
+                        grid-column: 1 / -1;
                     }
 
                     .sect2 {
-                        grid-column: 1 / 3;
-                        grid-template-columns: 1fr 1fr;
-                        grid-template-rows: 1fr;
+                        grid-template-columns: 1fr;
+                        grid-template-rows: auto auto;
                     }
 
-                    .sect3 {
-                        grid-column: 1 / 3;
+                    .oh-lightbox-scroll {
+                        overflow-x: auto;
+                        overflow-y: hidden;
+                        -webkit-overflow-scrolling: touch;
+                        display: flex;
+                        align-items: stretch;
+                        justify-content: flex-start;
+                        padding-bottom: env(safe-area-inset-bottom, 0);
                     }
+
+                    .oh-lightbox-img {
+                        height: 100%;
+                        width: auto;
+                        max-width: none;
+                        min-height: 100%;
+                        flex: 0 0 auto;
+                        object-fit: contain;
+                    }
+
+                    .oh-lightbox-meta {
+                        padding: 0;
+                        left: 5%;
+                        bottom: 2%;
+                        max-width: 90%;
+                    }
+                }
+
+                /* Full-screen lightbox: image scrolls vertically at full width; caption + close stay fixed */
+                .oh-lightbox {
+                    position: fixed;
+                    inset: 0;
+                    z-index: 200000;
+                    margin: 0;
+                    padding: 0;
+                    box-sizing: border-box;
+                    background: #000;
+                    overflow: hidden;
+                }
+
+                .oh-lightbox[hidden] {
+                    display: none !important;
+                }
+
+                .oh-lightbox-scroll {
+                    position: absolute;
+                    inset: 0;
+                    z-index: 0;
+                    overflow-y: auto;
+                    overflow-x: hidden;
+                    -webkit-overflow-scrolling: touch;
+                    overscroll-behavior: contain;
+                    /* Lets you scroll the bottom of the image clear of the fixed caption */
+                    padding-bottom: min(42vh, 16rem);
+                    box-sizing: border-box;
+                }
+
+                .oh-lightbox-img {
+                    width: 100%;
+                    height: auto;
+                    margin: 0;
+                    padding: 0;
+                    border: 0;
+                    display: block;
+                    vertical-align: top;
+                    cursor: pointer;
+                }
+
+                .oh-lightbox-meta {
+                    position: fixed;
+                    left: 0;
+                    bottom: 0;
+                    z-index: 1;
+                    max-width: min(92vw, 40rem);
+                    padding: 1.25rem 1.5rem 1.5rem;
+                    padding-bottom: max(1.25rem, env(safe-area-inset-bottom, 0px));
+                    box-sizing: border-box;
+                    color: var(--c3, #fff);
+                    text-shadow: 0 2px 12px rgba(0, 0, 0, 0.85);
+                    pointer-events: none;
+                }
+
+                .oh-lightbox-meta .oh-lightbox-title {
+                    margin: 0 0 0.35rem;
+                    font-size: clamp(.8rem, 1vw, 1.5rem);
+                    font-variation-settings: var(--fv-caption-fine);
+                    line-height: 1.2;
+                }
+
+                .oh-lightbox-meta .oh-lightbox-artist {
+                    margin: 0 0 0.35rem;
+                    font-size: clamp(0.9rem, 1.4vw, 1.1rem);
+                    font-variation-settings: var(--fv-emphasis);
+                    opacity: 0.95;
+                }
+
+                .oh-lightbox-meta .oh-lightbox-credit {
+                    margin: 0 0 0.5rem;
+                    font-size: clamp(0.65rem, 0.9vw, 0.82rem);
+                    font-variation-settings: var(--fv-caption-fine);
+                    opacity: 0.88;
+                }
+
+                .oh-lightbox-meta .oh-lightbox-desc {
+                    margin: 0 0 0.5rem;
+                    font-size: clamp(0.72rem, 1vw, 0.92rem);
+                    font-variation-settings: var(--fv-caption-fine);
+                    line-height: 1.45;
+                    opacity: 0.92;
+                }
+
+                .oh-lightbox-meta .oh-lightbox-copy {
+                    margin: 0;
+                    font-size: clamp(0.65rem, 0.88vw, 0.85rem);
+                    font-variation-settings: var(--fv-caption-fine);
+                    line-height: 1.4;
+                    opacity: 0.88;
+                }
+
+                .oh-lightbox-close {
+                    position: fixed;
+                    top: max(0.75rem, env(safe-area-inset-top, 0px));
+                    right: max(0.75rem, env(safe-area-inset-right, 0px));
+                    z-index: 2;
+                    width: 2.75rem;
+                    height: 2.75rem;
+                    margin: 0;
+                    padding: 0;
+                    border: 1px solid color-mix(in srgb, var(--c3, #fff) 35%, transparent);
+                    border-radius: 0;
+                    background: color-mix(in srgb, #000 45%, transparent);
+                    color: var(--c3, #fff);
+                    font-size: 1.5rem;
+                    line-height: 1;
+                    cursor: pointer;
+                    pointer-events: auto;
+                    -webkit-appearance: none;
+                    appearance: none;
+                    font-family: inherit;
+                }
+
+                .oh-lightbox-close:hover {
+                    background: color-mix(in srgb, #000 65%, transparent);
                 }
             </style>
             <div class="objects-highlight">
@@ -245,6 +537,27 @@ class ObjectsHighlightComponent extends HTMLElement {
                         <div class="sect2-content2"></div>
                     </div>  
                     <div class="sect3"></div>
+                </div>
+            </div>
+            <div
+                class="oh-lightbox"
+                id="ohLightbox"
+                hidden
+                aria-modal="true"
+                role="dialog"
+                aria-label="Object"
+                aria-hidden="true"
+            >
+                <button type="button" class="oh-lightbox-close" aria-label="Close">×</button>
+                <div class="oh-lightbox-scroll">
+                    <img class="oh-lightbox-img" src="" alt="" />
+                </div>
+                <div class="oh-lightbox-meta">
+                    <h2 class="oh-lightbox-title"></h2>
+                    <p class="oh-lightbox-artist"></p>
+                    <p class="oh-lightbox-credit"></p>
+                    <p class="oh-lightbox-desc"></p>
+                    <p class="oh-lightbox-copy"></p>
                 </div>
             </div>
         `;

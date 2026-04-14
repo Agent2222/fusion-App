@@ -52,6 +52,7 @@ export function render() {
                     <h1 id="studioSectionHeading">${sectionTitle(initial)}</h1>
                     <div class="studio-topbar-actions">
                         <span class="studio-topbar-admin-label">Admin</span>
+                        <button type="button" class="studio-topbar-account-btn" id="studioAccountBtn" aria-label="Account dashboard">Account</button>
                         <button type="button" id="studioSettingsBtn" aria-label="Settings">⚙</button>
                     </div>
                 </header>
@@ -76,11 +77,14 @@ function isStudioMobileNav() {
     return typeof window !== 'undefined' && window.matchMedia(NAV_DRAWER_MQ).matches;
 }
 
+/** Prevent stacking `hashchange` listeners when `initStudio` re-runs (e.g. `fusion-localechange` → `handleRoute`). */
+let _studioHashChangeHandler = /** @type {(() => void) | null} */ (null);
+
 export default function initStudio() {
     const root = document.getElementById('studioRoot');
     const main = document.getElementById('studioMainContent');
-    const heading = document.getElementById('studioSectionHeading');
     const nav = document.getElementById('studioNav');
+    const accountBtn = document.getElementById('studioAccountBtn');
     const settingsBtn = document.getElementById('studioSettingsBtn');
     const wordmark = document.getElementById('studioWordmark');
     const menuBtn = document.getElementById('studioMenuBtn');
@@ -134,14 +138,20 @@ export default function initStudio() {
 
     const applySection = async (sectionId) => {
         const id = sectionId || normalizeHash();
-        heading.textContent = sectionTitle(id);
-        main.dataset.studioSection = id;
-        main.innerHTML = renderStudioMain(id);
-        nav.querySelectorAll('.studio-nav-item').forEach((btn) => {
+        // Always resolve live nodes — `fusion-localechange` / full route re-render replaces `#app` but
+        // a previous `window` hash listener may still run; captured `main`/`nav` would point at detached DOM.
+        const mainEl = document.getElementById('studioMainContent');
+        const headingEl = document.getElementById('studioSectionHeading');
+        const navEl = document.getElementById('studioNav');
+        if (!mainEl || !navEl) return;
+        if (headingEl) headingEl.textContent = sectionTitle(id);
+        mainEl.dataset.studioSection = id;
+        mainEl.innerHTML = renderStudioMain(id);
+        navEl.querySelectorAll('.studio-nav-item').forEach((btn) => {
             const sid = btn.getAttribute('data-studio-section');
             btn.classList.toggle('is-active', sid === id && id !== STUDIO_DASHBOARD_ID);
         });
-        await initStudioMain(id, main);
+        await initStudioMain(id, mainEl);
     };
 
     nav.querySelectorAll('.studio-nav-item').forEach((btn) => {
@@ -152,6 +162,10 @@ export default function initStudio() {
             applySection(id);
             closeNavIfMobile();
         });
+    });
+
+    accountBtn?.addEventListener('click', () => {
+        navigate('/settings/profile');
     });
 
     settingsBtn?.addEventListener('click', () => {
@@ -166,9 +180,13 @@ export default function initStudio() {
         closeNavIfMobile();
     });
 
-    window.addEventListener('hashchange', () => {
-        applySection(normalizeHash());
-    });
+    if (_studioHashChangeHandler) {
+        window.removeEventListener('hashchange', _studioHashChangeHandler);
+    }
+    _studioHashChangeHandler = () => {
+        void applySection(normalizeHash());
+    };
+    window.addEventListener('hashchange', _studioHashChangeHandler);
 
     const start = normalizeHash();
     applySection(start);

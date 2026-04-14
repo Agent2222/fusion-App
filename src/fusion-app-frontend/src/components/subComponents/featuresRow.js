@@ -228,6 +228,24 @@ class FeaturesRowComponent extends HTMLElement {
                         grid-template-columns: 1fr;
                     }
                 }
+
+                @media (max-width: 768px) {
+                    .features-row {
+                        margin-top: 40px;
+                        height: 75vh;
+                        min-height: 0;
+                    }
+
+                    .feature-card-title {
+                        font-size: clamp(1.3rem, 1.4vw, 1.35rem);
+                        border-bottom: 1px solid var(--c2, #000);
+                        padding-bottom: 0.35rem;
+                    }
+
+                    .feature-card-description {
+                        font-size: clamp(0.95rem, 1.2vw, 1.2rem);
+                    }
+                }
             </style>
             ${
                 empty

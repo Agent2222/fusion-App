@@ -47,11 +47,14 @@ class HeaderComponent extends HTMLElement {
         /** @type {MediaQueryList | null} */
         this._mobileNavMql = null;
         /**
-         * @type {{ kind: 'guest' } | { kind: 'admin' } | { kind: 'staff' } | { kind: 'needsRegistration' } | { kind: 'member', profileHref: string, pending: boolean }}
+         * @type {{ kind: 'guest' } | { kind: 'admin' } | { kind: 'staff' } | { kind: 'needsRegistration' } | { kind: 'member', profileHref: string, pending: boolean, needsProfileCompletion?: boolean }}
          */
         this._authUi = { kind: 'guest' };
         /** @type {(() => void) | null} */
         this._onFusionAuthBound = null;
+        /** @type {((e: Event) => void) | null} */
+        this._onProfileSetupPromptBound = null;
+        this._profileSetupPrompt = { open: false, fullName: '', email: '' };
     }
 
     /**
@@ -157,7 +160,7 @@ class HeaderComponent extends HTMLElement {
             gsap.to(this._logoHeaderEl, {
                 delay: 0.35,
                 opacity: 1,
-                pointerEvents: 'none',
+                pointerEvents: 'auto',
                 duration: 0.35,
                 ease: 'power2.inOut',
                 overwrite: 'auto',
@@ -311,6 +314,7 @@ class HeaderComponent extends HTMLElement {
             document.getElementById('journalMainContent'),
             document.getElementById('programViewMainContent'),
             document.getElementById('profileMainContent'),
+            document.getElementById('settingsMainContent'),
             document.getElementById('contextMainContent'),
             document.getElementById('eventMainContent'),
             document.getElementById('journalEntryMainContent'),
@@ -382,6 +386,14 @@ class HeaderComponent extends HTMLElement {
             void this._refreshHeaderAuthState();
         };
         window.addEventListener('fusion-auth-change', this._onFusionAuthBound);
+        this._onProfileSetupPromptBound = (ev) => {
+            const detail =
+                ev && typeof ev === 'object' && 'detail' in ev
+                    ? /** @type {CustomEvent<{ fullName?: string, email?: string }>} */ (ev).detail
+                    : null;
+            this._openProfileSetupPrompt(detail);
+        };
+        window.addEventListener('fusion-open-profile-setup', this._onProfileSetupPromptBound);
         void this._refreshHeaderAuthState();
         this._onRouteChangeForNavBound = () => {
             this._syncActiveNavLink();
@@ -406,6 +418,10 @@ class HeaderComponent extends HTMLElement {
         if (this._onFusionAuthBound) {
             window.removeEventListener('fusion-auth-change', this._onFusionAuthBound);
             this._onFusionAuthBound = null;
+        }
+        if (this._onProfileSetupPromptBound) {
+            window.removeEventListener('fusion-open-profile-setup', this._onProfileSetupPromptBound);
+            this._onProfileSetupPromptBound = null;
         }
     }
 
@@ -473,10 +489,67 @@ class HeaderComponent extends HTMLElement {
                   ? 'PROFILE'
                   : 'プロフィール';
             const href = esc(ui.profileHref || '/register');
+            const completeProfileLabel = en ? 'COMPLETE PROFILE' : 'プロフィールを完成';
             slot.innerHTML = `
                         <button type="button" class="headerRectBtn" data-action="sign-out">${en ? 'SIGN OUT' : 'サインアウト'}</button>
-                        <button type="button" class="headerRectBtn headerRectBtn--register" data-href="${href}">${profLabel}</button>`;
+                        <button type="button" class="headerRectBtn headerRectBtn--register" data-href="${href}">${profLabel}</button>
+                        ${
+                            ui.needsProfileCompletion
+                                ? `<button type="button" class="headerRectBtn headerRectBtn--complete-profile" data-action="complete-profile">${completeProfileLabel}</button>`
+                                : ''
+                        }`;
         }
+        this._renderProfileSetupPrompt();
+    }
+
+    _openProfileSetupPrompt(detail = null) {
+        const d = detail && typeof detail === 'object' ? detail : {};
+        const fullName = String(d.fullName ?? '').trim();
+        const email = String(d.email ?? '').trim();
+        this._profileSetupPrompt = { open: true, fullName, email };
+        this._renderProfileSetupPrompt();
+    }
+
+    _closeProfileSetupPrompt() {
+        this._profileSetupPrompt.open = false;
+        this._renderProfileSetupPrompt();
+    }
+
+    _renderProfileSetupPrompt() {
+        const root = this.shadowRoot;
+        const host = root?.querySelector('#headerProfileSetupPrompt');
+        if (!host) return;
+        if (!this._profileSetupPrompt.open) {
+            host.hidden = true;
+            host.innerHTML = '';
+            return;
+        }
+        const en = this.getLocale() === 'en';
+        const name = this._profileSetupPrompt.fullName || (en ? 'this account' : 'このアカウント');
+        const email = this._profileSetupPrompt.email;
+        const detail = email ? `${name} (${email})` : name;
+        host.hidden = false;
+        host.innerHTML = `
+            <div class="header-profile-setup-overlay" data-action="close-profile-setup"></div>
+            <div class="header-profile-setup-modal" role="dialog" aria-modal="true" aria-label="${
+                en ? 'Profile setup' : 'プロフィール設定'
+            }">
+                <p class="header-profile-setup-title">${en ? 'Set up your profile' : 'プロフィールを設定'}</p>
+                <p class="header-profile-setup-copy">${
+                    en
+                        ? `Do you want to setup your profile with ${detail}?`
+                        : `${detail} でプロフィールを設定しますか？`
+                }</p>
+                <div class="header-profile-setup-actions">
+                    <button type="button" class="headerRectBtn" data-action="close-profile-setup">${
+                        en ? 'Not now' : 'あとで'
+                    }</button>
+                    <button type="button" class="headerRectBtn headerRectBtn--register" data-action="confirm-profile-setup">${
+                        en ? 'Set up profile' : 'プロフィール設定'
+                    }</button>
+                </div>
+            </div>
+        `;
     }
 
     async _refreshHeaderAuthState() {
@@ -537,9 +610,17 @@ class HeaderComponent extends HTMLElement {
             }
             const st = acc.status;
             const pending = Boolean(st && typeof st === 'object' && 'pending' in st);
+            const linkedRaw = acc.linkedArtistId ?? acc.linked_artist_id;
+            const linkedId = Array.isArray(linkedRaw)
+                ? linkedRaw.length
+                    ? String(linkedRaw[0] ?? '').trim()
+                    : ''
+                : linkedRaw != null
+                  ? String(linkedRaw).trim()
+                  : '';
             const { resolveProfilePathForAccount } = await import('../../utils/authHeader.js');
             const profileHref = await resolveProfilePathForAccount(acc);
-            this._authUi = { kind: 'member', profileHref, pending };
+            this._authUi = { kind: 'member', profileHref, pending, needsProfileCompletion: !linkedId };
             this._fillAuthPair();
         } catch (_) {
             this._authUi = { kind: 'guest' };
@@ -771,6 +852,29 @@ class HeaderComponent extends HTMLElement {
                     void import('../../utils/icAuth.js').then((m) => m.logoutInternetIdentity());
                     return;
                 }
+                if (action === 'complete-profile') {
+                    this.closeMobileMenu();
+                    activateDeactivate('/settings/profile');
+                    navigate('/settings/profile');
+                    return;
+                }
+                if (action === 'close-profile-setup') {
+                    this._closeProfileSetupPrompt();
+                    return;
+                }
+                if (action === 'confirm-profile-setup') {
+                    this._closeProfileSetupPrompt();
+                    void import('../../utils/database.js').then(async (m) => {
+                        try {
+                            await m.ensureMyLinkedArtistProfile();
+                        } catch {
+                            /* ignore */
+                        }
+                        activateDeactivate('/settings/profile');
+                        navigate('/settings/profile');
+                    });
+                    return;
+                }
                 const href = rectBtn.getAttribute('data-href');
                 if (action === 'register' || href === '/register') {
                     this.closeMobileMenu();
@@ -796,6 +900,13 @@ class HeaderComponent extends HTMLElement {
         });
 
         root.querySelector('#logo').addEventListener('click', (e) => {
+            e.preventDefault();
+            this.closeMobileMenu();
+            activateDeactivate('/');
+            navigate('/');
+        });
+
+        root.querySelector('#logoHeader')?.addEventListener('click', (e) => {
             e.preventDefault();
             this.closeMobileMenu();
             activateDeactivate('/');
@@ -939,10 +1050,12 @@ class HeaderComponent extends HTMLElement {
                     display: none;
                 }
 
+                /* Narrow hit box (logo width only); opacity + pointer-events driven by GSAP when bar hides */
                 #logoHeader {
                     box-sizing: border-box;
                     max-height: 150px;
-                    width: 100%;
+                    width: max-content;
+                    max-width: 100%;
                     padding-top: 0;
                     padding-bottom: 0;
                     display: grid;
@@ -955,14 +1068,8 @@ class HeaderComponent extends HTMLElement {
                     position: absolute;
                     top: 0;
                     left: 0;
-                    right: 0;
+                    right: auto;
                     opacity: 0;
-                    pointer-events: none;
-                }
-
-                /* Visible when main bar is hidden; stays non-interactive so it never blocks nav/footer */
-                #logoHeader.active {
-                    opacity: 1;
                     pointer-events: none;
                 }
 
@@ -975,7 +1082,7 @@ class HeaderComponent extends HTMLElement {
                     justify-content: start;
                     overflow: visible;
                     cursor: pointer;
-                    pointer-events: none;
+                    pointer-events: inherit;
                 }
 
                 #logoHeader img {
@@ -1052,7 +1159,69 @@ class HeaderComponent extends HTMLElement {
                 .headerRectBtn--register {
                     background-color: var(--c5, #c9c9c9);
                     color: var(--c2, #000);
-                } 
+                }
+
+                .headerRectBtn--complete-profile {
+                    position: fixed;
+                    top: 1rem;
+                    right: 1rem;
+                    z-index: 170;
+                    background: var(--c3);
+                }
+
+                :host-context(html[data-theme="dark"]) .headerRectBtn--register {
+                    color: #000000;
+                }
+
+                .header-profile-setup-host[hidden] {
+                    display: none;
+                }
+
+                .header-profile-setup-host {
+                    position: fixed;
+                    inset: 0;
+                    z-index: 199;
+                }
+
+                .header-profile-setup-overlay {
+                    position: absolute;
+                    inset: 0;
+                    background: rgba(0, 0, 0, 0.28);
+                }
+
+                .header-profile-setup-modal {
+                    position: absolute;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    width: min(92vw, 460px);
+                    background: var(--bg);
+                    border: 1px solid var(--c2);
+                    box-sizing: border-box;
+                    padding: 1rem;
+                }
+
+                .header-profile-setup-title {
+                    margin: 0 0 0.5rem;
+                    color: var(--c2);
+                    font-size: clamp(1rem, 1.15vw, 1.1rem);
+                    font-variation-settings: var(--fv-title);
+                }
+
+                .header-profile-setup-copy {
+                    margin: 0;
+                    color: var(--c2);
+                    font-size: clamp(0.8rem, 0.95vw, 0.92rem);
+                    line-height: 1.35;
+                }
+
+                .header-profile-setup-actions {
+                    margin-top: 0.9rem;
+                    display: flex;
+                    justify-content: flex-end;
+                    gap: 0.55rem;
+                    flex-wrap: wrap;
+                }
 
                 .headerRectBtn:hover {
                     opacity: 0.88;
@@ -1090,6 +1259,10 @@ class HeaderComponent extends HTMLElement {
                 .headerLangBtn:focus-visible {
                     outline: 1px solid var(--c2, #000);
                     outline-offset: 2px;
+                }
+
+                #headerSymbolLogo {
+                    pointer-events: auto;
                 }
 
                 @media (max-width: ${MOBILE_NAV_MAX_PX}px) {
@@ -1221,6 +1394,13 @@ class HeaderComponent extends HTMLElement {
                         text-align: center;
                     }
 
+                    .headerRectBtn--complete-profile {
+                        position: static;
+                        width: 100%;
+                        top: auto;
+                        right: auto;
+                    }
+
                     #headerDrawerBackdrop {
                         display: block;
                         position: fixed;
@@ -1272,6 +1452,7 @@ class HeaderComponent extends HTMLElement {
                     <img id="headerSymbolLogo" src="${SymbolLogo}" alt="Logo">
                 </div>
             </div>
+            <div id="headerProfileSetupPrompt" class="header-profile-setup-host" hidden></div>
         `;
     }
 }

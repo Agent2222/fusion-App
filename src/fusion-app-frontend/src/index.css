@@ -63,6 +63,8 @@ html[data-theme="dark"] {
   --fv-label-strong: 'wght' 600, 'wdth' 110;
   --fv-card-title: 'wght' 750, 'wdth' 130;
   --fv-caption: 'wght' 400, 'wdth' 130;
+  /* Lighter / narrower than caption — micro-labels, lightbox meta, fine print */
+  --fv-caption-fine: 'wght' 300, 'wdth' 115;
   --fv-nav: 'wght' 500, 'wdth' 150;
   --fv-nav-active: 'wght' 700, 'wdth' 150;
   --fv-cta: 'wght' 900, 'wdth' 110;
@@ -111,6 +113,9 @@ html[data-theme="dark"] {
 }
 .fv-caption {
   font-variation-settings: var(--fv-caption);
+}
+.fv-caption-fine {
+  font-variation-settings: var(--fv-caption-fine);
 }
 .fv-nav {
   font-variation-settings: var(--fv-nav);
@@ -293,6 +298,26 @@ body {
   overflow: visible;
 }
 
+/* Injected route: `/settings/*`, `/register` — same shell as profile (header + footer space, full width). */
+.settings-profile-page {
+  width: 100%;
+  min-height: min-content;
+  padding-bottom: 19.5rem;
+  margin-top: 8rem;
+  overflow: visible;
+}
+
+.settings-profile-page .feed-container {
+  width: 100%;
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  box-sizing: border-box;
+  padding-left: clamp(0.5rem, 2vw, 1.25rem);
+  padding-right: clamp(0.5rem, 2vw, 1.25rem);
+}
+
 .profile-content .artist-profile {
   max-width: 100%;
   margin: 0 auto;
@@ -424,6 +449,75 @@ body {
   display: flex;
   justify-content: center;
   align-items: center;
+}
+
+.profile-gallery-access-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  box-sizing: border-box;
+}
+
+.profile-gallery-access-modal[hidden] {
+  display: none;
+}
+
+.profile-gallery-access-modal__scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+}
+
+.profile-gallery-access-modal__panel {
+  position: relative;
+  z-index: 1;
+  max-width: 26rem;
+  width: 100%;
+  padding: 1.25rem 1.35rem;
+  background: var(--bg, #fff);
+  border: 1px solid var(--c2);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+  pointer-events: auto;
+}
+
+.profile-gallery-access-modal__title {
+  margin: 0 0 0.65rem;
+  font-size: clamp(1rem, 2vw, 1.15rem);
+  font-variation-settings: var(--fv-title);
+  color: var(--c2);
+}
+
+.profile-gallery-access-modal__body {
+  margin: 0 0 1rem;
+  font-size: clamp(0.8rem, 1.35vw, 0.95rem);
+  line-height: 1.5;
+  color: var(--c2);
+  font-variation-settings: var(--fv-body);
+}
+
+.profile-gallery-access-modal__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.25rem;
+  padding: 0.35rem 1rem;
+  border: 1px solid var(--c2);
+  background: var(--c3);
+  color: var(--c2);
+  cursor: pointer;
+  font-variation-settings: var(--fv-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+}
+
+.profile-gallery-access-modal__close:hover {
+  background: var(--c5);
 }
 
 .galleryAccessButton {
@@ -588,6 +682,104 @@ body {
   margin: 0;
   line-height: 1.2;
   text-align: right;
+}
+
+/* Artist profile — narrow viewports: measure, stacking, rhythm (desktop rules above unchanged) */
+@media (max-width: 768px) {
+  .profile-page {
+    margin-top: clamp(3rem, 12vw, 8rem);
+    padding-bottom: clamp(8rem, 28vw, 19.5rem);
+  }
+
+  .artist-profile-body {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto;
+    align-items: start;
+    justify-content: start;
+    padding-left: clamp(0.75rem, 4vw, 2rem);
+    padding-right: clamp(0.75rem, 4vw, 2rem);
+  }
+
+  .artist-profile-body #leftColumn {
+    order: 1;
+  }
+
+  .artist-profile-body #rightColumn {
+    order: 2;
+    justify-items: start;
+    align-items: start;
+    padding-top: 0.5rem;
+  }
+
+  .artist-profile-perspective {
+    width: 100%;
+    max-width: min(100%, 42rem);
+  }
+
+  .artist-profile-heading {
+    font-size: clamp(0.875rem, 2.6vw, 1.1rem);
+  }
+
+  .artist-profile-perspective p,
+  .artist-profile-context p,
+  .artist-profile-constructing p {
+    font-size: clamp(1rem, 2.9vw, 1.4rem);
+    line-height: 1.35;
+  }
+
+  .artist-profile-practice {
+    font-size: clamp(1rem, 2.9vw, 1.6rem);
+  }
+
+  .galleryAccessButton {
+    font-size: clamp(0.875rem, 2.6vw, 1.2rem);
+  }
+
+  .artist-profile-context {
+    width: 100%;
+    max-width: min(100%, 42rem);
+  }
+
+  .profile-quote-container {
+    padding-left: clamp(1rem, 6vw, 25%);
+    padding-right: clamp(1rem, 6vw, 25%);
+    font-size: clamp(1.25rem, 5.5vw, 3rem);
+    line-height: 1.25;
+  }
+
+  #profile-sight-words {
+    height: auto;
+    min-height: min(24rem, 65dvh);
+    padding-top: 1.5rem;
+    padding-bottom: 1.5rem;
+  }
+
+  #sight-words-container {
+    height: auto;
+    min-height: 0;
+  }
+
+  .artist-profile-constructing {
+    width: 100%;
+    max-width: min(100%, 42rem);
+    margin-left: 0;
+  }
+
+  .artist-profile-constructing p {
+    text-align: left;
+  }
+
+  #profile-constructing-words > .artist-profile-heading {
+    text-align: left;
+  }
+
+  .profile-artist-links {
+    justify-content: flex-start;
+  }
+
+  .profile-artist-link {
+    font-size: clamp(0.875rem, 2.5vw, 1rem);
+  }
 }
 
 .profile-images-container {
@@ -1500,8 +1692,7 @@ button:hover {
   overflow-x: hidden;
   pointer-events: none;
   opacity: 0;
-  transform: translateX(-20%);
-  transition: transform 0.5s ease-in-out, opacity 1s ease-in-out;
+  transition: transform 0.5s ease-in-out, opacity .5s ease-in-out;
   padding-top: 150px;
   padding-bottom: 250px;
 }
@@ -1527,7 +1718,6 @@ button:hover {
 }
 
 #homeMainContent.active {
-  transform: translateX(0);
   opacity: 1;
   pointer-events: auto;
 }
@@ -1721,7 +1911,7 @@ button:hover {
 
   .feed-item .imageBlock {
     grid-column: 1 / -1;
-    max-height: 40vh;
+    max-height: min(44vh, 28rem);
   }
 
   .feed-item .contentBlock {
@@ -1746,7 +1936,7 @@ button:hover {
   }
 
   .feed-item .imageBlock {
-    max-height: 35vh;
+    max-height: min(48vh, 26rem);
   }
 
   .feed-item .cbInnerRight {
@@ -1929,6 +2119,59 @@ button:hover {
   transition: all 0.3s ease;
 }
 
+/* `#programIntroCTA1` uses `display: flex` above — that beats the UA `[hidden]` rule, so never rely on `hidden` alone to hide this node; use `.program-intro-cta--closed-soon` for not-yet-open programs. */
+#programIntroCTA1.program-intro-cta--closed-soon {
+  cursor: default;
+  pointer-events: none;
+  background-color: var(--c5, #e8e4e6);
+  color: var(--c2);
+  opacity: 0.95;
+}
+
+#programIntroCTA1.program-intro-cta--closed-soon:hover {
+  background-color: var(--c5, #e8e4e6);
+  color: var(--c2);
+}
+
+#programIntroCTAs.program-intro-ctas--apply-closed {
+  grid-template-rows: auto auto;
+  height: auto;
+  min-height: 0;
+}
+
+@keyframes program-application-cta-review-blink {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(0, 0, 0, 0.08);
+  }
+  50% {
+    opacity: 0.88;
+    box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.06);
+  }
+}
+
+/* Shared with `app-program-details` .begin-application (review in-progress state). */
+#programIntroCTA1.program-application-cta--review {
+  background-color: var(--c5);
+  color: var(--c2);
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  box-sizing: border-box;
+  animation: program-application-cta-review-blink 1.2s ease-in-out infinite;
+}
+
+#programIntroCTA1.program-application-cta--review:hover {
+  background-color: var(--c5);
+  color: var(--c2);
+  opacity: 0.95;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #programIntroCTA1.program-application-cta--review {
+    animation: none;
+  }
+}
+
 #programIntroCTA2 {
   width: 275px;
   height: 50px;
@@ -2092,7 +2335,8 @@ button:hover {
 
 #contextEcosystemPartnersGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  /* auto-fit (not auto-fill) collapses empty tracks so N cards don’t leave a phantom extra column */
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 1.25rem 1.5rem;
   width: 100%;
   max-width: min(100%, 72rem);
@@ -2269,6 +2513,45 @@ button:hover {
 }
 
 @media (max-width: 768px) {
+  #filterContent {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr 1fr;
+    align-items: stretch;
+    justify-items: stretch;
+  }
+
+  #filterSystem.active {
+    padding-top: 0;
+    min-height: min(100dvh, 100%);
+    height: 100%;
+    box-sizing: border-box;
+  }
+
+  #programsMainContent {
+    padding-top: 7.5rem;
+    margin-bottom: 30rem;
+  }
+
+  #journalMainContent {
+    margin-bottom: 20rem;
+  }
+
+  #contextMainContent {
+    margin-top: 25%;
+  }
+
+  #contextSubHeadlineText {
+    font-size: clamp(1.2rem, 1.2vw, 1.5rem);
+  }
+
+  .community-page .shoutHeadline {
+    margin-top: 25%;
+  }
+
+  .journal-entry-description {
+    font-size: clamp(1.04rem, 1.2vw, 1.45rem);
+  }
+
   #homeMainContent {
     padding-top: 110px;
   }
@@ -2318,7 +2601,7 @@ button:hover {
 
 @media (max-width: 640px) {
   #programsMainContent {
-    padding-top: clamp(4.5rem, 14vw, 6.5rem);
+    padding-top: 7.5rem;
     padding-bottom: clamp(6rem, 22vw, 10rem);
   }
 }

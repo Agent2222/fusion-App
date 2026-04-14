@@ -8,6 +8,32 @@ import { getArtists, getFeaturedArtists } from '../utils/database.js';
 /** @type {((e: CustomEvent) => void) | null} */
 let _artistsFeedFilterHandler = null;
 
+/**
+ * IDs of artists currently shown in the Featured strip — omit them from "All Artists" pagination.
+ * @param {object[] | null | undefined} featured
+ * @returns {Set<string>}
+ */
+function featuredArtistIdSet(featured) {
+    const s = new Set();
+    for (const a of featured || []) {
+        if (a && typeof a === 'object' && a.id != null) s.add(String(a.id));
+    }
+    return s;
+}
+
+/**
+ * @param {object[]} artists
+ * @param {Set<string>} featuredIds
+ */
+function excludeFeaturedFromPool(artists, featuredIds) {
+    if (!featuredIds.size || !Array.isArray(artists)) return artists || [];
+    return artists.filter((a) => {
+        if (!a || typeof a !== 'object') return true;
+        if (a.id == null) return true;
+        return !featuredIds.has(String(a.id));
+    });
+}
+
 export function render() {
     return `
         <div class="page artists-page">
@@ -27,6 +53,7 @@ export default function initArtists() {
     void (async () => {
         const all = await getArtists();
         const feat = await getFeaturedArtists();
+        const featuredIds = featuredArtistIdSet(feat);
         const featuredArtist = document.getElementById('featuredArtist2');
         if (featuredArtist && typeof featuredArtist.setFeaturedArtist === 'function') {
             featuredArtist.setFeaturedArtist({ artists: feat || [] });
@@ -42,7 +69,7 @@ export default function initArtists() {
             _artistsFeedFilterHandler = (e) => {
                 const ev = /** @type {CustomEvent} */ (e);
                 if (ev.detail?.state !== 'artists') return;
-                const raw = all || [];
+                const raw = excludeFeaturedFromPool(all || [], featuredIds);
                 const filtered = applyArtistFilters(raw, ev.detail.criteria || {});
                 artistsFeed.setArtists(buildFeedPool(filtered));
             };
@@ -53,7 +80,10 @@ export default function initArtists() {
                 disciplineKeys: [],
                 locationKey: 'all',
             };
-            const initialPool = applyArtistFilters(all || [], defaultCriteria);
+            const initialPool = applyArtistFilters(
+                excludeFeaturedFromPool(all || [], featuredIds),
+                defaultCriteria
+            );
             artistsFeed.setArtists(buildFeedPool(initialPool));
         }
     })();

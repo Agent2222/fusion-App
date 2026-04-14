@@ -76,26 +76,31 @@ applyLocaleToDocument(window.locale);
 document.addEventListener('DOMContentLoaded', () => {
     if (DEV_MODE) console.log('Application initialized');
 
-    // Fonts: Typekit + document.fonts.ready, then reveal the loadscreen.
-    // (Moved out of inline scripts to satisfy CSP `script-src 'self'`.)
+    // Fonts: Typekit + document.fonts.ready, then set `fonts-ready` (diagnostics / future use).
+    // Capped wait so a hung Typekit never blocks this flag forever; enter is not gated on fonts (loadscreen.js).
     (async () => {
-        try {
-            if (window.Typekit && window.Typekit.load) {
-                // Avoid re-loading if already started elsewhere.
-                if (!window.__typekitPromise) window.__typekitPromise = window.Typekit.load();
-                await window.__typekitPromise;
-            }
-        } catch (e) {
-            // Ignore; fallback below.
-        }
+        const FONT_READY_MAX_MS = 4000;
+        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-        try {
-            if (document.fonts && document.fonts.ready) {
-                await document.fonts.ready;
+        const loadFonts = async () => {
+            try {
+                if (window.Typekit && window.Typekit.load) {
+                    if (!window.__typekitPromise) window.__typekitPromise = window.Typekit.load();
+                    await window.__typekitPromise;
+                }
+            } catch (e) {
+                /* ignore */
             }
-        } catch (e) {
-            // Ignore.
-        }
+            try {
+                if (document.fonts && document.fonts.ready) {
+                    await document.fonts.ready;
+                }
+            } catch (e) {
+                /* ignore */
+            }
+        };
+
+        await Promise.race([loadFonts(), sleep(FONT_READY_MAX_MS)]);
 
         const ls = document.querySelector('app-loadscreen');
         if (ls) ls.setAttribute('fonts-ready', 'true');

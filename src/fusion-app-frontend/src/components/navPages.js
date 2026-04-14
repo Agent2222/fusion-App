@@ -17,11 +17,13 @@ export function generateArtistsContent() {
 
 export function generateCommunityContent() {
     return `
-        <div class="shoutHeadline" style="height: 40vh; margin-bottom: 50px;">
-            This is not for every artist.<br><br>It is for those willing to work<br>within unfamiliar environments—<br>alongside others,<br> in close proximity to place and process.
-        </div>
-        <div class="page-content nav-page-content">
-            <app-join-network id="joinNetworkCommunity" data-modal-type="membership" context="community" active="true" data-margin-top="100px" data-margin-bottom="0px"></app-join-network>
+        <div class="community-page">
+            <div class="shoutHeadline" style="height: 40vh; margin-bottom: 50px;">
+                This is not for every artist.<br><br>It is for those willing to work<br>within unfamiliar environments—<br>alongside others,<br> in close proximity to place and process.
+            </div>
+            <div class="page-content nav-page-content">
+                <app-join-network id="joinNetworkCommunity" data-modal-type="membership" context="community" active="true" data-margin-top="100px" data-margin-bottom="0px"></app-join-network>
+            </div>
         </div>
     `;
 }
@@ -36,8 +38,4 @@ export function generateContextContent() {
 
 export function generateSignInContent() {
     return section('Sign in', 'signInMainContent');
-}
-
-export function generateRegisterContent() {
-    return section('Register', 'registerMainContent');
 }

@@ -176,7 +176,6 @@ class FooterComponent extends HTMLElement {
     connectedCallback() {
         this.render();
         this._footerEl = this.shadow.querySelector('footer');
-        this.attachEventListeners();
         if (this.getAttribute('active') === 'true') {
             this.attachScrollRevealBehavior();
             requestAnimationFrame(() => this.syncFooterVisibilityFromScroll());
@@ -187,16 +186,13 @@ class FooterComponent extends HTMLElement {
         this.detachScrollRevealBehavior();
     }
 
-    attachEventListeners() {
-        // Attach event listeners to elements within shadow DOM if needed
-        // Example: social media links, newsletter signup, etc.
-    }
-
     render() {
         this.shadow.innerHTML = `
             <style>
             :host {
                 display: block;
+                /* Host must set semantic text color — body uses a fixed #333 that would otherwise inherit into the shadow tree. */
+                color: var(--c2, #000000);
             }
                 
                 footer {
@@ -213,6 +209,7 @@ class FooterComponent extends HTMLElement {
                     justify-content: center;
                     font-family: 'momochidori-variable', sans-serif;
                     font-variation-settings: var(--fv-body-wide);
+                    color: var(--c2, #000000);
                     opacity: 0;
                     transform: translateY(100%);
                     position: absolute;
@@ -222,12 +219,13 @@ class FooterComponent extends HTMLElement {
                     z-index: 5;
                     will-change: transform, opacity;
                     background-color: var(--bg);
-                    border-top: 1px solid var(--c2, #000);
+                    border-top: 1px solid var(--c2, #000000);
                 }
 
-                a {
+                a,
+                a:visited {
                     text-decoration: none;
-                    color: var(--c2, #000);
+                    color: var(--c2, #000000);
                     transition: opacity 0.3s;
                 }
 
@@ -308,7 +306,7 @@ class FooterComponent extends HTMLElement {
                     width: 100%;
                     display: flex;
                     justify-content: end;
-                    color: var(--c2, #000);
+                    color: var(--c2, #000000);
                     text-align: right;
                 }
 
@@ -346,10 +344,31 @@ class FooterComponent extends HTMLElement {
                     line-height: 1;
                 }
 
+                #leadPartner {
+                    color: var(--c2, #000000);
+                }
+
                 #leadPartner:hover {
                     text-decoration: underline;
                     transition: all 0.3s ease;
                     cursor: pointer;
+                }
+
+                #leadPartnerTba {
+                    margin: 0.35rem 0 0;
+                    padding: 0;
+                    font-size: clamp(0.65rem, 0.85vw, 0.85rem);
+                    line-height: 1.35;
+                    font-variation-settings: var(--fv-nav);
+                    color: var(--c2, #000000);
+                    opacity: 0.9;
+                }
+
+                #footerCookies,
+                #footerPrivacy,
+                #footerTerms,
+                #footerLocations {
+                    color: var(--c2, #000000);
                 }
 
                 @media (max-width: 900px) {
@@ -414,40 +433,59 @@ class FooterComponent extends HTMLElement {
                         width: 100%;
                         left: 0%;
                         right: auto;
-                        padding: 1rem 10% 1.5rem;
+                        padding: 1.25rem 8% 1.75rem;
+                        min-height: 280px;
                         box-sizing: border-box;
                     }
 
                     #footerLogo img {
-                        width: min(85px, 50vw);
+                        width: min(110px, 42vw);
                         height: auto;
                     }
 
+                    #footerLinks {
+                        font-size: clamp(1rem, 3.2vw, 1.2rem);
+                    }
+
+                    #footerSocial a {
+                        font-size: clamp(0.95rem, 3vw, 1.1rem);
+                    }
+
                     .fcBottom {
-                        font-size: clamp(0.8rem, 2.8vw, 0.95rem);
+                        font-size: clamp(0.92rem, 3vw, 1.05rem);
                     }
 
                     #footerEmailLocations {
-                        font-size: clamp(0.8rem, 2.8vw, 1rem);
+                        font-size: clamp(0.92rem, 3vw, 1.12rem);
                     }
 
                     #footerEmail {
-                        font-size: clamp(0.8rem, 2.8vw, 1rem);
+                        font-size: clamp(0.92rem, 3vw, 1.12rem);
                     }
 
                     #globalLeadPartnerColumn {
-                        font-size: clamp(0.8rem, 2.8vw, 1rem);
+                        font-size: clamp(0.92rem, 3vw, 1.12rem);
+                    }
+
+                    #leadPartnerTba {
+                        font-size: clamp(0.78rem, 2.6vw, 0.95rem);
                     }
                 }
 
                 @media (max-width: 640px) {
                     footer {
-                        padding: 0.875rem 5% 1.25rem;
+                        padding: 1rem 6% 1.5rem;
+                        min-height: 260px;
                     }
 
                     #footerLinks {
                         flex-wrap: wrap;
                         gap: 1rem;
+                        font-size: clamp(0.95rem, 3.4vw, 1.15rem);
+                    }
+
+                    #footerSocial a {
+                        font-size: clamp(0.92rem, 3.2vw, 1.05rem);
                     }
                 }
             </style>
@@ -459,10 +497,11 @@ class FooterComponent extends HTMLElement {
                     <div id="footerc1" class="fcColumn">
                         <div class="fcTop" id="globalLeadPartnerColumn">
                             <div id="leadPartner">Global Lead<br>Partner</div>
+                            <p id="leadPartnerTba">To be announced.</p>
                         </div>
                         <div class="fcBottom">
-                            <div id="footerSocialInstagram"><a href="#" target="_blank">Instagram</a></div>
-                            <div id="footerSocialYoutube"><a href="#" target="_blank">Youtube</a></div>
+                            <div id="footerSocialInstagram"><a href="https://www.instagram.com/fusion_intl/" target="_blank">Instagram</a></div>
+                            <div id="footerSocialYoutube"><a href="https://www.youtube.com/@fusionartworld" target="_blank">Youtube</a></div>
                         </div>
                     </div>
                     <div id="footerc2" class="fcColumn">

@@ -6,6 +6,7 @@ import {
     artistEnglishBlock,
     artistSlugFromName,
 } from '../../utils/artistSlug.js';
+import { applyArtistCardImage } from '../../utils/artistCardPlaceholder.js';
 
 class FeaturedArtistComponent extends HTMLElement {
     constructor() {
@@ -52,7 +53,6 @@ class FeaturedArtistComponent extends HTMLElement {
             const artist = this.data.artists[i];
             const locale = typeof window.getLocale === 'function' ? window.getLocale() : 'en';
             const artistName = artistDisplayName(artist, locale);
-            const artistImage = artist.image;
             const artistDiscipline = artistDisplayDiscipline(artist, locale);
 
             let card = document.createElement('div');
@@ -67,13 +67,15 @@ class FeaturedArtistComponent extends HTMLElement {
 
             card.innerHTML = `
                 <div class="artist-card-image">
-                    <img src="${artistImage}" alt="${artistName}">
+                    <img alt="${artistName}" loading="lazy" decoding="async">
                 </div>
                 <div class="artist-card-content">
                     <div class="artist-card-title">${artistName}</div>
                     <div class="artist-card-discipline">${artistDiscipline}</div>
                 </div>
             `;
+            const faImg = card.querySelector('.artist-card-image img');
+            applyArtistCardImage(faImg, artist.image);
 
             this.shadowRoot.querySelector('.content').appendChild(card);
         }
@@ -148,7 +150,7 @@ class FeaturedArtistComponent extends HTMLElement {
                     transition: all 0.5s ease;
                 }
 
-                .artist-card:hover > .artist-card-image > img {
+                .artist-card:hover > .artist-card-image > img:not(.artist-card-img--placeholder) {
                     animation: scaleImage 15s ease forwards;
                 }
 
@@ -172,6 +174,12 @@ class FeaturedArtistComponent extends HTMLElement {
                     height: 100%;
                     object-fit: cover;
                     transform-origin: center top;
+                }
+
+                .artist-card-image img.artist-card-img--placeholder {
+                    object-fit: contain;
+                    object-position: center;
+                    background: var(--c3);
                 }
                 
                 .artist-card-content {

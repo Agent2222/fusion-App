@@ -5,6 +5,20 @@
 import { LS_INTEGRATION_API_KEY, LS_INTEGRATION_API_URL } from './studioServicesConfig.js';
 
 /**
+ * Map raw API errors (e.g. empty body, "Not found", 404) to calm, actionable copy for the join flow.
+ * @param {unknown} raw
+ * @param {number} [status]
+ * @returns {string}
+ */
+export function mapIntegrationUserMessage(raw, status) {
+    const t = typeof raw === 'string' ? raw.trim() : String(raw || '').trim();
+    if (!t || /^not found\.?$/i.test(t) || status === 404) {
+        return 'Payment service could not be reached. Check Studio → Services (Integration API URL) and your connection, then try again.';
+    }
+    return t;
+}
+
+/**
  * @returns {Record<string, string>}
  */
 function integrationHeadersJson() {
@@ -102,7 +116,7 @@ export async function createSubscription(opts) {
                 'Payment service is an older build: redeploy fusion-integration-api (pay-first needs POST /stripe/create-subscription without principal). Check VITE_INTEGRATION_API_URL / Studio → Services points at the updated server.'
             );
         }
-        throw new Error(msg || `Create subscription HTTP ${res.status}`);
+        throw new Error(mapIntegrationUserMessage(msg || `Create subscription HTTP ${res.status}`, res.status));
     }
     const data = await res.json();
     if (!data.clientSecret) {
@@ -149,7 +163,8 @@ export async function linkSubscriptionToPrincipal(opts) {
     });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `Link subscription HTTP ${res.status}`);
+        const raw = typeof err.error === 'string' ? err.error : '';
+        throw new Error(mapIntegrationUserMessage(raw || `Link subscription HTTP ${res.status}`, res.status));
     }
     return res.json();
 }
@@ -208,7 +223,8 @@ export async function createPaymentIntent(amountCents, currency = 'usd', metadat
     });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `Payment intent HTTP ${res.status}`);
+        const raw = typeof err.error === 'string' ? err.error : '';
+        throw new Error(mapIntegrationUserMessage(raw || `Payment intent HTTP ${res.status}`, res.status));
     }
     const data = await res.json();
     if (!data.clientSecret) {

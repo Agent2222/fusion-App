@@ -8,6 +8,7 @@ import {
     PROGRAM_APPLICATION_ERROR_CODE,
     submitProgramApplication,
 } from '../../utils/database.js';
+import { getProfileSetupDraft } from '../../utils/profileSetupDraft.js';
 
 const STEP_COUNT = 2;
 
@@ -76,6 +77,9 @@ class ApplicationFormComponent extends HTMLElement {
                 submitNoLinkedArtist:
                     'アカウントに紐づくアーティストプロフィールがありません。Studio でロスターと紐づけてもらうか、アーティストとリンクされた II でサインインしてください。',
                 submitSuccess: '応募を受け付けました。',
+            submitting: '送信中…',
+            submitReceivedTitle: '応募を受け付けました。',
+            submitReceivedBody: 'プロフィールダッシュボードで進捗を確認できます。',
                 alreadyApplied: 'このプログラムには既に応募済みです。内容を更新して再送信できます。',
                 next: '次へ',
                 back: '戻る',
@@ -115,6 +119,9 @@ class ApplicationFormComponent extends HTMLElement {
             submitNoLinkedArtist:
                 'Your account has no linked artist profile. Ask Fusion to link your roster row in Studio, or sign in with an identity that is linked to an artist.',
             submitSuccess: 'Your application was received.',
+            submitting: 'Submitting...',
+            submitReceivedTitle: 'Your application was received.',
+            submitReceivedBody: 'You can track your progress in your profile dashboard.',
             alreadyApplied: 'You already applied to this program. You can update and resubmit.',
             next: 'Next',
             back: 'Back',
@@ -287,12 +294,11 @@ class ApplicationFormComponent extends HTMLElement {
             statusEl.classList.remove('is-error', 'is-success');
         }
         const payload = this._collectPayload();
+        this._setSubmittingState(true, L.submitting);
         try {
             await submitProgramApplication(programId, payload);
-            if (statusEl) {
-                statusEl.textContent = L.submitSuccess;
-                statusEl.classList.add('is-success');
-            }
+            if (statusEl) statusEl.classList.add('is-success');
+            this._showSubmitSuccess(programId);
         } catch (err) {
             const code = err && typeof err === 'object' && 'code' in err ? String(/** @type {{ code?: unknown }} */ (err).code) : '';
             const raw = err instanceof Error ? err.message : String(err);
@@ -316,7 +322,55 @@ class ApplicationFormComponent extends HTMLElement {
             if (typeof console !== 'undefined' && console.error) {
                 console.error('[ApplicationForm]', err);
             }
+        } finally {
+            this._setSubmittingState(false, '');
         }
+    }
+
+    _setSubmittingState(on, text) {
+        const root = this.shadowRoot;
+        const form = root?.querySelector('#app-application-form-fields');
+        const statusEl = root?.querySelector('#app-form-status');
+        const submitBtn = root?.querySelector('.app-btn[type="submit"]');
+        if (form) {
+            form.classList.toggle('is-submitting', on);
+            form.querySelectorAll('input, textarea, select, button').forEach((el) => {
+                if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || el instanceof HTMLButtonElement) {
+                    el.disabled = on;
+                }
+            });
+        }
+        if (submitBtn) submitBtn.classList.toggle('is-loading', on);
+        if (statusEl) {
+            statusEl.classList.remove('is-error');
+            statusEl.textContent = on ? text : statusEl.textContent;
+        }
+    }
+
+    _showSubmitSuccess(programId) {
+        const root = this.shadowRoot;
+        if (!root) return;
+        const L = this._labels();
+        const popup = root.querySelector('#app-submit-success');
+        const title = root.querySelector('#app-submit-success-title');
+        const body = root.querySelector('#app-submit-success-body');
+        if (title) title.textContent = L.submitReceivedTitle;
+        if (body) body.textContent = L.submitReceivedBody;
+        popup?.removeAttribute('hidden');
+        root.querySelector('#app-application-form-fields')?.setAttribute('hidden', '');
+        root.querySelector('.app-form-stepper')?.setAttribute('hidden', '');
+        root.querySelector('.app-form-pagination-wrap')?.setAttribute('hidden', '');
+        const statusEl = root.querySelector('#app-form-status');
+        if (statusEl) {
+            statusEl.classList.remove('is-error');
+            statusEl.classList.add('is-success');
+            statusEl.textContent = '';
+        }
+        window.dispatchEvent(
+            new CustomEvent('fusion-program-application-submitted', {
+                detail: { programId, status: 'reviewing' },
+            })
+        );
     }
 
     async _prefillFromArtist() {
@@ -362,6 +416,21 @@ class ApplicationFormComponent extends HTMLElement {
         if (city) setVal('app-city', city);
         if (block.discipline) setVal('app-discipline', String(block.discipline));
 
+        const draft = getProfileSetupDraft();
+        const nameParts = String(draft.fullName || '').trim().split(/\s+/).filter(Boolean);
+        const draftFirst = nameParts[0] || '';
+        const draftLast = nameParts.slice(1).join(' ');
+        const setIfEmpty = (id, v) => {
+            if (!v) return;
+            const el = root.querySelector(`#${id}`);
+            if (!el || !('value' in el)) return;
+            if (String(el.value || '').trim()) return;
+            el.value = v;
+        };
+        setIfEmpty('app-first-name', draftFirst);
+        setIfEmpty('app-last-name', draftLast);
+        setIfEmpty('app-email', String(draft.email || '').trim());
+
         const appliedRaw = rec.applied_json ?? rec.appliedJson;
         if (programId && appliedRaw) {
             try {
@@ -386,6 +455,11 @@ class ApplicationFormComponent extends HTMLElement {
                 if (entry && statusEl) {
                     statusEl.textContent = L.alreadyApplied;
                     statusEl.classList.add('is-success');
+                    window.dispatchEvent(
+                        new CustomEvent('fusion-program-application-submitted', {
+                            detail: { programId, status: 'reviewing' },
+                        })
+                    );
                 }
             } catch {
                 /* ignore */
@@ -659,6 +733,20 @@ class ApplicationFormComponent extends HTMLElement {
                     background: rgba(0, 0, 0, 0.05);
                 }
 
+                @keyframes app-submit-pulse {
+                    0%, 100% { opacity: 1; }
+                    50% { opacity: 0.45; }
+                }
+
+                #app-application-form-fields.is-submitting {
+                    opacity: 0.8;
+                    pointer-events: none;
+                }
+
+                .app-btn.is-loading {
+                    animation: app-submit-pulse 0.85s ease-in-out infinite;
+                }
+
                 .app-form-pagination-wrap {
                     display: flex;
                     justify-content: center;
@@ -705,6 +793,29 @@ class ApplicationFormComponent extends HTMLElement {
 
                 .app-form-status.is-success {
                     opacity: 0.9;
+                }
+
+                .app-submit-success {
+                    max-width: 760px;
+                    margin: 0.5rem auto 0;
+                    border: 1px solid var(--c2);
+                    background: var(--c3);
+                    padding: clamp(1rem, 2vw, 1.35rem);
+                    text-align: center;
+                }
+
+                .app-submit-success h3 {
+                    margin: 0;
+                    color: var(--c2);
+                    font-size: clamp(1rem, 1.2vw, 1.15rem);
+                    font-variation-settings: var(--fv-title);
+                }
+
+                .app-submit-success p {
+                    margin: 0.45rem 0 0;
+                    color: var(--c2);
+                    font-size: clamp(0.86rem, 1vw, 0.95rem);
+                    line-height: 1.4;
                 }
             </style>
             <div class="application-form-root">
@@ -791,6 +902,11 @@ class ApplicationFormComponent extends HTMLElement {
                 </form>
 
                 <p id="app-form-status" class="app-form-status" role="status" aria-live="polite"></p>
+
+                <div id="app-submit-success" class="app-submit-success" hidden>
+                    <h3 id="app-submit-success-title"></h3>
+                    <p id="app-submit-success-body"></p>
+                </div>
 
                 <div class="app-form-pagination-wrap">
                     <div class="app-form-pagination-dot-container" role="tablist" aria-label="Form steps">

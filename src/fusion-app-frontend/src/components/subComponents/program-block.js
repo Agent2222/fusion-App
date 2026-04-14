@@ -269,10 +269,12 @@ class ProgramBlockComponent extends HTMLElement {
                     .program-block {
                         grid-template-columns: 1fr;
                         grid-template-rows: 260px auto;
+                        margin-bottom: 2rem;
                     }
 
                     .content {
                         padding: 0.75rem 0;
+                        justify-content: flex-start;
                     }
 
                     .cta-row {
@@ -285,6 +287,14 @@ class ProgramBlockComponent extends HTMLElement {
                     .right {
                         grid-template-columns: 1fr;
                         grid-template-rows: minmax(200px, 40vh) auto;
+                    }
+
+                    .content {
+                        justify-content: flex-start;
+                    }
+
+                    .program-block {
+                        margin-bottom: 2rem;
                     }
 
                     .right .image-wrap {

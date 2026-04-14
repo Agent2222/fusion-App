@@ -116,8 +116,8 @@ function locationModalOptionsHtml() {
 
 function templateArtists() {
     return `
-        <div id="filterSystem" class="main-cont active">
-            <div id="filterToggle" class="active">Filter Artists</div>
+        <div id="filterSystem" class="main-cont">
+            <div id="filterToggle">Filter Artists</div>
             <div id="filterContent">
                 <div id="leftFilter" class="filterBlock">
                     <div id="locationFilter">
@@ -172,8 +172,8 @@ function templateArtists() {
 
 function templateEditions() {
     return `
-        <div id="filterSystem" class="main-cont active">
-            <div id="filterToggle" class="active">Filter Editions</div>
+        <div id="filterSystem" class="main-cont">
+            <div id="filterToggle">Filter Editions</div>
             <div id="filterContent">
                 <div id="leftFilter" class="filterBlock">
                     <div id="editionCategoryFilter" class="filterButtonBlock filterButtonBlock--multi filterButtonBlock--compact" data-multi="true" data-all-id="allEditionCategories">
@@ -211,8 +211,8 @@ function templateEditions() {
 
 function templateGalleryAccess() {
     return `
-        <div id="filterSystem" class="main-cont active">
-            <div id="filterToggle" class="active">Filter Gallery Access</div>
+        <div id="filterSystem" class="main-cont">
+            <div id="filterToggle">Filter Gallery Access</div>
             <div id="filterContent">
                 <div id="leftFilter" class="filterBlock">
                     <div id="galleryLocationWrap">

@@ -65,6 +65,55 @@ function populateIntroGallery(container, items) {
     }
 }
 
+function wireProfileGalleryAccess() {
+    const modal = document.getElementById('profileGalleryAccessModal');
+    if (modal?.dataset.galleryAccessWired === '1') return;
+    if (modal) modal.dataset.galleryAccessWired = '1';
+    const scrim = modal?.querySelector('.profile-gallery-access-modal__scrim');
+    const closeBtn = modal?.querySelector('.profile-gallery-access-modal__close');
+    const openModal = () => {
+        if (!modal) return;
+        document.body.appendChild(modal);
+        modal.hidden = false;
+        modal.setAttribute('aria-hidden', 'false');
+    };
+    const closeModal = () => {
+        if (!modal) return;
+        modal.hidden = true;
+        modal.setAttribute('aria-hidden', 'true');
+    };
+    scrim?.addEventListener('click', closeModal);
+    closeBtn?.addEventListener('click', closeModal);
+    const onKey = (e) => {
+        if (e.key === 'Escape' && modal && !modal.hidden) closeModal();
+    };
+    window.addEventListener('keydown', onKey);
+
+    document.querySelectorAll('.profile-page .galleryAccessButton').forEach((btn) => {
+        btn.setAttribute('role', 'button');
+        if (!btn.hasAttribute('tabindex')) btn.setAttribute('tabindex', '0');
+        btn.addEventListener('click', async () => {
+            try {
+                const { getAuthSnapshot } = await import('../utils/icAuth.js');
+                const snap = await getAuthSnapshot();
+                if (snap.authenticated) {
+                    openModal();
+                } else {
+                    document.getElementById('joinNetworkProfile')?.openModal?.();
+                }
+            } catch {
+                document.getElementById('joinNetworkProfile')?.openModal?.();
+            }
+        });
+        btn.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                btn.click();
+            }
+        });
+    });
+}
+
 function profileSlugFromPathname() {
     const path = window.location.pathname;
     if (!path.startsWith('/profile/')) return null;
@@ -90,6 +139,41 @@ function statusLabel(status) {
         default:
             return status || '';
     }
+}
+
+/**
+ * First name for profile placeholder copy (Perspective, What they see, etc.).
+ * @param {Record<string, unknown> | null | undefined} loc
+ * @param {string} displayName
+ */
+function profileFirstNameForPlaceholders(loc, displayName) {
+    const fn = String(loc?.firstName ?? '').trim();
+    if (fn) return fn;
+    const name = String(displayName ?? '').trim();
+    if (name) {
+        const first = name.split(/\s+/)[0];
+        if (first) return first;
+    }
+    return 'This artist';
+}
+
+/**
+ * @param {string} firstName
+ */
+function artistProfileWorldPlaceholders(firstName) {
+    const x = firstName;
+    return {
+        perspective: `What has shaped ${x}'s way of seeing, and what continues to move him to create?`,
+        vision: [
+            `What quietly draws ${x} in?`,
+            'What stays with them over time?',
+            `What begins to reveal itself to ${x}?`,
+            `What shifts the way ${x} sees the world?`,
+        ],
+        constructing: `How does ${x} bring his ideas into form, and what unfolds through his process of making?`,
+        context: `Who is ${x}, and where did their work begin?`,
+        quote: `What words might ${x} offer that reflect how they see, feel, and moves through their work? We'll see.`,
+    };
 }
 
 export function generateProfileContent() {
@@ -143,13 +227,42 @@ export function generateProfileContent() {
                         <app-join-network id="joinNetworkProfile" data-modal-type="access" context="profile" active="true" data-margin-top="100px" data-margin-bottom="96px"></app-join-network>
                     </div> 
                 </div>
+                <div
+                    id="profileGalleryAccessModal"
+                    class="profile-gallery-access-modal"
+                    hidden
+                    aria-hidden="true"
+                >
+                    <div class="profile-gallery-access-modal__scrim" aria-hidden="true"></div>
+                    <div
+                        class="profile-gallery-access-modal__panel"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="profileGalleryAccessModalTitle"
+                    >
+                        <h2 id="profileGalleryAccessModalTitle" class="profile-gallery-access-modal__title">
+                            Coming Soon
+                        </h2>
+                        <p class="profile-gallery-access-modal__body">
+                            This is not for every gallery. It is for those willing to step outside familiar
+                            systems, to engage with artists, context, and process in new ways.
+                        </p>
+                        <button type="button" class="profile-gallery-access-modal__close">Close</button>
+                    </div>
+                </div>
             </main>
         </div>
     `;
 }
 
 export default function initProfile() {
+    document.querySelectorAll('#profileGalleryAccessModal').forEach((m) => {
+        const pm = document.getElementById('profileMain');
+        if (pm && !pm.contains(m)) m.remove();
+    });
+
     const slug = profileSlugFromPathname();
+    wireProfileGalleryAccess();
 
     const article = document.getElementById('artistProfile');
     const notFound = document.getElementById('artistProfileNotFound');
@@ -224,6 +337,17 @@ export default function initProfile() {
             return;
         }
 
+        const displayName = (() => {
+            const n = String(loc.name ?? '').trim();
+            if (n) return n;
+            const fn = String(loc.firstName ?? '').trim();
+            const ln = String(loc.lastName ?? '').trim();
+            return [fn, ln].filter(Boolean).join(' ');
+        })();
+
+        const firstName = profileFirstNameForPlaceholders(loc, displayName);
+        const worldPh = artistProfileWorldPlaceholders(firstName);
+
         const img = document.getElementById('artistProfileImage');
         const nameEl = document.getElementById('artistProfileName');
         const practiceEl = document.getElementById('artistProfilePractice');
@@ -231,13 +355,15 @@ export default function initProfile() {
         const perspectiveHeadingEl = document.getElementById('artistProfilePerspectiveHeading');
         if (img) {
             img.src = artist.image || '';
-            img.alt = loc.name || '';
+            img.alt = displayName || '';
         }
-        if (nameEl) nameEl.textContent = loc.name || '';
+        if (nameEl) nameEl.textContent = displayName || '';
         if (practiceEl) practiceEl.textContent = loc.world?.practice || '';
         if (perspectiveEl) {
             perspectiveEl.replaceChildren();
-            for (const text of worldTextParts(loc.world?.perspective)) {
+            const perspectiveParts = worldTextParts(loc.world?.perspective);
+            const texts = perspectiveParts.length ? perspectiveParts : [worldPh.perspective];
+            for (const text of texts) {
                 const p = document.createElement('p');
                 p.textContent = text;
                 perspectiveEl.appendChild(p);
@@ -247,25 +373,33 @@ export default function initProfile() {
         if (contextHeadingEl) contextHeadingEl.textContent = locale === 'ja' ? '文脈' : 'Context';
         if (contextContentEl) {
             contextContentEl.replaceChildren();
-            for (const text of worldTextParts(loc.world?.context)) {
+            const contextParts = worldTextParts(loc.world?.context);
+            const ctxTexts = contextParts.length ? contextParts : [worldPh.context];
+            for (const text of ctxTexts) {
                 const p = document.createElement('p');
                 p.textContent = text;
                 contextContentEl.appendChild(p);
             }
         }
-        document.title = `${loc.name || 'Artist'} · Fusion`;
+        document.title = `${displayName || 'Artist'} · Fusion`;
 
         const sightWordsContainerEl = document.getElementById('sight-words-container');
         if (sightWordsContainerEl) {
             sightWordsContainerEl.replaceChildren();
-            for (const text of worldTextParts(loc.world?.vision)) {
+            const visionParts = worldTextParts(loc.world?.vision);
+            const visionLines = visionParts.length ? visionParts : worldPh.vision;
+            const narrowSight =
+                typeof window !== 'undefined' &&
+                typeof window.matchMedia === 'function' &&
+                window.matchMedia('(max-width: 768px)').matches;
+            for (const text of visionLines) {
                 if (!text) continue;
                 const p = document.createElement('p');
                 p.className = 'profile-sight-word-line';
                 p.textContent = text;
                 const alignRight = Math.random() < 0.5;
-                const padPct = 5 + Math.random() * 28;
-                const fontRem = 1.2 + Math.random() * 2.5;
+                const padPct = (narrowSight ? 2 : 5) + Math.random() * (narrowSight ? 12 : 28);
+                const fontRem = (narrowSight ? 1.05 : 1.2) + Math.random() * (narrowSight ? 1.35 : 2.5);
                 p.style.fontSize = `${fontRem}rem`;
                 if (alignRight) {
                     p.style.textAlign = 'right';
@@ -283,7 +417,9 @@ export default function initProfile() {
         const constructingWordsContainerEl = document.getElementById('constructing-words-container');
         if (constructingWordsContainerEl) {
             constructingWordsContainerEl.replaceChildren();
-            for (const text of worldTextParts(loc.world?.constructing)) {
+            const constructingParts = worldTextParts(loc.world?.constructing);
+            const conTexts = constructingParts.length ? constructingParts : [worldPh.constructing];
+            for (const text of conTexts) {
                 const p = document.createElement('p');
                 p.textContent = text;
                 constructingWordsContainerEl.appendChild(p);
@@ -293,12 +429,13 @@ export default function initProfile() {
         const quoteContainerEl = document.getElementById('profileQuoteContainer');
         if (quoteContainerEl) {
             quoteContainerEl.replaceChildren();
-            const quote = loc.world?.quote;
-            if (quote) {
-                const p = document.createElement('p');
-                p.textContent = `"${quote}"`;
-                quoteContainerEl.appendChild(p);
-            }
+            const quoteRaw = loc.world?.quote;
+            const quote = String(quoteRaw ?? '').trim();
+            const p = document.createElement('p');
+            p.id = 'profileQuote';
+            p.className = 'artist-profile-quote';
+            p.textContent = quote ? `"${quote}"` : worldPh.quote;
+            quoteContainerEl.appendChild(p);
         }
 
         populateArtistLinks(artistLinksEl, loc.links);

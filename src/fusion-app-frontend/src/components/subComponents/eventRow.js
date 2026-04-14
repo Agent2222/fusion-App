@@ -1,5 +1,6 @@
 // Event row: `data-event-id` selects an item from CMS events list; copy from `en` / `ja` on that item.
 import { getEventsList, subscribeDataSource } from '../../utils/database.js';
+import { isJournalListingPage } from '../../utils/journalListingPage.js';
 import { navigate } from '../../router.js';
 
 function escapeHtml(s) {
@@ -97,8 +98,27 @@ class EventRowComponent extends HTMLElement {
         return { event, loc };
     }
 
+    /**
+     * Journal listing page only: show rows for upcoming (or unset status) events; hide missing/past.
+     * @param {{ event: object, loc: object } | null} resolved
+     */
+    _isAvailableJournalEvent(resolved) {
+        if (!resolved) return false;
+        const st = resolved.event && typeof resolved.event === 'object' ? resolved.event.status : undefined;
+        if (st == null || st === '') return true;
+        return String(st) === 'upcoming';
+    }
+
     render() {
         const resolved = this._resolveEventData();
+        const isJournal = (this.getAttribute('context') || '') === 'journal';
+        if (isJournal && isJournalListingPage() && !this._isAvailableJournalEvent(resolved)) {
+            this.style.display = 'none';
+            this.shadow.innerHTML = `<style>:host { display: none !important; }</style>`;
+            return;
+        }
+        this.style.display = '';
+
         const loc = resolved?.loc;
         const imageSrc = resolved?.event?.image ?? '';
         const category = loc?.category ?? '';

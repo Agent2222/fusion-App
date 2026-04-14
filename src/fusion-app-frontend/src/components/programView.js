@@ -1,15 +1,33 @@
 import placeholderImg from '../assets/dev/program_hero-1.jpg';
 import { findArtistByEnglishName } from '../utils/artistSlug.js';
-import { findProgramPairByPathname, getArtists } from '../utils/database.js';
+import { findProgramPairByPathname, getArtists, getMyArtistRecord, getPrograms } from '../utils/database.js';
 import { getAuthSnapshot } from '../utils/icAuth.js';
 import {
+    programApplicationCtaLabelForAuth,
+    programApplicationReviewLabel,
+    programKeyDetailsLabel,
+} from '../utils/programApplicationCta.js';
+import {
     PROGRAM_APPLICATION_VIEWPORT_TOP_GAP_PX,
+    revealProgramApplicationOrOpenJoin,
     scrollElementTopToViewportGap,
 } from '../utils/scrollAnchorToViewportGap.js';
 
-function facilitiesToSidebarText(facilities) {
-    if (!Array.isArray(facilities) || !facilities.length) return '';
-    const parts = facilities
+function toTrimmedList(values) {
+    if (!Array.isArray(values)) return [];
+    return values
+        .map((f) => {
+            if (typeof f === 'string') return f.trim();
+            return '';
+        })
+        .filter(Boolean);
+}
+
+function facilitiesToSidebarList(facilities, facilityList) {
+    const fromList = toTrimmedList(facilityList);
+    if (fromList.length) return fromList;
+    if (!Array.isArray(facilities) || !facilities.length) return [];
+    return facilities
         .map((f) => {
             if (typeof f === 'string') return f.trim();
             if (!f || typeof f !== 'object') return '';
@@ -18,7 +36,13 @@ function facilitiesToSidebarText(facilities) {
             return d || t;
         })
         .filter(Boolean);
-    return parts.join(' ');
+}
+
+function locationsToSidebarList(cardLocation, detailsLocations) {
+    const fromDetails = toTrimmedList(detailsLocations);
+    if (fromDetails.length) return fromDetails;
+    const single = String(cardLocation || '').trim();
+    return single ? [single] : [];
 }
 
 function formatCostText(costs) {
@@ -66,71 +90,117 @@ function setProgramHeroMedia(container, url, alt) {
     container.appendChild(img);
 }
 
-const CTA_COPY = {
-    en: { guest: 'Sign up & apply', user: 'Begin application' },
-    ja: { guest: 'サインアップして応募', user: '応募を始める' },
-};
+/** Rebound per route render; previous listeners are aborted. */
+let programCtaWireAbort = null;
 
-/** Avoid duplicate listeners if `applyProgramToDom` is ever invoked more than once. */
-let programApplicationCtasWired = false;
-
-/**
- * @param {boolean} authenticated
- * @returns {string}
- */
-function ctaLabelForAuth(authenticated) {
-    const loc = typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
-    const b = authenticated ? CTA_COPY[loc].user : CTA_COPY[loc].guest;
-    return b;
+function hasAppliedForProgram(record, programId) {
+    if (!record || !programId) return false;
+    const raw = record.applied_json ?? record.appliedJson;
+    if (!raw) return false;
+    try {
+        const j = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        return Boolean(j && typeof j === 'object' && j[programId]);
+    } catch {
+        return false;
+    }
 }
 
 /**
  * @param {string} programId
+ * @param {boolean} [applicationsOpen] When false (e.g. studioStatus `comingUp`), hide apply CTAs and form — no “Begin application”.
  */
-function wireProgramApplicationSection(programId) {
+function wireProgramApplicationSection(programId, applicationsOpen = true) {
     const wrap = document.getElementById('programApplicationWrap');
     const formEl = document.getElementById('programApplicationSection');
     if (formEl && programId) {
         formEl.setAttribute('data-program-id', programId);
     }
 
-    if (programApplicationCtasWired) {
-        return;
+    if (programCtaWireAbort) {
+        programCtaWireAbort.abort();
     }
-    programApplicationCtasWired = true;
-
-    const revealAndScroll = () => {
-        if (wrap) {
-            wrap.removeAttribute('hidden');
-            wrap.removeAttribute('inert');
-        }
-        if (formEl) {
-            formEl.setAttribute('active', 'true');
-        }
-        const section = document.getElementById('programApplicationSection');
-        scrollElementTopToViewportGap(section, PROGRAM_APPLICATION_VIEWPORT_TOP_GAP_PX);
-    };
+    programCtaWireAbort = new AbortController();
+    const signal = programCtaWireAbort.signal;
 
     const introCta1 = document.getElementById('programIntroCTA1');
     const appBtn1 = document.getElementById('applicationButton1');
 
-    const onPrimaryCta = async () => {
-        const snap = await getAuthSnapshot();
-        if (!snap.authenticated) {
-            window.dispatchEvent(new CustomEvent('fusion-open-join-network', { detail: {} }));
-            return;
-        }
-        revealAndScroll();
+    const scrollToProgramDetailsSection = () => {
+        const el = document.getElementById('programDetailsSection');
+        if (!el) return;
+        scrollElementTopToViewportGap(el, PROGRAM_APPLICATION_VIEWPORT_TOP_GAP_PX);
     };
 
-    introCta1?.addEventListener('click', () => void onPrimaryCta());
-    appBtn1?.addEventListener('click', () => void onPrimaryCta());
+    const bindKeyboardButton = (el, onActivate) => {
+        if (!el) return;
+        el.addEventListener(
+            'keydown',
+            (ev) => {
+                if (ev.key !== 'Enter' && ev.key !== ' ') return;
+                ev.preventDefault();
+                onActivate();
+            },
+            { signal }
+        );
+    };
+
+    if (!applicationsOpen) {
+        if (introCta1) {
+            introCta1.removeAttribute('hidden');
+            introCta1.classList.remove('program-application-cta--review');
+            introCta1.classList.add('program-intro-cta--closed-soon');
+            introCta1.textContent = 'Coming soon';
+            introCta1.setAttribute('aria-hidden', 'false');
+            introCta1.setAttribute('aria-disabled', 'true');
+            introCta1.removeAttribute('role');
+            introCta1.removeAttribute('tabindex');
+        }
+        const introCtAs = document.getElementById('programIntroCTAs');
+        introCtAs?.classList.add('program-intro-ctas--apply-closed');
+        if (wrap) {
+            wrap.setAttribute('hidden', '');
+            wrap.setAttribute('inert', '');
+        }
+        if (formEl) formEl.setAttribute('active', 'false');
+        appBtn1?.addEventListener('click', scrollToProgramDetailsSection, { signal });
+        if (appBtn1) appBtn1.textContent = programKeyDetailsLabel();
+        bindKeyboardButton(appBtn1, scrollToProgramDetailsSection);
+        return;
+    }
+
+    document.getElementById('programIntroCTAs')?.classList.remove('program-intro-ctas--apply-closed');
+    if (introCta1) {
+        introCta1.classList.remove('program-intro-cta--closed-soon');
+        introCta1.removeAttribute('aria-disabled');
+        introCta1.setAttribute('role', 'button');
+        introCta1.setAttribute('tabindex', '0');
+    }
+
+    const onPrimaryCta = () => void revealProgramApplicationOrOpenJoin();
+
+    introCta1?.addEventListener('click', onPrimaryCta, { signal });
+    appBtn1?.addEventListener('click', scrollToProgramDetailsSection, { signal });
+    bindKeyboardButton(introCta1, onPrimaryCta);
+    bindKeyboardButton(appBtn1, scrollToProgramDetailsSection);
 
     const refreshAuthUi = async () => {
         const snap = await getAuthSnapshot();
-        const label = ctaLabelForAuth(snap.authenticated);
-        if (introCta1) introCta1.textContent = label;
-        if (appBtn1) appBtn1.textContent = label;
+        let alreadyApplied = false;
+        if (snap.authenticated) {
+            try {
+                const rec = await getMyArtistRecord();
+                alreadyApplied = hasAppliedForProgram(rec, programId);
+            } catch {
+                alreadyApplied = false;
+            }
+        }
+        if (introCta1) {
+            introCta1.textContent = alreadyApplied
+                ? programApplicationReviewLabel()
+                : programApplicationCtaLabelForAuth(snap.authenticated);
+            introCta1.classList.toggle('program-application-cta--review', alreadyApplied);
+        }
+        if (appBtn1) appBtn1.textContent = programKeyDetailsLabel();
         if (!snap.authenticated) {
             if (wrap) {
                 wrap.setAttribute('hidden', '');
@@ -141,7 +211,13 @@ function wireProgramApplicationSection(programId) {
     };
 
     void refreshAuthUi();
-    window.addEventListener('fusion-auth-change', () => void refreshAuthUi());
+    window.addEventListener('fusion-auth-change', () => void refreshAuthUi(), { signal });
+    window.addEventListener('fusion-localechange', () => void refreshAuthUi(), { signal });
+    window.addEventListener(
+        'fusion-program-application-submitted',
+        () => void refreshAuthUi(),
+        { signal }
+    );
 }
 
 export function generateProgramViewContent() {
@@ -163,7 +239,7 @@ export function generateProgramViewContent() {
                                 <div id="programIntroCTA1" class="program-intro-cta" role="button" tabindex="0">Sign up & apply</div>
                                 <div id="programIntroCTA2">
                                     <div class="horizontal-line"><hr></div>
-                                    <div id="applicationButton1" class="program-intro-cta" role="button" tabindex="0">Sign up & apply</div>
+                                    <div id="applicationButton1" class="program-intro-cta" role="button" tabindex="0">Key Details</div>
                                     <div class="horizontal-line"><hr></div>
                                 </div>
                             </div>
@@ -226,6 +302,30 @@ async function applyProgramToDom(programPair) {
     if (introSubLine2) introSubLine2.textContent = descriptionText;
 
     const programId = current?.id != null ? String(current.id) : '';
+    let applicationsOpen = true;
+    if (programId) {
+        try {
+            const rows = await getPrograms();
+            const row = rows.find(
+                (p) => String(p.id) === programId || p.id === current?.id || String(p.id) === String(current?.id)
+            );
+            const statusFromRow = row ? String(row.studioStatus ?? '').trim() : '';
+            const statusFromCard = String(
+                current?.studioStatus ??
+                    programPair.en?.studioStatus ??
+                    programPair.ja?.studioStatus ??
+                    ''
+            ).trim();
+            const effectiveStatus = statusFromRow || statusFromCard;
+            if (effectiveStatus) {
+                applicationsOpen = effectiveStatus.toLowerCase() === 'open';
+            } else if (current && 'acceptingApplications' in current) {
+                applicationsOpen = Boolean(current.acceptingApplications);
+            }
+        } catch {
+            applicationsOpen = true;
+        }
+    }
     const formEl = document.getElementById('programApplicationSection');
     if (formEl && programId) {
         formEl.setAttribute('data-program-id', programId);
@@ -265,10 +365,12 @@ async function applyProgramToDom(programPair) {
         typeof programDetailsSection.setProgramDetails === 'function'
     ) {
         programDetailsSection.setProgramDetails({
+            programId,
+            applicationsOpen,
             headline: programPage?.detailsHeadline || '',
             keyDates,
-            location: (current?.location || '').trim(),
-            facilitiesText: facilitiesToSidebarText(details?.facilities),
+            locations: locationsToSidebarList(current?.location, details?.locations),
+            facilities: facilitiesToSidebarList(details?.facilities, details?.facilityList),
             costText: formatCostText(details?.costs),
             additionalInfo: programPage?.additionalInfo || null,
         });
@@ -277,7 +379,7 @@ async function applyProgramToDom(programPair) {
     document.title = `${titleText || 'Program'} · Fusion`;
 
     if (programId) {
-        wireProgramApplicationSection(programId);
+        wireProgramApplicationSection(programId, applicationsOpen);
     }
 }
 

@@ -103,6 +103,14 @@ module {
         #needsSubscription;
     };
 
+    /// Self-service profile link after membership is active (`ensureMyLinkedArtistProfile`).
+    public type EnsureLinkedProfileResult = {
+        #ok;
+        #alreadyLinked;
+        #needsSubscription;
+        #noAccount;
+    };
+
     /// Full artist row for canister + Studio: public `profile` + optional JSON blob for locales (versioned).
     /// `imported` / `accessCode` are Studio-only onboarding fields (not in public `Artist` / `listArtists`).
     public type ArtistRecord = {

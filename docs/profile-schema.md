@@ -19,7 +19,7 @@ This document locks the **canonical shape** for artist roster rows (`testData.al
 
 ## Per-locale block (`locales.en` / `locales.ja`)
 
-See inventory in the product plan. Fields include `name`, `discipline`, `status`, `location`, `bio`, `seo`, **`world`**, `links`, `programs`, `masterPortfolio`, `events`, `wordsFromArtist`, `notes`, etc.
+See inventory in the product plan. Fields include `name`, optional `firstName` / `lastName` (member settings UI derives `name` as `firstName` + `lastName` for compatibility), `discipline`, `status`, `location`, `bio`, **`world`**, `links`, `programs`, `masterPortfolio`, `events`, `wordsFromArtist`, `notes`, etc. Legacy data may still contain `seo`; the **member profile settings** UI does not edit SEO (Discovery) — use Studio or JSON import if you need to change `seo`.
 
 ## `world.*` polymorphism (string vs array)
 
@@ -38,7 +38,7 @@ Seed data is inconsistent: `perspective`, `vision`, `constructing`, and `context
 |------|--------|
 | **Public profile (`profile.js`)** | `image`, locale `name`, `world.*` (practice, perspective, vision, constructing, context, quote, introGallery), `links`, `programs` (veteran banner) |
 | **Feeds** | `image`, `filter`, locale labels as implemented in feed components |
-| **Settings (planned sections)** | Full `locales` JSON for parity; notes/visibility/feature order per admin matrix (`docs/ADMIN_PROFILE_FIELDS.md`) |
+| **Member profile settings (`settingsProfile.js`)** | Full `locales` JSON via `updateMyArtistLocalesJson`; hero image via `updateMyArtistProfilePatch`; no SEO fields in the form |
 
 ## Collector / non-artist profiles
 

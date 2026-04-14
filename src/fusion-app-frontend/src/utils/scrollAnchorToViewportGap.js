@@ -44,3 +44,53 @@ export function scrollElementTopToViewportGap(element, gapPx, behavior = 'smooth
     }
     scroller.scrollBy({ top: delta, behavior });
 }
+
+/**
+ * Same behavior as program page hero CTAs: guests → join modal; signed-in → show `#programApplicationWrap`,
+ * activate `#programApplicationSection`, then scroll it into view.
+ *
+ * @returns {Promise<void>}
+ */
+export async function revealProgramApplicationOrOpenJoin() {
+    const { getAuthSnapshot } = await import('./icAuth.js');
+    const snap = await getAuthSnapshot();
+    if (!snap.authenticated) {
+        window.dispatchEvent(new CustomEvent('fusion-open-join-network', { detail: {} }));
+        return;
+    }
+    try {
+        const { getAccountForCaller } = await import('./database.js');
+        const { getProfileSetupDraft } = await import('./profileSetupDraft.js');
+        const acc = await getAccountForCaller();
+        const linkedRaw = acc && typeof acc === 'object' ? acc.linkedArtistId ?? acc.linked_artist_id : null;
+        const linkedId = Array.isArray(linkedRaw)
+            ? linkedRaw.length
+                ? String(linkedRaw[0] ?? '').trim()
+                : ''
+            : linkedRaw != null
+              ? String(linkedRaw).trim()
+              : '';
+        if (!linkedId) {
+            const draft = getProfileSetupDraft();
+            window.dispatchEvent(
+                new CustomEvent('fusion-open-profile-setup', {
+                    detail: { fullName: draft.fullName, email: draft.email },
+                })
+            );
+            return;
+        }
+    } catch {
+        /* ignore and continue */
+    }
+    const wrap = document.getElementById('programApplicationWrap');
+    const formEl = document.getElementById('programApplicationSection');
+    if (wrap) {
+        wrap.removeAttribute('hidden');
+        wrap.removeAttribute('inert');
+    }
+    if (formEl) {
+        formEl.setAttribute('active', 'true');
+    }
+    const section = document.getElementById('programApplicationSection');
+    scrollElementTopToViewportGap(section, PROGRAM_APPLICATION_VIEWPORT_TOP_GAP_PX);
+}

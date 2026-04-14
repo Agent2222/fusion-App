@@ -10,7 +10,7 @@
  */
 export const config = {
   devMode: false,
-  siteActive: true,
+  siteActive: false,
   apiBaseUrl: '/api',
   testData: false,
   pageStatus: {
@@ -19,63 +19,69 @@ export const config = {
         public: true,
         dev: true,
       },
-      message: 'Discover artists from Fusion’s curated programs.',
-      comingSoonMessage: 'Coming soon',
-      comingSoonCopy: 'Coming soon',
+      message: 'Discover artists emerging through Fusion’s programs.',
+      comingSoonMessage: 'Evolving',
+      comingSoonCopy: 'New features and artist releases are being added.',
     },
+  
     programs: {
       status: {
         public: true,
         dev: true,
       },
       message: 'Residencies, exhibitions, and collaborations across Japan.',
-      comingSoonMessage: 'Coming soon',
-      comingSoonCopy: 'Coming soon',
+      comingSoonMessage: 'Expanding',
+      comingSoonCopy: 'Additional programs and opportunities are currently being prepared.',
     },
+  
     galleryAccess: {
       status: {
         public: false,
         dev: false,
       },
       message: 'This is not for every gallery.<br><br>It is for those willing to step outside<br>familiar systems,<br>to engage with artists,<br>context,<br>and process in new ways.',
-      comingSoonMessage: 'Coming soon',
-      comingSoonCopy: 'Coming soon',
+      comingSoonMessage: 'By invitation',
+      comingSoonCopy: 'Access is being developed and extended selectively.',
     },
+  
     editions: {
       status: {
-        public: true,
-        dev: true,
+        public: false,
+        dev: false,
       },
-      message: 'Limited prints, multiples, and published works from Fusion artists.',
-      comingSoonMessage: 'Coming soon',
-      comingSoonCopy: 'Coming soon',
+      message: 'Objects, prints, and works released through Fusion artists.',
+      comingSoonMessage: 'Developing',
+      comingSoonCopy: 'Future releases and editions are being prepared.',
     },
+  
     journal: {
       status: {
         public: true,
         dev: true,
       },
-      message: 'Read the latest entries from Fusion’s artists and explore our archive.',
-      comingSoonMessage: 'Coming soon',
-      comingSoonCopy: 'Coming soon',
+      message: 'Writing, documentation, and perspectives from within the network.',
+      comingSoonMessage: 'In progress',
+      comingSoonCopy: 'New entries and archives are currently being compiled.',
     },
+  
     community: {
       status: {
-        public: true,
-        dev: true,
+        public: false,
+        dev: false,
       },
-      message: 'This is not for every artist.<br><br>It is for those willing to work<br>within unfamiliar environments,<br>alongside others,<br> in close proximity to place and process.',
-      comingSoonMessage: 'Coming soon',
-      comingSoonCopy: 'Coming soon',
+      message: 'This is not for every artist.<br><br>It is for those willing to work<br>within unfamiliar environments,<br>alongside others,<br>in close proximity to place and process.',
+      comingSoonMessage: 'Forming',
+      comingSoonCopy: 'The network is actively taking shape.',
     },
+  
     context: {
       status: {
         public: true,
         dev: true,
       },
-      message: 'Fusion in context',
-      comingSoonMessage: 'Coming soon',
-      comingSoonCopy: 'Coming soon',
+      message: 'Where Fusion operates, and why.',
+      comingSoonMessage: 'Building context',
+      comingSoonCopy: 'Additional documentation and background are being developed.',
     },
   }
 };

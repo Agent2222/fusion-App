@@ -6,6 +6,7 @@ import {
     artistLocaleBlock,
     artistSlugFromName,
 } from '../../utils/artistSlug.js';
+import { applyArtistCardImage } from '../../utils/artistCardPlaceholder.js';
 
 import prepIcon from '../../assets/icon-cal.png';
 import showingIcon from '../../assets/icon-loc.png';
@@ -110,6 +111,12 @@ class ArtistsGAFeedElement extends HTMLElement {
                     transition: transform 0.35s ease;
                 }
 
+                .artist-card-image img.artist-card-img--placeholder {
+                    object-fit: contain;
+                    object-position: center;
+                    background: var(--c3);
+                }
+
                 .artist-card-content {
                     height: 150px;
                     display: flex;
@@ -138,6 +145,13 @@ class ArtistsGAFeedElement extends HTMLElement {
                     line-height: 1.2;
                     text-align: center;
                     opacity: 0.9;
+                }
+
+                .feed-nav-row--top {
+                    display: flex;
+                    justify-content: center;
+                    margin-bottom: 1.25rem;
+                    padding-bottom: 0.35rem;
                 }
 
                 .feed-footer {
@@ -288,6 +302,15 @@ class ArtistsGAFeedElement extends HTMLElement {
                 }
             </style>
             <div class="artists-ga-feed">
+                <div class="feed-nav-row feed-nav-row--top">
+                    <div class="feed-nav">
+                        <div class="feed-nav-buttons">
+                            <button type="button" class="nav-btn" id="btnBackGATop" aria-label="Previous page">Back</button>
+                            <button type="button" class="nav-btn" id="btnNextGATop" aria-label="Next page">Next</button>
+                        </div>
+                        <div class="feed-page-label" id="feedPageLabelGATop" aria-hidden="true">Pg. 1</div>
+                    </div>
+                </div>
                 <div class="feed-grid" id="feedGridGA"></div>
                 <div class="feed-footer">
                     <div class="feed-nav">
@@ -304,10 +327,15 @@ class ArtistsGAFeedElement extends HTMLElement {
         this.gridEl = this.shadowRoot.getElementById('feedGridGA');
         this.btnBack = this.shadowRoot.getElementById('btnBackGA');
         this.btnNext = this.shadowRoot.getElementById('btnNextGA');
+        this.btnBackTop = this.shadowRoot.getElementById('btnBackGATop');
+        this.btnNextTop = this.shadowRoot.getElementById('btnNextGATop');
         this.pageLabelEl = this.shadowRoot.getElementById('feedPageLabelGA');
+        this.pageLabelTopEl = this.shadowRoot.getElementById('feedPageLabelGATop');
 
         this.btnBack.addEventListener('click', () => this.goPrev());
         this.btnNext.addEventListener('click', () => this.goNext());
+        this.btnBackTop.addEventListener('click', () => this.goPrev());
+        this.btnNextTop.addEventListener('click', () => this.goNext());
     }
 
     statusIcon(status) {
@@ -352,7 +380,6 @@ class ArtistsGAFeedElement extends HTMLElement {
         for (let i = 0; i < slice.length; i++) {
             const artist = slice[i];
             const artistName = artistDisplayName(artist, locale);
-            const artistImage = artist.image;
             const artistDiscipline = artistDisplayDiscipline(artist, locale);
             const loc = artistLocaleBlock(artist, locale);
             const artistStatus = loc?.status;
@@ -384,7 +411,7 @@ class ArtistsGAFeedElement extends HTMLElement {
 
             card.innerHTML = `
                 <div class="artist-card-image">
-                    <img src="${artistImage}" alt="${escapeHtml(artistName)}">
+                    <img alt="${escapeHtml(artistName)}" loading="lazy" decoding="async">
                 </div>
                 <div class="artist-card-content">
                     <div class="artist-card-title">${escapeHtml(artistName)}</div>
@@ -392,15 +419,24 @@ class ArtistsGAFeedElement extends HTMLElement {
                     <div class="artist-card-status ${category}"><div class="bgBlock ${category}-bg"></div>${statusIcon} <span class="status-text">${statusText}</span></div>
                 </div>
             `;
+            const gaImg = card.querySelector('.artist-card-image img');
+            applyArtistCardImage(gaImg, artist.image);
             grid.appendChild(card);
         }
 
-        this.btnBack.disabled = this.currentPage <= 0;
-        this.btnNext.disabled = total === 0 || this.currentPage >= totalPages - 1;
+        const backDisabled = this.currentPage <= 0;
+        const nextDisabled = total === 0 || this.currentPage >= totalPages - 1;
+        this.btnBack.disabled = backDisabled;
+        this.btnNext.disabled = nextDisabled;
+        this.btnBackTop.disabled = backDisabled;
+        this.btnNextTop.disabled = nextDisabled;
 
+        const pageLabelText = total === 0 ? 'Pg. 1' : `Pg. ${this.currentPage + 1}`;
         if (this.pageLabelEl) {
-            const pageNum = total === 0 ? 1 : this.currentPage + 1;
-            this.pageLabelEl.textContent = `Pg. ${pageNum}`;
+            this.pageLabelEl.textContent = pageLabelText;
+        }
+        if (this.pageLabelTopEl) {
+            this.pageLabelTopEl.textContent = pageLabelText;
         }
     }
 }
