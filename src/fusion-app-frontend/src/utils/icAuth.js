@@ -6,6 +6,7 @@ import { AuthClient, ERROR_USER_INTERRUPT } from '@dfinity/auth-client';
 import { DEV_MODE, getInternetIdentityUrl } from '../config.js';
 import { FUSION_PENDING_MEMBERSHIP_LINK_KEY } from './integrationApi.js';
 import { getProfileSetupDraft } from './profileSetupDraft.js';
+import posthog from 'posthog-js';
 
 function linkedArtistIdFromAccount(acc) {
     if (!acc || typeof acc !== 'object') return '';
@@ -115,6 +116,9 @@ export async function loginInternetIdentity() {
     const snapAfterLogin = await getAuthSnapshot();
     if (snapAfterLogin.authenticated) {
         console.log('[Fusion] Logged in — principal:', snapAfterLogin.principal.toText());
+        const principalText = snapAfterLogin.principal.toText();
+        posthog.identify(principalText);
+        posthog.capture('sign_in_succeeded', { auth_method: 'internet_identity' });
     }
     await dispatchFusionAuthChange();
     await runPostLoginPipeline();
@@ -124,6 +128,8 @@ export async function logoutInternetIdentity() {
     await clearAuthActorCaches();
     const client = await getAuthClientSingleton();
     await client.logout();
+    posthog.capture('signed_out', { auth_method: 'internet_identity' });
+    posthog.reset();
     await dispatchFusionAuthChange();
 }
 
@@ -170,6 +176,7 @@ export async function runPostLoginPipeline() {
     const linkedArtistId = linkedArtistIdFromAccount(acc);
     if (!linkedArtistId) {
         const draft = getProfileSetupDraft();
+        posthog.capture('profile_setup_opened', { trigger: 'post_login_no_linked_artist' });
         window.dispatchEvent(
             new CustomEvent('fusion-open-profile-setup', {
                 detail: {

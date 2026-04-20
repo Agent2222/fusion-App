@@ -1,4 +1,6 @@
 import { navigate } from '../../router.js';
+import { mergeLocaleDeep } from '../../utils/localeFallback.js';
+import posthog from 'posthog-js';
 
 /** @param {unknown} raw */
 function resolveGalleryAccessCtaHref(raw) {
@@ -59,7 +61,12 @@ class GalleryAccessCtaComponent extends HTMLElement {
             typeof window !== 'undefined' && typeof window.getLocale === 'function'
                 ? window.getLocale()
                 : 'en';
-        const slice = this.data[loc] || this.data.en || this.data.ja || {};
+        const en = this.data.en && typeof this.data.en === 'object' ? this.data.en : {};
+        const ja = this.data.ja && typeof this.data.ja === 'object' ? this.data.ja : {};
+        const slice =
+            loc === 'ja'
+                ? /** @type {Record<string, unknown>} */ (mergeLocaleDeep(en, ja))
+                : /** @type {Record<string, unknown>} */ (en);
         const cta = slice.cta ?? '';
         const ctaHref = resolveGalleryAccessCtaHref(this.data.ctaLink);
         const ctaHeadText = slice.ctaHeadText ?? '';
@@ -86,6 +93,7 @@ class GalleryAccessCtaComponent extends HTMLElement {
         const a = ctaEl.querySelector('.gallery-access-cta-button-link a');
         if (a) {
             a.addEventListener('click', (e) => {
+                posthog.capture('gallery_access_cta_clicked', { destination: ctaHref });
                 if (ctaHref.startsWith('/') && !ctaHref.startsWith('//')) {
                     e.preventDefault();
                     navigate(ctaHref);

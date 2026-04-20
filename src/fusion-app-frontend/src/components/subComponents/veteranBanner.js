@@ -1,5 +1,7 @@
-// Two-column banner (half event-row height): program image + residency copy.
-import { getAllProgramsBlock, subscribeDataSource } from '../../utils/database.js';
+// Two-column banner (half event-row height): Fusion badge + residency copy.
+import { getAllProgramsBlock, getCurrentProgramSeason, subscribeDataSource } from '../../utils/database.js';
+import { mergeLocaleDeep } from '../../utils/localeFallback.js';
+import { yearFromProgramSlug } from '../../utils/artistSlug.js';
 
 function escapeHtml(s) {
     return String(s)
@@ -24,15 +26,51 @@ function resolveProgram(programId, block) {
     const id = PROGRAM_ID_ALIASES[programId] || programId;
     const locale = typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
     const programs = block?.programs;
-    const list =
+    const enList =
         programs && typeof programs === 'object'
-            ? /** @type {Record<string, unknown>} */ (programs)[locale] ??
-              /** @type {Record<string, unknown>} */ (programs).en
+            ? /** @type {Record<string, unknown>} */ (programs).en
             : null;
-    if (!Array.isArray(list)) return null;
-    const program = list.find((p) => p && String(p.id) === String(id));
-    if (!program) return null;
+    const jaList =
+        programs && typeof programs === 'object'
+            ? /** @type {Record<string, unknown>} */ (programs).ja
+            : null;
+    if (!Array.isArray(enList)) return null;
+    const idx = enList.findIndex((p) => p && String(p.id) === String(id));
+    if (idx < 0) return null;
+    const enCard = enList[idx];
+    const jaCard = Array.isArray(jaList) && jaList[idx] && typeof jaList[idx] === 'object' ? jaList[idx] : {};
+    const program =
+        locale === 'ja'
+            ? /** @type {Record<string, unknown>} */ (mergeLocaleDeep(enCard, jaCard))
+            : /** @type {Record<string, unknown>} */ (enCard);
     return { program, loc: program };
+}
+
+/**
+ * @param {{ program?: Record<string, unknown>, loc?: Record<string, unknown> } | null} resolved
+ * @param {string | null} programId
+ */
+function displayYearForProgram(resolved, programId) {
+    const raw = resolved?.program?.year ?? resolved?.loc?.year;
+    if (raw != null && String(raw).trim()) return String(raw).trim();
+    return programId ? yearFromProgramSlug(programId) : '';
+}
+
+/**
+ * @param {{ program?: Record<string, unknown>, loc?: Record<string, unknown> } | null} resolved
+ * @param {string | null} programId
+ */
+function displayFocusForProgram(resolved, programId) {
+    if (!resolved) {
+        return programId ? String(programId).replace(/-/g, ' ') : '';
+    }
+    const focus = String(resolved.loc?.focus ?? resolved.program?.focus ?? '').trim();
+    const headline = String(
+        resolved.loc?.programPage && typeof resolved.loc.programPage === 'object'
+            ? /** @type {{ headline?: unknown }} */ (resolved.loc.programPage).headline
+            : ''
+    ).trim();
+    return focus || headline || String(resolved.loc?.id ?? programId ?? '').replace(/-/g, ' ');
 }
 
 class VeteranBannerComponent extends HTMLElement {
@@ -41,13 +79,15 @@ class VeteranBannerComponent extends HTMLElement {
         this.shadow = this.attachShadow({ mode: 'open' });
         /** @type {Record<string, unknown> | null} */
         this._programsBlock = null;
+        /** Site `currentProgramSeason` — compare 4-digit year to badge label for background color. */
+        this._currentSeason = '';
         /** @type {(() => void) | null} */
         this._unsubData = null;
         this._onLocaleChange = () => this.render();
     }
 
     static get observedAttributes() {
-        return ['data-program-id'];
+        return ['data-program-id', 'data-residency-year'];
     }
 
     attributeChangedCallback() {
@@ -71,6 +111,11 @@ class VeteranBannerComponent extends HTMLElement {
 
     async _loadPrograms() {
         this._programsBlock = await getAllProgramsBlock();
+        try {
+            this._currentSeason = (await getCurrentProgramSeason()).trim();
+        } catch {
+            this._currentSeason = '';
+        }
         this.render();
     }
 
@@ -81,19 +126,48 @@ class VeteranBannerComponent extends HTMLElement {
 
     render() {
         const programId = this._getProgramId();
+        const residencyYearAttr = (this.getAttribute('data-residency-year') || '').trim();
         const resolved = programId ? resolveProgram(programId, this._programsBlock) : null;
-        const imageSrc = resolved?.program?.imageSrc ?? '';
-        const title = resolved
-            ? resolved.loc?.programPage?.headline ?? resolved.loc?.focus ?? resolved.loc?.id ?? ''
-            : programId
-              ? String(programId).replace(/-/g, ' ')
-              : '';
 
         const locale = typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
+
+        /** @type {string} */
+        let focusText = '';
+        /** @type {string} */
+        let yearStr = '';
+        if (programId) {
+            focusText = displayFocusForProgram(resolved, programId);
+            yearStr = displayYearForProgram(resolved, programId) || residencyYearAttr;
+        } else if (residencyYearAttr) {
+            focusText =
+                locale === 'ja' ? 'ジャパン・アーティスト・レジデンシー' : 'Japan Artist Residency';
+            yearStr = residencyYearAttr;
+        }
+
+        const emphasis = [focusText, yearStr].filter(Boolean).join(' ');
+        const yearBadgeHtml = yearStr
+            ? ` <span id="programYear">${escapeHtml(yearStr)}</span>`
+            : '';
+
+        let fusionBadgePastClass = '';
+        const cs = String(this._currentSeason || '').trim();
+        if (cs && yearStr) {
+            const seasonYear =
+                yearFromProgramSlug(cs) ||
+                (() => {
+                    const m = cs.match(/\b(19|20)\d{2}\b/);
+                    return m ? m[0] : '';
+                })();
+            const y = String(yearStr).trim();
+            if (!seasonYear || y !== seasonYear) {
+                fusionBadgePastClass = 'fusion-badge--past-season';
+            }
+        }
+
         const lead =
             locale === 'ja'
-                ? '現在、FUSION レジデンシーに参加中 — '
-                : 'Currently part of FUSION Residency — ';
+                ? 'プログラム卒業生 — '
+                : 'Program Alumni — ';
 
         this.shadow.innerHTML = `
             <style>
@@ -169,6 +243,10 @@ class VeteranBannerComponent extends HTMLElement {
                     margin: 0;
                     line-height: 1;
                 }
+
+                #fusionBadge.fusion-badge--past-season {
+                    background-color: var(--c1);
+                }
                     
                 #fusionBadge p {
                     margin: 0;
@@ -180,6 +258,23 @@ class VeteranBannerComponent extends HTMLElement {
                     font-size: clamp(1.25rem, 1.2vw, 1.5rem);
                     font-variation-settings: var(--fv-headline-wide);
                     letter-spacing: 0.1em;
+                }
+
+                .fusion-badge-line2 {
+                    display: flex;
+                    flex-wrap: wrap;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 0.25rem 0.35rem;
+                    max-width: 100%;
+                    padding: 0 0.2rem;
+                    box-sizing: border-box;
+                }
+
+                #programBadgeFocus {
+                    font-size: clamp(0.65rem, 1.1vw, 0.95rem);
+                    font-variation-settings: var(--fv-subtitle);
+                    line-height: 1.25;
                 }
 
                 #programYear {
@@ -225,13 +320,13 @@ class VeteranBannerComponent extends HTMLElement {
             </style>
             <div class="veteran-banner" part="veteran-banner">
                 <div class="veteran-banner__badge">
-                    <div id="fusionBadge">
+                    <div id="fusionBadge" class="${fusionBadgePastClass}">
                         <p id="fusionBadgeTitle">FUSION</p>
-                        <p>${title} <span id="programYear"></span></p>
+                        <p class="fusion-badge-line2"><span id="programBadgeFocus">${escapeHtml(focusText)}</span>${yearBadgeHtml}</p>
                     </div>
                 </div>
                 <div class="veteran-banner__text">
-                    ${escapeHtml(lead)}<strong>${escapeHtml(title)}</strong>
+                    ${escapeHtml(lead)}<strong>${escapeHtml(emphasis)}</strong>
                 </div>
             </div>
         `;

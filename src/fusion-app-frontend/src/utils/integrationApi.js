@@ -75,10 +75,13 @@ export async function fetchIntegrationHealth() {
 /** Set while pay-first join awaits Internet Identity after Stripe (`icAuth.runPostLoginPipeline` guard). */
 export const FUSION_PENDING_MEMBERSHIP_LINK_KEY = 'fusion-pending-membership-link';
 
+/** Pay-first program application: subscription ids + email for linking after II signup (JSON). */
+export const FUSION_PENDING_APPLICATION_SUB_KEY = 'fusion-pending-application-subscription';
+
 /**
  * Create a Stripe Subscription (bi-monthly Price) and return the first invoice PaymentIntent client secret.
  * Omit `principal` for **pay-first** checkout: response includes `fusionPendingId` until the user links II.
- * @param {{ principal?: string, email: string, metadata?: Record<string, string>, payFirst?: boolean }} opts
+ * @param {{ principal?: string, email: string, metadata?: Record<string, string>, payFirst?: boolean, subscriptionTier?: 'bimonthly' | 'annual' }} opts
  * @returns {Promise<{ clientSecret: string, subscriptionId: string, customerId: string, fusionPendingId?: string }>}
  */
 export async function createSubscription(opts) {
@@ -98,6 +101,10 @@ export async function createSubscription(opts) {
         email: email.trim(),
         metadata,
     };
+    const tier = opts?.subscriptionTier;
+    if (tier === 'annual' || tier === 'bimonthly') {
+        body.subscriptionTier = tier;
+    }
     if (payFirst) {
         body.payFirst = true;
     } else if (typeof principal === 'string' && principal.trim()) {

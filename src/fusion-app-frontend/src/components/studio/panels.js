@@ -18,31 +18,41 @@ import {
     getArtists,
     getArtistsForStudio,
     loadArtistForStudioEdit,
-    CONTENT_PAGE_REGISTRY,
-    getContentBundleForStudio,
-    getContentSummary,
     getDashboardMetrics,
     getDataSource,
+    getContentBundleForStudio,
     getEditions,
     getJournalEntries,
     getJournalEntryForStudio,
     getProgramRecordForStudio,
     getPrograms,
+    getApplicationPaymentGlobal,
+    getCurrentProgramSeason,
+    setApplicationPaymentGlobal,
+    setCurrentProgramSeason,
+    setArtistMostRecentProgram,
+    applyFeaturedFlagsFromStudioSaveLive,
+    setManualFeaturedForArtistStudio,
+    setFeaturableForArtistStudio,
+    setRandomFeaturedModeStudio,
     getSubscribers as loadSubscribersFromDataSource,
     getSubscribersCsv,
     setDataSource,
     upsertApplicantStudio,
     studioReinterpretWithPrompt,
-    studioTranslateEnToJa,
-    upsertContentPageStudio,
     upsertEditionStudio,
     upsertJournalStudio,
     upsertProgramStudio,
+    normalizeProgramVisibility,
     upsertSubscriberRow,
     saveArtistTestOverlayJson,
+    studioTranslateEnToJa,
     syncStudioArtistsLegacyHeroImages,
     syncStudioArtistsLegacyIntroGalleries,
+    upsertContentPageStudio,
+    generateAndUpsertArtistWorldFromBio,
 } from '../../utils/database.js';
+import { STUDIO_WORLD_BATCH_MAX } from '../../utils/studioArtistWorldLlm.js';
 import { parseSubscriberCsv } from '../../utils/csvParse.js';
 import {
     editorTextToObjectLocale,
@@ -51,32 +61,25 @@ import {
 import {
     applicantPayloadToPlainNotes,
     applyJournalPlainLocales,
-    applyScalarPatches,
-    applyStringPatches,
-    flattenScalarFields,
-    flattenStringFields,
-    syncContextJaMediaFromEn,
     journalLocalesToPlain,
     plainNotesToApplicantPayload,
     shortPrincipalDisplay,
     shortRefLabel,
 } from '../../utils/studioPlainForms.js';
-import {
-    applyFeaturedFlagsFromStudioSave,
-    MAX_MANUAL_FEATURED,
-    readArtistFeaturedMeta,
-    setFeaturableForArtist,
-    setManualFeaturedForArtist,
-    setRandomFeaturedMode,
-} from '../../utils/artistFeaturedExtension.js';
+import { MAX_MANUAL_FEATURED, readArtistFeaturedMeta } from '../../utils/artistFeaturedExtension.js';
 import { LEGACY_PROFILE_BASE } from '../../utils/studioLegacyProfileUrls.js';
 import { openStudioModal } from '../../utils/studioModal.js';
 import { createPaymentIntent, fetchIntegrationHealth, sendEmail } from '../../utils/integrationApi.js';
 import { uploadBlobToS3 } from '../../utils/studioS3Upload.js';
-import { appendContentFieldRow, appendContentLocalePairRow, collectContentStringValues } from './studioFieldRender.js';
-import { groupLocaleContentRows } from '../../utils/studioContentLocalePairs.js';
+import { renderContent, initContent } from './sections/contentSection.js';
 import { getFieldKind, getFieldKindBadgeLabel } from '../../utils/studioFieldRegistry.js';
-import { collectProgramLocalesFromForm, renderProgramLocaleFormHtml } from '../../utils/studioProgramLocaleForm.js';
+import { appendContentLocalePairRow } from './studioFieldRender.js';
+import { shoutHtmlToPlain } from '../../utils/shoutHeadlineText.js';
+import {
+    bindStudioProgGalleryUrlPreviews,
+    collectProgramLocalesFromForm,
+    renderProgramLocaleFormHtml,
+} from '../../utils/studioProgramLocaleForm.js';
 import {
     STUDIO_WORLD_TO_NEW_PATHS,
     collectArtistRecordFromForm,
@@ -373,6 +376,20 @@ function renderArtists() {
                 <button type="button" class="studio-btn-ghost" id="studio-artists-sync-hero">Sync Profile Images</button>
                 <button type="button" class="studio-btn-ghost" id="studio-artists-sync-gallery">Sync Gallery</button>
             </div>
+            <div class="studio-artists-shout-block" style="margin:0.75rem 0 1rem">
+                <p class="studio-muted" style="margin:0 0 0.5rem">Public <strong>/artists</strong> page — headline above the featured strip (plain text; line breaks preserved). Also listed under <strong>Content</strong>.</p>
+                <div id="studio-artists-shout-fields" class="studio-content-fields"></div>
+                <div class="studio-toolbar-actions" style="margin-top:0.65rem">
+                    <button type="button" class="studio-btn-primary" id="studio-artists-shout-save">Save shout headline</button>
+                </div>
+                <p id="studio-artists-shout-msg" class="studio-banner studio-banner--info" style="display:none;margin-top:0.5rem" role="status"></p>
+            </div>
+            <div class="studio-artists-world-batch" style="margin:0 0 1rem">
+                <p class="studio-muted" style="margin:0 0 0.5rem">
+                    Generate <strong>Kamauu-style</strong> world copy (micro-bio, perspective, vision, constructing, context, quote) from English bio/discipline via the canister LLM. Japanese locales are filled by translation.
+                </p>
+                <button type="button" class="studio-btn-secondary" id="studio-artists-world-batch-open">Generate world from bio (batch)…</button>
+            </div>
             <div id="studio-artists-banner" class="studio-banner studio-banner--info"></div>
             <div class="studio-table-wrap studio-table-wrap--sticky-head">
                 <table class="studio-table studio-table--dense">
@@ -385,11 +402,12 @@ function renderArtists() {
                             <th>Visibility</th>
                             <th>Featured</th>
                             <th>Featurable</th>
+                            <th>Recent program</th>
                             <th>Public profile</th>
                             <th class="studio-td-actions">Manage</th>
                         </tr>
                     </thead>
-                    <tbody id="studio-artists-tbody"><tr><td colspan="9">Loading…</td></tr></tbody>
+                    <tbody id="studio-artists-tbody"><tr><td colspan="10">Loading…</td></tr></tbody>
                 </table>
             </div>
         </div>
@@ -416,6 +434,11 @@ function renderPrograms() {
                 <label class="studio-file-label studio-btn-ghost">
                     <input type="file" accept="application/json,.json" id="studio-programs-batch-json" class="studio-file-input" />
                     Batch upload (JSON)
+                </label>
+                <label class="studio-field" style="display:inline-flex;align-items:center;flex-wrap:wrap;gap:0.4rem 0.65rem;margin-left:0.5rem">
+                    <span class="studio-muted">Current season (program id)</span>
+                    <input type="text" id="studio-programs-current-season" class="studio-input" placeholder="e.g. fusionKaga" autocomplete="off" style="min-width:11rem" />
+                    <button type="button" class="studio-btn-ghost" id="studio-programs-current-season-save">Save</button>
                 </label>
             </div>
             <div id="studio-programs-banner" class="studio-banner studio-banner--info" style="display:none"></div>
@@ -537,186 +560,6 @@ function renderJournal() {
     `;
 }
 
-function renderContent() {
-    return `
-        <div class="studio-section-stack">
-            <p class="studio-muted">Edit wording for each site section below. Labels describe where text appears (English and 日本語). You never need to paste structured data or storage keys.</p>
-            <div class="studio-content-toolbar">
-                <label class="studio-field studio-field--inline"><span class="studio-toolbar-label">Search</span>
-                    <input type="search" id="studio-content-filter" class="studio-input" placeholder="Filter sections…" autocomplete="off" />
-                </label>
-                <span id="studio-content-count" class="studio-muted studio-content-count"></span>
-            </div>
-            <div class="studio-table-wrap studio-table-wrap--rounded">
-                <table class="studio-table studio-table--rows">
-                    <thead>
-                        <tr>
-                            <th>Section</th>
-                            <th>Preview</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody id="studio-content-tbody"><tr><td colspan="3">Loading…</td></tr></tbody>
-                </table>
-            </div>
-            <div id="studio-content-editor" class="studio-content-editor" style="display:none">
-                <div class="studio-content-editor__header">
-                    <h3 class="studio-subheading" id="studio-content-editor-title">Edit</h3>
-                    <p class="studio-muted studio-content-editor-slug" id="studio-content-editor-slug" hidden></p>
-                </div>
-                <p class="studio-modal-hint studio-content-hint" id="studio-content-hint">Fields are labeled by kind (Route, Media, Text, …). Uploads use Services → S3. Save to persist to storage.</p>
-                <p id="studio-content-live-placeholder" class="studio-banner studio-banner--placeholder" style="display:none" role="status">
-                    Sample copy only — this section is not stored on the canister yet. Use <strong>Save</strong> or <strong>Adopt sample</strong> to persist (including any edits).
-                </p>
-                <p id="studio-content-unsaved" class="studio-banner studio-banner--warn" style="display:none" role="status">You have unsaved changes.</p>
-                <div id="studio-content-fields" class="studio-content-fields studio-content-fields--scroll"></div>
-                <div class="studio-content-editor__footer">
-                    <div class="studio-toolbar-actions studio-content-editor__actions">
-                        <button type="button" class="studio-btn-primary" id="studio-content-save">Save</button>
-                        <button type="button" class="studio-btn-primary" id="studio-content-adopt" style="display:none">Adopt sample</button>
-                        <button type="button" class="studio-btn-ghost" id="studio-content-cancel">Cancel</button>
-                    </div>
-                    <p id="studio-content-saved-at" class="studio-muted studio-content-saved-at" style="display:none" aria-live="polite"></p>
-                    <p id="studio-content-msg" class="studio-banner studio-banner--info" style="display:none"></p>
-                </div>
-            </div>
-        </div>
-    `;
-}
-
-/**
- * Content editor: flatten → {@link getFieldKind} per path → {@link appendContentFieldRow} (studioFieldRender.js).
- * Upload/controls follow registry; legacy asset heuristic lives in studioFieldRegistry only.
- *
- * @param {HTMLElement} container
- * @param {unknown} bundle
- * @param {string} slug
- * @param {{ markDirty: () => void }} hooks
- */
-function fillStudioContentPlainFields(container, bundle, slug, hooks) {
-    container.innerHTML = '';
-    let rows = flattenStringFields(bundle);
-    if (slug === 'context') {
-        rows = rows.filter((r) => {
-            if (!r.path.startsWith('ja.')) return true;
-            const k = getFieldKind('context', r.path);
-            return k !== 'assetUrl' && k !== 'externalUrl';
-        });
-    }
-    rows = rows.sort((a, b) => a.path.localeCompare(b.path));
-    const grouped = groupLocaleContentRows(rows);
-
-    /** @type {string | null} */
-    let joinFlowSection = null;
-    /** @type {string | null} */
-    let programHeroLocale = null;
-
-    /** @type {{ markDirty: () => void, translateEnToJa: (s: string) => Promise<string> }} */
-    const hooksPair = {
-        markDirty: () => hooks.markDirty(),
-        translateEnToJa: (text) => studioTranslateEnToJa(text),
-    };
-
-    const appendSectionHeadings = (pathForHead) => {
-        if (slug === 'join-network-flow') {
-            const head = pathForHead.split('.')[0] || '';
-            if (head && head !== joinFlowSection && ['membership', 'access', 'apply'].includes(head)) {
-                joinFlowSection = head;
-                const h = document.createElement('h4');
-                h.className = 'studio-content-section-heading';
-                h.textContent = head.charAt(0).toUpperCase() + head.slice(1);
-                container.appendChild(h);
-            }
-        }
-        if (slug === 'program-hero') {
-            const head = pathForHead.split('.')[0] || '';
-            if (head === 'en' || head === 'ja') {
-                if (head !== programHeroLocale) {
-                    programHeroLocale = head;
-                    const h = document.createElement('h4');
-                    h.className = 'studio-content-section-heading';
-                    h.textContent = head === 'en' ? 'English' : '日本語';
-                    container.appendChild(h);
-                }
-            }
-        }
-    };
-
-    for (const g of grouped) {
-        if (g.type === 'pair') {
-            appendSectionHeadings(g.en.path);
-            appendContentLocalePairRow(container, slug, g.en, g.ja, hooksPair);
-        } else {
-            const r = g.row;
-            appendSectionHeadings(r.path);
-            appendContentFieldRow(container, slug, r, hooks);
-        }
-    }
-    const scalars = flattenScalarFields(bundle).sort((a, b) => a.path.localeCompare(b.path));
-    for (const s of scalars) {
-        const row = document.createElement('div');
-        row.className = 'studio-content-field-row studio-content-field-row--scalar';
-        const lab = document.createElement('label');
-        lab.className = 'studio-field studio-field--stack studio-content-field-main';
-        const span = document.createElement('span');
-        span.textContent = `${s.label} (${s.kind})`;
-        lab.appendChild(span);
-        if (s.kind === 'boolean') {
-            const inp = document.createElement('input');
-            inp.type = 'checkbox';
-            inp.className = 'studio-checkbox';
-            inp.dataset.scalarPath = s.path;
-            inp.checked = Boolean(s.value);
-            inp.addEventListener('change', () => hooks.markDirty());
-            lab.appendChild(inp);
-        } else {
-            const inp = document.createElement('input');
-            inp.type = 'number';
-            inp.className = 'studio-input';
-            inp.dataset.scalarPath = s.path;
-            inp.value = String(s.value);
-            inp.addEventListener('input', () => hooks.markDirty());
-            lab.appendChild(inp);
-        }
-        row.appendChild(lab);
-        container.appendChild(row);
-    }
-    if (Array.isArray(bundle) && bundle.length > 0) {
-        const wrap = document.createElement('div');
-        wrap.className = 'studio-content-array-hint';
-        const tbl = document.createElement('table');
-        tbl.className = 'studio-table studio-content-mini-table';
-        tbl.innerHTML =
-            '<thead><tr><th>#</th><th>Id / key</th><th>Preview</th></tr></thead><tbody></tbody>';
-        const tb = tbl.querySelector('tbody');
-        bundle.forEach((row, idx) => {
-            const tr = document.createElement('tr');
-            const id =
-                row && typeof row === 'object'
-                    ? String(row.id ?? row.href ?? row.title ?? row.link ?? '—')
-                    : '—';
-            const prev =
-                row && typeof row === 'object' && row.en && typeof row.en === 'object'
-                    ? String(row.en.title ?? row.en.category ?? '')
-                    : '';
-            tr.innerHTML = `<td>${idx}</td><td>${escapeHtml(id.slice(0, 80))}</td><td>${escapeHtml(prev.slice(0, 120))}</td>`;
-            tb?.appendChild(tr);
-        });
-        const cap = document.createElement('p');
-        cap.className = 'studio-muted';
-        cap.innerHTML = `<strong>${bundle.length}</strong> items — edit fields below (paths like <code>0.en.title</code>).`;
-        wrap.appendChild(cap);
-        wrap.appendChild(tbl);
-        container.insertBefore(wrap, container.firstChild);
-    }
-    if (!grouped.length && !scalars.length) {
-        const p = document.createElement('p');
-        p.className = 'studio-muted';
-        p.textContent = 'No editable text or numeric fields were found for this section.';
-        container.appendChild(p);
-    }
-}
-
 function renderEmail() {
     return `
         <div class="studio-section-stack">
@@ -797,6 +640,7 @@ function renderServices() {
             <div class="studio-tabs" data-studio-tabs="services">
                 <div class="studio-tabs__list" role="tablist" aria-label="Services sections">
                     <button type="button" class="studio-tabs__tab is-active" role="tab" id="studio-svc-tab-connect" aria-selected="true" aria-controls="studio-svc-panel-connect">Connection</button>
+                    <button type="button" class="studio-tabs__tab" role="tab" id="studio-svc-tab-subscription" aria-selected="false" aria-controls="studio-svc-panel-subscription">Subscription</button>
                     <button type="button" class="studio-tabs__tab" role="tab" id="studio-svc-tab-stripe" aria-selected="false" aria-controls="studio-svc-panel-stripe">Stripe</button>
                     <button type="button" class="studio-tabs__tab" role="tab" id="studio-svc-tab-resend" aria-selected="false" aria-controls="studio-svc-panel-resend">Resend</button>
                     <button type="button" class="studio-tabs__tab" role="tab" id="studio-svc-tab-s3" aria-selected="false" aria-controls="studio-svc-panel-s3">Amazon S3</button>
@@ -816,6 +660,23 @@ function renderServices() {
                             <div class="studio-field studio-field--full studio-services-actions">
                                 <button type="button" class="studio-btn-primary" id="studio-svc-save">Save</button>
                                 <button type="button" class="studio-btn-ghost" id="studio-svc-health">Test connection</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="studio-svc-panel-subscription" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-svc-tab-subscription" hidden>
+                        <div class="studio-form-grid studio-services-grid studio-services-grid--panel">
+                            <h3 class="studio-subheading studio-field--full">Application form — global “what’s included”</h3>
+                            <p class="studio-muted studio-field--full">Stored in the canister as site setting <code>applicationPaymentGlobal</code> (admin write). Shown on every program application form, merged with per-program bullets under Programs → Payment option details.</p>
+                            <label class="studio-field studio-field--full">
+                                <span>English bullets (one per line)</span>
+                                <textarea id="studio-svc-subscription-en" class="studio-input studio-textarea" rows="10" spellcheck="true" autocomplete="off"></textarea>
+                            </label>
+                            <label class="studio-field studio-field--full">
+                                <span>日本語 bullets (1行に1つ)</span>
+                                <textarea id="studio-svc-subscription-ja" class="studio-input studio-textarea" rows="10" spellcheck="true" autocomplete="off"></textarea>
+                            </label>
+                            <div class="studio-field studio-field--full studio-services-actions">
+                                <button type="button" class="studio-btn-primary" id="studio-svc-subscription-save">Save</button>
                             </div>
                         </div>
                     </div>
@@ -1020,6 +881,221 @@ function escapeHtml(s) {
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
+}
+
+/**
+ * @param {object} row
+ */
+function artistRowDisplayNameForBatch(row) {
+    const en = row?.locales?.en;
+    if (en && typeof en === 'object' && en.name != null && String(en.name).trim()) {
+        return String(en.name).trim();
+    }
+    return String(row?.slug || row?.id || '').trim() || '—';
+}
+
+/**
+ * Batch LLM world generator modal (pills + progress).
+ * @param {HTMLElement} mainEl
+ * @param {() => Promise<void>} reloadArtistsTable
+ */
+function wireArtistWorldBatchUI(mainEl, reloadArtistsTable) {
+    const openBtn = mainEl.querySelector('#studio-artists-world-batch-open');
+    if (!(openBtn instanceof HTMLButtonElement)) return;
+
+    const syncLiveState = () => {
+        const live = getDataSource() === 'live';
+        openBtn.disabled = !live;
+        openBtn.title = live ? '' : 'Requires live data source (IC LLM on canister).';
+    };
+    syncLiveState();
+    window.addEventListener('fusion-data-source-change', syncLiveState);
+
+    openBtn.addEventListener('click', async () => {
+        /** @type {object[]} */
+        let allArtists = [];
+        try {
+            allArtists = await getArtistsForStudio();
+        } catch (e) {
+            alert(e instanceof Error ? e.message : String(e));
+            return;
+        }
+        const max = STUDIO_WORLD_BATCH_MAX;
+        const notice =
+            allArtists.length > max
+                ? `<p class="studio-muted">Up to <strong>${max}</strong> artists per run. <strong>Select all</strong> stages the first ${max} in roster order (${allArtists.length} total).</p>`
+                : `<p class="studio-muted">${allArtists.length} artist(s). Maximum <strong>${max}</strong> per run.</p>`;
+
+        const pillsHtml = allArtists
+            .map((row) => {
+                const id = String(row.id ?? '').trim();
+                const label = escapeHtml(artistRowDisplayNameForBatch(row));
+                return `<button type="button" class="studio-world-batch-pill studio-world-batch-pill--idle" data-artist-id="${escapeHtml(id)}">${label}</button>`;
+            })
+            .join('');
+
+        const inner = `
+${notice}
+<label class="studio-field studio-field--row" style="margin:0.75rem 0;align-items:center;gap:0.5rem">
+<input type="checkbox" id="studio-world-batch-overwrite" />
+<span>Overwrite existing world fields (otherwise only fill empty fields)</span>
+</label>
+<div class="studio-world-batch-actions">
+<button type="button" class="studio-btn-ghost" id="studio-world-batch-select-all">Select all (up to ${max})</button>
+<button type="button" class="studio-btn-ghost" id="studio-world-batch-clear">Clear selection</button>
+</div>
+<div class="studio-world-batch-pills" id="studio-world-batch-pills">${pillsHtml}</div>
+<div class="studio-world-batch-progress" id="studio-world-batch-progress" hidden>
+<div class="studio-world-batch-progress-track" aria-hidden="true"><div class="studio-world-batch-progress-bar" id="studio-world-batch-progress-bar"></div></div>
+<span class="studio-muted studio-world-batch-progress-label" id="studio-world-batch-progress-label">0 / 0</span>
+</div>
+<p class="studio-banner studio-banner--error" id="studio-world-batch-run-error" style="display:none;margin-top:0.5rem" role="alert"></p>
+<div class="studio-modal-actions" style="margin-top:1rem;padding-top:0.75rem;border-top:1px solid #e2e8f0">
+<button type="button" class="studio-btn-ghost" data-studio-modal-close="1">Cancel</button>
+<button type="button" class="studio-btn-primary" id="studio-world-batch-run" disabled>Run</button>
+</div>`;
+
+        const { root } = openStudioModal(inner, {
+            title: 'Generate world from bio (batch)',
+            wide: true,
+        });
+
+        const byId = new Map(allArtists.map((r) => [String(r.id), r]));
+        /** @type {Set<string>} */
+        const staged = new Set();
+        const maxSel = max;
+
+        const pillsRoot = root.querySelector('#studio-world-batch-pills');
+        const runBtn = root.querySelector('#studio-world-batch-run');
+        const progressEl = root.querySelector('#studio-world-batch-progress');
+        const progressBar = root.querySelector('#studio-world-batch-progress-bar');
+        const progressLabel = root.querySelector('#studio-world-batch-progress-label');
+        const runErr = root.querySelector('#studio-world-batch-run-error');
+
+        /** @param {string} id */
+        function findPill(id) {
+            for (const b of pillsRoot?.querySelectorAll('button[data-artist-id]') ?? []) {
+                if (b.getAttribute('data-artist-id') === id) return b;
+            }
+            return null;
+        }
+
+        /**
+         * @param {string} id
+         * @param {'idle' | 'staged' | 'ok' | 'err'} state
+         * @param {string} [errMsg]
+         */
+        function setPillState(id, state, errMsg) {
+            const pill = findPill(id);
+            if (!(pill instanceof HTMLButtonElement)) return;
+            pill.classList.remove(
+                'studio-world-batch-pill--idle',
+                'studio-world-batch-pill--staged',
+                'studio-world-batch-pill--ok',
+                'studio-world-batch-pill--err',
+            );
+            pill.classList.add(`studio-world-batch-pill--${state}`);
+            pill.title = state === 'err' ? errMsg || 'Error' : '';
+            if (state === 'idle') pill.removeAttribute('title');
+        }
+
+        function updateRunEnabled() {
+            if (runBtn instanceof HTMLButtonElement) runBtn.disabled = staged.size === 0;
+        }
+
+        pillsRoot?.querySelectorAll('.studio-world-batch-pill').forEach((pill) => {
+            pill.addEventListener('click', () => {
+                const id = pill.getAttribute('data-artist-id');
+                if (!id) return;
+                if (staged.has(id)) {
+                    staged.delete(id);
+                    setPillState(id, 'idle');
+                } else if (staged.size >= maxSel) {
+                    alert(`At most ${maxSel} artists per run.`);
+                } else {
+                    staged.add(id);
+                    setPillState(id, 'staged');
+                }
+                updateRunEnabled();
+            });
+        });
+
+        root.querySelector('#studio-world-batch-select-all')?.addEventListener('click', () => {
+            staged.clear();
+            pillsRoot?.querySelectorAll('.studio-world-batch-pill').forEach((p) => {
+                const id = p.getAttribute('data-artist-id');
+                if (id) setPillState(id, 'idle');
+            });
+            let n = 0;
+            for (const row of allArtists) {
+                const id = String(row.id ?? '').trim();
+                if (!id || n >= maxSel) break;
+                staged.add(id);
+                setPillState(id, 'staged');
+                n += 1;
+            }
+            updateRunEnabled();
+        });
+
+        root.querySelector('#studio-world-batch-clear')?.addEventListener('click', () => {
+            staged.clear();
+            pillsRoot?.querySelectorAll('.studio-world-batch-pill').forEach((p) => {
+                const id = p.getAttribute('data-artist-id');
+                if (id) setPillState(id, 'idle');
+            });
+            updateRunEnabled();
+        });
+
+        runBtn?.addEventListener('click', async () => {
+            const ow = root.querySelector('#studio-world-batch-overwrite');
+            const overwrite = ow instanceof HTMLInputElement && ow.checked;
+            const mode = overwrite ? 'overwrite' : 'fillEmpty';
+            if (runErr instanceof HTMLElement) {
+                runErr.style.display = 'none';
+                runErr.textContent = '';
+            }
+            if (progressEl instanceof HTMLElement) progressEl.hidden = false;
+            const ids = [...staged];
+            let done = 0;
+            const total = ids.length;
+            if (progressLabel) progressLabel.textContent = `0 / ${total}`;
+            if (progressBar instanceof HTMLElement) progressBar.style.width = total ? '0%' : '100%';
+            if (runBtn instanceof HTMLButtonElement) runBtn.disabled = true;
+
+            for (const id of ids) {
+                const row = byId.get(id);
+                if (!row) {
+                    setPillState(id, 'err', 'Row missing');
+                    done += 1;
+                    if (progressLabel) progressLabel.textContent = `${done} / ${total}`;
+                    if (progressBar instanceof HTMLElement) {
+                        progressBar.style.width = total ? `${(done / total) * 100}%` : '100%';
+                    }
+                    continue;
+                }
+                try {
+                    await generateAndUpsertArtistWorldFromBio(row, mode);
+                    setPillState(id, 'ok');
+                } catch (e) {
+                    const msg = e instanceof Error ? e.message : String(e);
+                    setPillState(id, 'err', msg);
+                    if (runErr instanceof HTMLElement) {
+                        runErr.style.display = 'block';
+                        runErr.textContent = msg;
+                    }
+                }
+                done += 1;
+                if (progressLabel) progressLabel.textContent = `${done} / ${total}`;
+                if (progressBar instanceof HTMLElement) {
+                    progressBar.style.width = total ? `${(done / total) * 100}%` : '100%';
+                }
+            }
+            if (runBtn instanceof HTMLButtonElement) runBtn.disabled = false;
+            await reloadArtistsTable();
+        });
+
+        updateRunEnabled();
+    });
 }
 
 /**
@@ -1606,7 +1682,7 @@ async function initArtists(mainEl) {
                 if (!(cb instanceof HTMLInputElement)) return;
                 const id = cb.getAttribute('data-id');
                 if (!id) return;
-                const r = setManualFeaturedForArtist(id, cb.checked);
+                const r = await setManualFeaturedForArtistStudio(id, cb.checked);
                 if (!r.ok) {
                     cb.checked = !cb.checked;
                     if (banner) {
@@ -1623,8 +1699,33 @@ async function initArtists(mainEl) {
                 if (!(cb instanceof HTMLInputElement)) return;
                 const id = cb.getAttribute('data-id');
                 if (!id) return;
-                setFeaturableForArtist(id, cb.checked);
+                await setFeaturableForArtistStudio(id, cb.checked);
                 await load();
+            });
+        });
+        tbody.querySelectorAll('.studio-art-mrp').forEach((inp) => {
+            inp.addEventListener('blur', async () => {
+                if (!(inp instanceof HTMLInputElement)) return;
+                const id = inp.getAttribute('data-id');
+                if (!id) return;
+                const row = allArtists.find((x) => String(x.id) === String(id));
+                const prev = row ? String(row.mostRecentProgram ?? '').trim() : '';
+                const next = inp.value.trim();
+                if (next === prev) return;
+                try {
+                    await setArtistMostRecentProgram(id, next);
+                    if (row) row.mostRecentProgram = next;
+                    if (banner) {
+                        banner.className = 'studio-banner studio-banner--ok';
+                        banner.textContent = `Saved most recent program for ${id}.`;
+                    }
+                } catch (e) {
+                    inp.value = prev;
+                    if (banner) {
+                        banner.className = 'studio-banner studio-banner--error';
+                        banner.textContent = e instanceof Error ? e.message : String(e);
+                    }
+                }
             });
         });
     };
@@ -1636,12 +1737,12 @@ async function initArtists(mainEl) {
             if (quickFilter === 'featurable' && !a.featurable) return false;
             if (quickFilter === 'featured' && !a.featured) return false;
             if (!q) return true;
-            const hay = `${a.slug} ${a.id} ${a.visibility} ${a.featuredOrder}`.toLowerCase();
+            const hay = `${a.slug} ${a.id} ${a.visibility} ${a.featuredOrder} ${a.mostRecentProgram ?? ''}`.toLowerCase();
             return hay.includes(q);
         });
         if (countEl) countEl.textContent = String(q || quickFilter !== 'all' ? artists.length : allArtists.length);
         if (!artists.length) {
-            tbody.innerHTML = `<tr><td colspan="9">${allArtists.length ? 'No rows match filters.' : 'No artists.'}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="10">${allArtists.length ? 'No rows match filters.' : 'No artists.'}</td></tr>`;
             return;
         }
         tbody.innerHTML = artists
@@ -1651,6 +1752,7 @@ async function initArtists(mainEl) {
                 const imp = a.imported ? 'Yes' : '—';
                 const code = a.accessCode ? escapeHtml(String(a.accessCode)) : '—';
                 const idEsc = escapeHtml(String(a.id || ''));
+                const mrpVal = escapeHtml(String(a.mostRecentProgram ?? ''));
                 const feat = a.featured === true ? 'checked' : '';
                 const featur = a.featurable === true ? 'checked' : '';
                 return `<tr>
@@ -1661,6 +1763,7 @@ async function initArtists(mainEl) {
                 <td>${escapeHtml(a.visibility || '')}</td>
                 <td class="studio-td-cb"><input type="checkbox" class="studio-art-featured-cb" data-id="${idEsc}" ${feat} aria-label="Featured" /></td>
                 <td class="studio-td-cb"><input type="checkbox" class="studio-art-featurable-cb" data-id="${idEsc}" ${featur} aria-label="Featurable for random" /></td>
+                <td><input type="text" class="studio-input studio-art-mrp" data-id="${idEsc}" value="${mrpVal}" placeholder="Program id" aria-label="Most recent program" /></td>
                 <td><a class="studio-action-link" href="/profile/${encodeURIComponent(slugRaw)}" target="_blank" rel="noopener">Open profile</a></td>
                 <td class="studio-td-actions"><button type="button" class="studio-btn-ghost studio-art-manage" data-id="${idEsc}">MANAGE</button></td>
             </tr>`;
@@ -1786,7 +1889,7 @@ async function initArtists(mainEl) {
                     const flags = raw._featuredFlags;
                     delete raw._featuredFlags;
                     try {
-                        raw.featuredOrder = applyFeaturedFlagsFromStudioSave(String(full.id), {
+                        raw.featuredOrder = await applyFeaturedFlagsFromStudioSaveLive(String(full.id), {
                             featured: Boolean(flags?.featured),
                             featurable: Boolean(flags?.featurable),
                         });
@@ -1839,12 +1942,26 @@ async function initArtists(mainEl) {
 
     const load = async () => {
         if (banner) {
-            banner.textContent = `Data source: ${getDataSource()} — ${getDataSource() === 'test' ? 'testData + Studio overlay (localStorage)' : 'canister listArtists'}`;
+            banner.textContent = `Data source: ${getDataSource()} — ${getDataSource() === 'test' ? 'testData + Studio overlay (localStorage)' : 'canister (artists + featured strip state)'}`;
         }
         allArtists = await getArtistsForStudio();
         const rnd = mainEl.querySelector('#studio-artists-random-featured');
         if (rnd instanceof HTMLInputElement) {
-            rnd.checked = readArtistFeaturedMeta().randomFeatured;
+            if (getDataSource() === 'test') {
+                rnd.checked = readArtistFeaturedMeta().randomFeatured;
+            } else {
+                try {
+                    const actor = await getFusionBackendActor();
+                    if (typeof actor.getArtistFeaturedGalleryPublic === 'function') {
+                        const g = await actor.getArtistFeaturedGalleryPublic();
+                        rnd.checked = g?.randomFeatured === true;
+                    } else {
+                        rnd.checked = readArtistFeaturedMeta().randomFeatured;
+                    }
+                } catch {
+                    rnd.checked = readArtistFeaturedMeta().randomFeatured;
+                }
+            }
         }
         applyArtistFilter();
     };
@@ -1869,17 +1986,24 @@ async function initArtists(mainEl) {
         }
     });
 
-    const runLegacySync = async (label, fn) => {
+    /** @param {{ hero?: boolean }} [opts] */
+    const runLegacySync = async (label, fn, opts = {}) => {
+        const isHeroSync = opts.hero === true;
         if (!banner) return;
         banner.className = 'studio-banner studio-banner--info';
         banner.textContent = `${label}…`;
         try {
             const n = await fn();
             banner.className = 'studio-banner studio-banner--ok';
-            banner.textContent =
-                n > 0
-                    ? `${label}: updated ${n} artist(s). Upload matching files to S3 under uploads/legacyProfiles/ if needed.`
+            if (n > 0) {
+                banner.textContent = isHeroSync
+                    ? `${label}: cleared all profile hero images and set legacy URLs for ${n} artist(s). Upload matching files to S3 under uploads/legacyProfiles/ if needed.`
+                    : `${label}: updated ${n} artist(s). Upload matching files to S3 under uploads/legacyProfiles/ if needed.`;
+            } else {
+                banner.textContent = isHeroSync
+                    ? `${label}: no artists in roster.`
                     : `${label}: no artists needed updates (already have URLs or gallery).`;
+            }
             await load();
         } catch (e) {
             banner.className = 'studio-banner studio-banner--error';
@@ -1891,7 +2015,7 @@ async function initArtists(mainEl) {
         const isHero = kind === 'hero';
         const title = isHero ? 'Sync Profile Images' : 'Sync Gallery';
         const intro = isHero
-            ? 'This updates artists whose profile hero image is still empty. Matching files should exist on S3 (or URLs will 404 until uploaded).'
+            ? 'This clears every artist’s profile hero image, then sets each to the legacy S3 URL below (all roster artists). Matching files should exist on S3 (or URLs will 404 until uploaded). Temporary tool — see docs/delete-later.md.'
             : 'This fills English and Japanese intro gallery slots when all three slots have no image URL. Matching files should exist on S3 (or URLs will 404 until uploaded).';
         const urlHelp = isHero
             ? `<p class="studio-muted" style="margin:0 0 0.5rem"><strong>URL format</strong> — one file per artist:</p>
@@ -1913,7 +2037,11 @@ ${urlHelp}
         const { close, root } = openStudioModal(inner, { title: `Confirm: ${title}`, compact: true });
         root.querySelector('#studio-legacy-sync-confirm')?.addEventListener('click', () => {
             close();
-            void runLegacySync(title, isHero ? syncStudioArtistsLegacyHeroImages : syncStudioArtistsLegacyIntroGalleries);
+            void runLegacySync(
+                title,
+                isHero ? syncStudioArtistsLegacyHeroImages : syncStudioArtistsLegacyIntroGalleries,
+                isHero ? { hero: true } : {}
+            );
         });
     };
 
@@ -1923,6 +2051,83 @@ ${urlHelp}
     mainEl.querySelector('#studio-artists-sync-gallery')?.addEventListener('click', () => {
         openLegacySyncConfirm('gallery');
     });
+
+    const shoutFields = mainEl.querySelector('#studio-artists-shout-fields');
+    const shoutSave = mainEl.querySelector('#studio-artists-shout-save');
+    const shoutMsg = mainEl.querySelector('#studio-artists-shout-msg');
+
+    const showShoutMsg = (kind, text) => {
+        if (!(shoutMsg instanceof HTMLElement)) return;
+        if (!text) {
+            shoutMsg.style.display = 'none';
+            shoutMsg.textContent = '';
+            return;
+        }
+        shoutMsg.style.display = 'block';
+        shoutMsg.className = `studio-banner studio-banner--${kind}`;
+        shoutMsg.textContent = text;
+    };
+
+    const loadArtistsShoutFields = async () => {
+        if (!shoutFields) return;
+        const bundle = await getContentBundleForStudio('artists-page', { forStudio: true });
+        const b =
+            bundle && typeof bundle === 'object'
+                ? /** @type {Record<string, unknown>} */ (bundle)
+                : { en: {}, ja: {} };
+        const en = b.en && typeof b.en === 'object' ? /** @type {Record<string, unknown>} */ (b.en) : {};
+        const ja = b.ja && typeof b.ja === 'object' ? /** @type {Record<string, unknown>} */ (b.ja) : {};
+        const enPlain =
+            typeof en.shoutText === 'string'
+                ? String(en.shoutText).replace(/\r\n/g, '\n')
+                : shoutHtmlToPlain(String(en.shoutHtml ?? ''));
+        const jaPlain =
+            typeof ja.shoutText === 'string'
+                ? String(ja.shoutText).replace(/\r\n/g, '\n')
+                : shoutHtmlToPlain(String(ja.shoutHtml ?? ''));
+        shoutFields.replaceChildren();
+        appendContentLocalePairRow(
+            shoutFields,
+            'artists-page',
+            {
+                path: 'en.shoutText',
+                label: 'Shout headline',
+                value: enPlain,
+            },
+            {
+                path: 'ja.shoutText',
+                label: 'Shout headline',
+                value: jaPlain,
+            },
+            {
+                markDirty: () => {},
+                translateEnToJa: (text) => studioTranslateEnToJa(text),
+            }
+        );
+    };
+
+    shoutSave?.addEventListener('click', async () => {
+        if (!(shoutFields instanceof HTMLElement)) return;
+        const enTa = shoutFields.querySelector('[data-path="en.shoutText"]');
+        const jaTa = shoutFields.querySelector('[data-path="ja.shoutText"]');
+        const enVal = enTa instanceof HTMLTextAreaElement ? enTa.value : '';
+        const jaVal = jaTa instanceof HTMLTextAreaElement ? jaTa.value : '';
+        if (shoutSave instanceof HTMLButtonElement) shoutSave.disabled = true;
+        showShoutMsg('info', 'Saving…');
+        try {
+            await upsertContentPageStudio('artists-page', {
+                en: { shoutText: enVal },
+                ja: { shoutText: jaVal },
+            });
+            showShoutMsg('ok', 'Saved. Public /artists page will pick up changes after refresh or navigation.');
+        } catch (e) {
+            showShoutMsg('error', e instanceof Error ? e.message : String(e));
+        } finally {
+            if (shoutSave instanceof HTMLButtonElement) shoutSave.disabled = false;
+        }
+    });
+
+    await loadArtistsShoutFields();
 
     searchInput?.addEventListener('input', () => applyArtistFilter());
 
@@ -1937,18 +2142,28 @@ ${urlHelp}
         });
     });
 
-    mainEl.querySelector('#studio-artists-random-featured')?.addEventListener('change', (e) => {
+    mainEl.querySelector('#studio-artists-random-featured')?.addEventListener('change', async (e) => {
         const t = e.target;
         if (t instanceof HTMLInputElement) {
-            setRandomFeaturedMode(t.checked);
-            if (banner) {
-                banner.className = 'studio-banner studio-banner--ok';
-                banner.textContent = t.checked
-                    ? `Random featured: up to ${MAX_MANUAL_FEATURED} featurable artists per home load.`
-                    : 'Manual featured list drives the home strip (max 8).';
+            try {
+                await setRandomFeaturedModeStudio(t.checked);
+                if (banner) {
+                    banner.className = 'studio-banner studio-banner--ok';
+                    banner.textContent = t.checked
+                        ? `Random featured: up to ${MAX_MANUAL_FEATURED} featurable artists per home load.`
+                        : 'Manual featured list drives the home strip (max 8).';
+                }
+            } catch (err) {
+                t.checked = !t.checked;
+                if (banner) {
+                    banner.className = 'studio-banner studio-banner--error';
+                    banner.textContent = err instanceof Error ? err.message : String(err);
+                }
             }
         }
     });
+
+    wireArtistWorldBatchUI(mainEl, load);
 
     await load();
 }
@@ -1972,6 +2187,16 @@ async function initPrograms(mainEl) {
     async function load() {
         if (!tbody) return;
         tbody.innerHTML = '<tr><td colspan="8">Loading…</td></tr>';
+        const seasonInp = mainEl.querySelector('#studio-programs-current-season');
+        let season = '';
+        try {
+            season = await getCurrentProgramSeason();
+        } catch {
+            season = '';
+        }
+        if (seasonInp instanceof HTMLInputElement) {
+            seasonInp.value = season;
+        }
         allPrograms = await getPrograms();
         applyProgramFilter();
     }
@@ -2016,7 +2241,33 @@ async function initPrograms(mainEl) {
                 const id = btn.getAttribute('data-id');
                 const row = allPrograms.find((x) => String(x.id) === String(id));
                 const rl = row?.routeLink || '';
-                if (rl) window.open(`${window.location.origin}${rl}`, '_blank', 'noopener');
+                if (!rl) return;
+                const vis = normalizeProgramVisibility(row?.visibility);
+                if (vis === 'none') {
+                    alert('Preview is not available when visibility is "none". Set visibility to public or private.');
+                    return;
+                }
+                let pathname = rl;
+                try {
+                    pathname = new URL(rl, window.location.origin).pathname;
+                } catch {
+                    /* keep rl */
+                }
+                const canonical = pathname.startsWith('/programs/')
+                    ? `/program/${pathname.slice('/programs/'.length)}`
+                    : pathname;
+                const segs = canonical.split('/').filter(Boolean);
+                const slug =
+                    segs[0] === 'program' && segs[1] && segs[1] !== 'private' ? segs[1] : '';
+                if (vis === 'private' && slug) {
+                    window.open(
+                        `${window.location.origin}/program/private/${encodeURIComponent(slug)}`,
+                        '_blank',
+                        'noopener',
+                    );
+                    return;
+                }
+                window.open(`${window.location.origin}${rl.startsWith('/') ? rl : `/${rl}`}`, '_blank', 'noopener');
             });
         });
         tbody.querySelectorAll('.studio-prog-edit').forEach((btn) => {
@@ -2077,13 +2328,20 @@ async function initPrograms(mainEl) {
         const routeLinkKind = getFieldKind('program-hero', 'routeLink');
         const cardImgKind = getFieldKind('all-programs', 'programs.en.0.imageSrc');
         const localeFormHtml = renderProgramLocaleFormHtml(escapeHtml, enObj, jaObj);
+        const visCur = normalizeProgramVisibility(p.visibility);
+        const visOptions = ['public', 'private', 'none']
+            .map(
+                (opt) =>
+                    `<option value="${opt}" ${visCur === opt ? 'selected' : ''}>${escapeHtml(opt)}</option>`,
+            )
+            .join('');
         const body = `
           <form id="studio-prog-form" class="studio-modal-form studio-modal-form--program">
             <div class="studio-modal-fields-row">
             <label class="studio-field"><span>ID</span><input name="id" required class="studio-input" value="${escapeHtml(String(p.id))}" ${existing ? 'readonly' : ''} /></label>
             <label class="studio-field"><span>routeLink (record) <span class="studio-field-kind-badge studio-field-kind-badge--${routeLinkKind}">${escapeHtml(getFieldKindBadgeLabel(routeLinkKind))}</span></span><input name="routeLink" class="studio-input" value="${escapeHtml(String(p.routeLink || ''))}" /></label>
             <label class="studio-field"><span>featuredOrder</span><input name="featuredOrder" type="number" class="studio-input" value="${escapeHtml(String(p.featuredOrder ?? 0))}" /></label>
-            <label class="studio-field"><span>visibility</span><input name="visibility" class="studio-input" value="${escapeHtml(String(p.visibility || ''))}" /></label>
+            <label class="studio-field"><span>visibility</span><select name="visibility" class="studio-select">${visOptions}</select></label>
             <label class="studio-field"><span>studioStatus</span>
               <select name="studioStatus" class="studio-select">
                 ${['open', 'full', 'active', 'completed', 'comingUp']
@@ -2117,6 +2375,7 @@ async function initPrograms(mainEl) {
             wide: true,
         });
         const localeFormRoot = root.querySelector('.studio-prog-locale-form');
+        bindStudioProgGalleryUrlPreviews(localeFormRoot);
         root.querySelectorAll('input.studio-prog-cover-file[data-upload-target-locale]').forEach((fileEl) => {
             fileEl.addEventListener('change', async (ev) => {
                 const t = ev.target;
@@ -2130,6 +2389,52 @@ async function initPrograms(mainEl) {
                     await uploadBlobToS3(f, targetInput instanceof HTMLInputElement ? targetInput : null, {
                         area: 'studio/programs',
                     });
+                } catch (err) {
+                    const m = err instanceof Error ? err.message : String(err);
+                    alert(`${m}\n\nConfigure S3 presign under Studio → Services.`);
+                }
+                t.value = '';
+            });
+        });
+        root.querySelectorAll('input.studio-prog-fade-file[data-fade-slot]').forEach((fileEl) => {
+            fileEl.addEventListener('change', async (ev) => {
+                const t = ev.target;
+                const f = t && 'files' in t ? t.files?.[0] : null;
+                if (!f || !localeFormRoot) return;
+                const slot = t.getAttribute('data-fade-slot') || '0';
+                const targetInput = localeFormRoot.querySelector(
+                    `.studio-prog-fade-url[data-fade-slot="${slot}"]`
+                );
+                try {
+                    await uploadBlobToS3(f, targetInput instanceof HTMLInputElement ? targetInput : null, {
+                        area: 'studio/programs',
+                    });
+                    if (targetInput instanceof HTMLInputElement) {
+                        targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+                } catch (err) {
+                    const m = err instanceof Error ? err.message : String(err);
+                    alert(`${m}\n\nConfigure S3 presign under Studio → Services.`);
+                }
+                t.value = '';
+            });
+        });
+        root.querySelectorAll('input.studio-prog-strip-file[data-strip-slot]').forEach((fileEl) => {
+            fileEl.addEventListener('change', async (ev) => {
+                const t = ev.target;
+                const f = t && 'files' in t ? t.files?.[0] : null;
+                if (!f || !localeFormRoot) return;
+                const slot = t.getAttribute('data-strip-slot') || '0';
+                const targetInput = localeFormRoot.querySelector(
+                    `.studio-prog-strip-url[data-strip-slot="${slot}"]`
+                );
+                try {
+                    await uploadBlobToS3(f, targetInput instanceof HTMLInputElement ? targetInput : null, {
+                        area: 'studio/programs',
+                    });
+                    if (targetInput instanceof HTMLInputElement) {
+                        targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
                 } catch (err) {
                     const m = err instanceof Error ? err.message : String(err);
                     alert(`${m}\n\nConfigure S3 presign under Studio → Services.`);
@@ -2178,6 +2483,17 @@ async function initPrograms(mainEl) {
             const n = await batchImportProgramsFromJson(data);
             show('ok', `Imported ${n} program record(s).`);
             await load();
+        } catch (e) {
+            show('error', e instanceof Error ? e.message : String(e));
+        }
+    });
+
+    mainEl.querySelector('#studio-programs-current-season-save')?.addEventListener('click', async () => {
+        const inp = mainEl.querySelector('#studio-programs-current-season');
+        if (!(inp instanceof HTMLInputElement)) return;
+        try {
+            await setCurrentProgramSeason(inp.value);
+            show('ok', 'Current season saved.');
         } catch (e) {
             show('error', e instanceof Error ? e.message : String(e));
         }
@@ -2575,7 +2891,7 @@ async function initJournal(mainEl) {
         const linkKind = getFieldKind(jeSlug, 'link');
         const imgKind = getFieldKind(jeSlug, 'imageSrc');
         const body = `
-          <form id="studio-je-form" class="studio-modal-form">
+          <form id="studio-je-form" class="studio-modal-form studio-modal-form--journal">
             <p class="studio-muted">Internal reference: <code class="studio-code-inline">${escapeHtml(shortRefLabel(String(j.id)))}</code></p>
             <div class="studio-modal-fields-row">
             <label class="studio-field studio-field--full"><span>Entry ID</span><input name="id" required class="studio-input" value="${escapeHtml(String(j.id))}" ${existing ? 'readonly' : ''} /></label>
@@ -2597,22 +2913,21 @@ async function initJournal(mainEl) {
               </select>
             </label>
             </div>
-            <div class="studio-locale-split">
-              <label class="studio-field studio-field--stack">
-                <span class="studio-locale-label">English title</span>
-                <input type="text" id="studio-je-title-en" class="studio-input" value="${escapeHtml(plain.titleEn)}" />
-              </label>
-              <label class="studio-field studio-field--stack">
-                <span class="studio-locale-label">日本語 title</span>
-                <input type="text" id="studio-je-title-ja" class="studio-input" value="${escapeHtml(plain.titleJa)}" />
-              </label>
+            <div class="studio-prog-col-headers" aria-hidden="true">
+              <span class="studio-prog-grid-label"></span>
+              <span class="studio-prog-col-title">English</span>
+              <span class="studio-prog-col-title">日本語</span>
             </div>
-            <label class="studio-field studio-field--stack"><span>English body</span>
-              <textarea id="studio-je-body-en" class="studio-textarea" rows="10" spellcheck="true">${escapeHtml(plain.bodyEn)}</textarea>
-            </label>
-            <label class="studio-field studio-field--stack"><span>日本語 body</span>
-              <textarea id="studio-je-body-ja" class="studio-textarea" rows="10" spellcheck="true">${escapeHtml(plain.bodyJa)}</textarea>
-            </label>
+            <div class="studio-prog-grid-row">
+              <span class="studio-prog-grid-label">Title</span>
+              <input type="text" id="studio-je-title-en" class="studio-input studio-prog-grid-input" value="${escapeHtml(plain.titleEn)}" spellcheck="true" />
+              <input type="text" id="studio-je-title-ja" class="studio-input studio-prog-grid-input" value="${escapeHtml(plain.titleJa)}" spellcheck="true" />
+            </div>
+            <div class="studio-prog-grid-row studio-prog-grid-row--textarea">
+              <span class="studio-prog-grid-label">Body</span>
+              <textarea id="studio-je-body-en" class="studio-textarea studio-prog-grid-input" rows="10" spellcheck="true">${escapeHtml(plain.bodyEn)}</textarea>
+              <textarea id="studio-je-body-ja" class="studio-textarea studio-prog-grid-input" rows="10" spellcheck="true">${escapeHtml(plain.bodyJa)}</textarea>
+            </div>
             <div class="studio-modal-actions">
               <button type="submit" class="studio-btn-primary">Save journal entry</button>
             </div>
@@ -2666,206 +2981,6 @@ async function initJournal(mainEl) {
     mainEl.querySelector('#studio-journal-refresh')?.addEventListener('click', () => load());
     mainEl.querySelector('#studio-journal-search')?.addEventListener('input', () => applyJournalFilter());
     await load();
-}
-
-async function initContent(mainEl) {
-    const tbody = mainEl.querySelector('#studio-content-tbody');
-    const editor = mainEl.querySelector('#studio-content-editor');
-    const titleEl = mainEl.querySelector('#studio-content-editor-title');
-    const slugEl = mainEl.querySelector('#studio-content-editor-slug');
-    const fieldsEl = mainEl.querySelector('#studio-content-fields');
-    const msg = mainEl.querySelector('#studio-content-msg');
-    const unsavedEl = mainEl.querySelector('#studio-content-unsaved');
-    const savedAtEl = mainEl.querySelector('#studio-content-saved-at');
-    const placeholderEl = mainEl.querySelector('#studio-content-live-placeholder');
-    const adoptBtn = mainEl.querySelector('#studio-content-adopt');
-    /** @type {string | null} */
-    let activeSlug = null;
-    /** @type {boolean} */
-    let contentDirty = false;
-
-    const showMsg = (kind, text) => {
-        if (!msg) return;
-        msg.style.display = text ? 'block' : 'none';
-        msg.className = `studio-banner studio-banner--${kind}`;
-        msg.textContent = text;
-    };
-
-    const setPlaceholderUi = (on) => {
-        if (placeholderEl) placeholderEl.style.display = on ? 'block' : 'none';
-        if (adoptBtn instanceof HTMLElement) adoptBtn.style.display = on ? '' : 'none';
-    };
-
-    const setDirty = (dirty) => {
-        contentDirty = dirty;
-        if (unsavedEl) {
-            unsavedEl.style.display = dirty ? 'block' : 'none';
-        }
-        const saveBtn = mainEl.querySelector('#studio-content-save');
-        if (saveBtn instanceof HTMLButtonElement) {
-            saveBtn.setAttribute('aria-busy', 'false');
-        }
-    };
-
-    /** @param {string} slug */
-    const registryEntry = (slug) => CONTENT_PAGE_REGISTRY.find((e) => e.slug === slug);
-
-    const onBeforeUnload = (ev) => {
-        if (contentDirty && editor?.style.display !== 'none') {
-            ev.preventDefault();
-            ev.returnValue = '';
-        }
-    };
-    window.addEventListener('beforeunload', onBeforeUnload);
-
-    const summary = await getContentSummary();
-    if (!tbody) return;
-    const previewText = (s) => {
-        const t = [s.title, s.snippet].filter(Boolean).join(' — ');
-        return t.length > 160 ? `${t.slice(0, 157)}…` : t;
-    };
-    tbody.innerHTML = summary
-        .map(
-            (s) => `
-        <tr>
-            <td>${escapeHtml(s.label)}</td>
-            <td>${escapeHtml(previewText(s))}</td>
-            <td><button type="button" class="studio-btn-ghost studio-content-edit" data-slug="${escapeHtml(s.slug)}">Edit</button></td>
-        </tr>`
-        )
-        .join('');
-
-    const openEditor = async (slug) => {
-        activeSlug = slug;
-        if (editor) editor.style.display = 'block';
-        const entry = registryEntry(slug);
-        if (titleEl) titleEl.textContent = entry?.label ? `Edit: ${entry.label}` : 'Edit section';
-        if (slugEl) {
-            slugEl.textContent = slug ? `Slug: ${slug}` : '';
-            slugEl.hidden = !slug;
-        }
-        showMsg('info', '');
-        setDirty(false);
-        if (savedAtEl) savedAtEl.style.display = 'none';
-        const loaded = await getContentBundleForStudio(slug, { forStudio: true, returnMeta: true });
-        const bundle =
-            loaded && typeof loaded === 'object' && 'bundle' in loaded
-                ? /** @type {{ bundle: unknown }} */ (loaded).bundle
-                : loaded;
-        const isLivePlaceholder =
-            loaded && typeof loaded === 'object' && 'isLivePlaceholder' in loaded
-                ? /** @type {{ isLivePlaceholder: boolean }} */ (loaded).isLivePlaceholder
-                : false;
-        setPlaceholderUi(isLivePlaceholder);
-        if (fieldsEl) {
-            fillStudioContentPlainFields(fieldsEl, bundle, slug || '', {
-                markDirty: () => setDirty(true),
-            });
-        }
-        titleEl?.focus();
-        editor?.scrollIntoView({ behavior: 'smooth' });
-    };
-
-    tbody.querySelectorAll('.studio-content-edit').forEach((btn) => {
-        btn.addEventListener('click', () => openEditor(btn.getAttribute('data-slug') || ''));
-    });
-
-    fieldsEl?.addEventListener('change', async (ev) => {
-        const t = ev.target;
-        if (!(t instanceof HTMLInputElement) || t.type !== 'file') return;
-        const path = t.dataset.uploadFor;
-        if (!path || !fieldsEl) return;
-        const f = t.files?.[0];
-        if (!f) return;
-        const el = fieldsEl.querySelector(`.studio-content-str-value[data-path="${CSS.escape(path)}"]`);
-        if (!(el instanceof HTMLTextAreaElement) && !(el instanceof HTMLInputElement)) return;
-        try {
-            await uploadBlobToS3(f, el, { area: 'studio/content' });
-            setDirty(true);
-            showMsg('ok', 'Uploaded — URL inserted. Save to persist.');
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-        } catch (err) {
-            const m = err instanceof Error ? err.message : String(err);
-            const hint =
-                /presign|fetch|network|failed/i.test(m) && !/S3 upload failed/.test(m)
-                    ? `${m} — configure Services (integration API + S3) via the Services tab.`
-                    : m;
-            showMsg('error', hint);
-        }
-        t.value = '';
-    });
-
-    mainEl.querySelector('#studio-content-cancel')?.addEventListener('click', () => {
-        if (editor) editor.style.display = 'none';
-        activeSlug = null;
-        setDirty(false);
-        setPlaceholderUi(false);
-        if (savedAtEl) savedAtEl.style.display = 'none';
-    });
-
-    const persistContent = async () => {
-        if (!activeSlug || !fieldsEl) return;
-        const map = collectContentStringValues(fieldsEl);
-        /** @type {Record<string, string>} */
-        const scalarMap = {};
-        fieldsEl.querySelectorAll('input[data-scalar-path]').forEach((el) => {
-            const p = el.getAttribute('data-scalar-path');
-            if (!p) return;
-            if (el instanceof HTMLInputElement && el.type === 'checkbox') {
-                scalarMap[p] = el.checked ? 'true' : 'false';
-            } else if (el instanceof HTMLInputElement) {
-                scalarMap[p] = el.value;
-            }
-        });
-        const bundle = await getContentBundleForStudio(activeSlug, { forStudio: true });
-        let next = applyStringPatches(bundle, map);
-        next = applyScalarPatches(bundle, next, scalarMap);
-        if (activeSlug === 'context') {
-            next = syncContextJaMediaFromEn(next);
-        }
-        await upsertContentPageStudio(activeSlug, next);
-        const ts = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-        if (savedAtEl) {
-            savedAtEl.textContent = `Last saved ${ts}`;
-            savedAtEl.style.display = 'block';
-        }
-        setDirty(false);
-        setPlaceholderUi(false);
-        showMsg('ok', 'Saved.');
-    };
-
-    mainEl.querySelector('#studio-content-save')?.addEventListener('click', async () => {
-        try {
-            await persistContent();
-        } catch (e) {
-            showMsg('error', e instanceof Error ? e.message : String(e));
-        }
-    });
-
-    adoptBtn?.addEventListener('click', async () => {
-        try {
-            await persistContent();
-        } catch (e) {
-            showMsg('error', e instanceof Error ? e.message : String(e));
-        }
-    });
-
-    const filterInput = mainEl.querySelector('#studio-content-filter');
-    const countEl = mainEl.querySelector('#studio-content-count');
-    const total = summary.length;
-    const applyContentFilter = () => {
-        const q = (filterInput instanceof HTMLInputElement ? filterInput.value : '').trim().toLowerCase();
-        let n = 0;
-        tbody?.querySelectorAll('tr').forEach((tr) => {
-            const t = tr.textContent?.toLowerCase() ?? '';
-            const show = !q || t.includes(q);
-            tr.style.display = show ? '' : 'none';
-            if (show) n += 1;
-        });
-        if (countEl) countEl.textContent = q ? `${n} of ${total} section(s) match` : `${total} sections`;
-    };
-    applyContentFilter();
-    filterInput?.addEventListener('input', applyContentFilter);
 }
 
 async function initEmail(mainEl) {
@@ -3185,7 +3300,42 @@ async function initServices(mainEl) {
     };
 
     load();
+    const subEn = mainEl.querySelector('#studio-svc-subscription-en');
+    const subJa = mainEl.querySelector('#studio-svc-subscription-ja');
+    const loadSubscriptionFields = async () => {
+        try {
+            const g = await getApplicationPaymentGlobal();
+            if (subEn) subEn.value = (g.en?.whatsIncludedBullets || []).join('\n');
+            if (subJa) subJa.value = (g.ja?.whatsIncludedBullets || []).join('\n');
+        } catch {
+            /* ignore */
+        }
+    };
+    void loadSubscriptionFields();
+
     initServicesTabs(mainEl);
+
+    mainEl.querySelector('#studio-svc-subscription-save')?.addEventListener('click', async () => {
+        const linesEn = String(subEn?.value || '')
+            .split(/\r?\n/)
+            .map((s) => s.trim())
+            .filter(Boolean);
+        const linesJa = String(subJa?.value || '')
+            .split(/\r?\n/)
+            .map((s) => s.trim())
+            .filter(Boolean);
+        show('info', 'Saving…');
+        try {
+            await setApplicationPaymentGlobal({
+                en: { whatsIncludedBullets: linesEn },
+                ja: { whatsIncludedBullets: linesJa },
+            });
+            show('ok', 'Saved subscription application copy.');
+            await loadSubscriptionFields();
+        } catch (e) {
+            show('error', e instanceof Error ? e.message : String(e));
+        }
+    });
 
     mainEl.querySelector('#studio-svc-save')?.addEventListener('click', () => save());
     mainEl.querySelector('#studio-svc-health')?.addEventListener('click', async () => {

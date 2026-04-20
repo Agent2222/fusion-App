@@ -1,0 +1,16 @@
+# Fusion — llms.txt
+# Site: https://fusionart.world
+# Fusion is a premium art platform connecting artists with Japan artist residency programs, editions, and editorial content.
+
+User-agent: *
+Allow: /
+
+# Key public hubs
+# / — Home
+# /programs — Japan artist residency programs
+# /artists — Artists
+# /journal — Editorial journal
+# /context — Mission and ecosystem
+# /contact — Contact
+
+Contact: mailto:info@fusionart.world

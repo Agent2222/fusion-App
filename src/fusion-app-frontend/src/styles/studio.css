@@ -51,6 +51,15 @@ html[data-studio='true'] body {
   --studio-btn-ghost-border: var(--c2);
   --studio-btn-ghost-fg: var(--c2);
   --studio-btn-ghost-bg: var(--c3);
+  /* Vertical / horizontal rhythm (editorial workspace) */
+  --studio-space-xs: 0.35rem;
+  --studio-space-sm: 0.65rem;
+  --studio-space-md: 1rem;
+  --studio-space-lg: 1.5rem;
+  --studio-space-xl: 2.25rem;
+  --studio-space-2xl: 3rem;
+  /* Slightly lifted canvas behind cards (Phase E aligns with this token) */
+  --studio-workspace-canvas: color-mix(in srgb, var(--studio-workspace-bg) 88%, #ffffff 12%);
 }
 
 .studio-app {
@@ -288,15 +297,103 @@ button.studio-wordmark-btn:hover {
   background: #f8fafc !important;
 }
 
+/* Persistent workspace context: breadcrumb + optional TOC (plan Phase A) */
+.studio-workspace-rail {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--studio-space-lg);
+  padding: var(--studio-space-sm) var(--studio-space-lg) var(--studio-space-md);
+  background: var(--studio-workspace-canvas);
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.studio-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.5rem;
+  min-width: 0;
+  font-variation-settings: var(--fv-label);
+  font-size: 0.82rem;
+  color: var(--studio-muted);
+}
+
+.studio-breadcrumb__root {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--studio-muted);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.studio-breadcrumb__root:hover {
+  color: #0f172a;
+}
+
+.studio-breadcrumb__sep {
+  color: #94a3b8;
+  user-select: none;
+}
+
+.studio-breadcrumb__current {
+  font-variation-settings: var(--fv-label-strong);
+  color: #0f172a;
+}
+
+.studio-breadcrumb__trail {
+  color: var(--studio-muted);
+}
+
+.studio-workspace-toc {
+  flex: 0 0 min(220px, 32%);
+  max-width: 280px;
+  padding: 0.15rem 0 0;
+  font-size: 0.78rem;
+  color: var(--studio-muted);
+}
+
+.studio-workspace-toc__label {
+  display: block;
+  font-variation-settings: var(--fv-caption);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.35rem;
+  color: #94a3b8;
+}
+
+.studio-workspace-toc__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.studio-workspace-toc__link {
+  color: var(--c2, #0f172a);
+  text-decoration: none;
+  display: block;
+  padding: 0.2rem 0;
+}
+
+.studio-workspace-toc__link:hover {
+  text-decoration: underline;
+}
+
 .studio-main {
   flex: 1;
   min-height: 0;
-  padding: 1.5rem 1.75rem 2.5rem;
+  padding: var(--studio-space-lg, 1.5rem) var(--studio-space-lg, 1.75rem) var(--studio-space-xl, 2.5rem);
   overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   color: var(--c2, #0f172a);
+  background: var(--studio-workspace-canvas);
 }
 
 .studio-section-stack {
@@ -322,6 +419,7 @@ button.studio-wordmark-btn:hover {
   border-radius: var(--studio-card-radius);
   box-shadow: var(--studio-card-shadow);
   padding: 1.25rem 1.35rem;
+  border: 1px solid color-mix(in srgb, var(--c2, #0f172a) 6%, transparent);
 }
 
 .studio-stat-value {
@@ -1215,15 +1313,25 @@ button.studio-wordmark-btn:hover {
 
 .studio-locale-split {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1rem 1.25rem;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--studio-space-md, 1rem) var(--studio-space-lg, 1.25rem);
   align-items: stretch;
   margin-top: 0.5rem;
+  column-gap: clamp(1rem, 3vw, 2rem);
 }
 
-@media (max-width: 800px) {
+@media (max-width: 900px) {
   .studio-locale-split {
     grid-template-columns: 1fr;
+    row-gap: var(--studio-space-lg, 1.5rem);
+  }
+
+  .studio-locale-split .studio-locale-label {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: var(--studio-space-sm, 0.35rem) 0;
+    background: linear-gradient(to bottom, var(--c3, #fff) 90%, transparent);
   }
 }
 
@@ -1274,6 +1382,13 @@ button.studio-wordmark-btn:hover {
   margin-top: 0.25rem;
 }
 
+/* Journal entry modal — same EN|JA grid primitives as Programs */
+.studio-modal-form--journal {
+  max-height: min(70vh, 640px);
+  overflow-y: auto;
+  padding-right: 0.35rem;
+}
+
 /* Artists modal — tabbed editor */
 .studio-modal-form--artist .studio-tabs__panels {
   max-height: min(62vh, 560px);
@@ -1294,10 +1409,11 @@ button.studio-wordmark-btn:hover {
 
 .studio-prog-col-headers {
   display: grid;
-  grid-template-columns: minmax(6.5rem, 9rem) 1fr 1fr;
-  gap: 0.5rem 0.75rem;
+  grid-template-columns: minmax(5.5rem, 9rem) minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--studio-space-sm, 0.5rem) var(--studio-space-md, 0.85rem);
   align-items: end;
   margin-bottom: 0.35rem;
+  column-gap: clamp(0.75rem, 2vw, 1.5rem);
 }
 
 .studio-prog-col-title {
@@ -1310,10 +1426,11 @@ button.studio-wordmark-btn:hover {
 
 .studio-prog-grid-row {
   display: grid;
-  grid-template-columns: minmax(6.5rem, 9rem) 1fr 1fr;
-  gap: 0.45rem 0.65rem;
+  grid-template-columns: minmax(5.5rem, 9rem) minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--studio-space-sm, 0.45rem) var(--studio-space-md, 0.75rem);
   align-items: start;
   margin-bottom: 0.45rem;
+  column-gap: clamp(0.75rem, 2vw, 1.5rem);
 }
 
 .studio-prog-grid-row--textarea .studio-prog-grid-input {
@@ -1343,6 +1460,37 @@ button.studio-wordmark-btn:hover {
   font-size: 0.84rem;
   font-variation-settings: var(--fv-subtitle);
   color: #0f172a;
+}
+
+.studio-prog-subhead--nested {
+  margin-top: 1.35rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+/* Program Manage modal: fade / strip gallery URL rows */
+.studio-prog-url-preview-wrap {
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.studio-prog-url-preview-wrap[hidden] {
+  display: none !important;
+}
+
+.studio-prog-url-preview {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .studio-prog-details {
@@ -1382,14 +1530,23 @@ button.studio-wordmark-btn:hover {
   color: #0f172a;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 900px) {
   .studio-prog-grid-row,
   .studio-prog-col-headers {
     grid-template-columns: 1fr;
+    row-gap: var(--studio-space-sm, 0.5rem);
   }
 
   .studio-prog-col-headers .studio-prog-col-title:first-of-type {
     display: none;
+  }
+
+  .studio-prog-grid-label {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: var(--studio-space-sm, 0.35rem) 0;
+    background: linear-gradient(to bottom, var(--c3, #fff) 90%, transparent);
   }
 }
 
@@ -1783,15 +1940,26 @@ button.studio-wordmark-btn:hover {
 
 .studio-content-locale-pair-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.75rem 1rem;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--studio-space-md, 0.75rem) var(--studio-space-lg, 1.25rem);
   width: 100%;
   align-items: start;
+  column-gap: clamp(1rem, 3vw, 2rem);
 }
 
-@media (max-width: 720px) {
+@media (max-width: 900px) {
   .studio-content-locale-pair-grid {
     grid-template-columns: 1fr;
+    row-gap: var(--studio-space-lg, 1.5rem);
+  }
+
+  .studio-content-locale-col-title {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    margin: 0 -0.25rem;
+    padding: var(--studio-space-sm, 0.5rem) 0.25rem;
+    background: linear-gradient(to bottom, var(--c3, #fff) 88%, transparent);
   }
 }
 
@@ -1801,6 +1969,8 @@ button.studio-wordmark-btn:hover {
   font-variation-settings: var(--fv-label-strong);
   color: var(--studio-muted);
   margin-bottom: 0.25rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .studio-content-translate-btn {
@@ -1851,6 +2021,25 @@ button.studio-wordmark-btn:hover {
   padding-bottom: 0.35rem;
   border-bottom: 1px solid color-mix(in srgb, var(--c2, #000) 15%, transparent);
   color: var(--c2, #111);
+}
+
+/* Manifest-driven chapters (`studioContentManifest.js` + `fillStudioContentPlainFields`) */
+.studio-content-chapter {
+  margin-bottom: var(--studio-space-xl, 2rem);
+}
+
+.studio-content-chapter-title {
+  margin: 0 0 var(--studio-space-md, 1rem);
+  font-size: 0.95rem;
+  font-variation-settings: var(--fv-title);
+  color: #0f172a;
+  letter-spacing: 0.02em;
+}
+
+.studio-content-chapter-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
 }
 
 .studio-content-editor__footer {
@@ -2094,4 +2283,93 @@ button.studio-wordmark-btn:hover {
 
 .studio-action-link:hover {
   color: var(--c1, #c12525);
+}
+
+/* Artist world batch (LLM) — pills + progress */
+.studio-world-batch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.35rem 0 0.25rem;
+}
+
+.studio-world-batch-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0.65rem 0 0.5rem;
+}
+
+.studio-world-batch-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--c2, #000) 18%, transparent);
+  font-size: 0.8rem;
+  font-variation-settings: var(--fv-label);
+  cursor: pointer;
+  background: #f1f5f9;
+  color: #475569;
+  max-width: 100%;
+}
+
+.studio-world-batch-pill:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.studio-world-batch-pill--idle {
+  background: #f1f5f9;
+  color: #475569;
+  border-color: color-mix(in srgb, var(--c2, #000) 18%, transparent);
+}
+
+.studio-world-batch-pill--staged {
+  background: #fef9c3;
+  color: #854d0e;
+  border-color: #eab308;
+}
+
+.studio-world-batch-pill--ok {
+  background: #dcfce7;
+  color: #166534;
+  border-color: #22c55e;
+}
+
+.studio-world-batch-pill--err {
+  background: #fee2e2;
+  color: #991b1b;
+  border-color: #f87171;
+}
+
+.studio-world-batch-progress {
+  margin-top: 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.studio-world-batch-progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c2, #000) 10%, transparent);
+  overflow: hidden;
+}
+
+.studio-world-batch-progress-bar {
+  height: 100%;
+  width: 0%;
+  min-width: 0;
+  background: var(--c1, #c12525);
+  border-radius: inherit;
+  transition: width 0.2s ease;
+}
+
+.studio-world-batch-progress-label {
+  font-size: 0.78rem;
+  font-variation-settings: var(--fv-label);
+  color: color-mix(in srgb, var(--c2, #000) 72%, transparent);
+  margin-top: 0.35rem;
 }

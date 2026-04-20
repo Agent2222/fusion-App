@@ -27,6 +27,7 @@
     "@dfinity/candid": "^3.0.0",
     "@dfinity/principal": "^3.0.0",
     "@stripe/stripe-js": "^4.10.0",
-    "lit-html": "^2.8.0"
+    "lit-html": "^2.8.0",
+    "posthog-js": "^1.369.0"
   }
 }

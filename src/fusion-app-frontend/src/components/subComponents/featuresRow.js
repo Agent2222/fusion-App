@@ -3,6 +3,7 @@
  * Data source: CMS `feature-cards` — pick a group with `data-area` matching `group.id`.
  */
 import { getContentBundleForStudio, subscribeDataSource } from '../../utils/database.js';
+import { mergeLocaleDeep } from '../../utils/localeFallback.js';
 
 function escapeHtml(s) {
     return String(s)
@@ -114,7 +115,12 @@ class FeaturesRowComponent extends HTMLElement {
         const cells = items
             .slice(0, 3)
             .map((item) => {
-                const loc = item[locale] || item.en || {};
+                const enL = item.en && typeof item.en === 'object' ? item.en : {};
+                const jaL = item.ja && typeof item.ja === 'object' ? item.ja : {};
+                const loc =
+                    locale === 'ja'
+                        ? /** @type {Record<string, unknown>} */ (mergeLocaleDeep(enL, jaL))
+                        : /** @type {Record<string, unknown>} */ (enL);
                 const title = loc.title ?? '';
                 const description = loc.description ?? '';
                 const ctaRaw = loc.cta;

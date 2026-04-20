@@ -7,10 +7,12 @@
  * - testData: when true, prefer bundled fixtures when `fusion-data-source` is unset (see database.js).
  *   When false, prefer live canister data. Per-build override: `VITE_USE_TEST_DATA=true` in `.env`
  *   (checked in database.js; takes precedence over this flag).
+ * - Mainnet backend id when `devMode` is false: see `MAINNET_FUSION_APP_BACKEND_CANISTER_ID` and
+ *   `resolveFusionBackendCanisterId` (avoids local `dfx generate` id with mainnet host on Vite).
  */
 export const config = {
   devMode: false,
-  siteActive: false,
+  siteActive: true,
   apiBaseUrl: '/api',
   testData: false,
   pageStatus: {
@@ -129,6 +131,14 @@ export function getHost() {
  * Mainnet II id (reference only). For local replica use `VITE_II_CANISTER_ID` from `.dfx/local` — never this id.
  */
 export const MAINNET_INTERNET_IDENTITY_CANISTER_ID = 'rdmx6-jaaaa-aaaaa-aaadq-cai';
+
+/**
+ * Mainnet `fusion-app-backend` principal — keep in sync with repo-root `canister_ids.json` (`fusion-app-backend.ic`).
+ * When {@link DEV_MODE} is false, {@link resolveFusionBackendCanisterId} uses this so anonymous queries use mainnet
+ * even if generated `declarations/` still contain a local id from `dfx generate` (common when running Vite on `:3000`).
+ * Override with `VITE_FUSION_BACKEND_CANISTER_ID` (e.g. staging).
+ */
+export const MAINNET_FUSION_APP_BACKEND_CANISTER_ID = 'e7x5d-vaaaa-aaaab-af7bq-cai';
 
 let _warnedMissingLocalIi;
 let _loggedLocalInternetIdentityUrlOnce;
@@ -285,6 +295,27 @@ export function getInternetIdentityUrl() {
 import { HttpAgent, Actor } from '@dfinity/agent';
 
 /**
+ * Backend canister id for {@link createICActor} / {@link createAuthenticatedICActor}.
+ * - Optional **`VITE_FUSION_BACKEND_CANISTER_ID`** wins (staging / custom mainnet).
+ * - **`DEV_MODE` true:** use the id from generated declarations (local replica).
+ * - **`DEV_MODE` false:** use {@link MAINNET_FUSION_APP_BACKEND_CANISTER_ID} so host (`icp-api.io`) and principal match.
+ *
+ * @param {string} [declaredCanisterId] — from `declarations/fusion-app-backend`
+ * @returns {string}
+ */
+export function resolveFusionBackendCanisterId(declaredCanisterId) {
+    try {
+        const v = trimEnv(import.meta.env?.VITE_FUSION_BACKEND_CANISTER_ID);
+        if (v) return v;
+    } catch {
+        /* ignore */
+    }
+    const declared = typeof declaredCanisterId === 'string' ? declaredCanisterId.trim() : '';
+    if (DEV_MODE) return declared;
+    return MAINNET_FUSION_APP_BACKEND_CANISTER_ID || declared;
+}
+
+/**
  * Create an anonymous (unauthenticated) IC actor.
  * Useful for query/update calls that don't require a signed identity.
  */
@@ -330,5 +361,26 @@ export async function createAuthenticatedICActor(idlFactory, canisterId, identit
     canisterId,
     ...options.actorOptions,
   });
+}
+
+/**
+ * Canonical origin for OG URLs and `link[rel=canonical]` (no trailing slash).
+ * In the browser, uses `window.location.origin` so local and staging hosts stay correct.
+ * For SSR-less builds, override with `VITE_PUBLIC_SITE_ORIGIN`.
+ * Production custom domain: https://fusionart.world
+ */
+export function getPublicSiteOrigin() {
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return String(window.location.origin).replace(/\/$/, "");
+  }
+  try {
+    const v = import.meta.env && import.meta.env.VITE_PUBLIC_SITE_ORIGIN;
+    if (typeof v === "string" && v.trim()) {
+      return v.trim().replace(/\/$/, "");
+    }
+  } catch (_) {
+    /* ignore */
+  }
+  return "https://fusionart.world";
 }
 

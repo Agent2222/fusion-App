@@ -1,3 +1,5 @@
+import { mergeLocaleDeep } from '../../utils/localeFallback.js';
+
 class ObjectsHighlightComponent extends HTMLElement {
     constructor() {
         super();
@@ -173,7 +175,12 @@ class ObjectsHighlightComponent extends HTMLElement {
                 : 'en';
         const localeSlice = (row) => {
             if (!row || typeof row !== 'object') return {};
-            return row[loc] || row.en || row.ja || {};
+            const en = row.en && typeof row.en === 'object' ? row.en : {};
+            const ja = row.ja && typeof row.ja === 'object' ? row.ja : {};
+            if (loc === 'ja') {
+                return /** @type {Record<string, unknown>} */ (mergeLocaleDeep(en, ja));
+            }
+            return /** @type {Record<string, unknown>} */ (en);
         };
 
         const targets = [

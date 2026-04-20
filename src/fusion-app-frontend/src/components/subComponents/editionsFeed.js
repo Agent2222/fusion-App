@@ -1,5 +1,6 @@
 // Editions feed: rows of 1, 2, 3, 4, then 5 tiles (15 items per page); paginated.
 import { navigate } from '../../router.js';
+import { mergeLocaleDeep } from '../../utils/localeFallback.js';
 
 /** 1 + 2 + 3 + 4 + 5 = 15 items per page */
 const PAGE_SIZE = 15;
@@ -314,8 +315,12 @@ class EditionsFeedComponent extends HTMLElement {
      */
     _appendCard(parent, item, featured) {
         const locale = typeof window.getLocale === 'function' ? window.getLocale() : 'en';
-        const loc = locale === 'ja' ? 'ja' : 'en';
-        const copy = item[loc] || item.en;
+        const en = item.en && typeof item.en === 'object' ? item.en : {};
+        const ja = item.ja && typeof item.ja === 'object' ? item.ja : {};
+        const copy =
+            locale === 'ja'
+                ? /** @type {Record<string, unknown>} */ (mergeLocaleDeep(en, ja))
+                : /** @type {Record<string, unknown>} */ (en);
         const title = copy?.title || '';
         const alt = copy?.alt || title;
         const href = item.href || '#';

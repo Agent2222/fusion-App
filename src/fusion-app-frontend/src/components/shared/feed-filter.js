@@ -116,8 +116,8 @@ function locationModalOptionsHtml() {
 
 function templateArtists() {
     return `
-        <div id="filterSystem" class="main-cont">
-            <div id="filterToggle">Filter Artists</div>
+        <div id="filterSystem" class="main-cont active">
+            <div id="filterToggle" class="active">Filter Artists</div>
             <div id="filterContent">
                 <div id="leftFilter" class="filterBlock">
                     <div id="locationFilter">

@@ -1,6 +1,7 @@
 /**
- * Staff-curated featured artists + random pool — stored in localStorage (not Motoko `stable` maps).
- * Merged onto artist rows via {@link mergeArtistFeaturedExtension} to avoid schema upgrades.
+ * Staff-curated featured artists + random pool.
+ * - **Test / Studio overlay:** `localStorage` (`fusionArtistFeaturedMeta`).
+ * - **Live:** canonical state from the canister (`getArtistFeaturedGalleryPublic` + staff setters).
  */
 
 export const MAX_MANUAL_FEATURED = 8;
@@ -21,6 +22,28 @@ export function defaultArtistFeaturedMeta() {
         randomFeatured: false,
         manualFeaturedIds: [],
         featurableById: {},
+    };
+}
+
+/**
+ * Map canister `ArtistFeaturedGalleryPublic` into {@link ArtistFeaturedMeta}.
+ * @param {Record<string, unknown> | null | undefined} g
+ * @returns {ArtistFeaturedMeta}
+ */
+export function artistFeaturedMetaFromCanister(g) {
+    if (!g || typeof g !== 'object') return defaultArtistFeaturedMeta();
+    const manualFeaturedIds = Array.isArray(g.manualFeaturedIds)
+        ? g.manualFeaturedIds.map((x) => String(x)).filter(Boolean).slice(0, MAX_MANUAL_FEATURED)
+        : [];
+    const featurableIds = Array.isArray(g.featurableIds) ? g.featurableIds.map((x) => String(x)) : [];
+    const featurableById =
+        featurableIds.length > 0
+            ? Object.fromEntries(featurableIds.filter(Boolean).map((id) => [id, true]))
+            : {};
+    return {
+        randomFeatured: g.randomFeatured === true,
+        manualFeaturedIds,
+        featurableById,
     };
 }
 
@@ -71,12 +94,13 @@ export function writeArtistFeaturedMeta(meta) {
 
 /**
  * @param {object | null | undefined} artist
+ * @param {ArtistFeaturedMeta} [metaOverride] — when set (e.g. live canister), skips localStorage.
  * @returns {object}
  */
-export function mergeArtistFeaturedExtension(artist) {
+export function mergeArtistFeaturedExtension(artist, metaOverride) {
     if (!artist || typeof artist !== 'object') return {};
     const id = String(/** @type {{ id?: unknown }} */ (artist).id ?? '');
-    const meta = readArtistFeaturedMeta();
+    const meta = metaOverride && typeof metaOverride === 'object' ? metaOverride : readArtistFeaturedMeta();
     const featured = meta.manualFeaturedIds.includes(id);
     const featurable = Boolean(meta.featurableById[id]);
     return { ...artist, featured, featurable };
@@ -168,17 +192,37 @@ function shuffleInPlace(arr) {
 /**
  * Featured strip for home / artists page (max 8).
  * @param {object[]} allArtists — rows already passed through {@link mergeArtistFeaturedExtension}
+ * @param {ArtistFeaturedMeta} [metaOverride] — when omitted, uses localStorage (test / legacy).
  * @returns {object[]}
  */
-export function resolveFeaturedArtistsForPublic(allArtists) {
+export function resolveFeaturedArtistsForPublic(allArtists, metaOverride) {
     if (!Array.isArray(allArtists) || !allArtists.length) return [];
-    const meta = readArtistFeaturedMeta();
+    const meta = metaOverride && typeof metaOverride === 'object' ? metaOverride : readArtistFeaturedMeta();
     if (meta.randomFeatured) {
         const pool = allArtists.filter((a) => Boolean(/** @type {{ featurable?: boolean }} */ (a).featurable));
         return shuffleInPlace(pool).slice(0, MAX_MANUAL_FEATURED);
     }
     const ids = meta.manualFeaturedIds.slice(0, MAX_MANUAL_FEATURED);
-    return ids
+    const fromManual = ids
         .map((id) => allArtists.find((a) => String(/** @type {{ id?: unknown }} */ (a).id) === id))
         .filter(Boolean);
+    if (fromManual.length > 0) return fromManual;
+
+    /**
+     * Browsers without this localStorage row (new device, cleared storage) still need a featured strip
+     * when Studio has saved `featuredOrder` on the canister.
+     */
+    const fromOrder = [...allArtists]
+        .filter((a) => {
+            if (!a || typeof a !== 'object') return false;
+            const fo = Number(/** @type {{ featuredOrder?: unknown }} */ (a).featuredOrder);
+            return Number.isFinite(fo) && fo > 0 && fo <= MAX_MANUAL_FEATURED;
+        })
+        .sort(
+            (a, b) =>
+                Number(/** @type {{ featuredOrder?: unknown }} */ (a).featuredOrder) -
+                Number(/** @type {{ featuredOrder?: unknown }} */ (b).featuredOrder),
+        )
+        .slice(0, MAX_MANUAL_FEATURED);
+    return fromOrder;
 }

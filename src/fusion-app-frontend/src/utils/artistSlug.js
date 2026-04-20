@@ -125,3 +125,115 @@ export function findArtistByEnglishName(name, artists) {
     }
     return null;
 }
+
+/**
+ * Canonical program IDs are stored on the English locale block (`locales.en.programs`).
+ * @param {object | null | undefined} artist
+ * @returns {string[]}
+ */
+export function artistProgramIds(artist) {
+    const en = artistEnglishBlock(artist);
+    const rawEn = en && typeof en === 'object' ? /** @type {{ programs?: unknown }} */ (en).programs : null;
+    if (Array.isArray(rawEn) && rawEn.length) {
+        return rawEn.map((x) => String(x ?? '').trim()).filter(Boolean);
+    }
+    const ja =
+        artist && typeof artist === 'object' && artist.locales && typeof artist.locales === 'object'
+            ? /** @type {{ ja?: unknown }} */ (artist.locales).ja
+            : null;
+    const rawJa = ja && typeof ja === 'object' ? /** @type {{ programs?: unknown }} */ (ja).programs : null;
+    if (!Array.isArray(rawJa)) return [];
+    return rawJa.map((x) => String(x ?? '').trim()).filter(Boolean);
+}
+
+/**
+ * Most recent program = last entry in `programs` (append-only ordering).
+ * @param {object | null | undefined} artist
+ * @returns {string}
+ */
+export function artistMostRecentProgramId(artist) {
+    const ids = artistProgramIds(artist);
+    return ids.length ? ids[ids.length - 1] : '';
+}
+
+/**
+ * Best-effort year from a program slug (e.g. `fusion-residency-2025` → `2025`).
+ * @param {string} programId
+ * @returns {string}
+ */
+export function yearFromProgramSlug(programId) {
+    const m = String(programId || '').match(/(19|20)\d{2}/);
+    return m ? m[0] : '';
+}
+
+/**
+ * Roster `galleryFilter.season` (calendar year for gallery access / cohort season).
+ * @param {object | null | undefined} artist
+ * @returns {number}
+ */
+export function artistGallerySeasonYear(artist) {
+    if (!artist || typeof artist !== 'object') return 0;
+    const g = /** @type {{ galleryFilter?: unknown }} */ (artist).galleryFilter;
+    if (!g || typeof g !== 'object') return 0;
+    const n = Number(/** @type {{ season?: unknown }} */ (g).season ?? 0);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+/**
+ * Year label for cards / banners: program slug (most recent), else gallery season, else filter cohort year.
+ * @param {object | null | undefined} artist
+ * @returns {string}
+ */
+export function artistResidencyCardYear(artist) {
+    const fromProg = yearFromProgramSlug(artistMostRecentProgramId(artist));
+    if (fromProg) return fromProg;
+    const sy = artistGallerySeasonYear(artist);
+    if (sy) return String(sy);
+    const f = artist && typeof artist === 'object' ? /** @type {{ filter?: unknown }} */ (artist).filter : null;
+    const cy = f && typeof f === 'object' ? Number(/** @type {{ cohortYear?: unknown }} */ (f).cohortYear ?? 0) : 0;
+    if (Number.isFinite(cy) && cy > 0) return String(Math.floor(cy));
+    return '';
+}
+
+/**
+ * Whether the card/badge year label matches the site's current program season.
+ * Compares 4-digit years (e.g. badge "2026" vs season `fusionKaga2026` or `2026`), then full `mostRecentProgram` vs `currentSeason` string.
+ *
+ * @param {string} badgeYearLabel — e.g. "2026"
+ * @param {string} currentSeasonStr — value from `getCurrentProgramSeason()` (database.js)
+ * @param {unknown} [mostRecentProgram] — roster `mostRecentProgram`
+ * @returns {boolean}
+ */
+export function residencyBadgeMatchesCurrentSeason(
+    badgeYearLabel,
+    currentSeasonStr,
+    mostRecentProgram,
+) {
+    const by = String(badgeYearLabel || '').trim();
+    const cy = String(currentSeasonStr || '').trim();
+    if (!cy) return false;
+    if (by) {
+        const seasonYear =
+            yearFromProgramSlug(cy) ||
+            (() => {
+                const m = cy.match(/\b(19|20)\d{2}\b/);
+                return m ? m[0] : '';
+            })();
+        if (seasonYear && by === seasonYear) return true;
+    }
+    const mrp = String(mostRecentProgram ?? '').trim().toLowerCase();
+    const cur = cy.toLowerCase();
+    return Boolean(mrp && cur && mrp === cur);
+}
+
+/**
+ * Whether the artist should show residency UI (programs list and/or season/cohort on roster).
+ * @param {object | null | undefined} artist
+ */
+export function artistHasResidencySignal(artist) {
+    if (artistProgramIds(artist).length > 0) return true;
+    if (artistGallerySeasonYear(artist) > 0) return true;
+    const f = artist?.filter;
+    const cy = f && typeof f === 'object' ? Number(/** @type {{ cohortYear?: unknown }} */ (f).cohortYear ?? 0) : 0;
+    return Number.isFinite(cy) && cy > 0;
+}

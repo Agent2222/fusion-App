@@ -100,14 +100,19 @@ class ExtendedNetworkFeedElement extends HTMLElement {
                     box-sizing: border-box;
                 }
 
+                /* Match staffFeed .staff-feed-headline (People behind FUSION) */
                 .feed-header {
-                    font-size: clamp(1rem, 1.2vw, 1.35rem);
-                    font-variation-settings: var(--fv-display);
+                    margin: 0 auto 3rem;
+                    font-size: clamp(1.25rem, 1.2vw, 2rem);
+                    font-variation-settings: var(--fv-title);
+                    letter-spacing: 0.06em;
                     color: var(--c2);
-                    padding-bottom: 0.75rem;
-                    padding-left: 1%;
                     user-select: none;
                     text-align: center;
+                    width: 100%;
+                    max-width: min(100%, 72rem);
+                    box-sizing: border-box;
+                    padding: 0;
                 }
 
                 .feed-description {
@@ -117,10 +122,11 @@ class ExtendedNetworkFeedElement extends HTMLElement {
                     line-height: 1.45;
                     max-width: 52rem;
                     padding-bottom: 2rem;
-                    margin-bottom: 2rem;
+                    margin: 0 auto 2rem;
                     text-align: center;
-                    padding-left: 38%;
-                    padding-right: 38%;
+                    padding-left: 10%;
+                    padding-right: 10%;
+                    box-sizing: border-box;
                 }
 
                 .feed-grid {
@@ -171,27 +177,31 @@ class ExtendedNetworkFeedElement extends HTMLElement {
                     flex-direction: column;
                     align-items: center;
                     justify-content: center;
-                    padding: 0.4rem 0.25rem 0.55rem;
+                    padding: 0.5rem 1rem 1.25rem;
                     background-color: var(--c3);
-                    gap: 0.25rem;
-                    height: 6rem;
+                    gap: 0.35rem;
+                    box-sizing: border-box;
                 }
 
+                /* Match staffFeed staff-card-name / staff-card-title */
                 .network-card-name {
+                    margin: 0;
                     font-size: clamp(1rem, 1.5vw, 1.8rem);
-                    font-variation-settings: var(--fv-card-title);
-                    color: var(--c2);
+                    font-variation-settings: var(--fv-nav);
+                    letter-spacing: 0.04em;
                     line-height: 1.2;
+                    color: var(--c2);
                     text-align: center;
                 }
 
                 .network-card-meta {
-                    font-size: clamp(0.62rem, 1.1vw, 1.2rem);
+                    margin: 0;
+                    font-size: clamp(0.8rem, 1.1vw, 1.2rem);
                     font-variation-settings: var(--fv-card-title);
+                    line-height: 1;
                     color: var(--c2);
-                    line-height: 1.25;
                     text-align: center;
-                    opacity: 0.9;
+                    opacity: 0.95;
                 }
 
                 .feed-empty {
@@ -209,6 +219,12 @@ class ExtendedNetworkFeedElement extends HTMLElement {
                 @media (max-width: 520px) {
                     .feed-grid {
                         grid-template-columns: 1fr;
+                    }
+                }
+
+                @media (max-width: 768px) {
+                    .feed-description {
+                        max-width: none;
                     }
                 }
             </style>

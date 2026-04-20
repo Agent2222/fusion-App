@@ -3,9 +3,13 @@ import {
     artistDisplayDiscipline,
     artistDisplayName,
     artistEnglishBlock,
+    artistHasResidencySignal,
+    artistResidencyCardYear,
+    residencyBadgeMatchesCurrentSeason,
     artistSlugFromName,
 } from '../../utils/artistSlug.js';
 import { applyArtistCardImage } from '../../utils/artistCardPlaceholder.js';
+import { getCurrentProgramSeason } from '../../utils/database.js';
 
 /** 20 cards per page, 5 columns × 4 rows */
 const PAGE_SIZE = 20;
@@ -19,8 +23,13 @@ function dedupeArtistsById(artists) {
     const out = [];
     for (const a of artists) {
         if (!a || typeof a !== 'object') continue;
-        const id = a.id != null ? String(a.id) : a.slug != null ? String(a.slug) : null;
-        const key = id || JSON.stringify(a);
+        const idRaw = a.id != null ? String(a.id).trim() : '';
+        const slugRaw =
+            a.slug != null && String(a.slug).trim() !== ''
+                ? String(a.slug).trim().toLowerCase()
+                : '';
+        /* Empty id must not collapse distinct rows — fall back to slug before JSON. */
+        const key = idRaw ? `id:${idRaw}` : slugRaw ? `slug:${slugRaw}` : JSON.stringify(a);
         if (seen.has(key)) continue;
         seen.add(key);
         out.push(a);
@@ -87,14 +96,14 @@ class ArtistsFeedElement extends HTMLElement {
         this.pool = Array.isArray(artists) ? artists : [];
         this.currentPage = 0;
         if (this._shellReady) {
-            this.updatePage();
+            void this.updatePage();
         }
     }
 
     connectedCallback() {
         this.ensureShell();
         if (this.pool.length) {
-            this.updatePage();
+            void this.updatePage();
         }
     }
 
@@ -146,10 +155,38 @@ class ArtistsFeedElement extends HTMLElement {
                 }
 
                 .artist-card-image {
+                    position: relative;
                     width: 100%;
                     aspect-ratio: 3 / 4;
                     overflow: hidden;
                     background: var(--c3);
+                }
+
+                .residency-badge {
+                    position: absolute;
+                    left: 0.35rem;
+                    bottom: 0.35rem;
+                    z-index: 1;
+                    padding: 0.2rem 0.4rem;
+                    border-radius: 2px;
+                    background-color: var(--c1);
+                    color: var(--c3);
+                    font-size: clamp(0.58rem, 0.72vw, 0.7rem);
+                    font-variation-settings: var(--fv-subtitle);
+                    letter-spacing: 0.04em;
+                    line-height: 1.1;
+                    text-align: center;
+                    pointer-events: none;
+                    box-sizing: border-box;
+                }
+
+                .residency-badge[hidden] {
+                    display: none !important;
+                }
+
+                .residency-badge--past-season {
+                    background-color: #000;
+                    color: var(--c3);
                 }
 
                 .artist-card-image img {
@@ -270,9 +307,24 @@ class ArtistsFeedElement extends HTMLElement {
                     }
                 }
 
+                @media (max-width: 768px) {
+                    .artist-card {
+                        min-height: 0;
+                    }
+
+                    .artist-card-content {
+                        padding: 0.5rem 0.35rem 0.65rem;
+                        gap: 0.12rem;
+                    }
+                }
+
                 @media (max-width: 520px) {
                     .feed-grid {
                         grid-template-columns: repeat(2, minmax(0, 1fr));
+                    }
+
+                    .artist-card-content {
+                        padding: 0.45rem 0.3rem 0.55rem;
                     }
                 }
             </style>
@@ -317,17 +369,21 @@ class ArtistsFeedElement extends HTMLElement {
     goPrev() {
         if (this.currentPage <= 0) return;
         this.currentPage -= 1;
-        this.updatePage();
+        void this.updatePage();
+        // scroll to the top of the artists feed
+        this.gridEl.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
     goNext() {
         const totalPages = Math.max(1, Math.ceil(this.pool.length / PAGE_SIZE));
         if (this.currentPage >= totalPages - 1) return;
         this.currentPage += 1;
-        this.updatePage();
+        void this.updatePage();
+        // scroll to the top of the artists feed
+        this.gridEl.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
-    updatePage() {
+    async updatePage() {
         if (!this._shellReady) return;
 
         const grid = this.gridEl;
@@ -337,6 +393,17 @@ class ArtistsFeedElement extends HTMLElement {
         const totalPages = total === 0 ? 1 : Math.ceil(total / PAGE_SIZE);
         const start = this.currentPage * PAGE_SIZE;
         const slice = this.pool.slice(start, start + PAGE_SIZE);
+
+        let currentSeason = '';
+        try {
+            currentSeason = (await getCurrentProgramSeason()).trim();
+        } catch {
+            currentSeason = '';
+        }
+        /* After await, another setArtists/updatePage may have run — clear again so we never append twice. */
+        grid.innerHTML = '';
+
+        const useSeasonCompare = currentSeason !== '';
 
         const locale = typeof window.getLocale === 'function' ? window.getLocale() : 'en';
 
@@ -356,6 +423,7 @@ class ArtistsFeedElement extends HTMLElement {
 
             card.innerHTML = `
                 <div class="artist-card-image">
+                    <div class="residency-badge" hidden></div>
                     <img alt="${escapeHtml(artistName)}" loading="lazy" decoding="async">
                 </div>
                 <div class="artist-card-content">
@@ -365,6 +433,27 @@ class ArtistsFeedElement extends HTMLElement {
             `;
             const cardImg = card.querySelector('.artist-card-image img');
             applyArtistCardImage(cardImg, artist.image);
+            const residencyBadge = card.querySelector('.residency-badge');
+            if (residencyBadge instanceof HTMLElement) {
+                const y = artistResidencyCardYear(artist);
+                residencyBadge.classList.remove('residency-badge--past-season');
+                if (artistHasResidencySignal(artist) && y) {
+                    residencyBadge.textContent = y;
+                    residencyBadge.removeAttribute('hidden');
+                    if (useSeasonCompare) {
+                        const matches = residencyBadgeMatchesCurrentSeason(
+                            y,
+                            currentSeason,
+                            artist.mostRecentProgram,
+                        );
+                        if (!matches) {
+                            residencyBadge.classList.add('residency-badge--past-season');
+                        }
+                    }
+                } else {
+                    residencyBadge.setAttribute('hidden', '');
+                }
+            }
             grid.appendChild(card);
         }
 

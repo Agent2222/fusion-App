@@ -6,8 +6,8 @@ import HeaderWideLogo from '../../assets/Fusion-X-logo-02.png';
 
 const MENU_IDLE_MS = 2000;
 const SCROLL_DELTA_PX = 4;
-/** Match `footer.js` BOTTOM_THRESHOLD_PX — hide floating logo when footer zone is active. */
-const BOTTOM_ZONE_PX = 200;
+/** Match `footer.js` bottom threshold — hide floating logo when footer zone is active. */
+const BOTTOM_ZONE_PX = 0;
 const LOCALE_STORAGE_KEY = 'fusion-locale';
 /** Drawer + bar layout; below loadscreen (~1000) and above page chrome. */
 const MOBILE_NAV_MAX_PX = 1024;
@@ -1287,10 +1287,6 @@ class HeaderComponent extends HTMLElement {
                         font-size: clamp(1.8rem, 2vw, 1.35rem);
                     }
 
-                    #headerAuthPair {
-                        padding-bottom: 2rem;
-                    }
-
                     header {
                         display: flex;
                         flex-direction: row;
@@ -1375,12 +1371,38 @@ class HeaderComponent extends HTMLElement {
                     }
 
                     #headerCtas {
-                        margin-top: auto;
+                        margin-top: 5%;
                         margin-left: 0;
+                        width: 100%;
+                        display: grid;
+                        grid-template-columns: minmax(0, 75%) minmax(0, 25%);
+                        grid-template-rows: auto;
+                        align-items: center;
+                        column-gap: 0.5rem;
+                        row-gap: 0;
+                    }
+
+                    #headerCtas #headerAuthPair {
+                        grid-column: 1;
+                        min-width: 0;
+                        width: 100%;
+                        padding-bottom: 0;
                         flex-direction: column;
                         align-items: stretch;
-                        gap: 0.75rem;
-                        align-items: end;
+                    }
+
+                    #headerCtas #headerLangBtn {
+                        grid-column: 2;
+                        justify-self: end;
+                        align-self: center;
+                        width: min(100%, 3.75rem);
+                        height: 3.75rem;
+                        min-width: 2.75rem;
+                        min-height: 3.75rem;
+                        font-size: clamp(0.78rem, 3.2vw, 0.95rem);
+                        font-variation-settings: var(--fv-nav-active);
+                        border-width: 2px;
+                        box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
                     }
 
                     #headerCtas .header-auth-pair {
@@ -1391,7 +1413,9 @@ class HeaderComponent extends HTMLElement {
 
                     #headerCtas .headerRectBtn {
                         width: 100%;
+                        padding: 0.9rem 0.95rem;
                         text-align: center;
+                        font-size: clamp(0.85rem, 0.95vw, 0.8rem);
                     }
 
                     .headerRectBtn--complete-profile {

@@ -1,6 +1,7 @@
 // Event row: `data-event-id` selects an item from CMS events list; copy from `en` / `ja` on that item.
 import { getEventsList, subscribeDataSource } from '../../utils/database.js';
 import { isJournalListingPage } from '../../utils/journalListingPage.js';
+import { mergeLocaleDeep } from '../../utils/localeFallback.js';
 import { navigate } from '../../router.js';
 
 function escapeHtml(s) {
@@ -93,7 +94,12 @@ class EventRowComponent extends HTMLElement {
         const event = list.find((e) => String(e.id) === id);
         if (!event) return null;
         const locale = typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
-        const loc = event[locale] || event.en;
+        const enE = event.en && typeof event.en === 'object' ? event.en : {};
+        const jaE = event.ja && typeof event.ja === 'object' ? event.ja : {};
+        const loc =
+            locale === 'ja'
+                ? /** @type {Record<string, unknown>} */ (mergeLocaleDeep(enE, jaE))
+                : /** @type {Record<string, unknown>} */ (enE);
         if (!loc) return null;
         return { event, loc };
     }

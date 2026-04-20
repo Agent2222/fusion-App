@@ -1,5 +1,6 @@
 // Info band: head + sub copy (no header row, no CTA). Styled like gallery-access-cta text.
 import { getContentBundleForStudio, subscribeDataSource } from '../../utils/database.js';
+import { mergeLocaleDeep } from '../../utils/localeFallback.js';
 
 class InfoComponent extends HTMLElement {
     constructor() {
@@ -63,9 +64,14 @@ class InfoComponent extends HTMLElement {
 
     render() {
         const locale = typeof window.getLocale === 'function' ? window.getLocale() : 'en';
-        const loc = locale === 'ja' ? 'ja' : 'en';
         const slice = this._getContextSlice();
-        const row = slice ? slice[loc] || slice.en : { headText: '', subText: '' };
+        const enR = slice?.en && typeof slice.en === 'object' ? slice.en : {};
+        const jaR = slice?.ja && typeof slice.ja === 'object' ? slice.ja : {};
+        const row = slice
+            ? locale === 'ja'
+                ? /** @type {Record<string, unknown>} */ (mergeLocaleDeep(enR, jaR))
+                : /** @type {Record<string, unknown>} */ (enR)
+            : { headText: '', subText: '' };
         const headText = row.headText || '';
         const subText = row.subText || '';
 

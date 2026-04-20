@@ -252,6 +252,19 @@ button[type="submit"] {
   display: none;
 }
 
+/* Screen-reader-only primary H1 where the visible headline is injected later (programs, context). */
+.seo-primary-h1 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* Routing System Styles */
 * {
   margin: 0;
@@ -294,7 +307,7 @@ body {
 .profile-page {
   padding-bottom: 19.5rem;
   /* padding-top: 145px; */
-  margin-top: 8rem;
+  margin-top: 9rem;
   overflow: visible;
 }
 
@@ -691,6 +704,26 @@ body {
     padding-bottom: clamp(8rem, 28vw, 19.5rem);
   }
 
+  .profile-context-container {
+    text-align: center;
+  }
+
+
+  #profileMainContent {
+    margin-top: 9rem;
+    margin-bottom: 350px;
+  }
+
+  /* Let profile sections (intro gallery, etc.) extend past one viewport — avoids clipped 3rd image */
+  .profile-page .page-content {
+    height: auto;
+    min-height: 0;
+  }
+
+  .artist-profile-hero {
+    height: 40vh;
+  }
+
   .artist-profile-body {
     grid-template-columns: 1fr;
     grid-template-rows: auto auto;
@@ -702,18 +735,25 @@ body {
 
   .artist-profile-body #leftColumn {
     order: 1;
+    text-align: center;
   }
 
   .artist-profile-body #rightColumn {
     order: 2;
-    justify-items: start;
+    justify-items: center;
     align-items: start;
     padding-top: 0.5rem;
+    margin-top: 2rem;
   }
 
   .artist-profile-perspective {
     width: 100%;
     max-width: min(100%, 42rem);
+  }
+
+  .galleryAccessButton {
+    width: 150px;
+    height: 150px;  
   }
 
   .artist-profile-heading {
@@ -745,13 +785,14 @@ body {
     padding-right: clamp(1rem, 6vw, 25%);
     font-size: clamp(1.25rem, 5.5vw, 3rem);
     line-height: 1.25;
+    margin-top: 5rem;
+    margin-bottom: 5rem;
   }
 
   #profile-sight-words {
     height: auto;
     min-height: min(24rem, 65dvh);
-    padding-top: 1.5rem;
-    padding-bottom: 1.5rem;
+    margin-top: 0;
   }
 
   #sight-words-container {
@@ -770,16 +811,22 @@ body {
   }
 
   #profile-constructing-words > .artist-profile-heading {
-    text-align: left;
+    text-align: center;
   }
 
   .profile-artist-links {
-    justify-content: flex-start;
+    justify-content: center;
   }
 
   .profile-artist-link {
-    font-size: clamp(0.875rem, 2.5vw, 1rem);
+    font-size: clamp(0.95rem, 2.5vw, 1rem);
   }
+
+  .profile-gallery-access-button-container {
+    margin-top: 5rem;
+    margin-bottom: 5rem;
+  }
+
 }
 
 .profile-images-container {
@@ -814,20 +861,52 @@ body {
   grid-column: 1 / -1;
 }
 
-@media (max-width: 640px) {
+/* Stack intro gallery: block layout avoids grid placement bugs; no gaps between images */
+@media (max-width: 768px) {
   .profile-images-container {
-    grid-template-columns: 1fr;
+    display: block;
+    width: 100%;
+    margin-top: 3rem;
+  }
+
+  .profile-images-container .profile-intro-gallery-item {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    gap: 0;
+  }
+
+  .profile-images-container .profile-intro-gallery-item + .profile-intro-gallery-item {
+    margin-top: 0;
   }
 
   .profile-intro-gallery-item:nth-child(1),
   .profile-intro-gallery-item:nth-child(2),
-  .profile-intro-gallery-item:nth-child(n + 3) {
-    grid-column: 1 / -1;
+  .profile-intro-gallery-item:nth-child(n + 3),
+  .profile-intro-gallery-item:only-child {
+    grid-column: unset;
+    grid-row: unset;
+  }
+
+  .profile-intro-gallery-item:nth-child(2) {
+    min-height: auto;
   }
 
   .profile-intro-gallery-item:nth-child(2) .profile-intro-gallery-img-wrap {
     flex: none;
     aspect-ratio: 4 / 3;
+    min-height: 0;
+  }
+
+  /* Same aspect for all slots so the 3rd slot isn’t a zero-height edge case */
+  .profile-intro-gallery-item:nth-child(n + 3) .profile-intro-gallery-img-wrap {
+    aspect-ratio: 4 / 3;
+    flex: none;
+    min-height: 0;
+    width: 100%;
   }
 }
 
@@ -851,20 +930,23 @@ body {
   border-radius: 2px;
 }
 
-.profile-intro-gallery-item:nth-child(2) {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
+/* Desktop only: col 2 flex + growing wrap must not override mobile block stack (same specificity as narrow rules). */
+@media (min-width: 769px) {
+  .profile-intro-gallery-item:nth-child(2) {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
 
-.profile-intro-gallery-item:nth-child(2) .profile-intro-gallery-img-wrap {
-  width: 100%;
-  flex: 1 1 auto;
-  min-height: 0;
-  aspect-ratio: unset;
-  position: relative;
-  overflow: hidden;
-  border-radius: 2px;
+  .profile-intro-gallery-item:nth-child(2) .profile-intro-gallery-img-wrap {
+    width: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
+    aspect-ratio: unset;
+    position: relative;
+    overflow: hidden;
+    border-radius: 2px;
+  }
 }
 
 /* Default + full-width rows */
@@ -1708,6 +1790,13 @@ button:hover {
   min-height: 0; /* allow flex container to shrink so overflow scrolls */
 }
 
+/* Prevent the featured grid from collapsing to zero height on narrow / flex layouts */
+#homeMainContent.feed-container > app-featured-artist {
+  flex-shrink: 0;
+  min-height: min-content;
+  width: 100%;
+}
+
 /*
  * Loadscreen enter (loadscreen.js) sets inline pointer-events: none on every .main-cont.
  * Descendants can opt back in. Home uses #homeMainContent.active { pointer-events: auto };
@@ -1992,19 +2081,21 @@ button:hover {
   width: 100vw;
   margin-left: calc(50% - 50vw);
   margin-right: calc(50% - 50vw);
-  aspect-ratio: 16 / 9;
+  aspect-ratio: 5 / 4;
   height: auto;
   overflow: hidden;
 }
 
 .program-detail-hero .program-detail-hero-media {
+  position: relative;
   width: 100%;
   height: 100%;
   min-height: 0;
 }
 
-.program-detail-hero .program-detail-hero-media img,
-.program-detail-hero .program-detail-hero-media video {
+/* Single image hero (no video stack) */
+.program-detail-hero .program-detail-hero-media > img:only-child,
+.program-detail-hero .program-detail-hero-media > img:not(.program-detail-hero-poster) {
   width: 100%;
   height: 100%;
   max-width: none;
@@ -2012,6 +2103,28 @@ button:hover {
   object-fit: cover;
   display: block;
   margin: 0;
+}
+
+/* Video hero: poster still underneath, video fades in on top */
+.program-detail-hero .program-detail-hero-poster,
+.program-detail-hero .program-detail-hero-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  object-fit: cover;
+  display: block;
+  margin: 0;
+}
+
+.program-detail-hero .program-detail-hero-poster {
+  z-index: 0;
+}
+
+.program-detail-hero .program-detail-hero-video {
+  z-index: 1;
 }
 
 .program-intro-cta {
@@ -2098,7 +2211,8 @@ button:hover {
   margin-top: 1%;
 }
 
-#programIntroCTA1 {
+#programIntroCTA1,
+#programIntroCTA3 {
   width: 275px;
   height: 50px;
   display: flex;
@@ -2113,14 +2227,16 @@ button:hover {
   cursor: pointer;
 }
 
-#programIntroCTA1:hover {
+#programIntroCTA1:hover,
+#programIntroCTA3:hover {
   background-color: var(--c3);
   color: var(--c2);
   transition: all 0.3s ease;
 }
 
-/* `#programIntroCTA1` uses `display: flex` above — that beats the UA `[hidden]` rule, so never rely on `hidden` alone to hide this node; use `.program-intro-cta--closed-soon` for not-yet-open programs. */
-#programIntroCTA1.program-intro-cta--closed-soon {
+/* `#programIntroCTA1` / `#programIntroCTA3` use `display: flex` above — that beats the UA `[hidden]` rule, so never rely on `hidden` alone to hide this node; use `.program-intro-cta--closed-soon` for not-yet-open programs. */
+#programIntroCTA1.program-intro-cta--closed-soon,
+#programIntroCTA3.program-intro-cta--closed-soon {
   cursor: default;
   pointer-events: none;
   background-color: var(--c5, #e8e4e6);
@@ -2128,7 +2244,8 @@ button:hover {
   opacity: 0.95;
 }
 
-#programIntroCTA1.program-intro-cta--closed-soon:hover {
+#programIntroCTA1.program-intro-cta--closed-soon:hover,
+#programIntroCTA3.program-intro-cta--closed-soon:hover {
   background-color: var(--c5, #e8e4e6);
   color: var(--c2);
 }
@@ -2152,7 +2269,8 @@ button:hover {
 }
 
 /* Shared with `app-program-details` .begin-application (review in-progress state). */
-#programIntroCTA1.program-application-cta--review {
+#programIntroCTA1.program-application-cta--review,
+#programIntroCTA3.program-application-cta--review {
   background-color: var(--c5);
   color: var(--c2);
   border: 1px solid rgba(0, 0, 0, 0.14);
@@ -2160,14 +2278,16 @@ button:hover {
   animation: program-application-cta-review-blink 1.2s ease-in-out infinite;
 }
 
-#programIntroCTA1.program-application-cta--review:hover {
+#programIntroCTA1.program-application-cta--review:hover,
+#programIntroCTA3.program-application-cta--review:hover {
   background-color: var(--c5);
   color: var(--c2);
   opacity: 0.95;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #programIntroCTA1.program-application-cta--review {
+  #programIntroCTA1.program-application-cta--review,
+  #programIntroCTA3.program-application-cta--review {
     animation: none;
   }
 }
@@ -2222,6 +2342,21 @@ button:hover {
   justify-content: center;
   user-select: none;
 }
+
+/* Offering cards → fade gallery: keep bands from stacking / overlapping (all breakpoints). */
+.program-view-content #keyOfferingsSection {
+  /* padding-bottom: clamp(1rem, 2.5vw, 2rem);
+  margin-bottom: clamp(0.25rem, 1vw, 0.75rem); */
+}
+
+.program-view-content app-program-offering-cards {
+  display: block;
+  /* margin-bottom: clamp(0.75rem, 2vw, 1.5rem); */
+}
+
+/* .program-view-content app-program-fade-gallery:not([hidden]) {
+  margin-top: clamp(1.5rem, 4vw, 2.75rem);
+} */
 
 /* ------------------ Editions (matches programs main scroll area) ------------------ */
 #editionsMainContent {
@@ -2296,6 +2431,13 @@ button:hover {
   justify-content: center;
 }
 
+.shoutHeadline .shout-headline__plain {
+  white-space: pre-line;
+  user-select: text;
+  width: 100%;
+  text-align: inherit;
+}
+
 #contextHeadline3 {
   margin-bottom: 400px;
 }
@@ -2327,8 +2469,8 @@ button:hover {
   padding-bottom: 2rem;
   margin: 0 0 2rem;
   text-align: center;
-  padding-left: 38%;
-  padding-right: 38%;
+  padding-left: 10%;
+  padding-right: 10%;
   box-sizing: border-box;
   text-align: center;
 }
@@ -2478,7 +2620,7 @@ button:hover {
 
   #programViewMainContent {
     margin-top: clamp(5rem, 10vw, 9rem);
-    margin-bottom: clamp(8rem, 15vw, 20rem);
+    margin-bottom: clamp(15rem, 15vw, 20rem);
   }
 
   .shoutHeadline {
@@ -2552,6 +2694,37 @@ button:hover {
     font-size: clamp(1.04rem, 1.2vw, 1.45rem);
   }
 
+  .journal-entry-content .journal-entry-detail {
+    max-width: none;
+    width: 100%;
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  .journal-entry-hero {
+    width: 100vw;
+    max-width: none;
+    aspect-ratio: unset;
+    margin-left: calc(50% - 50vw);
+    margin-right: calc(50% - 50vw);
+  }
+
+  .journal-entry-hero img {
+    width: 100%;
+    height: auto;
+    max-width: none;
+    max-height: none;
+    min-height: 42vh;
+    object-fit: cover;
+  }
+
+  .journal-entry-body {
+    padding-left: 10%;
+    padding-right: 10%;
+    box-sizing: border-box;
+    max-width: none;
+  }
+
   #homeMainContent {
     padding-top: 110px;
   }
@@ -2570,6 +2743,18 @@ button:hover {
     min-height: 0;
     padding-top: 8%;
     padding-bottom: 1.5rem;
+    padding-left: 5%;
+    padding-right: 5%;
+  }
+  
+  #programIntroTitle, #programIntroSubLine1, #programIntroSubLine2 {
+    margin-bottom: 1.2rem;
+  }
+
+  #programIntroSubLine2 {
+    padding-left: 10%;
+    padding-right: 10%;
+    margin-bottom: 1.8rem;
   }
 
   #programIntroSubLines {
@@ -2587,15 +2772,44 @@ button:hover {
   }
 
   #programIntroCTA1,
-  #programIntroCTA2 {
+  #programIntroCTA2,
+  #programIntroCTA3 {
     width: min(100%, 320px);
     max-width: 100%;
+  }
+
+  #programIntroCTA1 {
+    margin-bottom: .8rem;
   }
 
   #keyOfferingsTitle {
     height: auto;
     min-height: 0;
     padding: 1rem 0;
+  }
+
+  /* Program view: extra separation on small screens (stacking / overlap). */
+  .program-view-content #keyOfferingsSection {
+    /* padding-bottom: clamp(1.25rem, 4vw, 2.25rem);
+    margin-bottom: clamp(0.25rem, 1.5vw, 0.75rem); */
+    position: relative;
+    z-index: 1;
+  }
+
+  .program-view-content app-program-fade-gallery:not([hidden]) {
+    display: block;
+    /* margin-top: clamp(2rem, 7vw, 3.5rem); */
+    /* margin-bottom: 1.75rem; */
+    position: relative;
+    z-index: 0;
+    box-sizing: border-box;
+  }
+
+  .program-view-content app-program-strip-gallery:not([hidden]) {
+    display: block;
+    position: relative;
+    z-index: 0;
+    box-sizing: border-box;
   }
 }
 

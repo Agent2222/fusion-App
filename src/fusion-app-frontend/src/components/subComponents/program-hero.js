@@ -1,4 +1,5 @@
 import { navigate } from '../../router.js';
+import { firstNonEmptyString, mergeLocaleDeep } from '../../utils/localeFallback.js';
 
 // Placeholder — structure, content, and styles TBD
 class ProgramHeroComponent extends HTMLElement {
@@ -45,13 +46,18 @@ class ProgramHeroComponent extends HTMLElement {
     render() {
         const locale =
             typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
-        const loc = this.data?.[locale] || {};
+        const enLoc = this.data?.en && typeof this.data.en === 'object' ? this.data.en : {};
+        const jaLoc = this.data?.ja && typeof this.data.ja === 'object' ? this.data.ja : {};
+        const loc =
+            locale === 'ja'
+                ? /** @type {Record<string, unknown>} */ (mergeLocaleDeep(enLoc, jaLoc))
+                : /** @type {Record<string, unknown>} */ (enLoc);
         const safeTxt = (v) => {
             if (v === undefined || v === null) return '';
             const s = String(v);
             return s === 'NaN' ? '' : s;
         };
-        const imageSrc = this.data?.imageSrc;
+        const imageSrc = firstNonEmptyString(this.data?.imageSrc, jaLoc?.imageSrc, enLoc?.imageSrc);
         const imageAlt = loc.imageAlt;
         const location = safeTxt(loc.location);
         const season = safeTxt(loc.season);

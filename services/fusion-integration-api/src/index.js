@@ -189,6 +189,7 @@ app.get('/health', (_req, res) => {
         stripe: stripeSecret ? 'configured' : 'missing',
         stripeWebhook: stripeWebhookSecret ? 'configured' : 'optional',
         stripePrice: process.env.STRIPE_PRICE_ID ? 'configured' : 'missing',
+        stripeAnnualPrice: process.env.STRIPE_ANNUAL_PRICE_ID ? 'configured' : 'missing',
         fusionCanister: integrationIdentityConfigured ? 'configured' : 'missing',
         resend: resendApiKey ? 'configured' : 'missing',
         s3: s3Client && s3Bucket ? 'configured' : 'missing',
@@ -255,9 +256,23 @@ app.post('/stripe/create-subscription', requireApiKey, async (req, res) => {
         if (!stripe) {
             return res.status(503).json({ error: 'Stripe not configured' });
         }
-        const priceId = process.env.STRIPE_PRICE_ID || '';
+        const tierRaw = req.body?.subscriptionTier;
+        let tier = typeof tierRaw === 'string' ? tierRaw.trim().toLowerCase() : '';
+        if (!tier) tier = 'bimonthly';
+        if (tier !== 'bimonthly' && tier !== 'annual') {
+            return res.status(400).json({ error: 'Invalid subscriptionTier (use bimonthly or annual)' });
+        }
+        const priceId =
+            tier === 'annual'
+                ? process.env.STRIPE_ANNUAL_PRICE_ID || ''
+                : process.env.STRIPE_PRICE_ID || '';
         if (!priceId) {
-            return res.status(503).json({ error: 'STRIPE_PRICE_ID not configured' });
+            return res.status(503).json({
+                error:
+                    tier === 'annual'
+                        ? 'STRIPE_ANNUAL_PRICE_ID not configured'
+                        : 'STRIPE_PRICE_ID not configured',
+            });
         }
         const principalRaw = req.body?.principal;
         const principal =

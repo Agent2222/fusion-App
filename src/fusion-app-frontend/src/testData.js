@@ -24,6 +24,23 @@ import journal3 from './assets/dev/je-3.jpg';
  */
 
 export const testData = {
+    /** Site setting `applicationPaymentGlobal` — global EN/JA bullets for the program application form (test mode). */
+    applicationPaymentGlobal: {
+        en: {
+            whatsIncludedBullets: [
+                'Two months of Fusion platform membership with your application fee',
+                'Apply to additional Fusion programs without paying another application fee',
+            ],
+        },
+        ja: {
+            whatsIncludedBullets: [
+                '応募料に含まれる Fusion プラットフォームの2か月分のメンバーシップ',
+                '他の Fusion プログラムへ追加の応募料なしで応募できます',
+            ],
+        },
+    },
+    /** Site “current season” program id — compared to each artist’s `mostRecentProgram` (Studio → Programs). */
+    currentProgramSeason: 'fusionKaga',
     programHero: {
         order: 1,
         imageSrc: image1,
@@ -139,6 +156,7 @@ export const testData = {
                     availableSlots: 2,
                     acceptingApplications: true,
                     briefDescription: "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Quis ipsum suspendisse ultrices gravida. ",
+                    visibility: "public",
                     routeLink: "/program/kaga-ishikawa",
                     programPage: {
                         headline: "Elevate Your Practice",
@@ -178,7 +196,24 @@ export const testData = {
                             "Jade Vandenhout",
                         ],
                         detailsHeadline: "Residency Details",
+                        fadeGalleryDurationSec: 3,
+                        fadeGalleryImages: [image1, image2, image3],
+                        stripGalleryImages: [image1, image2, image3, image2],
                         programDetails: {
+                            locations: ["Kaga, Ishikawa, Japan"],
+                            residences: [
+                                {
+                                    name: "Residence partner",
+                                    href: "/programs",
+                                },
+                            ],
+                            included: [
+                                "Dedicated studio space",
+                                "Curated mentorship",
+                                "Onsen and lodging (as listed)",
+                            ],
+                            notIncluded: ["International airfare", "Shipping of finished work"],
+                            platform: "FUSION platform access for the duration of the program.",
                             facilities: [
                                 {
                                     title: "Facilities",
@@ -190,6 +225,8 @@ export const testData = {
                             costs: {
                                 base: "Residency fee: ¥200,000",
                                 additional: "materials/expenses",
+                                applicationFee:
+                                    "Application fee: $50 USD (includes 2-month Fusion platform membership).",
                             },
                             keyDates: [
                                 {
@@ -210,7 +247,45 @@ export const testData = {
                                 },
                             ],
                         },
+                        applicationForm: {
+                            depositAmountDisplay: "$1,000 USD",
+                            applicationFeeAmountCents: 5000,
+                            applicationDeadlineDisplay: "September 5, 2026",
+                            feeNoticeItalic:
+                                "The application fee for our artist residency program is designed to cover processing and administrative costs. This fee helps us manage the selection process, review applications thoroughly, and maintain the high standards of our residency experience. We appreciate your understanding and support in helping us create a vibrant community for artists worldwide.",
+                            selectionProcessOverride: "",
+                        },
+                        applicationPaymentOptions: {
+                            one_time: {
+                                title: "",
+                                displayPrice: "",
+                                subtext: "",
+                                subtext2: "",
+                                includedBullets: [
+                                    "One-time application processing",
+                                    "Membership benefits through the selection period",
+                                ],
+                            },
+                            bimonthly: {
+                                title: "",
+                                displayPrice: "$50",
+                                subtext: "Includes application fee",
+                                subtext2: "Renews every 2 months",
+                                includedBullets: ["Everything in the single payment option", "Ongoing platform membership"],
+                            },
+                            annual: {
+                                title: "",
+                                displayPrice: "$260",
+                                subtext: "Includes application fee",
+                                subtext2: "Renews every year",
+                                includedBullets: ["Best value for year-round access", "All recurring membership benefits"],
+                            },
+                        },
                         additionalInfo: {
+                            applicationFee:
+                                "The application fee includes a two-month Fusion platform membership. You can use your profile to connect with galleries, collectors, and curators. After you apply, you can manage your subscription from your profile dashboard.",
+                            aboutProgram:
+                                "This residency emphasizes focused studio time in Ishikawa with peer critique and a closing showcase. Expect structured milestones alongside room for experimentation.",
                             faq: [
                                 {
                                     question: "What is the residency fee?",
@@ -282,6 +357,7 @@ export const testData = {
                     totalSlots: 10,
                     availableSlots: 5,
                     briefDescription: "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Quis ipsum suspendisse ultrices gravida. ",
+                    visibility: "public",
                     routeLink: "/program/nihonbashi-tokyo",
                 },
                 {
@@ -296,6 +372,7 @@ export const testData = {
                     totalSlots: 10,
                     availableSlots: 5,
                     briefDescription: "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Quis ipsum suspendisse ultrices gravida. ",
+                    visibility: "public",
                     routeLink: "/program/sanjo-kyoto",
                 },
             ],
@@ -313,6 +390,7 @@ export const testData = {
                     availableSlots: 5,
                     briefDescription:
                         "本文はサンプルです。加賀での滞在制作と地域との対話を軸に、展示に向けたプロセスを紹介します。",
+                    visibility: "public",
                     routeLink: "/program/kaga-ishikawa",
                 },
                 {
@@ -328,6 +406,7 @@ export const testData = {
                     availableSlots: 5,
                     briefDescription:
                         "本文はサンプルです。東京・日本橋エリアをフィールドにしたプログラムの概要と参加方法をまとめています。",
+                    visibility: "public",
                     routeLink: "/program/nihonbashi-tokyo",
                 },
                 {
@@ -343,6 +422,7 @@ export const testData = {
                     availableSlots: 5,
                     briefDescription:
                         "本文はサンプルです。京都のまちなみと工芸・現代美術が交差する現場から、レジデンシーの記録をお届けします。",
+                    visibility: "public",
                     routeLink: "/program/sanjo-kyoto",
                 },
             ],
@@ -513,6 +593,7 @@ export const testData = {
                 {
                     "id": "artist_kamauu_001",
                     "slug": "kamauu",
+                    "mostRecentProgram": "fusionKaga",
                     "image": image2,
                     "featuredOrder": 3,
                     "visibility": "public",
@@ -2084,6 +2165,17 @@ export const testData = {
             ctaSubText: "スタジオ訪問、アーティスト紹介、<br>開催予定の展示へ。",
         }
     },
+    /** Public `/artists` — plain text above the featured strip (`app-shout-headline`; line breaks preserved). */
+    artistsPage: {
+        en: {
+            shoutText:
+                'Discover artists connected through Fusion programs—studios, residencies, and exhibitions across Japan and beyond.',
+        },
+        ja: {
+            shoutText:
+                'Fusionのプログラムを通じてつながるアーティストをご紹介します—日本国内外のスタジオ、レジデンシー、展示を横断して。',
+        },
+    },
     journals: {
         order: 6,
         journals: [
@@ -2301,6 +2393,8 @@ export const testData = {
                     title: 'Confirm Your Access',
                     subtitle: 'Your access period starts after this step.',
                     orderLabel: 'FUSION',
+                    finalPaymentPrice: '$50',
+                    finalPaymentStatement: 'every 2 months',
                     line3Months: '2 Months Access',
                     lineRenew: 'Renews every 2 months',
                     amount: '$50.00',
@@ -2321,6 +2415,8 @@ export const testData = {
                     title: 'アクセスを確定',
                     subtitle: 'お支払い後にアクセスが始まります。',
                     orderLabel: 'FUSION',
+                    finalPaymentPrice: '$50',
+                    finalPaymentStatement: '2 か月ごと',
                     line3Months: '2 か月アクセス',
                     lineRenew: '2 か月ごとに更新',
                     amount: '$50.00',
@@ -2474,6 +2570,8 @@ export const testData = {
                     title: 'Confirm Your Access',
                     subtitle: 'Your access period starts after this step.',
                     orderLabel: 'FUSION',
+                    finalPaymentPrice: '$50',
+                    finalPaymentStatement: 'every 2 months',
                     line3Months: '2 Months Access',
                     lineRenew: 'Renews every 2 months',
                     amount: '$50.00',
@@ -2494,6 +2592,8 @@ export const testData = {
                     title: 'アクセスを確定',
                     subtitle: 'お支払い後にアクセスが始まります。',
                     orderLabel: 'FUSION',
+                    finalPaymentPrice: '$50',
+                    finalPaymentStatement: '2 か月ごと',
                     line3Months: '2 か月アクセス',
                     lineRenew: '2 か月ごとに更新',
                     amount: '$50.00',
@@ -2647,6 +2747,8 @@ export const testData = {
                     title: 'Confirm Your Access',
                     subtitle: 'Your access period starts after this step.',
                     orderLabel: 'FUSION',
+                    finalPaymentPrice: '$50',
+                    finalPaymentStatement: 'every 2 months',
                     line3Months: '2 Months Access',
                     lineRenew: 'Renews every 2 months',
                     amount: '$50.00',
@@ -2667,6 +2769,8 @@ export const testData = {
                     title: 'アクセスを確定',
                     subtitle: 'お支払い後にアクセスが始まります。',
                     orderLabel: 'FUSION',
+                    finalPaymentPrice: '$50',
+                    finalPaymentStatement: '2 か月ごと',
                     line3Months: '2 か月アクセス',
                     lineRenew: '2 か月ごとに更新',
                     amount: '$50.00',
@@ -2822,7 +2926,7 @@ export const testData = {
     ],
     /**
      * Text-only cards for `app-features-row`. Use `data-area` on the element to pick a group (`id`).
-     * e.g. Context page: `data-area="context"`; Program view: `data-area="programs"`.
+     * e.g. Context page: `data-area="context"`. Program detail pages use `programPage.offeringCards` (Studio → Programs), not this bundle.
      * `marginTop` / `marginBottom`: CSS lengths for the row wrapper (e.g. `150px`, `4rem`, `0`).
      */
     featureCards: {

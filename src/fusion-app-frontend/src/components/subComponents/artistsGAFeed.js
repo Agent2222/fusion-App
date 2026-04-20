@@ -295,9 +295,41 @@ class ArtistsGAFeedElement extends HTMLElement {
                     }
                 }
 
+                @media (max-width: 768px) {
+                    .artist-card {
+                        min-height: 0;
+                    }
+
+                    .artist-card-content {
+                        height: auto;
+                        min-height: 0;
+                        padding: 0.65rem 8% 0.8rem;
+                        justify-content: flex-start;
+                    }
+
+                    .artist-card-title {
+                        font-size: clamp(0.85rem, 3.5vw, 1.25rem);
+                    }
+
+                    .artist-card-discipline {
+                        font-size: clamp(0.72rem, 2.8vw, 0.95rem);
+                    }
+
+                    .artist-card-status {
+                        margin-top: 0.4rem;
+                        padding-left: 0;
+                        padding-right: 0;
+                        max-width: 100%;
+                    }
+                }
+
                 @media (max-width: 520px) {
                     .feed-grid {
                         grid-template-columns: repeat(2, minmax(0, 1fr));
+                    }
+
+                    .artist-card-content {
+                        padding: 0.55rem 6% 0.7rem;
                     }
                 }
             </style>

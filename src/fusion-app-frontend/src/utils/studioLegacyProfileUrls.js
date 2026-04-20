@@ -1,5 +1,6 @@
 /**
  * Predictable S3 URLs for legacy profile hero + intro gallery (Studio sync buttons).
+ * @see docs/delete-later.md — remove with temporary Studio sync + `syncStudioArtistsLegacyHeroImages`.
  */
 
 export const LEGACY_PROFILE_BASE =

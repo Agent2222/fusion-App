@@ -1,11 +1,16 @@
 import { renderHeader } from './shared/header.js';
 import { renderFooter } from './shared/footer.js';
 
-import { getAllProgramsBlock, subscribeDataSource } from '../utils/database.js';
+import {
+    filterProgramsBlockToPublicListing,
+    getAllProgramsBlock,
+    subscribeDataSource,
+} from '../utils/database.js';
+import { firstNonEmptyString } from '../utils/localeFallback.js';
 
 function toProgramBlockData(enCard, jaCard) {
     return {
-        imageSrc: enCard.imageSrc,
+        imageSrc: firstNonEmptyString(jaCard?.imageSrc, enCard?.imageSrc),
         routeLink: enCard.routeLink,
         en: {
             focus: enCard.focus || '',
@@ -37,6 +42,7 @@ export function render() {
         <div class="page programs-page">
             <main id="programsMain" class="main-cont">
                 <div id="programsMainContent" class="feed-container">
+                    <h1 class="seo-primary-h1">Japan artist residency programs</h1>
                     <div id="programsBlocks"></div>
                 </div>
             </main>
@@ -59,7 +65,7 @@ export default function initPrograms() {
         const blocksHost = document.getElementById('programsBlocks');
         if (!blocksHost) return;
         blocksHost.innerHTML = '';
-        const block = await getAllProgramsBlock();
+        const block = filterProgramsBlockToPublicListing(await getAllProgramsBlock());
         const enCards = block?.programs?.en || [];
         const jaCards = block?.programs?.ja || [];
         for (let i = 0; i < enCards.length; i++) {

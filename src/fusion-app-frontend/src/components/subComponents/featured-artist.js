@@ -4,9 +4,21 @@ import {
     artistDisplayDiscipline,
     artistDisplayName,
     artistEnglishBlock,
+    artistHasResidencySignal,
+    artistResidencyCardYear,
+    residencyBadgeMatchesCurrentSeason,
     artistSlugFromName,
 } from '../../utils/artistSlug.js';
 import { applyArtistCardImage } from '../../utils/artistCardPlaceholder.js';
+import { getCurrentProgramSeason } from '../../utils/database.js';
+
+function escapeHtml(s) {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
 
 class FeaturedArtistComponent extends HTMLElement {
     constructor() {
@@ -43,13 +55,27 @@ class FeaturedArtistComponent extends HTMLElement {
         if (prop === 'active') {
             if (oldVal === newVal) return;
             this.render();
+            /* render() replaces shadow DOM — repaint cards without waiting for parent setFeaturedArtist */
+            const n = this.data?.artists?.length ?? 0;
+            if (n > 0) {
+                void this.createArtistCard(n);
+            }
         }
     }
 
-    createArtistCard(length) {
+    async createArtistCard(length) {
         const content = this.shadowRoot?.querySelector('.content');
         if (content) content.innerHTML = '';
-        for (let i=0; i<length; i++) {
+
+        let currentSeason = '';
+        try {
+            currentSeason = (await getCurrentProgramSeason()).trim();
+        } catch {
+            currentSeason = '';
+        }
+        const useSeasonCompare = currentSeason !== '';
+
+        for (let i = 0; i < length; i++) {
             const artist = this.data.artists[i];
             const locale = typeof window.getLocale === 'function' ? window.getLocale() : 'en';
             const artistName = artistDisplayName(artist, locale);
@@ -67,15 +93,38 @@ class FeaturedArtistComponent extends HTMLElement {
 
             card.innerHTML = `
                 <div class="artist-card-image">
-                    <img alt="${artistName}" loading="lazy" decoding="async">
+                    <div class="residency-badge" hidden></div>
+                    <img alt="${escapeHtml(artistName)}" loading="lazy" decoding="async">
                 </div>
                 <div class="artist-card-content">
-                    <div class="artist-card-title">${artistName}</div>
-                    <div class="artist-card-discipline">${artistDiscipline}</div>
+                    <div class="artist-card-title">${escapeHtml(artistName)}</div>
+                    <div class="artist-card-discipline">${escapeHtml(artistDiscipline)}</div>
                 </div>
             `;
             const faImg = card.querySelector('.artist-card-image img');
             applyArtistCardImage(faImg, artist.image);
+
+            const residencyBadge = card.querySelector('.residency-badge');
+            if (residencyBadge instanceof HTMLElement) {
+                residencyBadge.classList.remove('residency-badge--past-season');
+                const y = artistResidencyCardYear(artist);
+                if (artistHasResidencySignal(artist) && y) {
+                    residencyBadge.textContent = y;
+                    residencyBadge.removeAttribute('hidden');
+                    if (useSeasonCompare) {
+                        const matches = residencyBadgeMatchesCurrentSeason(
+                            y,
+                            currentSeason,
+                            artist.mostRecentProgram,
+                        );
+                        if (!matches) {
+                            residencyBadge.classList.add('residency-badge--past-season');
+                        }
+                    }
+                } else {
+                    residencyBadge.setAttribute('hidden', '');
+                }
+            }
 
             this.shadowRoot.querySelector('.content').appendChild(card);
         }
@@ -109,43 +158,49 @@ class FeaturedArtistComponent extends HTMLElement {
             <style>
                 :host {
                     display: block;
+                    width: 100%;
+                    min-width: 0;
                 }
 
                 .featured-artist {
                     width: 100%;
-                    height: auto;
-                    display: grid;
-                    grid-template-columns: 1fr;
-                    grid-template-rows: 5% 85% 10%;
-                    align-items: center;
-                    justify-content: center;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: stretch;
+                    box-sizing: border-box;
                     padding-bottom: 120px;
                     padding-top: 20px;
+                    flex-shrink: 0;
+                    min-height: min-content;
+                    overflow: visible;
                 }
 
                 .header {
+                    flex: 0 0 auto;
                     width: 100%;
-                    height: 100%;
                     font-size: 1.4rem;
                     font-variation-settings: var(--fv-display);
                     padding-left: 2%;
                     user-select: none;
                 }
 
+                /* flex: 1 + min-height: 0 let this shrink to 0 on narrow column layouts — cards vanished on mobile */
                 .content {
+                    flex: 0 0 auto;
                     width: 100%;
-                    height: 100%;
+                    min-height: min-content;
                     display: grid;
-                    grid-template-columns: 1fr 1fr 1fr 1fr;
+                    grid-template-columns: repeat(4, minmax(0, 1fr));
                     grid-template-rows: auto;
+                    grid-auto-rows: auto;
                 }
 
                 .artist-card {
                     width: 100%;
-                    height: 100%;
+                    min-width: 0;
                     display: grid;
                     grid-template-columns: 1fr;
-                    grid-template-rows: 80% 20%;
+                    grid-template-rows: auto auto;
                     cursor: pointer;
                     transition: all 0.5s ease;
                 }
@@ -164,9 +219,38 @@ class FeaturedArtistComponent extends HTMLElement {
                 }
 
                 .artist-card-image {
+                    position: relative;
                     width: 100%;
-                    height: 100%;
+                    aspect-ratio: 4 / 5;
                     overflow: hidden;
+                    background: var(--c3);
+                }
+
+                .residency-badge {
+                    position: absolute;
+                    left: 0.35rem;
+                    bottom: 0.35rem;
+                    z-index: 1;
+                    padding: 0.2rem 0.4rem;
+                    border-radius: 2px;
+                    background-color: var(--c1);
+                    color: var(--c3);
+                    font-size: clamp(0.58rem, 0.72vw, 0.7rem);
+                    font-variation-settings: var(--fv-subtitle);
+                    letter-spacing: 0.04em;
+                    line-height: 1.1;
+                    text-align: center;
+                    pointer-events: none;
+                    box-sizing: border-box;
+                }
+
+                .residency-badge[hidden] {
+                    display: none !important;
+                }
+
+                .residency-badge--past-season {
+                    background-color: #000;
+                    color: var(--c3);
                 }
                 
                 .artist-card-image img {
@@ -209,8 +293,9 @@ class FeaturedArtistComponent extends HTMLElement {
                 }
 
                 .button-cta {
+                    flex: 0 0 auto;
                     width: 23%;
-                    height: 55%;
+                    min-height: 3rem;
                     display: flex;
                     align-items: end;
                     justify-content: end;
@@ -249,7 +334,7 @@ class FeaturedArtistComponent extends HTMLElement {
 
                 @media (max-width: 1024px) {
                     .content {
-                        grid-template-columns: 1fr 1fr;
+                        grid-template-columns: repeat(2, minmax(0, 1fr));
                     }
 
                     .button-cta {
@@ -279,7 +364,19 @@ class FeaturedArtistComponent extends HTMLElement {
                     }
 
                     .content {
-                        grid-template-columns: 1fr 1fr;
+                        grid-template-columns: repeat(2, minmax(0, 1fr));
+                    }
+
+                    .artist-card {
+                        min-height: min-content;
+                    }
+
+                    .artist-card-content {
+                        height: auto;
+                        min-height: 0;
+                        padding: 0.65rem 0.45rem 0.75rem;
+                        box-sizing: border-box;
+                        gap: 0.2rem;
                     }
 
                     .button-cta {

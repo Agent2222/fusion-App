@@ -47,6 +47,16 @@ persistent actor {
   /// Composite key: `artistId|programId` → JSON `{"submittedAt":...,"payload":...}` (one entry per program).
   stable var applicationByArtistProgramStable : [(Text, Text)] = [];
 
+  /// Artist id → canonical program key for “most recent program” (Studio + residency badge).
+  stable var artistMostRecentProgramStable : [(Text, Text)] = [];
+
+  /// Featured strip: ids eligible for random rotation (subset flag per artist).
+  stable var artistFeaturedFeaturableIdsStable : [Text] = [];
+  /// Manual featured order (max 8) — public home/artists strip when not in random mode.
+  stable var artistFeaturedManualIdsStable : [Text] = [];
+  /// When true, public clients pick up to 8 from the featurable pool (shuffled client-side).
+  stable var artistFeaturedRandomModeStable : Bool = false;
+
   // In-memory hashmap for fast lookups/updates.
   transient var subscribersByEmail : _HashMap.HashMap<Text, Types.Subscriber> =
     _HashMap.HashMap<Text, Types.Subscriber>(
@@ -101,6 +111,16 @@ persistent actor {
   transient var applicationByArtistProgram : _HashMap.HashMap<Text, Text> =
     _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
 
+  transient var mostRecentProgramByArtistId : _HashMap.HashMap<Text, Text> =
+    _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
+
+  transient var artistFeaturedFeaturableById : _HashMap.HashMap<Text, Bool> =
+    _HashMap.HashMap<Text, Bool>(0, Text.equal, Text.hash);
+
+  transient var manualFeaturedArtistIds : Buffer.Buffer<Text> = Buffer.Buffer<Text>(0);
+
+  private let maxManualFeaturedStrip : Nat = 8;
+
   // Populate hashmaps on install / reload.
   for (entry in subscribersStable.vals()) {
     let email = entry.0;
@@ -145,6 +165,16 @@ persistent actor {
   };
   for (entry in applicationByArtistProgramStable.vals()) {
     applicationByArtistProgram.put(entry.0, entry.1);
+  };
+  for (entry in artistMostRecentProgramStable.vals()) {
+    mostRecentProgramByArtistId.put(entry.0, entry.1);
+  };
+
+  for (id in artistFeaturedFeaturableIdsStable.vals()) {
+    artistFeaturedFeaturableById.put(id, true);
+  };
+  for (id in artistFeaturedManualIdsStable.vals()) {
+    manualFeaturedArtistIds.add(id);
   };
 
   /// Keep in sync with `adminPrincipals` defaults above — `postupgrade` appends any of these not already stored.
@@ -207,6 +237,46 @@ persistent actor {
         };
       };
     };
+  };
+
+  private func featurableIdsSorted() : [Text] {
+    let pairs = _Iter.toArray(artistFeaturedFeaturableById.entries());
+    let keys = Array.map<(Text, Bool), Text>(pairs, func((k, _) : (Text, Bool)) : Text { k });
+    Array.sort(keys, Text.compare);
+  };
+
+  private func manualFeaturedIdsAsArray() : [Text] {
+    Buffer.toArray(manualFeaturedArtistIds);
+  };
+
+  private func setManualFeaturedFromArray(ids : [Text]) {
+    manualFeaturedArtistIds.clear();
+    for (id in ids.vals()) {
+      manualFeaturedArtistIds.add(id);
+    };
+  };
+
+  private func removeManualFeaturedId(id : Text) {
+    let arr = manualFeaturedIdsAsArray();
+    let filtered = Array.filter<Text>(arr, func(x : Text) : Bool { x != id });
+    setManualFeaturedFromArray(filtered);
+  };
+
+  private func indexOfManualFeatured(id : Text) : ?Nat {
+    let arr = manualFeaturedIdsAsArray();
+    var i : Nat = 0;
+    for (x in arr.vals()) {
+      if (x == id) {
+        return ?i;
+      };
+      i += 1;
+    };
+    null;
+  };
+
+  private func cleanupFeaturedForDeletedArtist(artistId : Text) {
+    ignore artistFeaturedFeaturableById.remove(artistId);
+    removeManualFeaturedId(artistId);
   };
 
   private func defaultMembership() : Types.MembershipFields {
@@ -393,6 +463,9 @@ persistent actor {
     applicantsStable := _Iter.toArray(applicantsById.entries());
     siteSettingsStable := _Iter.toArray(siteSettingsByKey.entries());
     applicationByArtistProgramStable := _Iter.toArray(applicationByArtistProgram.entries());
+    artistMostRecentProgramStable := _Iter.toArray(mostRecentProgramByArtistId.entries());
+    artistFeaturedFeaturableIdsStable := featurableIdsSorted();
+    artistFeaturedManualIdsStable := Buffer.toArray(manualFeaturedArtistIds);
   };
 
   system func postupgrade() {
@@ -483,6 +556,28 @@ persistent actor {
       applicationByArtistProgram.put(entry.0, entry.1);
     };
     applicationByArtistProgramStable := [];
+
+    mostRecentProgramByArtistId := _HashMap.HashMap<Text, Text>(
+      artistMostRecentProgramStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in artistMostRecentProgramStable.vals()) {
+      mostRecentProgramByArtistId.put(entry.0, entry.1);
+    };
+    artistMostRecentProgramStable := [];
+
+    artistFeaturedFeaturableById := _HashMap.HashMap<Text, Bool>(0, Text.equal, Text.hash);
+    for (id in artistFeaturedFeaturableIdsStable.vals()) {
+      artistFeaturedFeaturableById.put(id, true);
+    };
+    artistFeaturedFeaturableIdsStable := [];
+
+    manualFeaturedArtistIds := Buffer.Buffer<Text>(0);
+    for (id in artistFeaturedManualIdsStable.vals()) {
+      manualFeaturedArtistIds.add(id);
+    };
+    artistFeaturedManualIdsStable := [];
 
     for (d in defaultAdminPrincipals().vals()) {
       if (not isAdminPrincipal(d)) {
@@ -631,7 +726,7 @@ persistent actor {
           case null {};
         };
         let fo : Nat = 999_999;
-        let profile : Types.Artist = {
+        let profile : Types.ArtistCore = {
           id = artistId;
           slug = artistId;
           image = "";
@@ -663,6 +758,24 @@ persistent actor {
 
   // ===== Artists (public reads; writes staff/admin) =====
 
+  private func artistPublicFromCore(core : Types.ArtistCore, id : Text) : Types.Artist {
+    let mrp = switch (mostRecentProgramByArtistId.get(id)) {
+      case (?t) { t };
+      case null { "" };
+    };
+    {
+      id = core.id;
+      slug = core.slug;
+      image = core.image;
+      featuredOrder = core.featuredOrder;
+      visibility = core.visibility;
+      updatedAt = core.updatedAt;
+      filter = core.filter;
+      galleryFilter = core.galleryFilter;
+      mostRecentProgram = mrp;
+    };
+  };
+
   public query func listArtists() : async [Types.Artist] {
     let vals = _Iter.toArray(artistsById.vals());
     let sorted = Array.sort(
@@ -679,7 +792,9 @@ persistent actor {
     );
     Array.map<Types.ArtistRecord, Types.Artist>(
       sorted,
-      func(r : Types.ArtistRecord) : Types.Artist { r.profile },
+      func(r : Types.ArtistRecord) : Types.Artist {
+        artistPublicFromCore(r.profile, r.profile.id);
+      },
     );
   };
 
@@ -689,10 +804,15 @@ persistent actor {
       case (?id) {
         switch (artistsById.get(id)) {
           case null { null };
-          case (?rec) { ?rec.profile };
+          case (?rec) { ?artistPublicFromCore(rec.profile, rec.profile.id) };
         };
       };
     };
+  };
+
+  /// Public: artist id → stored most-recent program key (for merging with `listArtistRecordsPublic` in the client).
+  public query func listArtistMostRecentPrograms() : async [(Text, Text)] {
+    _Iter.toArray(mostRecentProgramByArtistId.entries());
   };
 
   private func sanitizeArtistRecordForPublic(rec : Types.ArtistRecord) : Types.ArtistRecord {
@@ -718,6 +838,62 @@ persistent actor {
       sorted,
       sanitizeArtistRecordForPublic,
     );
+  };
+
+  /// Public: featured strip curation (featurable pool, manual order, random mode) — separate from `ArtistCore`.
+  public query func getArtistFeaturedGalleryPublic() : async Types.ArtistFeaturedGalleryPublic {
+    {
+      randomFeatured = artistFeaturedRandomModeStable;
+      manualFeaturedIds = manualFeaturedIdsAsArray();
+      featurableIds = featurableIdsSorted();
+    };
+  };
+
+  /// Staff/admin: mark whether an artist may appear in random featured selection.
+  public shared (msg) func staffSetArtistFeaturedFeaturable(artistId : Text, featurable : Bool) : async () {
+    assertStaffOrAdmin(msg.caller);
+    switch (artistsById.get(artistId)) {
+      case null { Debug.trap("Unknown artist id") };
+      case (?_) {
+        if (featurable) {
+          artistFeaturedFeaturableById.put(artistId, true);
+        } else {
+          ignore artistFeaturedFeaturableById.remove(artistId);
+        };
+      };
+    };
+  };
+
+  /// Staff/admin: add/remove artist from the manual featured list (max 8). Returns 1-based slot or 0 if not featured.
+  public shared (msg) func staffSetManualFeaturedForArtist(artistId : Text, featured : Bool) : async Nat {
+    assertStaffOrAdmin(msg.caller);
+    switch (artistsById.get(artistId)) {
+      case null { Debug.trap("Unknown artist id") };
+      case (?_) {
+        if (featured) {
+          switch (indexOfManualFeatured(artistId)) {
+            case (?idx) { idx + 1 };
+            case null {
+              let n = manualFeaturedArtistIds.size();
+              if (n >= maxManualFeaturedStrip) {
+                Debug.trap("At most 8 featured artists");
+              };
+              manualFeaturedArtistIds.add(artistId);
+              manualFeaturedArtistIds.size();
+            };
+          };
+        } else {
+          removeManualFeaturedId(artistId);
+          0;
+        };
+      };
+    };
+  };
+
+  /// Staff/admin: when true, clients pick randomly from the featurable pool for the strip.
+  public shared (msg) func staffSetArtistFeaturedRandomMode(on : Bool) : async () {
+    assertStaffOrAdmin(msg.caller);
+    artistFeaturedRandomModeStable := on;
   };
 
   private func artistRecordBySlugPublic(slug : Text) : ?Types.ArtistRecord {
@@ -887,7 +1063,7 @@ persistent actor {
                 } else {
                   rec.profile.updatedAt;
                 };
-                let newProfile : Types.Artist = { rec.profile with updatedAt = newUpdated };
+                let newProfile : Types.ArtistCore = { rec.profile with updatedAt = newUpdated };
                 putArtistRecord({
                   rec with
                   profile = newProfile;
@@ -926,7 +1102,7 @@ persistent actor {
                 } else {
                   rec.profile.updatedAt;
                 };
-                let newProfile : Types.Artist = {
+                let newProfile : Types.ArtistCore = {
                   rec.profile with
                   image = image;
                   updatedAt = newUpdated;
@@ -991,7 +1167,7 @@ persistent actor {
                   return unique;
                 };
                 let now = "1970-01-01T00:00:00.000Z";
-                let newProfile : Types.Artist = {
+                let newProfile : Types.ArtistCore = {
                   rec.profile with
                   slug = unique;
                   updatedAt = now;
@@ -1101,11 +1277,26 @@ persistent actor {
       case null { false };
       case (?rec) {
         unlinkAccountsAndAppsForArtist(artistId);
+        cleanupFeaturedForDeletedArtist(artistId);
         ignore artistsById.remove(artistId);
         ignore artistSlugToId.remove(rec.profile.slug);
+        ignore mostRecentProgramByArtistId.remove(artistId);
         true;
       };
     };
+  };
+
+  public shared (msg) func setArtistMostRecentProgram(artistId : Text, programKey : Text) : async () {
+    assertStaffOrAdmin(msg.caller);
+    switch (artistsById.get(artistId)) {
+      case null { Debug.trap("Unknown artist id") };
+      case (?_) { mostRecentProgramByArtistId.put(artistId, programKey) };
+    };
+  };
+
+  public shared (msg) func setCurrentProgramSeason(value : Text) : async () {
+    assertStaffOrAdmin(msg.caller);
+    siteSettingsByKey.put("currentProgramSeason", value);
   };
 
   // ===== Programs (public reads; writes staff/admin) =====

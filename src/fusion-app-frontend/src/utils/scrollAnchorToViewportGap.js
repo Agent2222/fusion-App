@@ -46,41 +46,39 @@ export function scrollElementTopToViewportGap(element, gapPx, behavior = 'smooth
 }
 
 /**
- * Same behavior as program page hero CTAs: guests → join modal; signed-in → show `#programApplicationWrap`,
- * activate `#programApplicationSection`, then scroll it into view.
+ * Program page CTAs: show `#programApplicationWrap`, activate `#programApplicationSection`, scroll into view.
+ * Signed-in users without a linked roster profile are still sent to profile setup first; guests go straight to the form.
  *
  * @returns {Promise<void>}
  */
 export async function revealProgramApplicationOrOpenJoin() {
     const { getAuthSnapshot } = await import('./icAuth.js');
     const snap = await getAuthSnapshot();
-    if (!snap.authenticated) {
-        window.dispatchEvent(new CustomEvent('fusion-open-join-network', { detail: {} }));
-        return;
-    }
-    try {
-        const { getAccountForCaller } = await import('./database.js');
-        const { getProfileSetupDraft } = await import('./profileSetupDraft.js');
-        const acc = await getAccountForCaller();
-        const linkedRaw = acc && typeof acc === 'object' ? acc.linkedArtistId ?? acc.linked_artist_id : null;
-        const linkedId = Array.isArray(linkedRaw)
-            ? linkedRaw.length
-                ? String(linkedRaw[0] ?? '').trim()
-                : ''
-            : linkedRaw != null
-              ? String(linkedRaw).trim()
-              : '';
-        if (!linkedId) {
-            const draft = getProfileSetupDraft();
-            window.dispatchEvent(
-                new CustomEvent('fusion-open-profile-setup', {
-                    detail: { fullName: draft.fullName, email: draft.email },
-                })
-            );
-            return;
+    if (snap.authenticated) {
+        try {
+            const { getAccountForCaller } = await import('./database.js');
+            const { getProfileSetupDraft } = await import('./profileSetupDraft.js');
+            const acc = await getAccountForCaller();
+            const linkedRaw = acc && typeof acc === 'object' ? acc.linkedArtistId ?? acc.linked_artist_id : null;
+            const linkedId = Array.isArray(linkedRaw)
+                ? linkedRaw.length
+                    ? String(linkedRaw[0] ?? '').trim()
+                    : ''
+                : linkedRaw != null
+                  ? String(linkedRaw).trim()
+                  : '';
+            if (!linkedId) {
+                const draft = getProfileSetupDraft();
+                window.dispatchEvent(
+                    new CustomEvent('fusion-open-profile-setup', {
+                        detail: { fullName: draft.fullName, email: draft.email },
+                    })
+                );
+                return;
+            }
+        } catch {
+            /* ignore and continue */
         }
-    } catch {
-        /* ignore and continue */
     }
     const wrap = document.getElementById('programApplicationWrap');
     const formEl = document.getElementById('programApplicationSection');

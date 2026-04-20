@@ -29,7 +29,8 @@ stripe listen --forward-to localhost:8787/webhooks/stripe
 | `CORS_ORIGINS` | no | With `CORS_STRICT`, comma-separated extra allowed origins (e.g. `https://….icp0.io`). Ignored when `CORS_STRICT` is unset. |
 | `INTEGRATION_API_KEY` | no | If set, require `Authorization: Bearer <token>` on POST routes |
 | `STRIPE_SECRET_KEY` | for Stripe | `sk_test_…` or `sk_live_…` |
-| `STRIPE_PRICE_ID` | for subscriptions | Recurring Price id (`price_…`) for membership |
+| `STRIPE_PRICE_ID` | for subscriptions | Recurring Price id (`price_…`) for membership (bi-monthly; default tier) |
+| `STRIPE_ANNUAL_PRICE_ID` | optional | Recurring Price id for **annual** tier when the client sends `subscriptionTier: "annual"` (e.g. program application). Example: `price_1TOO5UHMfdeKt5zM6b6dPmfr` |
 | `STRIPE_WEBHOOK_SECRET` | for webhooks | `whsec_…` from Stripe Dashboard or `stripe listen` |
 | `FUSION_BACKEND_CANISTER_ID` | to sync on-chain | fusion-app-backend canister id |
 | `INTEGRATION_IC_IDENTITY_PEM` | to sync on-chain (preferred) | Full PEM from `dfx identity export <name>` |
@@ -53,7 +54,7 @@ stripe listen --forward-to localhost:8787/webhooks/stripe
 ## Routes
 
 - `GET /health` — status flags (no secrets); includes `stripePrice`, `fusionCanister`, `stripeWebhook`
-- `POST /stripe/create-subscription` — body `{ principal, email, metadata? }` — creates/finds Customer, Subscription, returns `clientSecret` from the first invoice PaymentIntent
+- `POST /stripe/create-subscription` — body `{ principal?, email, metadata?, payFirst?, subscriptionTier? }` — `subscriptionTier` optional: `bimonthly` (default) or `annual` (uses `STRIPE_ANNUAL_PRICE_ID`). Creates/finds Customer, Subscription, returns `clientSecret` from the first invoice PaymentIntent
 - `POST /stripe/create-payment-intent` — body `{ amount, currency?, metadata? }` (Studio tests / legacy)
 - `POST /webhooks/stripe` — **raw** JSON body; Stripe signature via `STRIPE_WEBHOOK_SECRET`
 - `POST /email/send` — body `{ to, subject, html | text, replyTo?, from? }` — optional `from` overrides `RESEND_FROM` when set (must be a verified sender in Resend)

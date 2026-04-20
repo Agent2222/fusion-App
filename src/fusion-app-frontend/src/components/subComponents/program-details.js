@@ -8,12 +8,12 @@ class ProgramDetailsComponent extends HTMLElement {
     constructor() {
         super();
         this.shadow = this.attachShadow({ mode: 'open' });
-        /** @type {null | { programId?: string, applicationsOpen?: boolean, headline: string, keyDates: Array<{ date?: string, description?: string }>, locations?: string[], facilities?: string[], costText: string, additionalInfo?: object | null }} */
+        /** @type {null | { programId?: string, applicationsOpen?: boolean, headline: string, keyDates: Array<{ date?: string, description?: string }>, locations?: string[], facilities?: string[], costText: string, applicationFeeLine?: string, residences?: Array<{ name?: string, href?: string }>, included?: string[], notIncluded?: string[], platform?: string, additionalInfo?: object | null }} */
         this._data = null;
     }
 
     /**
-     * @param {{ programId?: string, applicationsOpen?: boolean, headline: string, keyDates: Array<{ date?: string, description?: string }>, locations?: string[], facilities?: string[], costText: string, additionalInfo?: { faq?: object[], programNotes?: object[], refundPolicy?: object[] } | null }} payload
+     * @param {{ programId?: string, applicationsOpen?: boolean, headline: string, keyDates: Array<{ date?: string, description?: string }>, locations?: string[], facilities?: string[], costText: string, applicationFeeLine?: string, residences?: Array<{ name?: string, href?: string }>, included?: string[], notIncluded?: string[], platform?: string, additionalInfo?: { applicationFee?: string, aboutProgram?: string, faq?: object[], programNotes?: object[], refundPolicy?: object[] } | null }} payload
      */
     setProgramDetails(payload) {
         this._data = payload;
@@ -49,31 +49,57 @@ class ProgramDetailsComponent extends HTMLElement {
                 locations: '開催地',
                 facilities: '施設',
                 cost: '費用',
+                residence: 'レジデンス',
+                included: '含まれるもの',
+                notIncluded: '含まれないもの',
+                platform: 'プラットフォーム',
                 additionalInformation: '追加情報',
                 faq: 'よくある質問',
                 programNotes: 'プログラム備考',
                 refundPolicy: '返金ポリシー',
+                applicationFee: '応募料',
+                aboutProgram: 'プログラムについて',
             };
         }
         return {
             locations: 'LOCATIONS',
             facilities: 'FACILITIES',
             cost: 'COST',
+            residence: 'RESIDENCE',
+            included: 'INCLUDED',
+            notIncluded: 'NOT INCLUDED',
+            platform: 'PLATFORM',
             additionalInformation: 'Additional Information',
             faq: 'FAQ',
             programNotes: 'Program Notes',
             refundPolicy: 'Refund Policy',
+            applicationFee: 'Application Fee',
+            aboutProgram: 'About Program',
         };
     }
 
     _hasMainDetails() {
         if (!this._data) return false;
-        const { keyDates, locations, facilities, costText } = this._data;
+        const { keyDates, locations, facilities, costText, applicationFeeLine, residences, included, notIncluded, platform } = this._data;
         const hasDates = Array.isArray(keyDates) && keyDates.some((d) => (d?.date || d?.description || '').trim());
+        const resList = Array.isArray(residences) ? residences : [];
+        const hasResidence = resList.some((r) => {
+            if (!r || typeof r !== 'object') return false;
+            const n = String(r.name || '').trim();
+            const h = String(r.href || '').trim();
+            return Boolean(n || h);
+        });
+        const inc = Array.isArray(included) ? included : [];
+        const ninc = Array.isArray(notIncluded) ? notIncluded : [];
         const hasSidebar = Boolean(
             (Array.isArray(locations) && locations.some((x) => String(x || '').trim())) ||
                 (Array.isArray(facilities) && facilities.some((x) => String(x || '').trim())) ||
-                (costText && String(costText).trim()),
+                (costText && String(costText).trim()) ||
+                (applicationFeeLine && String(applicationFeeLine).trim()) ||
+                hasResidence ||
+                inc.some((x) => String(x || '').trim()) ||
+                ninc.some((x) => String(x || '').trim()) ||
+                (platform && String(platform).trim()),
         );
         return hasDates || hasSidebar;
     }
@@ -81,10 +107,14 @@ class ProgramDetailsComponent extends HTMLElement {
     _hasAdditionalInfo() {
         const a = this._data?.additionalInfo;
         if (!a || typeof a !== 'object') return false;
+        const appFee =
+            typeof a.applicationFee === 'string' && String(a.applicationFee).trim().length > 0;
+        const about =
+            typeof a.aboutProgram === 'string' && String(a.aboutProgram).trim().length > 0;
         const faq = Array.isArray(a.faq) && a.faq.length > 0;
         const notes = Array.isArray(a.programNotes) && a.programNotes.length > 0;
         const refund = Array.isArray(a.refundPolicy) && a.refundPolicy.length > 0;
-        return faq || notes || refund;
+        return appFee || about || faq || notes || refund;
     }
 
     _hasContent() {
@@ -121,7 +151,7 @@ class ProgramDetailsComponent extends HTMLElement {
     _closeAllAiPanels() {
         const root = this.shadowRoot;
         if (!root) return;
-        ['faq', 'notes', 'refund'].forEach((key) => {
+        ['appfee', 'about', 'faq', 'notes', 'refund'].forEach((key) => {
             const panel = root.querySelector(`#ai-panel-${key}`);
             const trig = root.querySelector(`#ai-trigger-${key}`);
             if (panel) {
@@ -137,7 +167,7 @@ class ProgramDetailsComponent extends HTMLElement {
     _openAiPanel(key) {
         const root = this.shadowRoot;
         if (!root) return;
-        ['faq', 'notes', 'refund'].forEach((k) => {
+        ['appfee', 'about', 'faq', 'notes', 'refund'].forEach((k) => {
             const panel = root.querySelector(`#ai-panel-${k}`);
             const trig = root.querySelector(`#ai-trigger-${k}`);
             const on = k === key;
@@ -206,9 +236,13 @@ class ProgramDetailsComponent extends HTMLElement {
         const beginBtn = root.querySelector('.begin-application');
         const additionalSection = root.querySelector('.additional-info');
         const additionalHeading = root.querySelector('.additional-info-heading');
+        const triggerAppfee = root.querySelector('#ai-trigger-appfee');
+        const triggerAbout = root.querySelector('#ai-trigger-about');
         const triggerFaq = root.querySelector('#ai-trigger-faq');
         const triggerNotes = root.querySelector('#ai-trigger-notes');
         const triggerRefund = root.querySelector('#ai-trigger-refund');
+        const panelAppfee = root.querySelector('#ai-panel-appfee');
+        const panelAbout = root.querySelector('#ai-panel-about');
         const panelFaq = root.querySelector('#ai-panel-faq');
         const panelNotes = root.querySelector('#ai-panel-notes');
         const panelRefund = root.querySelector('#ai-panel-refund');
@@ -219,7 +253,19 @@ class ProgramDetailsComponent extends HTMLElement {
         }
         this.style.display = '';
 
-        const { headline, keyDates, locations, facilities, costText, additionalInfo } = this._data;
+        const {
+            headline,
+            keyDates,
+            locations,
+            facilities,
+            costText,
+            applicationFeeLine,
+            residences,
+            included,
+            notIncluded,
+            platform,
+            additionalInfo,
+        } = this._data;
         const L = this._labels();
         const head = (headline || '').trim();
         const hasMain = this._hasMainDetails();
@@ -272,30 +318,125 @@ class ProgramDetailsComponent extends HTMLElement {
                 ? facilities.map((x) => String(x || '').trim()).filter(Boolean)
                 : [];
             const cost = (costText || '').trim();
+            const appFeeSidebar = (applicationFeeLine || '').trim();
+            const resRaw = Array.isArray(residences) ? residences : [];
+            const residenceRows = resRaw
+                .map((r) => {
+                    if (!r || typeof r !== 'object') return null;
+                    const name = String(r.name || '').trim();
+                    const href = String(r.href || '').trim();
+                    if (!name && !href) return null;
+                    return { name, href };
+                })
+                .filter(Boolean)
+                .slice(0, 5);
+            const incList = Array.isArray(included)
+                ? included.map((x) => String(x || '').trim()).filter(Boolean).slice(0, 10)
+                : [];
+            const excList = Array.isArray(notIncluded)
+                ? notIncluded.map((x) => String(x || '').trim()).filter(Boolean).slice(0, 5)
+                : [];
+            const plat = String(platform || '').trim();
+
             sidebarEl.innerHTML = '';
+            /** @type {Array<[string, 'list' | 'text' | 'residences', unknown]>} */
             const blocks = [
-                [L.locations, loc],
-                [L.facilities, fac],
-                [L.cost, cost],
+                [L.locations, 'list', loc],
+                [L.facilities, 'list', fac],
+                [L.cost, 'cost_pair', { main: cost, extra: appFeeSidebar }],
+                [L.residence, 'residences', residenceRows],
+                [L.included, 'list', incList],
+                [L.notIncluded, 'list', excList],
+                [L.platform, 'text', plat],
             ];
-            blocks.forEach(([label, val]) => {
-                if (!val) return;
+            blocks.forEach(([label, kind, val]) => {
+                if (kind === 'list') {
+                    const arr = /** @type {string[]} */ (val);
+                    if (!Array.isArray(arr) || !arr.length) return;
+                    const block = document.createElement('div');
+                    block.className = 'sidebar-block';
+                    const lab = document.createElement('div');
+                    lab.className = 'sidebar-label';
+                    lab.textContent = label;
+                    const ul = document.createElement('ul');
+                    ul.className = 'sidebar-value-list';
+                    for (const row of arr) {
+                        const li = document.createElement('li');
+                        li.textContent = `- ${row}`;
+                        ul.appendChild(li);
+                    }
+                    block.appendChild(lab);
+                    block.appendChild(ul);
+                    sidebarEl.appendChild(block);
+                    return;
+                }
+                if (kind === 'residences') {
+                    const rows = /** @type {{ name: string, href: string }[]} */ (val);
+                    if (!Array.isArray(rows) || !rows.length) return;
+                    const block = document.createElement('div');
+                    block.className = 'sidebar-block';
+                    const lab = document.createElement('div');
+                    lab.className = 'sidebar-label';
+                    lab.textContent = label;
+                    const ul = document.createElement('ul');
+                    ul.className = 'sidebar-value-list sidebar-value-list--residences';
+                    for (const row of rows) {
+                        const li = document.createElement('li');
+                        li.appendChild(document.createTextNode('- '));
+                        if (row.href) {
+                            const a = document.createElement('a');
+                            a.className = 'sidebar-residence-link';
+                            a.href = row.href;
+                            a.target = '_blank';
+                            a.rel = 'noopener noreferrer';
+                            a.textContent = row.name || row.href;
+                            li.appendChild(a);
+                        } else {
+                            li.appendChild(document.createTextNode(row.name));
+                        }
+                        ul.appendChild(li);
+                    }
+                    block.appendChild(lab);
+                    block.appendChild(ul);
+                    sidebarEl.appendChild(block);
+                    return;
+                }
+                if (kind === 'cost_pair') {
+                    const pair = /** @type {{ main: string, extra: string }} */ (val);
+                    const main = String(pair?.main || '').trim();
+                    const extra = String(pair?.extra || '').trim();
+                    if (!main && !extra) return;
+                    const block = document.createElement('div');
+                    block.className = 'sidebar-block';
+                    const lab = document.createElement('div');
+                    lab.className = 'sidebar-label';
+                    lab.textContent = label;
+                    block.appendChild(lab);
+                    if (main) {
+                        const p = document.createElement('p');
+                        p.className = 'sidebar-value';
+                        p.textContent = main;
+                        block.appendChild(p);
+                    }
+                    if (extra) {
+                        const p2 = document.createElement('p');
+                        p2.className = 'sidebar-value sidebar-value--addon';
+                        p2.textContent = extra;
+                        block.appendChild(p2);
+                    }
+                    sidebarEl.appendChild(block);
+                    return;
+                }
+                const text = String(val || '').trim();
+                if (!text) return;
                 const block = document.createElement('div');
                 block.className = 'sidebar-block';
                 const lab = document.createElement('div');
                 lab.className = 'sidebar-label';
                 lab.textContent = label;
-                const p = Array.isArray(val) ? document.createElement('ul') : document.createElement('p');
-                p.className = Array.isArray(val) ? 'sidebar-value-list' : 'sidebar-value';
-                if (Array.isArray(val)) {
-                    for (const row of val) {
-                        const li = document.createElement('li');
-                        li.textContent = `- ${row}`;
-                        p.appendChild(li);
-                    }
-                } else {
-                    p.textContent = val;
-                }
+                const p = document.createElement('p');
+                p.className = 'sidebar-value';
+                p.textContent = text;
                 block.appendChild(lab);
                 block.appendChild(p);
                 sidebarEl.appendChild(block);
@@ -321,6 +462,38 @@ class ProgramDetailsComponent extends HTMLElement {
         if (hasAdd && additionalHeading) additionalHeading.textContent = L.additionalInformation;
 
         const a = additionalInfo && typeof additionalInfo === 'object' ? additionalInfo : null;
+
+        if (panelAppfee) {
+            panelAppfee.innerHTML = '';
+            const rawFee = a?.applicationFee;
+            const feeText = typeof rawFee === 'string' ? rawFee.trim() : '';
+            if (feeText) {
+                this._appendTextBlocks(panelAppfee, feeText);
+            }
+        }
+        if (triggerAppfee) {
+            const vis = Boolean(panelAppfee?.children?.length);
+            triggerAppfee.hidden = !vis;
+            const lab = triggerAppfee.querySelector('.ai-trigger-label');
+            if (lab) lab.textContent = L.applicationFee;
+            triggerAppfee.setAttribute('aria-controls', 'ai-panel-appfee');
+        }
+
+        if (panelAbout) {
+            panelAbout.innerHTML = '';
+            const rawAbout = a?.aboutProgram;
+            const aboutText = typeof rawAbout === 'string' ? rawAbout.trim() : '';
+            if (aboutText) {
+                this._appendTextBlocks(panelAbout, aboutText);
+            }
+        }
+        if (triggerAbout) {
+            const vis = Boolean(panelAbout?.children?.length);
+            triggerAbout.hidden = !vis;
+            const lab = triggerAbout.querySelector('.ai-trigger-label');
+            if (lab) lab.textContent = L.aboutProgram;
+            triggerAbout.setAttribute('aria-controls', 'ai-panel-about');
+        }
 
         if (panelFaq) {
             panelFaq.innerHTML = '';
@@ -396,7 +569,7 @@ class ProgramDetailsComponent extends HTMLElement {
     }
 
     /**
-     * Match intro CTAs: “Sign up & apply” for guests, “Begin application” when signed in.
+     * Match intro CTAs: same primary label as program view (no guest vs signed-in split).
      * @param {HTMLButtonElement} beginBtn
      */
     async _syncBeginApplicationButtonLabel(beginBtn) {
@@ -420,10 +593,10 @@ class ProgramDetailsComponent extends HTMLElement {
             }
             beginBtn.textContent = alreadyApplied
                 ? programApplicationReviewLabel()
-                : programApplicationCtaLabelForAuth(snap.authenticated);
+                : programApplicationCtaLabelForAuth(true);
             beginBtn.classList.toggle('program-application-cta--review', alreadyApplied);
         } catch {
-            beginBtn.textContent = programApplicationCtaLabelForAuth(false);
+            beginBtn.textContent = programApplicationCtaLabelForAuth(true);
             beginBtn.classList.remove('program-application-cta--review');
         }
     }
@@ -454,7 +627,7 @@ class ProgramDetailsComponent extends HTMLElement {
                 const t = e.target.closest('.ai-trigger');
                 if (!t || t.hasAttribute('hidden')) return;
                 const key = t.getAttribute('data-panel');
-                if (!key || !['faq', 'notes', 'refund'].includes(key)) return;
+                if (!key || !['appfee', 'about', 'faq', 'notes', 'refund'].includes(key)) return;
                 const isOpen = t.getAttribute('aria-selected') === 'true';
                 if (isOpen) {
                     this._closeAllAiPanels();
@@ -664,6 +837,10 @@ class ProgramDetailsComponent extends HTMLElement {
                     letter-spacing: 0.02em;
                 }
 
+                .sidebar-value--addon {
+                    margin-top: 0.4rem;
+                }
+
                 .sidebar-value-list {
                     margin: 0;
                     padding: 0;
@@ -673,6 +850,16 @@ class ProgramDetailsComponent extends HTMLElement {
                     color: var(--c2);
                     line-height: 1.5;
                     letter-spacing: 0.02em;
+                }
+
+                a.sidebar-residence-link {
+                    color: inherit;
+                    text-decoration: underline;
+                    text-underline-offset: 0.15em;
+                }
+
+                a.sidebar-residence-link:hover {
+                    opacity: 0.85;
                 }
 
                 .additional-info {
@@ -837,6 +1024,12 @@ class ProgramDetailsComponent extends HTMLElement {
                 <section class="additional-info" hidden aria-labelledby="additional-info-heading">
                     <h3 class="additional-info-heading" id="additional-info-heading"></h3>
                     <div class="ai-triggers" role="tablist">
+                        <button type="button" class="ai-trigger" id="ai-trigger-appfee" data-panel="appfee" hidden role="tab" aria-selected="false">
+                            <span class="ai-trigger-arrow" aria-hidden="true">→</span><span class="ai-trigger-label"></span>
+                        </button>
+                        <button type="button" class="ai-trigger" id="ai-trigger-about" data-panel="about" hidden role="tab" aria-selected="false">
+                            <span class="ai-trigger-arrow" aria-hidden="true">→</span><span class="ai-trigger-label"></span>
+                        </button>
                         <button type="button" class="ai-trigger" id="ai-trigger-faq" data-panel="faq" hidden role="tab" aria-selected="false">
                             <span class="ai-trigger-arrow" aria-hidden="true">→</span><span class="ai-trigger-label"></span>
                         </button>
@@ -848,6 +1041,8 @@ class ProgramDetailsComponent extends HTMLElement {
                         </button>
                     </div>
                     <div class="ai-panels-wrap">
+                        <div class="ai-panel" id="ai-panel-appfee" role="tabpanel" hidden></div>
+                        <div class="ai-panel" id="ai-panel-about" role="tabpanel" hidden></div>
                         <div class="ai-panel" id="ai-panel-faq" role="tabpanel" hidden></div>
                         <div class="ai-panel" id="ai-panel-notes" role="tabpanel" hidden></div>
                         <div class="ai-panel" id="ai-panel-refund" role="tabpanel" hidden></div>

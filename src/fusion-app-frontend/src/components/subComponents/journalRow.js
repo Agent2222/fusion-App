@@ -5,6 +5,7 @@
 import { getJournalEntries, subscribeDataSource } from '../../utils/database.js';
 import { isJournalListingPage } from '../../utils/journalListingPage.js';
 import { navigate } from '../../router.js';
+import { mergeLocaleDeep, firstNonEmptyString } from '../../utils/localeFallback.js';
 import { escapeHtml, previewPlainText } from '../../utils/textPreview.js';
 
 class JournalRowComponent extends HTMLElement {
@@ -128,8 +129,13 @@ class JournalRowComponent extends HTMLElement {
         }
         this.style.display = '';
 
-        const loc = entry[locale] || entry.en;
-        const journalImage = entry.imageSrc;
+        const enE = entry.en && typeof entry.en === 'object' ? entry.en : {};
+        const jaE = entry.ja && typeof entry.ja === 'object' ? entry.ja : {};
+        const loc =
+            locale === 'ja'
+                ? /** @type {Record<string, unknown>} */ (mergeLocaleDeep(enE, jaE))
+                : /** @type {Record<string, unknown>} */ (enE);
+        const journalImage = firstNonEmptyString(entry.imageSrc, jaE?.imageSrc, enE?.imageSrc);
         const journalLink = entry.link || '#';
         const journalTitle = loc?.title ?? '';
         const journalDescription = previewPlainText(loc?.description ?? '', 250);
@@ -325,10 +331,18 @@ class JournalRowComponent extends HTMLElement {
                     .programCTA {
                         width: 100%;
                         margin-left: 0;
+                        border-bottom-color: #000;
                     }
                     .programCTA:has(.ctaButton:hover) {
                         width: 100%;
                         margin-left: 0;
+                    }
+                    .ctaButton {
+                        background-color: #000;
+                        color: #fff;
+                    }
+                    .ctaButton:hover {
+                        background-color: #222;
                     }
                 }
             </style>

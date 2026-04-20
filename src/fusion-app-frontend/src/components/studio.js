@@ -10,6 +10,10 @@ import {
     renderStudioMain,
     initStudioMain,
 } from './studio/panels.js';
+import {
+    resetStudioWorkspaceTrail,
+    setStudioWorkspaceSectionTitle,
+} from './studio/studioWorkspaceChrome.js';
 
 function normalizeHash() {
     const raw = (window.location.hash || '').replace(/^#/, '').trim().toLowerCase();
@@ -56,6 +60,15 @@ export function render() {
                         <button type="button" id="studioSettingsBtn" aria-label="Settings">⚙</button>
                     </div>
                 </header>
+                <div class="studio-workspace-rail">
+                    <nav class="studio-breadcrumb" id="studioWorkspaceBreadcrumb" aria-label="Workspace location">
+                        <button type="button" class="studio-breadcrumb__root" id="studioBreadcrumbStudio">Studio</button>
+                        <span class="studio-breadcrumb__sep" aria-hidden="true">·</span>
+                        <span class="studio-breadcrumb__current" id="studioBreadcrumbSection">${sectionTitle(initial)}</span>
+                        <span class="studio-breadcrumb__trail" id="studioBreadcrumbTrail" hidden></span>
+                    </nav>
+                    <aside class="studio-workspace-toc" id="studioWorkspaceToc" hidden aria-label="On this page"></aside>
+                </div>
                 <main id="studioMainContent" class="studio-main" data-studio-section="${initial}">
                     ${renderStudioMain(initial)}
                 </main>
@@ -144,7 +157,10 @@ export default function initStudio() {
         const headingEl = document.getElementById('studioSectionHeading');
         const navEl = document.getElementById('studioNav');
         if (!mainEl || !navEl) return;
-        if (headingEl) headingEl.textContent = sectionTitle(id);
+        const title = sectionTitle(id);
+        if (headingEl) headingEl.textContent = title;
+        setStudioWorkspaceSectionTitle(title);
+        resetStudioWorkspaceTrail();
         mainEl.dataset.studioSection = id;
         mainEl.innerHTML = renderStudioMain(id);
         navEl.querySelectorAll('.studio-nav-item').forEach((btn) => {
@@ -177,6 +193,12 @@ export default function initStudio() {
     wordmark?.addEventListener('click', () => {
         setHash(STUDIO_DASHBOARD_ID);
         applySection(STUDIO_DASHBOARD_ID);
+        closeNavIfMobile();
+    });
+
+    document.getElementById('studioBreadcrumbStudio')?.addEventListener('click', () => {
+        setHash(STUDIO_DASHBOARD_ID);
+        void applySection(STUDIO_DASHBOARD_ID);
         closeNavIfMobile();
     });
 

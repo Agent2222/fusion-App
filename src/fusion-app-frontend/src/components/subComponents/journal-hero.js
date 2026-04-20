@@ -1,4 +1,5 @@
 import { navigate } from '../../router.js';
+import { mergeLocaleDeep, firstNonEmptyString } from '../../utils/localeFallback.js';
 import { escapeHtml, previewPlainText } from '../../utils/textPreview.js';
 
 // Placeholder — structure, content, and styles TBD
@@ -68,8 +69,13 @@ class JournalHeroComponent extends HTMLElement {
 
         for (let i = 0; i < count; i++) {
             const row = journals[i];
-            const journalImage = row.imageSrc;
-            const slice = row[loc] || row.en || {};
+            const en = row.en && typeof row.en === 'object' ? row.en : {};
+            const ja = row.ja && typeof row.ja === 'object' ? row.ja : {};
+            const slice =
+                loc === 'ja'
+                    ? /** @type {Record<string, unknown>} */ (mergeLocaleDeep(en, ja))
+                    : /** @type {Record<string, unknown>} */ (en);
+            const journalImage = firstNonEmptyString(row.imageSrc, ja?.imageSrc, en?.imageSrc);
             const journalTitle = slice.title ?? '';
             const journalDescription = previewPlainText(slice.description ?? '', 250);
             const journalLink = row.link || '#';

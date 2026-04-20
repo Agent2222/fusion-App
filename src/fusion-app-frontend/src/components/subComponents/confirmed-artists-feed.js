@@ -620,8 +620,12 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
                         right: -24px;
                     }
 
+                    .artist-card {
+                        min-height: 0;
+                    }
+
                     .artist-card-content {
-                        padding: 1.25rem 0.35rem 1.5rem;
+                        padding: 1.1rem 0.4rem 1.25rem;
                     }
                 }
 
@@ -630,11 +634,16 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
                         grid-template-columns: 1fr;
                     }
 
+                    .artist-card-content {
+                        padding: 0.95rem 0.5rem 1.1rem;
+                    }
+
+                    /* Phantom placer cards: keep one row on mobile (do not stack). */
                     .confirmed-grid.confirmed-grid--phantom {
-                        display: flex;
-                        flex-direction: column;
-                        align-items: center;
-                        gap: clamp(0.65rem, 2vw, 1rem);
+                        display: grid;
+                        grid-template-columns: repeat(3, minmax(0, 1fr));
+                        gap: clamp(0.45rem, 2vw, 0.85rem);
+                        align-items: stretch;
                     }
 
                     .confirmed-grid.confirmed-grid--phantom .confirmed-phantom-spacer {
@@ -642,7 +651,8 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
                     }
 
                     .confirmed-grid.confirmed-grid--phantom .artist-card--phantom {
-                        width: min(100%, 240px);
+                        width: 100%;
+                        max-width: none;
                     }
 
                     .confirmed-pagination-dot {
@@ -662,10 +672,10 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
                     }
 
                     .confirmed-grid.confirmed-grid--phantom {
-                        display: flex;
-                        flex-direction: column;
-                        align-items: center;
-                        gap: clamp(0.65rem, 2vw, 1rem);
+                        display: grid;
+                        grid-template-columns: repeat(3, minmax(0, 1fr));
+                        gap: clamp(0.45rem, 2vw, 0.85rem);
+                        align-items: stretch;
                     }
 
                     .confirmed-grid.confirmed-grid--phantom .confirmed-phantom-spacer {
@@ -673,7 +683,8 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
                     }
 
                     .confirmed-grid.confirmed-grid--phantom .artist-card--phantom {
-                        width: min(100%, 240px);
+                        width: 100%;
+                        max-width: none;
                     }
                 }
             </style>

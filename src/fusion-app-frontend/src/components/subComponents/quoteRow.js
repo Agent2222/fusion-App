@@ -4,6 +4,7 @@
  */
 import { navigate } from '../../router.js';
 import { getContentBundleForStudio, subscribeDataSource } from '../../utils/database.js';
+import { mergeLocaleDeep } from '../../utils/localeFallback.js';
 
 function escapeHtml(s) {
     return String(s)
@@ -76,7 +77,13 @@ class QuoteRowComponent extends HTMLElement {
     render() {
         const locale = typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
         const slice = this._getSlice();
-        const row = slice ? slice[locale] || slice.en : null;
+        const enR = slice?.en && typeof slice.en === 'object' ? slice.en : {};
+        const jaR = slice?.ja && typeof slice.ja === 'object' ? slice.ja : {};
+        const row = slice
+            ? locale === 'ja'
+                ? /** @type {Record<string, unknown>} */ (mergeLocaleDeep(enR, jaR))
+                : /** @type {Record<string, unknown>} */ (enR)
+            : null;
         const quote = row?.quote ?? '';
         const attribution = row?.attribution ?? '';
         const hrefRaw = row?.attributionHref ?? '#';

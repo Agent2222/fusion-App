@@ -1,4 +1,5 @@
 import { navigate } from '../../router.js';
+import { firstNonEmptyString, mergeLocaleDeep } from '../../utils/localeFallback.js';
 
 // Placeholder — structure, content, and styles TBD
 class ComingUpComponent extends HTMLElement {
@@ -21,6 +22,7 @@ class ComingUpComponent extends HTMLElement {
     setComingUp(data) {
         this.data = data;
         this.render();
+        this.createCards();
     }
 
     getComingUp() {
@@ -35,26 +37,53 @@ class ComingUpComponent extends HTMLElement {
         if (prop === 'active') {
             if (oldVal === newVal) return;
             this.render();
+            if (this.data) this.createCards();
         }
     }
 
     createCards() {
-        for (let i=0; i<3; i++) {
-            const location = this.data.programs[window.getLocale()][i].location;
-            const startDate = this.data.programs[window.getLocale()][i].startDate;
-            const endDate = this.data.programs[window.getLocale()][i].endDate;
-            const year = this.data.programs[window.getLocale()][i].year;
-            const imageSrc = this.data.programs[window.getLocale()][i].imageSrc;
-            const imageAlt = this.data.programs[window.getLocale()][i].imageAlt;
-            const focus = this.data.programs[window.getLocale()][i].focus;
-            const routeLink = this.data.programs[window.getLocale()][i].routeLink;
+        const contentEl = this.shadowRoot?.querySelector('.content');
+        if (!contentEl) return;
 
-            let card = document.createElement('div');
-            card.classList.add('program-card');
-            card.addEventListener('click', () => {
-                navigate(routeLink);
+        const loc =
+            typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
+        const enArr = this.data?.programs?.en || [];
+        const jaArr = this.data?.programs?.ja || [];
+        const maxSlots = 3;
+        const count = Math.min(maxSlots, enArr.length, jaArr.length);
+
+        contentEl.replaceChildren();
+        contentEl.classList.remove('oneColumn', 'twoColumn', 'threeColumn');
+        if (count === 0) {
+            contentEl.classList.add('oneColumn');
+            return;
+        }
+        if (count === 1) contentEl.classList.add('oneColumn');
+        else if (count === 2) contentEl.classList.add('twoColumn');
+        else contentEl.classList.add('threeColumn');
+
+        for (let i = 0; i < count; i++) {
+            const enCard = enArr[i] || {};
+            const jaCard = jaArr[i] || {};
+            const card =
+                loc === 'ja'
+                    ? /** @type {Record<string, unknown>} */ (mergeLocaleDeep(enCard, jaCard))
+                    : /** @type {Record<string, unknown>} */ (enCard);
+            const location = card.location ?? '';
+            const startDate = card.startDate ?? '';
+            const endDate = card.endDate ?? '';
+            const year = card.year ?? '';
+            const imageSrc = firstNonEmptyString(jaCard?.imageSrc, enCard?.imageSrc) || '';
+            const imageAlt = card.imageAlt ?? '';
+            const focus = card.focus ?? '';
+            const routeLink = card.routeLink ?? '';
+
+            const cardEl = document.createElement('div');
+            cardEl.classList.add('program-card');
+            cardEl.addEventListener('click', () => {
+                if (routeLink) navigate(routeLink);
             });
-            card.innerHTML = `
+            cardEl.innerHTML = `
                 <div class="program-card-image">
                     <div class="programFocus">${focus}</div>
                     <img src="${imageSrc}" alt="${imageAlt}">
@@ -67,8 +96,8 @@ class ComingUpComponent extends HTMLElement {
                     </div>
                 </div>
             `;
-            
-            this.shadowRoot.querySelector('.content').appendChild(card);
+
+            contentEl.appendChild(cardEl);
         }
     }
 
@@ -107,8 +136,19 @@ class ComingUpComponent extends HTMLElement {
                     width: 100%;
                     height: 100%;
                     display: grid;
-                    grid-template-columns: 1fr 1fr 1fr;
                     grid-template-rows: 1fr;
+                }
+
+                .content.oneColumn {
+                    grid-template-columns: 1fr;
+                }
+
+                .content.twoColumn {
+                    grid-template-columns: 1fr 1fr;
+                }
+
+                .content.threeColumn {
+                    grid-template-columns: 1fr 1fr 1fr;
                 }
 
                 .program-card {
@@ -228,13 +268,16 @@ class ComingUpComponent extends HTMLElement {
                         padding-top: 2rem;
                     }
 
-                    .content {
+                    /* Three cards: 2×2-style row wrap; one/two columns unchanged */
+                    .content.threeColumn {
                         grid-template-columns: 1fr 1fr;
                     }
                 }
 
                 @media (max-width: 768px) {
-                    .content {
+                    .content.oneColumn,
+                    .content.twoColumn,
+                    .content.threeColumn {
                         grid-template-columns: 1fr;
                     }
 
@@ -262,7 +305,7 @@ class ComingUpComponent extends HTMLElement {
             </style>
             <div class="coming-up">
                  <div class="header">Current & Upcoming</div>
-                 <div class="content threeColumn"></div>
+                 <div class="content oneColumn"></div>
             </div>
         `;
     }

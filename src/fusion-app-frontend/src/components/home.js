@@ -7,6 +7,7 @@ import {
     getObjectsHighlight,
     getProgramHero,
     getAllProgramsBlock,
+    filterProgramsBlockToPublicListing,
 } from '../utils/database.js';
 
 /** Cached home bundle so returning to `/` can paint immediately without NaN/empty flashes. */
@@ -49,7 +50,7 @@ function onFusionContentPagesChanged(ev) {
     void loadHomeBlocks();
 }
 
-function applyHomeBlocks(
+async function applyHomeBlocks(
     programHeroData,
     allPrograms,
     featured,
@@ -65,13 +66,14 @@ function applyHomeBlocks(
     const comingUp = document.getElementById('comingUp');
     if (comingUp && typeof comingUp.setComingUp === 'function') {
         comingUp.setComingUp(allPrograms);
-        comingUp.createCards();
     }
 
     const featuredArtist = document.getElementById('featuredArtist');
     if (featuredArtist && typeof featuredArtist.setFeaturedArtist === 'function') {
         featuredArtist.setFeaturedArtist({ artists: featured || [] });
-        featuredArtist.createArtistCard((featured || []).length);
+        if (typeof featuredArtist.createArtistCard === 'function') {
+            await featuredArtist.createArtistCard((featured || []).length);
+        }
         featuredArtist.showAllArtistsButton();
     }
 
@@ -96,18 +98,18 @@ function applyHomeBlocks(
 
 async function loadHomeBlocks() {
     if (_homeBlocksCache) {
-        applyHomeBlocks(..._homeBlocksCache);
+        await applyHomeBlocks(..._homeBlocksCache);
     }
     const bundle = await Promise.all([
         getProgramHero(),
-        getAllProgramsBlock(),
+        getAllProgramsBlock().then((b) => filterProgramsBlockToPublicListing(b)),
         getFeaturedArtists(),
         getObjectsHighlight(),
         getGalleryAccessCta(),
         getJournalsHeroBlock(),
     ]);
     _homeBlocksCache = bundle;
-    applyHomeBlocks(...bundle);
+    await applyHomeBlocks(...bundle);
 }
 
 /** @type {((ev: Event) => void) | null} */
@@ -131,6 +133,7 @@ export default function initHome() {
     }
     _homeFeaturedMetaListener = () => {
         _homeBlocksCache = null;
+        void loadHomeBlocks();
     };
     window.addEventListener('fusion-artist-featured-meta-change', _homeFeaturedMetaListener);
 

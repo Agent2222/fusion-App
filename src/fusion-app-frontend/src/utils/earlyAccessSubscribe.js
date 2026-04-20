@@ -1,7 +1,13 @@
 /**
  * Shared Fusion backend actor + early-access subscribe (same flow as loadscreen `#csCTAForm` / `#csCTASubscribe`).
  */
-import { DEV_MODE, createICActor, createAuthenticatedICActor, getHost } from '../config.js';
+import {
+    DEV_MODE,
+    createICActor,
+    createAuthenticatedICActor,
+    getHost,
+    resolveFusionBackendCanisterId,
+} from '../config.js';
 
 let _resolvedActor = null;
 let _actorPromise = null;
@@ -39,7 +45,8 @@ export async function getAuthenticatedFusionBackendActor() {
             _decl = await import('declarations/fusion-app-backend');
         }
         if (!_decl?.canisterId || !_decl?.idlFactory) return null;
-        const actor = await createAuthenticatedICActor(_decl.idlFactory, _decl.canisterId, identity);
+        const cid = resolveFusionBackendCanisterId(_decl.canisterId);
+        const actor = await createAuthenticatedICActor(_decl.idlFactory, cid, identity);
         _authenticatedActor = actor;
         _authenticatedActorPrincipalText = pid;
         return actor;
@@ -69,11 +76,12 @@ export async function getFusionBackendActor() {
                     _decl = await import('declarations/fusion-app-backend');
                 }
                 if (_decl?.canisterId && _decl?.idlFactory) {
+                    const cid = resolveFusionBackendCanisterId(_decl.canisterId);
                     if (DEV_MODE) {
-                        console.log('[EarlyAccess] backend canisterId:', _decl.canisterId);
+                        console.log('[EarlyAccess] backend canisterId (resolved):', cid);
                         console.log('[EarlyAccess] IC host:', getHost());
                     }
-                    return await createICActor(_decl.idlFactory, _decl.canisterId);
+                    return await createICActor(_decl.idlFactory, cid);
                 }
             } catch (err) {
                 if (DEV_MODE) {

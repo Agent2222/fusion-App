@@ -1,4 +1,10 @@
 import { DEV_MODE } from './config.js';
+import { applyDocumentSeo } from './utils/documentSeo.js';
+import {
+    FUSION_PROGRAM_APPLICATION_LEAVE_CONFIRM,
+    fusionNavPathnameOnly,
+    isFusionProgramApplicationUnsaved,
+} from './utils/programApplicationGuard.js';
 import { getGateStateForPath, renderGatedHomeInnerHtml, renderGatedPageHtml } from './utils/pageGate.js';
 
 import { renderHeader } from './components/shared/header.js';
@@ -11,127 +17,186 @@ import LightSymbolLogo from './assets/Fusion-X-SymbolLogo-2.png';
 
 let headerAndFooterActive = false;
 
+/** @param {string} path */
+function robotsForPath(path) {
+    if (path === '/studio') return 'noindex, nofollow';
+    if (path.startsWith('/settings') || path === '/sign-in' || path === '/register') {
+        return 'noindex, nofollow';
+    }
+    return '';
+}
+
+/**
+ * Profile, settings, and dynamic detail routes set SEO in their own init (documentSeo).
+ * @param {string} path
+ */
+function shouldDeferSeoToPage(path) {
+    if (path.startsWith('/profile')) return true;
+    if (path.startsWith('/settings')) return true;
+    const isEditionDetail =
+        path.startsWith('/editions/') && path.slice('/editions/'.length).split('/').filter(Boolean)[0];
+    const isProgramDetail =
+        (path.startsWith('/program/') && path.slice('/program/'.length).split('/').filter(Boolean)[0]) ||
+        (path.startsWith('/programs/') &&
+            path.slice('/programs/'.length).split('/').filter(Boolean)[0]);
+    const isJournalEntryDetail =
+        path.startsWith('/journal/entry/') &&
+        path.slice('/journal/entry/'.length).split('/').filter(Boolean)[0];
+    const isEventDetail =
+        path.startsWith('/event/') && path.slice('/event/'.length).split('/').filter(Boolean)[0];
+    return Boolean(
+        isEditionDetail || isProgramDetail || isJournalEntryDetail || isEventDetail,
+    );
+}
+
+/**
+ * @param {string} path
+ * @param {{ title: string, description?: string }} route
+ */
+function applyRouterSeo(path, route) {
+    if (shouldDeferSeoToPage(path)) return;
+    let robots = robotsForPath(path);
+    if (route.contentGenerator === 'generateNotFoundContent') {
+        robots = 'noindex, nofollow';
+    }
+    applyDocumentSeo({
+        title: route.title,
+        description: route.description || '',
+        path,
+        robots: robots || undefined,
+        homeOrganizationJsonLd: path === '/',
+    });
+}
+
 // Route configuration object
 const routes = {
     '/': {
         loader: () => import('./components/home.js'),
-        title: 'Home',
-        description: 'Welcome to our app',
+        title: 'Fusion — Japan artist residencies & art platform',
+        description:
+            'Fusion connects artists with curated Japan artist residency programs, editions, and editorial context. A premium art platform for place-based practice.',
         contentGenerator: 'generateHomeContent',
         isFullPage: true // Home page renders full page structure
     },
     '/artists': {
         loader: () => import('./components/artists.js'),
-        title: 'Artists',
-        description: 'Artists',
+        title: 'Artists on Fusion — curated network',
+        description:
+            'Discover artists working through Fusion’s Japan-based programs and progressive art platform.',
         contentGenerator: 'generateArtistsContent',
         isFullPage: false // Artists page renders full page structure
     },
     '/programs': {
         loader: () => import('./components/programs.js'),
-        title: 'Programs',
-        description: 'Programs',
+        title: 'Japan artist residency programs · Fusion',
+        description:
+            'Curated artist residencies and programs across Japan — explore Fusion’s place-based opportunities.',
         contentGenerator: 'generateProgramsContent',
     },
     '/program-view': {
         loader: () => import('./components/programView.js'),
-        title: 'Program',
-        description: 'Program detail',
+        title: 'Program · Fusion',
+        description:
+            'Artist residency program details, schedule, and application information on Fusion.',
         contentGenerator: 'generateProgramViewContent',
         isFullPage: false,
     },
     '/gallery-access': {
         loader: () => import('./components/gallery-access.js'),
-        title: 'Gallery Access',
-        description: 'Gallery Access',
+        title: 'Gallery access · Fusion',
+        description:
+            'Curated gallery access and artist introductions through Fusion’s network.',
         contentGenerator: 'generateGalleryAccessContent'
     },
     '/editions': {
         loader: () => import('./components/editions.js'),
-        title: 'Editions',
-        description: 'Editions',
+        title: 'Editions & objects · Fusion',
+        description:
+            'Prints, objects, and works released through Fusion artists and partners.',
         contentGenerator: 'generateEditionsContent',
     },
     '/journal': {
         loader: () => import('./components/journal.js'),
-        title: 'Journal',
-        description: 'Journal',
+        title: 'Journal — editorial & field notes · Fusion',
+        description:
+            'Editorial writing, documentation, and perspectives from Fusion’s art platform.',
         contentGenerator: 'generateJournalContent',
         isFullPage: false,
     },
     '/community': {
         loader: () => import('./components/navPages.js'),
-        title: 'Community',
-        description: 'Community',
+        title: 'Community · Fusion',
+        description: 'Fusion’s artist community and membership programs.',
         contentGenerator: 'generateCommunityContent'
     },
     '/context': {
         loader: () => import('./components/context.js'),
-        title: 'Context',
-        description: 'Fusion in context',
+        title: 'Context — mission & ecosystem · Fusion',
+        description:
+            'Why Fusion exists: mission, ecosystem, and Japan artist residency focus for our art platform.',
         contentGenerator: 'generateContextContent',
         isFullPage: false,
     },
     '/sign-in': {
         loader: () => import('./components/navPages.js'),
-        title: 'Sign in',
-        description: 'Sign in',
+        title: 'Sign in · Fusion',
+        description: 'Sign in to your Fusion member account.',
         contentGenerator: 'generateSignInContent'
     },
     '/register': {
         loader: () => import('./components/settingsProfile.js'),
-        title: 'Account',
-        description: 'Your profile and account',
+        title: 'Account · Fusion',
+        description: 'Create or manage your Fusion member profile and account.',
         contentGenerator: 'generateSettingsProfileContent',
     },
     '/contact': {
         loader: () => import('./components/contact.js'),
-        title: 'Contact',
-        description: 'Get in touch with us',
+        title: 'Contact Fusion',
+        description: 'Contact the Fusion team — partnerships, programs, and general inquiries.',
         contentGenerator: 'generateContactContent',
     },
     '/profile': {
         loader: () => import('./components/profile.js'),
-        title: 'Artist profile',
-        description: 'Artist profile',
+        title: 'Artist profile · Fusion',
+        description: 'Artist profiles on Fusion’s Japan artist residency and programs platform.',
         contentGenerator: 'generateProfileContent',
     },
     '/edition-view': {
         loader: () => import('./components/editionView.js'),
-        title: 'Edition',
-        description: 'Edition detail',
+        title: 'Edition · Fusion',
+        description: 'Edition details, images, and release information on Fusion.',
         contentGenerator: 'generateEditionViewContent',
     },
     '/journal-entry-view': {
         loader: () => import('./components/journalEntry.js'),
-        title: 'Journal',
-        description: 'Journal entry',
+        title: 'Journal entry · Fusion',
+        description: 'Journal editorial entry on Fusion’s art platform.',
         contentGenerator: 'generateJournalEntryContent',
     },
     '/event-view': {
         loader: () => import('./components/event.js'),
-        title: 'Event',
-        description: 'Event detail',
+        title: 'Event · Fusion',
+        description: 'Events, talks, and gatherings on Fusion.',
         contentGenerator: 'generateEventContent',
     },
     '/studio': {
         loader: () => import('./components/studio.js'),
         title: 'Fusion Studio',
-        description: 'Admin dashboard',
+        description: 'Content and program administration for Fusion (members only).',
         isFullPage: true,
         /** Skip auto-injected public header/footer — studio is a separate shell. */
         noChrome: true,
     },
     '/settings/profile': {
         loader: () => import('./components/settingsProfile.js'),
-        title: 'Profile settings',
-        description: 'Edit public profile copy',
+        title: 'Profile settings · Fusion',
+        description: 'Edit your public artist profile and account settings on Fusion.',
         contentGenerator: 'generateSettingsProfileContent',
     },
     '/404': {
         loader: () => import('./components/notFound.js'),
-        title: 'Page Not Found',
-        description: 'The page you are looking for does not exist',
+        title: 'Page not found · Fusion',
+        description: 'The page you are looking for is not available on Fusion.',
         contentGenerator: 'generateNotFoundContent'
     }
 };
@@ -405,8 +470,7 @@ class Router {
                     !isJournalEntryDetail &&
                     !isEventDetail
                 ) {
-                    // Keep section titles for gated routes (same as normal routes).
-                    document.title = route.title;
+                    applyRouterSeo(path, route);
                 }
 
                 this.onRouteChange(path, route);
@@ -558,9 +622,9 @@ class Router {
                 !isJournalEntryDetail &&
                 !isEventDetail
             ) {
-                document.title = route.title;
+                applyRouterSeo(path, route);
             }
-            
+
             // Trigger route change event
             this.onRouteChange(path, route);
 
@@ -584,7 +648,12 @@ class Router {
                         appElement.innerHTML = html;
                     }
                 }
-                document.title = this.routes['/404'].title;
+                applyDocumentSeo({
+                    title: this.routes['/404'].title,
+                    description: this.routes['/404'].description || '',
+                    path: window.location.pathname,
+                    robots: 'noindex, nofollow',
+                });
             } catch (err) {
                 console.error('Error loading 404 page:', err);
             }
@@ -648,6 +717,13 @@ class Router {
      * pushState so back/forward (popstate) stays aligned with the rendered view.
      */
     navigate(path) {
+        const nextPath = fusionNavPathnameOnly(path);
+        const curPath = fusionNavPathnameOnly(window.location.pathname);
+        if (nextPath !== curPath && isFusionProgramApplicationUnsaved()) {
+            if (!window.confirm(FUSION_PROGRAM_APPLICATION_LEAVE_CONFIRM)) {
+                return;
+            }
+        }
         window.history.pushState({}, '', path);
         // activateDeactivate runs inside handleRoute after DOM updates; don’t run it here
         // or we toggle classes on the wrong (previous) page’s nodes.

@@ -2,8 +2,8 @@
 import gsap from 'gsap';
 import SymbolLogo from '../../assets/Fusion-X-SymbolLogo.png';
 
-/** Pixels from bottom to treat as "at bottom" (matches small rounding / subpixel). */
-const BOTTOM_THRESHOLD_PX = 200;
+/** Pixels from bottom to treat as "at bottom" (0 = flush with scroll end; avoids early reveal on mobile). */
+const BOTTOM_THRESHOLD_PX = 0;
 
 class FooterComponent extends HTMLElement {
     constructor() {

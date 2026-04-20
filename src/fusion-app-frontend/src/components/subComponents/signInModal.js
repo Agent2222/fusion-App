@@ -4,6 +4,7 @@
  */
 import { ERROR_USER_INTERRUPT } from '@dfinity/auth-client';
 import { loginInternetIdentity } from '../../utils/icAuth.js';
+import posthog from 'posthog-js';
 
 class SignInModal extends HTMLElement {
     constructor() {
@@ -242,6 +243,7 @@ class SignInModal extends HTMLElement {
                     return;
                 }
                 const msg = e instanceof Error ? e.message : String(e);
+                posthog.capture('sign_in_failed', { auth_method: 'internet_identity' });
                 const el = this.shadow.querySelector('#siErr');
                 if (el) el.textContent = msg || 'Sign-in failed.';
             }

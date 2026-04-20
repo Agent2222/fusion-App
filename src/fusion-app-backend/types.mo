@@ -28,8 +28,19 @@ module {
         view : Text;
     };
 
-    /// Top-level artist listing / profile metadata — mirror `testData.allArtists.artists[]`.
-    /// `image` is HTTPS or S3 key reference, not raw blob. Locales / nested body: extend or version next.
+    /// Stored roster profile (stable `ArtistRecord.profile`) — no derived/joined fields.
+    public type ArtistCore = {
+        id : Text;
+        slug : Text;
+        image : Text;
+        featuredOrder : Nat;
+        visibility : Text;
+        updatedAt : Text;
+        filter : ?ArtistFilter;
+        galleryFilter : ?ArtistGalleryFilter;
+    };
+
+    /// Public API (`listArtists`, `getArtistBySlug`): includes `mostRecentProgram` from the canister map.
     public type Artist = {
         id : Text;
         slug : Text;
@@ -39,6 +50,7 @@ module {
         updatedAt : Text;
         filter : ?ArtistFilter;
         galleryFilter : ?ArtistGalleryFilter;
+        mostRecentProgram : Text;
     };
 
     /// VetKD Phase A: store ciphertext only; client derives keys (see VETKD.md). Phase B wires vetkd_* calls.
@@ -114,14 +126,26 @@ module {
     /// Full artist row for canister + Studio: public `profile` + optional JSON blob for locales (versioned).
     /// `imported` / `accessCode` are Studio-only onboarding fields (not in public `Artist` / `listArtists`).
     public type ArtistRecord = {
-        profile : Artist;
+        profile : ArtistCore;
         localesJson : ?Text;
         notesEncrypted : ?EncryptedBlob;
         imported : Bool;
         accessCode : Text;
     };
 
+    /// Home / artists featured strip — stored in dedicated stable maps (not embedded in `ArtistCore`).
+    public type ArtistFeaturedGalleryPublic = {
+        randomFeatured : Bool;
+        manualFeaturedIds : [Text];
+        featurableIds : [Text];
+    };
+
     /// Program card + detail page JSON (versioned) — mirrors `testData.allPrograms.programs`.
+    /// Locale JSON may include `programPage.applicationPaymentOptions` (one_time | bimonthly | annual — application form cards),
+    /// `programPage.programDetails.costs.applicationFee` (sidebar),
+    /// `programPage.additionalInfo.applicationFee` (Application Fee dropdown),
+    /// and `programPage.additionalInfo.aboutProgram` (About Program dropdown).
+    /// Site settings key `applicationPaymentGlobal` (opaque Text JSON): global EN/JA bullets for the application form.
     /// `studioStatus`: open | full | active | completed | comingUp (Text for Studio filters).
     public type ProgramRecord = {
         id : Text;

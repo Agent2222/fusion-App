@@ -1,4 +1,7 @@
+import { getPublicSiteOrigin } from '../config.js';
 import { getEventsList, subscribeDataSource } from '../utils/database.js';
+import { applyDocumentSeo } from '../utils/documentSeo.js';
+import { firstNonEmptyString, mergeLocaleDeep } from '../utils/localeFallback.js';
 
 /**
  * @returns {number | null}
@@ -75,7 +78,12 @@ export function generateEventContent() {
 
 function applyEventToDom(ev) {
     const locale = typeof window.getLocale === 'function' ? window.getLocale() : 'en';
-    const loc = ev[locale === 'ja' ? 'ja' : 'en'] || ev.en;
+    const enE = ev.en && typeof ev.en === 'object' ? ev.en : {};
+    const jaE = ev.ja && typeof ev.ja === 'object' ? ev.ja : {};
+    const loc =
+        locale === 'ja'
+            ? /** @type {Record<string, unknown>} */ (mergeLocaleDeep(enE, jaE))
+            : /** @type {Record<string, unknown>} */ (enE);
     const title = loc?.title ?? '';
     const category = loc?.category ?? '';
     const date = loc?.date ?? '';
@@ -84,7 +92,7 @@ function applyEventToDom(ev) {
     const address = loc?.address ?? '';
     const description = loc?.description ?? '';
 
-    const img = document.getElementById('eventDetailImage');
+    const imgEl = document.getElementById('eventDetailImage');
     const catEl = document.getElementById('eventDetailCategory');
     const titleEl = document.getElementById('eventDetailTitle');
     const dateEl = document.getElementById('eventDetailDate');
@@ -95,9 +103,9 @@ function applyEventToDom(ev) {
     const pastNote = document.getElementById('eventDetailPastNote');
     const rsvpSection = document.getElementById('eventRsvpSection');
 
-    if (img) {
-        img.src = ev.image || '';
-        img.alt = title;
+    if (imgEl) {
+        imgEl.src = firstNonEmptyString(ev.image, jaE?.image, enE?.image);
+        imgEl.alt = title;
     }
     if (catEl) catEl.textContent = category;
     if (titleEl) titleEl.textContent = title;
@@ -120,7 +128,29 @@ function applyEventToDom(ev) {
         }
     }
 
-    document.title = `${title || 'Event'} · Fusion`;
+    const pageTitle = `${title || "Event"} · Fusion`;
+    document.title = pageTitle;
+    const pagePath = window.location.pathname;
+    const descText =
+        String(description || "").trim() ||
+        `${String(title || "Event")} — event on Fusion’s art platform.`;
+    let imageSrcForOg = firstNonEmptyString(ev.image, jaE?.image, enE?.image);
+    if (imageSrcForOg && !/^https?:\/\//i.test(imageSrcForOg)) {
+        const origin = getPublicSiteOrigin();
+        imageSrcForOg = `${origin}${imageSrcForOg.startsWith("/") ? imageSrcForOg : `/${imageSrcForOg}`}`;
+    }
+    applyDocumentSeo({
+        title: pageTitle,
+        description: descText,
+        path: pagePath,
+        ogType: "article",
+        imageUrl: imageSrcForOg || undefined,
+        breadcrumbItems: [
+            { name: "Home", path: "/" },
+            { name: "Journal", path: "/journal" },
+            { name: String(title || "Event").slice(0, 96), path: pagePath },
+        ],
+    });
 }
 
 function mountOtherEventRows(currentId, list) {
@@ -183,7 +213,12 @@ export default function initEvent() {
             show(notFound, true);
             const otherSec = document.getElementById('eventOtherSection');
             if (otherSec) otherSec.hidden = true;
-            document.title = 'Event not found · Fusion';
+            applyDocumentSeo({
+                title: "Event not found · Fusion",
+                description: "This event is not available on Fusion.",
+                path: window.location.pathname,
+                robots: "noindex, nofollow",
+            });
             return;
         }
 

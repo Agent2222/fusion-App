@@ -1,4 +1,5 @@
 import { navigate } from '../../router.js';
+import { firstNonEmptyString, mergeLocaleDeep } from '../../utils/localeFallback.js';
 
 // Compact program card block, modeled after program-hero.
 class ProgramBlockComponent extends HTMLElement {
@@ -50,9 +51,14 @@ class ProgramBlockComponent extends HTMLElement {
     render() {
         const locale = typeof window.getLocale === 'function' ? window.getLocale() : 'en';
         const layout = this.getAttribute('layout') === 'right' ? 'right' : 'left';
-        const localized = this.data?.[locale] || this.data?.en || {};
+        const enLoc = this.data?.en && typeof this.data.en === 'object' ? this.data.en : {};
+        const jaLoc = this.data?.ja && typeof this.data.ja === 'object' ? this.data.ja : {};
+        const localized =
+            locale === 'ja'
+                ? /** @type {Record<string, unknown>} */ (mergeLocaleDeep(enLoc, jaLoc))
+                : /** @type {Record<string, unknown>} */ (enLoc);
 
-        const imageSrc = this.data?.imageSrc || '';
+        const imageSrc = firstNonEmptyString(this.data?.imageSrc, jaLoc?.imageSrc, enLoc?.imageSrc);
         const imageAlt = localized.imageAlt || localized.title || 'Program';
         const focus = localized.focus || localized.imageAlt || '';
         const location = localized.location || '';
@@ -266,19 +272,46 @@ class ProgramBlockComponent extends HTMLElement {
                 }
 
                 @media (max-width: 900px) {
+                    /* Drop viewport-capped height — it clips text + CTA and makes blocks overlap the next card */
                     .program-block {
                         grid-template-columns: 1fr;
-                        grid-template-rows: 260px auto;
-                        margin-bottom: 2rem;
+                        grid-template-rows: minmax(220px, 42vh) auto;
+                        min-height: 0;
+                        max-height: none;
+                        margin-bottom: 2.5rem;
+                    }
+
+                    .image-wrap {
+                        min-height: 0;
                     }
 
                     .content {
+                        height: auto;
+                        min-height: 0;
                         padding: 0.75rem 0;
                         justify-content: flex-start;
                     }
 
+                    .content-inner {
+                        height: auto;
+                        min-height: 0;
+                    }
+
+                    .brief-description {
+                        height: auto;
+                        min-height: 0;
+                        max-height: none;
+                        width: 100%;
+                    }
+
                     .cta-row {
                         justify-content: flex-start;
+                        width: 100%;
+                        margin-left: 0;
+                    }
+
+                    .right .cta-row {
+                        margin-right: 0;
                     }
                 }
 
@@ -289,12 +322,31 @@ class ProgramBlockComponent extends HTMLElement {
                         grid-template-rows: minmax(200px, 40vh) auto;
                     }
 
+                    .program-block {
+                        min-height: 0;
+                        max-height: none;
+                        margin-bottom: 2.5rem;
+                    }
+
+                    .image-wrap {
+                        height: auto;
+                        min-height: 0;
+                    }
+
                     .content {
+                        height: auto;
+                        min-height: 0;
                         justify-content: flex-start;
                     }
 
-                    .program-block {
-                        margin-bottom: 2rem;
+                    .content-inner {
+                        height: auto;
+                        min-height: 0;
+                    }
+
+                    .brief-description {
+                        height: auto;
+                        width: 100%;
                     }
 
                     .right .image-wrap {

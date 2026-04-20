@@ -1,10 +1,12 @@
 import { getContentBundleForStudio, subscribeDataSource } from '../utils/database.js';
+import { mergeLocaleDeep } from '../utils/localeFallback.js';
 
 export function render() {
     return `
         <div class="page context-page">
             <main id="contextMain" class="main-cont">
                 <div id="contextMainContent" class="feed-container">
+                    <h1 class="seo-primary-h1">Context — Fusion mission and ecosystem</h1>
                     <div id="contextHeadline"></div>
                     <div id="contextSubHeadlineSection">
                         <div id="contextSubHeadlineText"></div>
@@ -34,9 +36,12 @@ export function render() {
 function localeSlice(bundle) {
     if (!bundle || typeof bundle !== 'object') return null;
     const locale = typeof window.getLocale === 'function' ? window.getLocale() : 'en';
-    const loc = locale === 'ja' ? 'ja' : 'en';
-    const block = /** @type {Record<string, unknown>} */ (bundle)[loc] || bundle.en;
-    return block && typeof block === 'object' ? /** @type {Record<string, unknown>} */ (block) : null;
+    const en = bundle.en && typeof bundle.en === 'object' ? /** @type {Record<string, unknown>} */ (bundle.en) : {};
+    const ja = bundle.ja && typeof bundle.ja === 'object' ? /** @type {Record<string, unknown>} */ (bundle.ja) : {};
+    if (locale === 'ja') {
+        return /** @type {Record<string, unknown>} */ (mergeLocaleDeep(en, ja));
+    }
+    return en;
 }
 
 function clearContextCopy() {
