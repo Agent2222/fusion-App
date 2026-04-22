@@ -1693,6 +1693,151 @@ button.studio-wordmark-btn:hover {
   border-radius: 0;
 }
 
+/* Studio → Users → Manage account modal */
+.studio-user-manage-modal {
+  max-width: 36rem;
+}
+
+.studio-user-manage-section {
+  margin-bottom: 1.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--c2, #000) 10%, transparent);
+}
+
+.studio-user-manage-section:last-of-type {
+  border-bottom: none;
+}
+
+.studio-user-manage-section-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+  font-variation-settings: var(--fv-label-strong);
+  color: var(--c2, #111);
+}
+
+.studio-user-manage-hint {
+  margin: 0 0 0.65rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.studio-user-manage-principal {
+  margin: 0;
+  font-size: 0.8rem;
+  word-break: break-all;
+  line-height: 1.4;
+}
+
+.studio-user-manage-control-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-top: 0.25rem;
+}
+
+.studio-user-manage-label {
+  flex: 0 0 auto;
+  min-width: 7rem;
+  font-size: 0.82rem;
+  font-variation-settings: var(--fv-label);
+  color: var(--c2, #111);
+}
+
+.studio-user-manage-select {
+  flex: 0 1 auto;
+  width: auto;
+  min-width: 10rem;
+  max-width: 18rem;
+}
+
+.studio-user-manage-dl {
+  margin: 0 0 0.75rem;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 1rem;
+  font-size: 0.82rem;
+}
+
+.studio-user-manage-dl dt {
+  margin: 0;
+  color: color-mix(in srgb, var(--c2, #111) 65%, transparent);
+  font-variation-settings: var(--fv-label);
+}
+
+.studio-user-manage-dl dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+.studio-user-manage-stripe-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.studio-user-manage-email-input {
+  flex: 1 1 12rem;
+  min-width: 10rem;
+  max-width: 22rem;
+}
+
+.studio-user-manage-stripe-result {
+  margin-top: 0.75rem;
+}
+
+.studio-stripe-live-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+
+.studio-stripe-live-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.78rem;
+  font-variation-settings: var(--fv-label-strong);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 0;
+  border: 1px solid transparent;
+}
+
+.studio-stripe-live-badge.is-active {
+  color: #0d5c2e;
+  background: color-mix(in srgb, #22c55e 14%, var(--studio-card-bg, #fff));
+  border-color: color-mix(in srgb, #16a34a 35%, transparent);
+}
+
+.studio-stripe-live-badge.is-inactive {
+  color: #991b1b;
+  background: color-mix(in srgb, #ef4444 12%, var(--studio-card-bg, #fff));
+  border-color: color-mix(in srgb, #dc2626 30%, transparent);
+}
+
+.studio-stripe-live-raw {
+  font-size: 0.82rem;
+}
+
+.studio-stripe-live-footnote {
+  margin: 0.4rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.studio-user-manage-actions {
+  margin-top: 0.25rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid color-mix(in srgb, var(--c2, #000) 10%, transparent);
+}
+
+.studio-user-manage-err {
+  margin-top: 0.75rem;
+}
+
 .studio-code-inline {
   font-size: 0.9em;
   word-break: break-all;

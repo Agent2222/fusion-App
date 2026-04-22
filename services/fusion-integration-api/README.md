@@ -55,6 +55,7 @@ stripe listen --forward-to localhost:8787/webhooks/stripe
 
 - `GET /health` — status flags (no secrets); includes `stripePrice`, `fusionCanister`, `stripeWebhook`
 - `POST /stripe/create-subscription` — body `{ principal?, email, metadata?, payFirst?, subscriptionTier? }` — `subscriptionTier` optional: `bimonthly` (default) or `annual` (uses `STRIPE_ANNUAL_PRICE_ID`). Creates/finds Customer, Subscription, returns `clientSecret` from the first invoice PaymentIntent
+- `POST /stripe/subscription-status-by-email` — body `{ email }` — looks up Stripe customer by email, returns best subscription + `membershipActive` (`true` when status is `active` or `trialing`). Studio “Manage user” live check (API key required)
 - `POST /stripe/create-payment-intent` — body `{ amount, currency?, metadata? }` (Studio tests / legacy)
 - `POST /webhooks/stripe` — **raw** JSON body; Stripe signature via `STRIPE_WEBHOOK_SECRET`
 - `POST /email/send` — body `{ to, subject, html | text, replyTo?, from? }` — optional `from` overrides `RESEND_FROM` when set (must be a verified sender in Resend)

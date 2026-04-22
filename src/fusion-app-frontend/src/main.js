@@ -4,10 +4,18 @@ import { DEV_MODE } from "./config.js";
 import "./index.css";
 import posthog from "posthog-js";
 
-posthog.init(import.meta.env.VITE_PUBLIC_POSTHOG_KEY, {
-  api_host: import.meta.env.VITE_PUBLIC_POSTHOG_HOST,
-  defaults: "2026-01-30",
-});
+/** Set `VITE_PUBLIC_POSTHOG_KEY` (and optionally `VITE_PUBLIC_POSTHOG_HOST`) in the build env for production analytics. */
+const POSTHOG_KEY = import.meta.env.VITE_PUBLIC_POSTHOG_KEY;
+if (POSTHOG_KEY) {
+  posthog.init(POSTHOG_KEY, {
+    api_host: import.meta.env.VITE_PUBLIC_POSTHOG_HOST,
+    defaults: "2026-01-30",
+  });
+} else if (DEV_MODE) {
+  console.warn(
+    "[PostHog] VITE_PUBLIC_POSTHOG_KEY is unset; events are not initialized. Set it in deploy for analytics.",
+  );
+}
 import faviconUrl from "./assets/favicon.ico";
 import "./assets/momochidori VF.js";
 
@@ -81,7 +89,7 @@ window.setLocale = (locale) => {
   const prev = window.locale;
   window.locale = next;
   applyLocaleToDocument(next);
-  if (prev !== next) {
+  if (prev !== next && POSTHOG_KEY) {
     posthog.capture("locale_changed", { locale: next, previous_locale: prev });
   }
 };
@@ -127,7 +135,9 @@ document.addEventListener("DOMContentLoaded", () => {
   window.addEventListener("routeChange", (event) => {
     if (DEV_MODE) console.log("Route changed to:", event.detail.path);
     // Add any global route change logic here
-    posthog.capture("$pageview", { $current_url: window.location.href });
+    if (POSTHOG_KEY) {
+      posthog.capture("$pageview", { $current_url: window.location.href });
+    }
   });
 
   window.addEventListener("fusion-localechange", () => {

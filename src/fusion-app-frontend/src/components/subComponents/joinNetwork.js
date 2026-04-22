@@ -1997,6 +1997,15 @@ class JoinNetworkComponent extends HTMLElement {
             redirect: "if_required",
           });
           if (error) {
+            posthog.capture("membership_payment_failed", {
+              modal_type:
+                this._modalType ||
+                this.getAttribute("data-modal-type") ||
+                "membership",
+              join_mode: this._joinMode || "full",
+              stripe_error_type: error.type || undefined,
+              stripe_error_code: error.code || undefined,
+            });
             if (errEl) errEl.textContent = error.message || "Payment failed.";
             return;
           }
@@ -2020,6 +2029,28 @@ class JoinNetworkComponent extends HTMLElement {
           await afterJoinSaved();
         } catch (e) {
           if (DEV_MODE) console.error("[JoinNetwork] confirmPayment", e);
+          const stripeLike =
+            e &&
+            typeof e === "object" &&
+            "type" in e &&
+            typeof e.type === "string";
+          posthog.capture("membership_payment_failed", {
+            modal_type:
+              this._modalType ||
+              this.getAttribute("data-modal-type") ||
+              "membership",
+            join_mode: this._joinMode || "full",
+            failure_kind: "exception",
+            ...(stripeLike
+              ? {
+                  stripe_error_type: e.type,
+                  stripe_error_code:
+                    "code" in e && typeof e.code === "string"
+                      ? e.code
+                      : undefined,
+                }
+              : {}),
+          });
           if (errEl) {
             errEl.textContent =
               e instanceof Error

@@ -1617,7 +1617,10 @@ export async function getMembershipAccessForCaller() {
     }
     const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
     const actor = await getAuthenticatedFusionBackendActor();
-    if (!actor || typeof actor.getMembershipAccessForCaller !== 'function') {
+    if (!actor) {
+        return 'noAccount';
+    }
+    if (typeof actor.getMembershipAccessForCaller !== 'function') {
         return 'ok';
     }
     const r = await actor.getMembershipAccessForCaller();
@@ -3555,7 +3558,18 @@ function parsePrincipalAccountPair(pair) {
 }
 
 /**
- * @typedef {{ principal: string, role: string, status: string, linkedArtistId?: string, linkedOrgId?: string, updatedAt: string, stripeSubscriptionStatus?: string, stripeCurrentPeriodEnd?: string, membershipExemptManual?: boolean }} StudioAccountRow
+ * @typedef {{
+ *   principal: string,
+ *   role: string,
+ *   status: string,
+ *   linkedArtistId?: string,
+ *   linkedOrgId?: string,
+ *   updatedAt: string,
+ *   stripeSubscriptionStatus?: string,
+ *   stripeCurrentPeriodEnd?: string,
+ *   membershipExemptManual?: boolean,
+ *   rawAccount?: Record<string, unknown>,
+ * }} StudioAccountRow
  */
 
 /**
@@ -3584,6 +3598,7 @@ export async function getAccountsForStudio() {
                 linkedArtistId: undefined,
                 linkedOrgId: undefined,
                 updatedAt: '',
+                rawAccount: undefined,
             });
             continue;
         }
@@ -3598,7 +3613,22 @@ export async function getAccountsForStudio() {
             stripeSubscriptionStatus: unwrapOpt(a.stripeSubscriptionStatus ?? a.stripe_subscription_status),
             stripeCurrentPeriodEnd: unwrapOpt(a.stripeCurrentPeriodEnd ?? a.stripe_current_period_end),
             membershipExemptManual: Boolean(a.membershipExemptManual ?? a.membership_exempt_manual),
+            rawAccount: a,
         });
     }
     return out;
+}
+
+/**
+ * Admin: replace a user account row (caller must be canister admin).
+ * @param {string} principalText
+ * @param {Record<string, unknown>} userAccount — full `UserAccount` shape from `listAccounts`, with edits applied
+ */
+export async function adminUpsertUserAccountStudio(principalText, userAccount) {
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminUpsertUserAccount !== 'function') {
+        throw new Error('adminUpsertUserAccount unavailable — run dfx generate fusion-app-backend');
+    }
+    const { Principal } = await import('@dfinity/principal');
+    await actor.adminUpsertUserAccount(Principal.fromText(String(principalText || '').trim()), userAccount);
 }

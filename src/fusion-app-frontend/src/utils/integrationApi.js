@@ -266,6 +266,40 @@ export async function syncSubscriptionFromStripe(principalText) {
 }
 
 /**
+ * Studio / admin: live Stripe subscription status for an email (integration API; API key).
+ * @param {string} email
+ * @returns {Promise<
+ *   | { ok: true; membershipActive: boolean; reason?: string; customerId?: string; subscriptionId?: string; subscriptionStatus: string | null; cancelAtPeriodEnd?: boolean }
+ *   | { ok: false; error?: string; reason?: string }
+ * >}
+ */
+export async function fetchStripeSubscriptionStatusByEmail(email) {
+    const trimmed = String(email ?? '').trim();
+    if (!trimmed.includes('@')) {
+        return { ok: false, reason: 'invalid_email' };
+    }
+    const base = getIntegrationBaseUrl();
+    if (!base) {
+        return { ok: false, reason: 'no_integration_url' };
+    }
+    try {
+        const res = await fetch(`${base}/stripe/subscription-status-by-email`, {
+            method: 'POST',
+            headers: integrationHeadersJson(),
+            body: JSON.stringify({ email: trimmed }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            const raw = typeof data.error === 'string' ? data.error : `HTTP ${res.status}`;
+            return { ok: false, error: raw };
+        }
+        return data;
+    } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+}
+
+/**
  * @param {string} principalText
  * @param {string} returnUrl Absolute URL (e.g. window.location.href)
  * @returns {Promise<{ url: string }>}

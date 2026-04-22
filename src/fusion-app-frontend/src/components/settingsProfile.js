@@ -2406,6 +2406,9 @@ export default function initSettingsProfile() {
         const { syncSubscriptionFromStripe } = await import("../utils/integrationApi.js");
         await syncSubscriptionFromStripe(snap.principal.toText());
         await ensureMyLinkedArtistProfile();
+        posthog.capture("membership_subscription_sync_succeeded", {
+          context: "settings_profile",
+        });
         setStatus("Done. Loading profile…");
       } catch (e) {
         setStatus(e instanceof Error ? e.message : String(e));
@@ -2425,6 +2428,9 @@ export default function initSettingsProfile() {
           ? window.location.href
           : "https://fusionart.world/settings/profile";
       const { url } = await createBillingPortalSession(snap.principal.toText(), href);
+      posthog.capture("membership_billing_portal_opened", {
+        context: "settings_profile",
+      });
       window.location.assign(url);
     } catch (e) {
       setStatus(e instanceof Error ? e.message : String(e));
@@ -2456,6 +2462,9 @@ export default function initSettingsProfile() {
         await import("../utils/integrationApi.js");
       await cancelSubscriptionAtPeriodEnd(snap.principal.toText());
       await syncSubscriptionFromStripe(snap.principal.toText());
+      posthog.capture("membership_cancel_scheduled", {
+        context: "settings_profile",
+      });
       setStatus("Cancellation scheduled for the end of your billing period.");
       await hydrateMembershipPanel();
     } catch (e) {

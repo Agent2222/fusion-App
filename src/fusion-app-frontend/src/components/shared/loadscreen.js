@@ -4,6 +4,7 @@ import { DEV_MODE, getHost, config } from '../../config.js';
 import { activateDeactivate, navigate } from '../../router.js';
 import { submitEarlyAccessToCanister } from '../../utils/earlyAccessSubscribe.js';
 import { withSeoVideoLabel } from '../../utils/mediaAltSeo.js';
+import posthog from 'posthog-js';
 
 // Load Screen Custom Element Component
 class LoadScreenComponent extends HTMLElement {
@@ -1134,6 +1135,11 @@ class LoadScreenComponent extends HTMLElement {
             try {
                 await submitEarlyAccessToCanister(email, category, '', '');
 
+                posthog.capture('early_access_submitted', {
+                    source: 'loadscreen',
+                    category: category || 'unknown',
+                });
+
                 // Hide the transient status and show the stored-email confirmation.
                 this.hideCTAStatus();
                 this.showSubscriptionConfirmation(email, category);
@@ -1143,6 +1149,7 @@ class LoadScreenComponent extends HTMLElement {
                     console.error('Early access subscribe failed', err);
                     console.error('[EarlyAccess] IC host:', getHost());
                 }
+                posthog.capture('early_access_submit_failed', { source: 'loadscreen' });
                 this.hideSubscriptionConfirmation();
                 this.setCTAStatus('Subscription failed. Please try again.');
             } finally {

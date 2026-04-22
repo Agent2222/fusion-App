@@ -13,6 +13,7 @@ import {
     deleteProgramStudio,
     deleteSubscriberRow,
     deleteArtistByIdStudio,
+    adminUpsertUserAccountStudio,
     getAccountsForStudio,
     getApplicants,
     getArtists,
@@ -73,6 +74,7 @@ import { openStudioModal } from '../../utils/studioModal.js';
 import {
     createPaymentIntent,
     fetchIntegrationHealth,
+    fetchStripeSubscriptionStatusByEmail,
     sendEmail,
     getIntegrationBaseUrl,
     syncSubscriptionFromStripe,
@@ -673,7 +675,7 @@ function renderUsers() {
                 countId: 'studio-users-header-count',
                 countLabel: 'in view',
             })}
-            <p class="studio-muted">Internet Identity has <strong>no password</strong>. “Reset password” is disabled until a non-II email store exists. Rich profile copy belongs in the future <strong>user profile</strong> dashboard.</p>
+            <p class="studio-muted">Internet Identity has <strong>no password</strong>. Use <strong>Manage</strong> on each row to update account status and manual membership exemption. Rich profile copy belongs in the future <strong>user profile</strong> dashboard.</p>
             <div id="studio-users-self" class="studio-users-self-card">Loading…</div>
             <div class="studio-filter-bar">
                 <div class="studio-users-filters" style="margin:0;flex:1;display:flex;flex-wrap:wrap;gap:1rem;align-items:flex-end">
@@ -707,7 +709,7 @@ function renderUsers() {
             </div>
             <div class="studio-table-wrap studio-table-wrap--sticky-head">
                 <table class="studio-table studio-table--dense">
-                    <thead><tr><th><span class="studio-sr-only">Health</span></th><th>Identity</th><th>Role</th><th>Status</th><th>Membership</th><th>Renews</th><th>Linked artist</th><th>Org</th><th>Updated</th><th class="studio-td-actions">Account</th></tr></thead>
+                    <thead><tr><th><span class="studio-sr-only">Health</span></th><th>Identity</th><th>Role</th><th>Status</th><th>Membership</th><th>Renews</th><th>Linked artist</th><th>Org</th><th>Updated</th><th class="studio-td-actions">Actions</th></tr></thead>
                     <tbody id="studio-users-tbody"><tr><td colspan="10">Loading…</td></tr></tbody>
                 </table>
             </div>
@@ -3596,6 +3598,179 @@ function formatStudioAccountCardHtml(u) {
     </dl>`;
 }
 
+/**
+ * @param {import('../../utils/database.js').StudioAccountRow} row
+ * @param {() => void | Promise<void>} onSaved
+ */
+function openStudioUserManageModal(row, onSaved) {
+    const raw = row.rawAccount;
+    if (!raw || typeof raw !== 'object') {
+        openStudioModal('<p class="studio-muted">No account payload for this row.</p>', { title: 'Manage account', compact: true });
+        return;
+    }
+    const principal = row.principal;
+    const curStatus = row.status || 'pending';
+    const exempt = !!row.membershipExemptManual;
+    const stripeSt = row.stripeSubscriptionStatus || '—';
+    const renews = row.stripeCurrentPeriodEnd || '—';
+    const canisterMembershipLabel = exempt ? 'Manual exempt' : String(stripeSt);
+
+    const body = `
+      <div class="studio-user-manage-modal">
+        <section class="studio-user-manage-section">
+          <h3 class="studio-user-manage-section-title">Identity</h3>
+          <p class="studio-user-manage-principal studio-muted">${escapeHtml(principal)}</p>
+        </section>
+
+        <section class="studio-user-manage-section">
+          <h3 class="studio-user-manage-section-title">Account status</h3>
+          <p class="studio-muted studio-user-manage-hint">Fusion account lifecycle (pending / active / suspended).</p>
+          <div class="studio-user-manage-control-row">
+            <label class="studio-user-manage-label" for="studio-user-edit-status">Status</label>
+            <select id="studio-user-edit-status" class="studio-select studio-user-manage-select" aria-label="Account status">
+              <option value="pending" ${curStatus === 'pending' ? 'selected' : ''}>pending</option>
+              <option value="active" ${curStatus === 'active' ? 'selected' : ''}>active</option>
+              <option value="suspended" ${curStatus === 'suspended' ? 'selected' : ''}>suspended</option>
+            </select>
+          </div>
+        </section>
+
+        <section class="studio-user-manage-section">
+          <h3 class="studio-user-manage-section-title">Membership (canister)</h3>
+          <p class="studio-muted studio-user-manage-hint">Stored on-chain. Use <strong>Live Stripe</strong> below to verify billing in Stripe.</p>
+          <dl class="studio-user-manage-dl">
+            <dt>Cached subscription</dt><dd>${escapeHtml(String(stripeSt))}</dd>
+            <dt>Period end</dt><dd>${escapeHtml(String(renews))}</dd>
+            <dt>Summary</dt><dd>${escapeHtml(canisterMembershipLabel)}</dd>
+          </dl>
+          <div class="studio-user-manage-control-row">
+            <label class="studio-user-manage-label" for="studio-user-edit-membership">Billing override</label>
+            <select id="studio-user-edit-membership" class="studio-select studio-user-manage-select" aria-label="Membership billing override">
+              <option value="standard" ${!exempt ? 'selected' : ''}>Standard — follow Stripe</option>
+              <option value="manual_exempt" ${exempt ? 'selected' : ''}>Manual exempt (complimentary)</option>
+            </select>
+          </div>
+        </section>
+
+        <section class="studio-user-manage-section studio-user-manage-section--stripe">
+          <h3 class="studio-user-manage-section-title">Live Stripe (by email)</h3>
+          <p class="studio-muted studio-user-manage-hint">Not from the canister. Requires Studio → Services integration URL + API key.</p>
+          <div class="studio-user-manage-stripe-row">
+            <label class="studio-user-manage-label studio-sr-only" for="studio-user-stripe-email">Customer email</label>
+            <input type="email" id="studio-user-stripe-email" class="studio-input studio-user-manage-email-input" placeholder="customer@email.com" autocomplete="off" />
+            <button type="button" class="studio-btn-primary" id="studio-user-stripe-check">Check Stripe</button>
+          </div>
+          <div id="studio-user-stripe-result" class="studio-user-manage-stripe-result" hidden></div>
+        </section>
+
+        <p id="studio-user-edit-err" class="studio-banner studio-banner--error studio-user-manage-err" hidden></p>
+        <div class="studio-modal-actions studio-user-manage-actions">
+          <button type="button" class="studio-btn-primary" id="studio-user-edit-save">Save changes</button>
+          <button type="button" class="studio-btn-ghost" data-studio-modal-close="1">Cancel</button>
+        </div>
+      </div>
+    `;
+
+    const { close, root } = openStudioModal(body, { title: 'Manage account', wide: true });
+    const saveBtn = root.querySelector('#studio-user-edit-save');
+    const errEl = root.querySelector('#studio-user-edit-err');
+    const checkBtn = root.querySelector('#studio-user-stripe-check');
+    const emailInput = root.querySelector('#studio-user-stripe-email');
+    const stripeResultEl = root.querySelector('#studio-user-stripe-result');
+    const CHECK_LABEL = 'Check Stripe';
+
+    const showStripeErr = (msg) => {
+        if (!stripeResultEl) return;
+        stripeResultEl.hidden = false;
+        stripeResultEl.innerHTML = `<p class="studio-muted studio-stripe-live-footnote">${escapeHtml(msg)}</p>`;
+    };
+
+    checkBtn?.addEventListener('click', async () => {
+        const email = emailInput instanceof HTMLInputElement ? emailInput.value.trim() : '';
+        if (!email.includes('@')) {
+            showStripeErr('Enter a valid customer email.');
+            return;
+        }
+        if (checkBtn instanceof HTMLButtonElement) {
+            checkBtn.disabled = true;
+            checkBtn.textContent = 'Checking…';
+        }
+        if (stripeResultEl) stripeResultEl.hidden = true;
+        try {
+            const r = await fetchStripeSubscriptionStatusByEmail(email);
+            if (
+                !r ||
+                typeof r !== 'object' ||
+                r.ok === false ||
+                typeof /** @type {{ membershipActive?: unknown }} */ (r).membershipActive !== 'boolean'
+            ) {
+                const msg =
+                    (r && typeof r === 'object' && (r.error || r.reason) && String(r.error || r.reason)) ||
+                    'Could not reach the integration API. Set URL + API key under Studio → Services.';
+                showStripeErr(msg);
+                return;
+            }
+            const active = r.membershipActive === true;
+            const rawLine =
+                r.subscriptionStatus != null && String(r.subscriptionStatus)
+                    ? String(r.subscriptionStatus)
+                    : r.reason
+                      ? String(r.reason)
+                      : '—';
+            const cancelNote = r.cancelAtPeriodEnd ? ' · cancel at period end' : '';
+            if (stripeResultEl) {
+                stripeResultEl.hidden = false;
+                stripeResultEl.innerHTML = `
+                  <div class="studio-stripe-live-status">
+                    <span class="studio-stripe-live-badge ${active ? 'is-active' : 'is-inactive'}">${active ? 'Active' : 'Inactive'}</span>
+                    <span class="studio-stripe-live-raw studio-muted">${escapeHtml(rawLine)}${escapeHtml(cancelNote)}</span>
+                  </div>
+                  <p class="studio-muted studio-stripe-live-footnote">Live Stripe — independent of table / canister cache.</p>
+                `;
+            }
+        } catch (e) {
+            showStripeErr(e instanceof Error ? e.message : String(e));
+        } finally {
+            if (checkBtn instanceof HTMLButtonElement) {
+                checkBtn.disabled = false;
+                checkBtn.textContent = CHECK_LABEL;
+            }
+        }
+    });
+
+    saveBtn?.addEventListener('click', async () => {
+        const sel = root.querySelector('#studio-user-edit-status');
+        const statusKey = sel instanceof HTMLSelectElement ? sel.value : 'pending';
+        const memSel = root.querySelector('#studio-user-edit-membership');
+        const mem = memSel instanceof HTMLSelectElement ? memSel.value : 'standard';
+        const ex = mem === 'manual_exempt';
+        const patched = {
+            ...raw,
+            status: { [statusKey]: null },
+            membershipExemptManual: ex,
+            updatedAt: new Date().toISOString(),
+        };
+        if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = true;
+        if (errEl instanceof HTMLElement) {
+            errEl.textContent = '';
+            errEl.hidden = true;
+        }
+        try {
+            await adminUpsertUserAccountStudio(principal, patched);
+            close();
+            await onSaved();
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (errEl instanceof HTMLElement) {
+                errEl.textContent = msg;
+                errEl.hidden = false;
+            }
+        } finally {
+            if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = false;
+        }
+    });
+}
+
 async function initUsers(mainEl) {
     const selfEl = mainEl.querySelector('#studio-users-self');
     const tbody = mainEl.querySelector('#studio-users-tbody');
@@ -3645,7 +3820,7 @@ async function initUsers(mainEl) {
                 <td>${r.linkedArtistId ? escapeHtml(String(r.linkedArtistId)) : '—'}</td>
                 <td>${r.linkedOrgId ? escapeHtml(String(r.linkedOrgId)) : '—'}</td>
                 <td><span class="studio-muted" title="${escapeHtml(r.updatedAt)}">${escapeHtml(r.updatedAt ? r.updatedAt.slice(0, 19) : '—')}</span></td>
-                <td><button type="button" class="studio-btn-ghost studio-user-rp" disabled title="Internet Identity has no password. Use identity recovery, or a future email-based account store.">Reset password</button></td>
+                <td><button type="button" class="studio-btn-primary studio-user-manage" data-principal="${escapeHtml(r.principal)}">Manage</button></td>
             </tr>`
             )
             .join('');
@@ -3682,6 +3857,31 @@ async function initUsers(mainEl) {
         renderTable();
         roleFilter?.addEventListener('change', renderTable);
         statusFilter?.addEventListener('change', renderTable);
+
+        if (tbody && !tbody.dataset.studioUserManageBound) {
+            tbody.dataset.studioUserManageBound = '1';
+            tbody.addEventListener('click', (e) => {
+                const t = e.target;
+                if (!(t instanceof Element)) return;
+                const btn = t.closest('.studio-user-manage');
+                if (!btn || !tbody.contains(btn)) return;
+                const p = btn.getAttribute('data-principal');
+                if (!p) return;
+                const row = allPairs.find((x) => x.principal === p);
+                if (!row) return;
+                openStudioUserManageModal(row, async () => {
+                    try {
+                        allPairs = await getAccountsForStudio();
+                        renderTable();
+                        if (syncMsg) syncMsg.textContent = 'Account updated.';
+                    } catch (err) {
+                        if (syncMsg) {
+                            syncMsg.textContent = err instanceof Error ? err.message : String(err);
+                        }
+                    }
+                });
+            });
+        }
 
         const syncBtn = syncAllBtn instanceof HTMLButtonElement ? syncAllBtn : null;
         if (syncBtn) {

@@ -4,10 +4,13 @@
 
 import {
     defaultApplicationPaymentGlobal,
+    ensureMyLinkedArtistProfile,
+    getMembershipAccessForCaller,
     getMyArtistRecord,
     PROGRAM_APPLICATION_ERROR_CODE,
     submitProgramApplication,
 } from '../../utils/database.js';
+import { getAuthSnapshot } from '../../utils/icAuth.js';
 import { emptyApplicationPaymentOptions } from '../../utils/programApplicationFormContext.js';
 import {
     createPaymentIntent,
@@ -101,6 +104,12 @@ class ApplicationFormComponent extends HTMLElement {
         this._wireAbort = null;
         /** User has a stored application for this `data-program-id` — hide fee UI; submit without Stripe. */
         this._alreadyApplied = false;
+        /** Active member (`ok` / `exempt`) after ensure — skip application fee Stripe. */
+        this._membershipFeeWaived = false;
+        /** Last `getMembershipAccessForCaller` result for analytics. */
+        this._membershipGate = 'unknown';
+        /** Avoid duplicate `program_application_started` on `fusion-auth-change` refresh. */
+        this._hasCapturedProgramApplicationStarted = false;
     }
 
     get active() {
@@ -418,6 +427,11 @@ class ApplicationFormComponent extends HTMLElement {
                 lead1: '連絡先と所在地を入力してください。',
                 lead2:
                     '正解よりも、あなたの視点や文脈を知りたいと考えています。率直にご記入のうえ、下の応募料でお支払い・送信を完了してください。',
+                lead2MemberFeeWaived:
+                    'Fusion メンバーのため、応募料は含まれています。内容を入力して、下のボタンから応募を送信してください。',
+                memberFeeWaivedBanner:
+                    'Fusion メンバーシップに応募料が含まれます。カードでのお支払いは不要です。',
+                submitApplicationOnly: '応募を送信',
                 lead2AlreadyApplied:
                     '応募内容を更新して保存できます。追加の応募料はかかりません。',
                 firstName: '名（ファーストネーム）',
@@ -517,6 +531,11 @@ class ApplicationFormComponent extends HTMLElement {
             lead1: 'Enter your name, email, and location.',
             lead2:
                 'We’re less interested in perfect answers, more in perspective. Share what feels true to you, then pay the application fee and submit below.',
+            lead2MemberFeeWaived:
+                'As a Fusion member, your application fee is included. Complete your answers and submit below.',
+            memberFeeWaivedBanner:
+                'Your Fusion membership includes the program application fee—no card payment required.',
+            submitApplicationOnly: 'Submit application',
             lead2AlreadyApplied:
                 'You can update your answers below and save. No additional application fee.',
             firstName: 'First name',
@@ -590,6 +609,8 @@ class ApplicationFormComponent extends HTMLElement {
             one_time_payment_available: oneTimeOk,
             bimonthly_plan_offered: true,
             annual_plan_offered: true,
+            fee_waived: !!this._membershipFeeWaived,
+            membership_gate: String(this._membershipGate || 'unknown'),
             ...(oneTimeOk ? { application_fee_amount_cents: Math.round(centsRaw) } : {}),
         };
     }
@@ -722,7 +743,7 @@ class ApplicationFormComponent extends HTMLElement {
     }
 
     async _prepareStripePayment() {
-        if (this._alreadyApplied) return;
+        if (this._alreadyApplied || this._membershipFeeWaived) return;
         const prepareKey = this._computeStripePrepareKey();
         if (
             this._stripePaymentReady &&
@@ -1105,10 +1126,26 @@ class ApplicationFormComponent extends HTMLElement {
             { signal }
         );
 
+        root.querySelector('#app-submit-free')?.addEventListener(
+            'click',
+            () => {
+                void this._onSubmitFreeClick();
+            },
+            { signal }
+        );
+
         window.addEventListener(
             'fusion-localechange',
             () => {
                 this._hydrateProgramContextInDom();
+            },
+            { signal }
+        );
+
+        window.addEventListener(
+            'fusion-auth-change',
+            () => {
+                void this._hydrateMembershipAndPrefill();
             },
             { signal }
         );
@@ -1125,25 +1162,84 @@ class ApplicationFormComponent extends HTMLElement {
     }
 
     /**
-     * @param {boolean} on
+     * Sync payment vs. member-waiver vs. already-applied sections (mutually exclusive).
      */
-    _applyAlreadyAppliedUi(on) {
+    _syncApplicationFeeUi() {
         const root = this.shadowRoot;
         if (!root) return;
         const L = this._labels();
         const pay = root.querySelector('#app-payment-section');
-        const wrap = root.querySelector('#app-submit-updates-wrap');
+        const updatesWrap = root.querySelector('#app-submit-updates-wrap');
+        const freeWrap = root.querySelector('#app-submit-free-wrap');
+        const banner = root.querySelector('#app-membership-fee-waived-banner');
         const lead = root.querySelector('#app-portfolio-lead');
-        if (pay instanceof HTMLElement) {
-            if (on) pay.setAttribute('hidden', '');
-            else pay.removeAttribute('hidden');
+
+        if (this._alreadyApplied) {
+            if (pay instanceof HTMLElement) pay.setAttribute('hidden', '');
+            if (updatesWrap instanceof HTMLElement) updatesWrap.removeAttribute('hidden');
+            if (freeWrap instanceof HTMLElement) freeWrap.setAttribute('hidden', '');
+            if (banner instanceof HTMLElement) banner.setAttribute('hidden', '');
+            if (lead) lead.textContent = L.lead2AlreadyApplied;
+            this._teardownStripePayment();
+            return;
         }
-        if (wrap instanceof HTMLElement) {
-            if (on) wrap.removeAttribute('hidden');
-            else wrap.setAttribute('hidden', '');
+        if (this._membershipFeeWaived) {
+            if (pay instanceof HTMLElement) pay.setAttribute('hidden', '');
+            if (updatesWrap instanceof HTMLElement) updatesWrap.setAttribute('hidden', '');
+            if (freeWrap instanceof HTMLElement) freeWrap.removeAttribute('hidden');
+            if (banner instanceof HTMLElement) banner.removeAttribute('hidden');
+            if (lead) lead.textContent = L.lead2MemberFeeWaived;
+            this._teardownStripePayment();
+            return;
         }
-        if (lead) lead.textContent = on ? L.lead2AlreadyApplied : L.lead2;
-        if (on) this._teardownStripePayment();
+        if (pay instanceof HTMLElement) pay.removeAttribute('hidden');
+        if (updatesWrap instanceof HTMLElement) updatesWrap.setAttribute('hidden', '');
+        if (freeWrap instanceof HTMLElement) freeWrap.setAttribute('hidden', '');
+        if (banner instanceof HTMLElement) banner.setAttribute('hidden', '');
+        if (lead) lead.textContent = L.lead2;
+    }
+
+    /**
+     * @param {boolean} on
+     */
+    _applyAlreadyAppliedUi(on) {
+        this._alreadyApplied = !!on;
+        this._syncApplicationFeeUi();
+    }
+
+    async _hydrateMembershipAndPrefill() {
+        this._membershipFeeWaived = false;
+        this._membershipGate = 'unknown';
+        try {
+            const snap = await getAuthSnapshot();
+            if (!snap.authenticated) {
+                this._membershipGate = 'noAccount';
+            } else {
+                const gate = await getMembershipAccessForCaller();
+                this._membershipGate = gate;
+                if (gate === 'ok' || gate === 'exempt') {
+                    const ens = await ensureMyLinkedArtistProfile();
+                    if (ens === 'ok' || ens === 'alreadyLinked') {
+                        this._membershipFeeWaived = true;
+                    }
+                }
+            }
+        } catch {
+            this._membershipFeeWaived = false;
+        }
+        this._syncApplicationFeeUi();
+        await this._prefillFromArtist();
+        if (this.shadowRoot) this._hydrateProgramContextInDom();
+        if (!this._hasCapturedProgramApplicationStarted) {
+            this._hasCapturedProgramApplicationStarted = true;
+            try {
+                posthog.capture('program_application_started', {
+                    ...this._posthogApplicationBaseProps(),
+                });
+            } catch {
+                /* ignore */
+            }
+        }
     }
 
     async _onSubmitUpdatesClick() {
@@ -1157,11 +1253,22 @@ class ApplicationFormComponent extends HTMLElement {
         await this._submitApplication();
     }
 
+    async _onSubmitFreeClick() {
+        if (!this._membershipFeeWaived || this._alreadyApplied) return;
+        const err = this._validateStep0Soft();
+        if (err) {
+            this._setFormStatusMessage(err, 'error');
+            return;
+        }
+        this._setFormStatusMessage('', 'neutral');
+        await this._submitApplication();
+    }
+
     /**
      * @param {'one_time' | 'bimonthly' | 'annual'} plan
      */
     _onPaymentPlanSelected(plan) {
-        if (this._alreadyApplied) return;
+        if (this._alreadyApplied || this._membershipFeeWaived) return;
         if (plan === 'one_time') {
             const centsRaw = this._programFormContext.applicationFeeAmountCents;
             const ok = typeof centsRaw === 'number' && Number.isFinite(centsRaw) && centsRaw >= 50;
@@ -1344,16 +1451,19 @@ class ApplicationFormComponent extends HTMLElement {
         const root = this.shadowRoot;
         if (!root) return;
         this._alreadyApplied = false;
-        this._applyAlreadyAppliedUi(false);
 
         const programId = this.getAttribute('data-program-id') || '';
         let rec;
         try {
             rec = await getMyArtistRecord();
         } catch {
+            this._syncApplicationFeeUi();
             return;
         }
-        if (!rec) return;
+        if (!rec) {
+            this._syncApplicationFeeUi();
+            return;
+        }
 
         const locale = typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
         let locales = {};
@@ -1433,7 +1543,7 @@ class ApplicationFormComponent extends HTMLElement {
                     statusEl.classList.remove('is-error');
                     statusEl.classList.add('is-success');
                     this._alreadyApplied = true;
-                    this._applyAlreadyAppliedUi(true);
+                    this._syncApplicationFeeUi();
                     window.dispatchEvent(
                         new CustomEvent('fusion-program-application-submitted', {
                             detail: { programId, status: 'reviewing' },
@@ -1444,13 +1554,12 @@ class ApplicationFormComponent extends HTMLElement {
                 /* ignore */
             }
         }
+        this._syncApplicationFeeUi();
     }
 
     _afterRender() {
         this._wireControls();
-        void this._prefillFromArtist().then(() => {
-            if (this.shadowRoot) this._hydrateProgramContextInDom();
-        });
+        void this._hydrateMembershipAndPrefill();
     }
 
     disconnectedCallback() {
@@ -1465,12 +1574,14 @@ class ApplicationFormComponent extends HTMLElement {
     connectedCallback() {
         this.render();
         this._afterRender();
-        posthog.capture('program_application_started', { ...this._posthogApplicationBaseProps() });
     }
 
     render() {
         this._paymentPlan = null;
         this._alreadyApplied = false;
+        this._membershipFeeWaived = false;
+        this._membershipGate = 'unknown';
+        this._hasCapturedProgramApplicationStarted = false;
         this._teardownStripePayment();
         const L = this._labels();
         this.shadow.innerHTML = `
@@ -2127,6 +2238,15 @@ class ApplicationFormComponent extends HTMLElement {
                         <div id="app-submit-updates-wrap" class="app-form-card app-form-card--spaced" hidden>
                             <div class="app-form-actions">
                                 <button type="button" class="app-btn app-btn--primary" id="app-submit-updates">${L.saveApplicationUpdates}</button>
+                            </div>
+                        </div>
+
+                        <div id="app-membership-fee-waived-banner" class="app-selection-intro" hidden>
+                            <p>${L.memberFeeWaivedBanner}</p>
+                        </div>
+                        <div id="app-submit-free-wrap" class="app-form-card app-form-card--spaced" hidden>
+                            <div class="app-form-actions">
+                                <button type="button" class="app-btn app-btn--primary" id="app-submit-free">${L.submitApplicationOnly}</button>
                             </div>
                         </div>
 
