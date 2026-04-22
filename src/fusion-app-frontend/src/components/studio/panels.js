@@ -1036,12 +1036,53 @@ function studioStripeDashboardCustomerUrl(customerId, publishableKey) {
 }
 
 /** @param {string | undefined} reason */
+function studioCanisterIntegrationNotConfiguredHint() {
+    return ' On the host running fusion-integration-api, set FUSION_BACKEND_CANISTER_ID, INTEGRATION_IC_IDENTITY_PEM (or _JSON), and IC_HOST (https://ic0.app for mainnet), then restart. GET /health should show fusionCanister: configured. As admin, call adminSetIntegrationServicePrincipal with the principal of that PEM identity. See services/fusion-integration-api/README.md.';
+}
+
+/** @param {string | undefined} reason */
 function studioSyncFailureExtraHint(reason) {
     const r = String(reason || '');
+    if (/canister integration not configured/i.test(r)) {
+        return studioCanisterIntegrationNotConfiguredHint();
+    }
     if (/\b404\b|not found|cannot post|cannot get/i.test(r)) {
         return ' Redeploy fusion-integration-api with POST /stripe/sync-subscription-by-email (see services/fusion-integration-api/README.md).';
     }
     return '';
+}
+
+/**
+ * @param {{ synced?: boolean; reason?: string } | undefined} emailRes
+ * @param {{ synced?: boolean; reason?: string } | undefined} principalRes
+ */
+function formatSyncAttempts(emailRes, principalRes) {
+    const eOk = emailRes?.synced === true;
+    const pOk = principalRes?.synced === true;
+    const er = !eOk && emailRes?.reason ? String(emailRes.reason) : '';
+    const pr = !pOk && principalRes?.reason ? String(principalRes.reason) : '';
+
+    if (eOk && pOk) return 'Email sync: ok. Principal sync: ok.';
+
+    if (er && pr && er === pr) {
+        return `Sync failed (email + principal routes): ${er}.${studioSyncFailureExtraHint(er)}`;
+    }
+
+    const parts = [];
+    if (eOk) parts.push('Email sync: ok.');
+    else if (er) parts.push(`Email sync: ${er}.${studioSyncFailureExtraHint(er)}`);
+    else if (getIntegrationBaseUrl()) parts.push('Email sync: no success (see console / integration logs).');
+
+    if (pOk) parts.push('Principal sync: ok.');
+    else if (pr) {
+        parts.push(`Principal sync: ${pr}${studioSyncFailureExtraHint(pr)}`);
+    } else if (eOk) {
+        parts.push('Principal sync: not attempted (email sync succeeded first).');
+    } else if (getIntegrationBaseUrl()) {
+        parts.push('Principal sync: no error detail (see console / integration logs).');
+    }
+
+    return parts.join(' ');
 }
 
 /** @param {string | undefined} iso */
@@ -3847,20 +3888,6 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
             }
         }
         return { up, refreshErr };
-    };
-
-    const formatSyncAttempts = (emailRes, principalRes) => {
-        const parts = [];
-        if (emailRes?.synced === true) parts.push('Email sync: ok.');
-        else if (emailRes?.reason)
-            parts.push(`Email sync: ${emailRes.reason}.${studioSyncFailureExtraHint(emailRes.reason)}`);
-        else if (getIntegrationBaseUrl()) parts.push('Email sync: no success (see console / integration logs).');
-        if (principalRes?.synced === true) parts.push('Principal sync: ok.');
-        else if (principalRes?.reason)
-            parts.push(`Principal sync: ${principalRes.reason}.${studioSyncFailureExtraHint(principalRes.reason)}`);
-        else if (emailRes?.synced !== true && getIntegrationBaseUrl())
-            parts.push('Principal sync: ran after email sync (no separate error).');
-        return parts.join(' ');
     };
 
     root.querySelector('#studio-user-copy-principal')?.addEventListener('click', () => {
