@@ -1695,7 +1695,87 @@ button.studio-wordmark-btn:hover {
 
 /* Studio → Users → Manage account modal */
 .studio-user-manage-modal {
-  max-width: 36rem;
+  max-width: 40rem;
+}
+
+.studio-user-manage-legend {
+  margin: 0 0 1rem;
+  padding: 0.65rem 0.75rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  background: color-mix(in srgb, var(--c2, #111) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c2, #000) 8%, transparent);
+}
+
+.studio-user-manage-principal-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.studio-user-manage-principal-row .studio-user-manage-principal {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.studio-user-manage-meta {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+}
+
+.studio-user-manage-billing-hint {
+  margin: 0.25rem 0 0;
+  font-size: 0.78rem;
+}
+
+.studio-user-manage-sync-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
+}
+
+.studio-user-manage-push-result {
+  margin: 0 0 0.65rem;
+  font-size: 0.78rem;
+}
+
+.studio-user-manage-stripe-ids {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.65rem;
+  font-size: 0.78rem;
+  border: 1px solid color-mix(in srgb, var(--c2, #000) 10%, transparent);
+  background: color-mix(in srgb, var(--c2, #111) 3%, transparent);
+}
+
+.studio-user-manage-id-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.studio-user-manage-id-row code {
+  font-size: 0.76rem;
+  word-break: break-all;
+}
+
+.studio-user-manage-stripe-dash {
+  margin: 0.5rem 0 0;
+}
+
+.studio-user-manage-warn {
+  margin-top: 0.75rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.studio-user-manage-modal .studio-btn-tiny {
+  padding: 0.2rem 0.45rem;
+  font-size: 0.72rem;
 }
 
 .studio-user-manage-section {

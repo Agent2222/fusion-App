@@ -75,8 +75,9 @@ import {
     createPaymentIntent,
     fetchIntegrationHealth,
     fetchStripeSubscriptionStatusByEmail,
-    sendEmail,
     getIntegrationBaseUrl,
+    getStoredBillingEmailForPrincipal,
+    sendEmail,
     studioStripeCheckEmailStorageKey,
     syncSubscriptionFromStripe,
     syncSubscriptionFromStripeByEmail,
@@ -1011,6 +1012,36 @@ function studioMembershipDotClass(row) {
     const s = String(row.stripeSubscriptionStatus || '').toLowerCase();
     if (s === 'active' || s === 'trialing') return 'studio-user-sub-dot--ok';
     return 'studio-user-sub-dot--err';
+}
+
+/** Canister row shows paid access (active/trialing) or manual exempt. */
+function studioRowCanisterPaid(row) {
+    if (!row || typeof row !== 'object') return false;
+    if (row.membershipExemptManual) return true;
+    const s = String(row.stripeSubscriptionStatus || '').toLowerCase();
+    return s === 'active' || s === 'trialing';
+}
+
+/**
+ * @param {string | undefined} customerId
+ * @param {string | undefined} publishableKey
+ */
+function studioStripeDashboardCustomerUrl(customerId, publishableKey) {
+    const cid = String(customerId || '').trim();
+    if (!cid.startsWith('cus_')) return '';
+    const pk = String(publishableKey || '');
+    const isTest = pk.startsWith('pk_test_');
+    const base = isTest ? 'https://dashboard.stripe.com/test' : 'https://dashboard.stripe.com';
+    return `${base}/customers/${encodeURIComponent(cid)}`;
+}
+
+/** @param {string | undefined} reason */
+function studioSyncFailureExtraHint(reason) {
+    const r = String(reason || '');
+    if (/\b404\b|not found|cannot post|cannot get/i.test(r)) {
+        return ' Redeploy fusion-integration-api with POST /stripe/sync-subscription-by-email (see services/fusion-integration-api/README.md).';
+    }
+    return '';
 }
 
 /** @param {string | undefined} iso */
@@ -3619,12 +3650,24 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
     const stripeSt = row.stripeSubscriptionStatus || '—';
     const renews = row.stripeCurrentPeriodEnd || '—';
     const canisterMembershipLabel = exempt ? 'Manual exempt' : String(stripeSt);
+    const accountUpdatedLabel = row.updatedAt ? escapeHtml(String(row.updatedAt).slice(0, 19)) : '—';
+    const billingHintStored = getStoredBillingEmailForPrincipal(principal);
+    const billingHintHtml =
+        billingHintStored && billingHintStored.includes('@')
+            ? `<p class="studio-muted studio-user-manage-billing-hint" id="studio-user-billing-hint">Client billing email (this browser): <code>${escapeHtml(billingHintStored)}</code></p>`
+            : '<p class="studio-muted studio-user-manage-billing-hint" id="studio-user-billing-hint" hidden></p>';
 
     const body = `
       <div class="studio-user-manage-modal">
+        <p class="studio-muted studio-user-manage-legend">The Users table <strong>dot</strong> and <strong>Membership</strong> below reflect the <strong>canister</strong>. <strong>Live Stripe</strong> queries Stripe directly — use Push / Check to align the canister.</p>
         <section class="studio-user-manage-section">
           <h3 class="studio-user-manage-section-title">Identity</h3>
-          <p class="studio-user-manage-principal studio-muted">${escapeHtml(principal)}</p>
+          <div class="studio-user-manage-principal-row">
+            <p class="studio-user-manage-principal studio-muted" id="studio-user-principal-line">${escapeHtml(principal)}</p>
+            <button type="button" class="studio-btn-ghost studio-btn-tiny" id="studio-user-copy-principal">Copy principal</button>
+          </div>
+          <p class="studio-muted studio-user-manage-meta">Account <code>updatedAt</code> (core): ${accountUpdatedLabel}</p>
+          ${billingHintHtml}
         </section>
 
         <section class="studio-user-manage-section">
@@ -3643,6 +3686,11 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
         <section class="studio-user-manage-section">
           <h3 class="studio-user-manage-section-title">Membership (canister)</h3>
           <p class="studio-muted studio-user-manage-hint">Stored on-chain. Use <strong>Live Stripe</strong> below to verify billing in Stripe.</p>
+          <div class="studio-user-manage-sync-actions">
+            <button type="button" class="studio-btn-ghost" id="studio-user-refresh-canister">Refresh from canister</button>
+            <button type="button" class="studio-btn-ghost" id="studio-user-push-subscription">Push subscription to canister</button>
+          </div>
+          <p id="studio-user-push-result" class="studio-muted studio-user-manage-push-result" hidden></p>
           <dl class="studio-user-manage-dl" id="studio-user-manage-membership-dl">
             <dt>Cached subscription</dt><dd id="studio-user-cache-sub">${escapeHtml(String(stripeSt))}</dd>
             <dt>Period end</dt><dd id="studio-user-cache-renew">${escapeHtml(String(renews))}</dd>
@@ -3666,8 +3714,10 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
             <button type="button" class="studio-btn-primary" id="studio-user-stripe-check">Check Stripe</button>
           </div>
           <div id="studio-user-stripe-result" class="studio-user-manage-stripe-result" hidden></div>
+          <div id="studio-user-stripe-ids" class="studio-user-manage-stripe-ids" hidden></div>
         </section>
 
+        <p id="studio-user-sync-warn" class="studio-banner studio-banner--warn studio-user-manage-warn" hidden></p>
         <p id="studio-user-edit-err" class="studio-banner studio-banner--error studio-user-manage-err" hidden></p>
         <div class="studio-modal-actions studio-user-manage-actions">
           <button type="button" class="studio-btn-primary" id="studio-user-edit-save">Save changes</button>
@@ -3676,14 +3726,194 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
       </div>
     `;
 
-    const { close, root } = openStudioModal(body, { title: 'Manage account', wide: true });
+    const { close, root } = openStudioModal(body, {
+        title: 'Manage account',
+        wide: true,
+        onClose: () => {
+            if (typeof onRefreshUsersList !== 'function') return;
+            void (async () => {
+                try {
+                    await onRefreshUsersList();
+                } catch (err) {
+                    try {
+                        const syncMsg = document.querySelector('#studio-users-sync-msg');
+                        if (syncMsg) {
+                            syncMsg.textContent =
+                                err instanceof Error ? err.message : String(err);
+                        }
+                    } catch {
+                        /* ignore */
+                    }
+                }
+            })();
+        },
+    });
     const saveBtn = root.querySelector('#studio-user-edit-save');
     const errEl = root.querySelector('#studio-user-edit-err');
     const checkBtn = root.querySelector('#studio-user-stripe-check');
     const emailInput = root.querySelector('#studio-user-stripe-email');
     const stripeResultEl = root.querySelector('#studio-user-stripe-result');
+    const syncWarnEl = root.querySelector('#studio-user-sync-warn');
+    const pushResultEl = root.querySelector('#studio-user-push-result');
+    const stripeIdsEl = root.querySelector('#studio-user-stripe-ids');
     const CHECK_LABEL = 'Check Stripe';
     const stripeCheckEmailLsKey = studioStripeCheckEmailStorageKey(principal);
+
+    const setSyncWarn = (text) => {
+        if (!(syncWarnEl instanceof HTMLElement)) return;
+        if (!text) {
+            syncWarnEl.hidden = true;
+            syncWarnEl.textContent = '';
+        } else {
+            syncWarnEl.hidden = false;
+            syncWarnEl.textContent = text;
+        }
+    };
+
+    const setPushResult = (text, show) => {
+        if (!(pushResultEl instanceof HTMLElement)) return;
+        pushResultEl.hidden = !show;
+        pushResultEl.textContent = show ? text : '';
+    };
+
+    /** @param {Record<string, unknown>} liveR */
+    const renderLiveStripeIds = (liveR) => {
+        if (!(stripeIdsEl instanceof HTMLElement)) return;
+        const cid = liveR.customerId != null ? String(liveR.customerId).trim() : '';
+        const sid = liveR.subscriptionId != null ? String(liveR.subscriptionId).trim() : '';
+        if (!cid && !sid) {
+            stripeIdsEl.hidden = true;
+            stripeIdsEl.innerHTML = '';
+            return;
+        }
+        const pk = getStripePublishableKeyResolved();
+        const dash = studioStripeDashboardCustomerUrl(cid, pk);
+        const bits = [];
+        if (cid) {
+            bits.push(
+                `<div class="studio-user-manage-id-row"><span class="studio-muted">Customer</span> <code>${escapeHtml(cid)}</code> <button type="button" class="studio-btn-ghost studio-btn-tiny" data-studio-copy="${escapeHtml(cid)}">Copy</button></div>`
+            );
+        }
+        if (sid) {
+            bits.push(
+                `<div class="studio-user-manage-id-row"><span class="studio-muted">Subscription</span> <code>${escapeHtml(sid)}</code> <button type="button" class="studio-btn-ghost studio-btn-tiny" data-studio-copy="${escapeHtml(sid)}">Copy</button></div>`
+            );
+        }
+        if (dash) {
+            bits.push(
+                `<p class="studio-muted studio-user-manage-stripe-dash"><a href="${escapeHtml(dash)}" target="_blank" rel="noopener noreferrer">Open customer in Stripe Dashboard</a></p>`
+            );
+        }
+        stripeIdsEl.innerHTML = bits.join('');
+        stripeIdsEl.hidden = false;
+    };
+
+    const runPushSubscriptionToCanister = async (emailStr) => {
+        let emailRes =
+            /** @type {{ synced?: boolean; reason?: string } | undefined} */ (undefined);
+        let principalRes =
+            /** @type {{ synced?: boolean; reason?: string } | undefined} */ (undefined);
+        let anySynced = false;
+        if (getIntegrationBaseUrl()) {
+            emailRes = await syncSubscriptionFromStripeByEmail(emailStr, principal);
+            anySynced = emailRes?.synced === true;
+            if (!anySynced) {
+                principalRes = await syncSubscriptionFromStripe(principal);
+                anySynced = principalRes?.synced === true;
+            }
+        }
+        return { emailRes, principalRes, anySynced };
+    };
+
+    const refetchUserRowAndRefreshTable = async () => {
+        let refreshErr = '';
+        let up = null;
+        try {
+            const rows = await getAccountsForStudio();
+            up = rows.find((x) => x.principal === principal) ?? null;
+            applyMembershipFromStudioRow(up);
+        } catch (e) {
+            refreshErr = e instanceof Error ? e.message : String(e);
+        }
+        if (typeof onRefreshUsersList === 'function') {
+            try {
+                await onRefreshUsersList();
+            } catch (e2) {
+                refreshErr = refreshErr
+                    ? `${refreshErr}; ${e2 instanceof Error ? e2.message : String(e2)}`
+                    : e2 instanceof Error
+                      ? e2.message
+                      : String(e2);
+            }
+        }
+        return { up, refreshErr };
+    };
+
+    const formatSyncAttempts = (emailRes, principalRes) => {
+        const parts = [];
+        if (emailRes?.synced === true) parts.push('Email sync: ok.');
+        else if (emailRes?.reason)
+            parts.push(`Email sync: ${emailRes.reason}.${studioSyncFailureExtraHint(emailRes.reason)}`);
+        else if (getIntegrationBaseUrl()) parts.push('Email sync: no success (see console / integration logs).');
+        if (principalRes?.synced === true) parts.push('Principal sync: ok.');
+        else if (principalRes?.reason)
+            parts.push(`Principal sync: ${principalRes.reason}.${studioSyncFailureExtraHint(principalRes.reason)}`);
+        else if (emailRes?.synced !== true && getIntegrationBaseUrl())
+            parts.push('Principal sync: ran after email sync (no separate error).');
+        return parts.join(' ');
+    };
+
+    root.querySelector('#studio-user-copy-principal')?.addEventListener('click', () => {
+        void copyToClipboard(principal);
+    });
+
+    root.addEventListener('click', (ev) => {
+        const t = ev.target;
+        if (!(t instanceof Element)) return;
+        const btn = t.closest('[data-studio-copy]');
+        if (!btn || !root.contains(btn)) return;
+        const val = btn.getAttribute('data-studio-copy');
+        if (val) void copyToClipboard(val);
+    });
+
+    root.querySelector('#studio-user-refresh-canister')?.addEventListener('click', async () => {
+        setPushResult('Refreshing…', true);
+        setSyncWarn('');
+        const { refreshErr } = await refetchUserRowAndRefreshTable();
+        if (refreshErr) {
+            setSyncWarn(`Could not refresh: ${refreshErr}`);
+            setPushResult('', false);
+        } else {
+            setPushResult('Canister data refreshed.', true);
+        }
+    });
+
+    root.querySelector('#studio-user-push-subscription')?.addEventListener('click', async () => {
+        const emailStr = emailInput instanceof HTMLInputElement ? emailInput.value.trim() : '';
+        if (!emailStr.includes('@')) {
+            setPushResult('Enter a valid customer email in Live Stripe first.', true);
+            return;
+        }
+        setPushResult('Pushing to canister…', true);
+        setSyncWarn('');
+        if (!getIntegrationBaseUrl()) {
+            setPushResult('Set Integration API URL in Studio → Services.', true);
+            return;
+        }
+        const { emailRes, principalRes, anySynced } = await runPushSubscriptionToCanister(emailStr);
+        const detail = formatSyncAttempts(emailRes, principalRes);
+        const { refreshErr } = await refetchUserRowAndRefreshTable();
+        if (refreshErr) {
+            setSyncWarn(`${detail} Table refresh failed: ${refreshErr}`);
+        } else if (!anySynced) {
+            setSyncWarn(
+                `Canister may still be stale. ${detail} If Stripe shows active but the table dot stays red, redeploy the integration API (sync-by-email) and verify INTEGRATION_IC_IDENTITY + adminSetIntegrationServicePrincipal.`
+            );
+        } else {
+            setSyncWarn('');
+        }
+        setPushResult(anySynced ? `Done. ${detail}` : `Not synced. ${detail}`, true);
+    });
     if (emailInput instanceof HTMLInputElement) {
         try {
             const saved = localStorage.getItem(stripeCheckEmailLsKey);
@@ -3741,6 +3971,11 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
             checkBtn.textContent = 'Checking…';
         }
         if (stripeResultEl) stripeResultEl.hidden = true;
+        if (stripeIdsEl instanceof HTMLElement) {
+            stripeIdsEl.hidden = true;
+            stripeIdsEl.innerHTML = '';
+        }
+        setSyncWarn('');
         try {
             const r = await fetchStripeSubscriptionStatusByEmail(email);
             try {
@@ -3760,6 +3995,8 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
                 showStripeErr(msg);
                 return;
             }
+            const liveRec = /** @type {Record<string, unknown>} */ (r);
+            renderLiveStripeIds(liveRec);
             const active = r.membershipActive === true;
             const rawLine =
                 r.subscriptionStatus != null && String(r.subscriptionStatus)
@@ -3775,38 +4012,26 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
                     <span class="studio-stripe-live-badge ${active ? 'is-active' : 'is-inactive'}">${active ? 'Active' : 'Inactive'}</span>
                     <span class="studio-stripe-live-raw studio-muted">${escapeHtml(rawLine)}${escapeHtml(cancelNote)}</span>
                   </div>
-                  <p class="studio-muted studio-stripe-live-footnote">Live Stripe — independent of table / canister cache.</p>
+                  <p class="studio-muted studio-stripe-live-footnote">Live Stripe — independent of table / canister cache until Push / Check sync succeeds.</p>
                 `;
             }
 
-            if (getIntegrationBaseUrl()) {
-                let synced = false;
-                try {
-                    const byEmail = await syncSubscriptionFromStripeByEmail(email, principal);
-                    synced = Boolean(byEmail && /** @type {{ synced?: unknown }} */ (byEmail).synced === true);
-                } catch {
-                    /* ignore */
-                }
-                if (!synced) {
-                    try {
-                        const byPrincipal = await syncSubscriptionFromStripe(principal);
-                        synced = Boolean(
-                            byPrincipal && /** @type {{ synced?: unknown }} */ (byPrincipal).synced === true
-                        );
-                    } catch {
-                        /* Stripe customer may lack metadata.principal */
-                    }
-                }
-            }
-            try {
-                const rows = await getAccountsForStudio();
-                const up = rows.find((x) => x.principal === principal);
-                applyMembershipFromStudioRow(up);
-                if (typeof onRefreshUsersList === 'function') {
-                    await onRefreshUsersList();
-                }
-            } catch {
-                /* ignore */
+            const { emailRes, principalRes, anySynced } = await runPushSubscriptionToCanister(email);
+            const syncDetail = formatSyncAttempts(emailRes, principalRes);
+            const { up, refreshErr } = await refetchUserRowAndRefreshTable();
+
+            if (refreshErr) {
+                setSyncWarn(
+                    `Could not reload canister / table: ${refreshErr}. Live Stripe may still differ from what is stored.`
+                );
+            } else if (!up) {
+                setSyncWarn('No account row returned for this principal after refresh.');
+            } else if (active && !studioRowCanisterPaid(up)) {
+                setSyncWarn(
+                    `Stripe shows active membership for this email, but the canister still shows "${String(up.stripeSubscriptionStatus || 'empty')}". ${anySynced ? '' : `Sync did not report success. ${syncDetail}`} Check integration service logs, integration identity (adminSetIntegrationServicePrincipal), and redeploy API if sync-by-email returns 404.`
+                );
+            } else {
+                setSyncWarn('');
             }
         } catch (e) {
             showStripeErr(e instanceof Error ? e.message : String(e));

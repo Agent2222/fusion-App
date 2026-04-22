@@ -377,7 +377,7 @@ export async function linkSubscriptionToPrincipal(opts) {
  * Ask the integration API to load this principal’s Stripe subscription and update the canister.
  * No-ops when integration URL is missing; logs warnings on failure (safe after login).
  * @param {string} principalText
- * @returns {Promise<{ synced?: boolean, reason?: string, status?: string } | undefined>}
+ * @returns {Promise<{ synced?: boolean; reason?: string; status?: string } | undefined>}
  */
 export async function syncSubscriptionFromStripe(principalText) {
     if (typeof principalText !== 'string' || !principalText.trim()) {
@@ -397,12 +397,13 @@ export async function syncSubscriptionFromStripe(principalText) {
             const err = await res.json().catch(() => ({}));
             const detail = typeof err.error === 'string' ? err.error : `HTTP ${res.status}`;
             console.warn('[Fusion] sync-subscription:', detail);
-            return undefined;
+            return { synced: false, reason: detail };
         }
         return await res.json();
     } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
         console.warn('[Fusion] sync-subscription failed:', e);
-        return undefined;
+        return { synced: false, reason: msg };
     }
 }
 
@@ -433,12 +434,13 @@ export async function syncSubscriptionFromStripeByEmail(email, principalText) {
             const err = await res.json().catch(() => ({}));
             const detail = typeof err.error === 'string' ? err.error : `HTTP ${res.status}`;
             console.warn('[Fusion] sync-subscription-by-email:', detail);
-            return undefined;
+            return { synced: false, reason: detail };
         }
         return await res.json();
     } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
         console.warn('[Fusion] sync-subscription-by-email failed:', e);
-        return undefined;
+        return { synced: false, reason: msg };
     }
 }
 
