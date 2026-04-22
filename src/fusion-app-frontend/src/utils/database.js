@@ -1660,6 +1660,61 @@ export async function getAccountForCaller() {
  * Test mode: creates a local overlay artist and selects it when none is selected.
  * @returns {Promise<'ok' | 'alreadyLinked' | 'needsSubscription' | 'noAccount'>}
  */
+/**
+ * Decode `registerWithJoinAccessCode` variant from the generated actor.
+ * @param {unknown} raw
+ * @returns {'ok' | 'invalidCode' | 'wrongRole' | 'artistAlreadyLinked' | 'accountExists' | 'inviteInactive' | 'unknown'}
+ */
+export function interpretRegisterWithJoinAccessCodeResult(raw) {
+    if (!raw || typeof raw !== 'object') return 'unknown';
+    const o = /** @type {Record<string, unknown>} */ (raw);
+    if ('ok' in o) return 'ok';
+    if ('invalidCode' in o) return 'invalidCode';
+    if ('wrongRole' in o) return 'wrongRole';
+    if ('artistAlreadyLinked' in o) return 'artistAlreadyLinked';
+    if ('accountExists' in o) return 'accountExists';
+    if ('inviteInactive' in o) return 'inviteInactive';
+    return 'unknown';
+}
+
+/**
+ * Admin: create a single-use 8-digit join invite (`adminCreateJoinInviteCode`).
+ * @param {Record<string, null>} role — e.g. `{ artist: null }`, `{ gallery: null }`
+ * @returns {Promise<string>} eight-digit code
+ */
+export async function adminCreateJoinInviteCodeStudio(role) {
+    if (getDataSource() === 'test') {
+        let s = '';
+        for (let i = 0; i < 8; i += 1) s += String(Math.floor(Math.random() * 10));
+        return s;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.adminCreateJoinInviteCode !== 'function') {
+        throw new Error('adminCreateJoinInviteCode unavailable — run dfx generate fusion-app-backend from the project root.');
+    }
+    return String(await actor.adminCreateJoinInviteCode(role));
+}
+
+/**
+ * Authenticated caller: redeem join invite or artist roster access code.
+ * @param {Record<string, null>} role
+ * @param {string} codeRaw
+ * @returns {Promise<ReturnType<typeof interpretRegisterWithJoinAccessCodeResult>>}
+ */
+export async function registerWithJoinAccessCodeForCaller(role, codeRaw) {
+    const code = String(codeRaw || '').replace(/\D/g, '');
+    if (getDataSource() === 'test') {
+        return code.length === 8 ? 'ok' : 'invalidCode';
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.registerWithJoinAccessCode !== 'function') {
+        throw new Error('registerWithJoinAccessCode unavailable — sign in and run dfx generate fusion-app-backend.');
+    }
+    const raw = await actor.registerWithJoinAccessCode(role, code);
+    return interpretRegisterWithJoinAccessCodeResult(raw);
+}
+
 export async function ensureMyLinkedArtistProfile() {
     if (getDataSource() === 'test') {
         let id = getProfileSettingsDevArtistId();

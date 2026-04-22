@@ -2331,8 +2331,11 @@ export const testData = {
                     dialogTitle: 'Join FUSION',
                     subtitle:
                         'Enter a curated platform connecting artists, galleries, curators, and collectors.',
-                    namePlaceholder: 'Full Name',
+                    firstNamePlaceholder: 'First name',
+                    lastNamePlaceholder: 'Last name',
                     emailPlaceholder: 'Email',
+                    accessCodeLabel: 'Access code (optional)',
+                    accessCodePlaceholder: '8-digit code',
                     roleLabel: "I'm joining as:",
                     continueLabel: 'Continue →',
                     renewHint: 'Renews every 2 months at $50',
@@ -2342,8 +2345,11 @@ export const testData = {
                     dialogTitle: 'FUSION に参加',
                     subtitle:
                         'アーティスト、ギャラリー、キュレーター、コレクターをつなぐキュレーション型のプラットフォームへ。',
-                    namePlaceholder: 'お名前',
+                    firstNamePlaceholder: '名',
+                    lastNamePlaceholder: '姓',
                     emailPlaceholder: 'メール',
+                    accessCodeLabel: 'アクセスコード（任意）',
+                    accessCodePlaceholder: '8桁のコード',
                     roleLabel: '参加形態:',
                     continueLabel: '次へ →',
                     renewHint: '2 か月ごとに $50 で更新',
@@ -2456,6 +2462,28 @@ export const testData = {
                     signInLabel: 'Internet Identity で続行',
                 },
             },
+            linkAccountExempt: {
+                en: {
+                    paymentSuccessLine: '',
+                    iiExplainer:
+                        'Internet Identity ties your membership to a secure login—no separate Fusion password.',
+                    linkKicker: '',
+                    title: 'Sign in to complete registration',
+                    lead: 'Sign in with Internet Identity to activate your membership with this access code. If you are already signed in, we will finish automatically.',
+                    help: '',
+                    signInLabel: 'Continue with Internet Identity',
+                },
+                ja: {
+                    paymentSuccessLine: '',
+                    iiExplainer:
+                        'Internet Identity はパスワードを使わず、あなたのメンバーシップをログインに安全に紐づけます。',
+                    linkKicker: '',
+                    title: '登録を完了',
+                    lead: 'Internet Identity でサインインすると、アクセスコードでメンバーシップが有効になります。すでにサインイン済みの場合は自動で完了します。',
+                    help: '',
+                    signInLabel: 'Internet Identity で続行',
+                },
+            },
             confirmation: {
                 en: {
                     title: "You're in",
@@ -2508,8 +2536,11 @@ export const testData = {
                     dialogTitle: 'Access Full Collection',
                     subtitle:
                         'Enter a curated platform connecting artists, galleries, curators, and collectors.',
-                    namePlaceholder: 'Full Name',
+                    firstNamePlaceholder: 'First name',
+                    lastNamePlaceholder: 'Last name',
                     emailPlaceholder: 'Email',
+                    accessCodeLabel: 'Access code (optional)',
+                    accessCodePlaceholder: '8-digit code',
                     roleLabel: "I'm joining as:",
                     continueLabel: 'Continue →',
                     renewHint: 'Renews every 2 months at $50',
@@ -2519,8 +2550,11 @@ export const testData = {
                     dialogTitle: 'コレクションへアクセス',
                     subtitle:
                         'アーティスト、ギャラリー、キュレーター、コレクターをつなぐキュレーション型のプラットフォームへ。',
-                    namePlaceholder: 'お名前',
+                    firstNamePlaceholder: '名',
+                    lastNamePlaceholder: '姓',
                     emailPlaceholder: 'メール',
+                    accessCodeLabel: 'アクセスコード（任意）',
+                    accessCodePlaceholder: '8桁のコード',
                     roleLabel: '参加形態:',
                     continueLabel: '次へ →',
                     renewHint: '2 か月ごとに $50 で更新',
@@ -2633,6 +2667,28 @@ export const testData = {
                     signInLabel: 'Internet Identity で続行',
                 },
             },
+            linkAccountExempt: {
+                en: {
+                    paymentSuccessLine: '',
+                    iiExplainer:
+                        'Internet Identity ties your access to a secure login—no separate Fusion password.',
+                    linkKicker: '',
+                    title: 'Sign in to complete registration',
+                    lead: 'Sign in with Internet Identity to activate your access with this code. If you are already signed in, we will finish automatically.',
+                    help: '',
+                    signInLabel: 'Continue with Internet Identity',
+                },
+                ja: {
+                    paymentSuccessLine: '',
+                    iiExplainer:
+                        'Internet Identity はパスワードを使わず、このアクセスをあなたのログインに安全に紐づけます。',
+                    linkKicker: '',
+                    title: '登録を完了',
+                    lead: 'Internet Identity でサインインすると、アクセスコードでアクセスが有効になります。すでにサインイン済みの場合は自動で完了します。',
+                    help: '',
+                    signInLabel: 'Internet Identity で続行',
+                },
+            },
             confirmation: {
                 en: {
                     title: "You're in",
@@ -2685,8 +2741,11 @@ export const testData = {
                     dialogTitle: 'Join & Apply',
                     subtitle:
                         'Enter a curated platform connecting artists, galleries, curators, and collectors.',
-                    namePlaceholder: 'Full Name',
+                    firstNamePlaceholder: 'First name',
+                    lastNamePlaceholder: 'Last name',
                     emailPlaceholder: 'Email',
+                    accessCodeLabel: 'Access code (optional)',
+                    accessCodePlaceholder: '8-digit code',
                     roleLabel: "I'm joining as:",
                     continueLabel: 'Continue →',
                     renewHint: 'Renews every 2 months at $50',
@@ -2696,8 +2755,11 @@ export const testData = {
                     dialogTitle: '参加して応募',
                     subtitle:
                         'アーティスト、ギャラリー、キュレーター、コレクターをつなぐキュレーション型のプラットフォームへ。',
-                    namePlaceholder: 'お名前',
+                    firstNamePlaceholder: '名',
+                    lastNamePlaceholder: '姓',
                     emailPlaceholder: 'メール',
+                    accessCodeLabel: 'アクセスコード（任意）',
+                    accessCodePlaceholder: '8桁のコード',
                     roleLabel: '参加形態:',
                     continueLabel: '次へ →',
                     renewHint: '2 か月ごとに $50 で更新',
@@ -2807,6 +2869,28 @@ export const testData = {
                     title: 'アクセスを有効化',
                     lead: 'Internet Identity でログインに紐づけ、応募を続けます。すでにサインイン済みの場合は自動で完了します。',
                     help: '後からでも構いません。同じメールでアカウントページから続行できます。',
+                    signInLabel: 'Internet Identity で続行',
+                },
+            },
+            linkAccountExempt: {
+                en: {
+                    paymentSuccessLine: '',
+                    iiExplainer:
+                        'Internet Identity ties your account to a secure login—no separate Fusion password.',
+                    linkKicker: '',
+                    title: 'Sign in to complete registration',
+                    lead: 'Sign in with Internet Identity to activate your access and continue your application with this code. If you are already signed in, we will finish automatically.',
+                    help: '',
+                    signInLabel: 'Continue with Internet Identity',
+                },
+                ja: {
+                    paymentSuccessLine: '',
+                    iiExplainer:
+                        'Internet Identity はパスワードを使わず、アカウントをあなたのログインに安全に紐づけます。',
+                    linkKicker: '',
+                    title: '登録を完了',
+                    lead: 'Internet Identity でサインインすると、アクセスコードでアクセスが有効になり、応募を続けられます。すでにサインイン済みの場合は自動で完了します。',
+                    help: '',
                     signInLabel: 'Internet Identity で続行',
                 },
             },

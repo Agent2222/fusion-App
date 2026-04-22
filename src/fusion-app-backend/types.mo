@@ -167,6 +167,23 @@ module {
         #noAccount;
     };
 
+    /// Admin-generated join invite (gallery / curator / collector / artist) — single-use while `active`.
+    public type JoinInviteRecord = {
+        role : UserRole;
+        active : Bool;
+        createdAt : Text;
+    };
+
+    /// Result of `registerWithJoinAccessCode` (Internet Identity required).
+    public type RegisterWithJoinAccessCodeResult = {
+        #ok;
+        #invalidCode;
+        #wrongRole;
+        #artistAlreadyLinked;
+        #accountExists;
+        #inviteInactive;
+    };
+
     /// Full artist row for canister + Studio: public `profile` + optional JSON blob for locales (versioned).
     /// `imported` / `accessCode` are Studio-only onboarding fields (not in public `Artist` / `listArtists`).
     public type ArtistRecord = {
@@ -284,5 +301,6 @@ module {
         artistMostRecentProgramStable : [(Text, Text)];
         artistFeaturedFeaturableIdsStable : [Text];
         artistFeaturedManualIdsStable : [Text];
+        joinInvitesStable : [(Text, JoinInviteRecord)];
     };
 };

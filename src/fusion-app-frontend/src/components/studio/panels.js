@@ -36,6 +36,7 @@ import {
     setManualFeaturedForArtistStudio,
     setFeaturableForArtistStudio,
     setRandomFeaturedModeStudio,
+    adminCreateJoinInviteCodeStudio,
     getSubscribers as loadSubscribersFromDataSource,
     getSubscribersCsv,
     setDataSource,
@@ -396,11 +397,13 @@ function renderArtists() {
             </div>
             <p class="studio-banner studio-banner--info">Admin roster: use <strong>Manage</strong> for structured editing (tabs: roster, identity, world, media, links/SEO). Batch JSON remains for bulk import. <strong>Advanced JSON</strong> in the modal applies <strong>test overlay</strong> only (localStorage).</p>
             <p class="studio-muted">Batch upload: JSON array of artist rows (see <code>ArtistRecord</code> shape), or <code>{ "artists": [ … ] }</code>. Imported rows get an 8-digit access code for future account linking.</p>
+            <p class="studio-muted">Per-artist <strong>access code</strong> in Manage is for claiming an existing roster profile. <strong>Generate artist join invite</strong> creates a separate single-use code for new members without a roster row (same 8-digit format).</p>
             <div class="studio-subscribers-toolbar studio-subscribers-toolbar--artists">
                 <label class="studio-file-label studio-btn-ghost">
                     <input type="file" accept="application/json,.json" id="studio-artists-batch-json" class="studio-file-input" />
                     Batch upload (JSON)
                 </label>
+                <button type="button" class="studio-btn-secondary" id="studio-artists-gen-invite">Generate artist join invite</button>
                 <button type="button" class="studio-btn-ghost" id="studio-artists-sync-hero">Sync Profile Images</button>
                 <button type="button" class="studio-btn-ghost" id="studio-artists-sync-gallery">Sync Gallery</button>
             </div>
@@ -945,6 +948,9 @@ function renderAudience(kind) {
     return `
         <div class="studio-section-stack">
             <p class="studio-muted">Subscribers with <strong>${escapeHtml(t)}</strong> in category (test or live), plus user accounts with role <code>#${escapeHtml(kind.replace(/s$/, ''))}</code> when live.</p>
+            <div class="studio-toolbar-actions" style="margin:0 0 0.75rem;flex-wrap:wrap;gap:0.5rem">
+                <button type="button" class="studio-btn-secondary" id="studio-audience-gen-${kind}">Generate ${escapeHtml(t)} join invite</button>
+            </div>
             <h3 class="studio-subheading">Subscribers</h3>
             <div class="studio-table-wrap">
                 <table class="studio-table">
@@ -987,6 +993,30 @@ function escapeHtml(s) {
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
+}
+
+/**
+ * @param {string} code
+ * @param {string} audienceNote
+ */
+async function studioAlertGeneratedJoinInviteCode(code, audienceNote) {
+    const parts = [`Generated code: ${code}`];
+    const note = String(audienceNote || '').trim();
+    if (note) {
+        parts.push('');
+        parts.push(note);
+    }
+    parts.push('');
+    parts.push(
+        'Single-use: deactivates after the first successful registration with Internet Identity.',
+    );
+    const msg = parts.join('\n');
+    try {
+        await navigator.clipboard.writeText(code);
+        alert(`${msg}\n\n(Copied to clipboard.)`);
+    } catch {
+        alert(msg);
+    }
 }
 
 /** @param {string | undefined} st */
@@ -2121,6 +2151,24 @@ async function initAudience(mainEl, kind) {
                   .join('')
             : '<tr><td colspan="3">No accounts with this role (admin + live only).</td></tr>';
     }
+
+    const roleRec =
+        kind === 'galleries'
+            ? { gallery: null }
+            : kind === 'collectors'
+              ? { collector: null }
+              : { curator: null };
+    mainEl.querySelector(`#studio-audience-gen-${kind}`)?.addEventListener('click', async () => {
+        try {
+            const code = await adminCreateJoinInviteCodeStudio(roleRec);
+            await studioAlertGeneratedJoinInviteCode(
+                code,
+                `Invite for audience: ${t}. Share with one person; they must pick the same role when joining.`,
+            );
+        } catch (e) {
+            alert(e instanceof Error ? e.message : String(e));
+        }
+    });
 }
 
 async function initArtists(mainEl) {
@@ -2517,6 +2565,18 @@ ${urlHelp}
     });
     mainEl.querySelector('#studio-artists-sync-gallery')?.addEventListener('click', () => {
         openLegacySyncConfirm('gallery');
+    });
+
+    mainEl.querySelector('#studio-artists-gen-invite')?.addEventListener('click', async () => {
+        try {
+            const code = await adminCreateJoinInviteCodeStudio({ artist: null });
+            await studioAlertGeneratedJoinInviteCode(
+                code,
+                'Artist-role invite for new members without a roster row. For claiming an existing imported profile, set the 8-digit code on the artist row in Manage instead.',
+            );
+        } catch (e) {
+            alert(e instanceof Error ? e.message : String(e));
+        }
     });
 
     const shoutFields = mainEl.querySelector('#studio-artists-shout-fields');

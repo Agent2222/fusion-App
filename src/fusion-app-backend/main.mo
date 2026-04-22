@@ -6,6 +6,9 @@ import Text "mo:base/Text";
 import Principal "mo:base/Principal";
 import Array "mo:base/Array";
 import Nat "mo:base/Nat";
+import Int "mo:base/Int";
+import Char "mo:base/Char";
+import Time "mo:base/Time";
 import Buffer "mo:base/Buffer";
 import Debug "mo:base/Debug";
 import Order "mo:base/Order";
@@ -49,6 +52,9 @@ persistent actor {
   stable var contentPagesStable : [(Text, Types.ContentPageRecord)] = [];
   stable var applicantsStable : [(Text, Types.ApplicantRecord)] = [];
   stable var siteSettingsStable : [(Text, Text)] = [];
+
+  /// Join invite codes (8-digit) — admin-generated; deactivated after first successful redemption.
+  stable var joinInvitesStable : [(Text, Types.JoinInviteRecord)] = [];
 
   /// Composite key: `artistId|programId` → JSON `{"submittedAt":...,"payload":...}` (one entry per program).
   stable var applicationByArtistProgramStable : [(Text, Text)] = [];
@@ -139,7 +145,35 @@ persistent actor {
 
   transient var manualFeaturedArtistIds : Buffer.Buffer<Text> = Buffer.Buffer<Text>(0);
 
+  transient var joinInvitesByCode : _HashMap.HashMap<Text, Types.JoinInviteRecord> =
+    _HashMap.HashMap<Text, Types.JoinInviteRecord>(0, Text.equal, Text.hash);
+
+  /// 8-digit access code → artist id (derived from `ArtistRecord.accessCode`; rebuilt on upgrade).
+  transient var accessCodeToArtistId : _HashMap.HashMap<Text, Text> =
+    _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
+
   private let maxManualFeaturedStrip : Nat = 8;
+
+  private func isEightDigitAccessCode(t : Text) : Bool {
+    if (Text.size(t) != 8) {
+      return false;
+    };
+    for (c in Text.toIter(t)) {
+      if (not Char.isDigit(c)) {
+        return false;
+      };
+    };
+    true;
+  };
+
+  private func rebuildAccessCodeToArtistIdIndex() {
+    accessCodeToArtistId := _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
+    for ((id, rec) in artistsById.entries()) {
+      if (isEightDigitAccessCode(rec.accessCode)) {
+        accessCodeToArtistId.put(rec.accessCode, id);
+      };
+    };
+  };
 
   // Populate hashmaps on install / reload.
   for (entry in subscribersStable.vals()) {
@@ -204,6 +238,12 @@ persistent actor {
   for (id in artistFeaturedManualIdsStable.vals()) {
     manualFeaturedArtistIds.add(id);
   };
+
+  for (entry in joinInvitesStable.vals()) {
+    joinInvitesByCode.put(entry.0, entry.1);
+  };
+
+  rebuildAccessCodeToArtistIdIndex();
 
   /// Keep in sync with `adminPrincipals` defaults above — `postupgrade` appends any of these not already stored.
   private func defaultAdminPrincipals() : [Principal] {
@@ -347,6 +387,81 @@ persistent actor {
   private func putUserAccountParts(core : Types.UserAccountCore, m : Types.MembershipFields, p : Principal) {
     accountsByPrincipal.put(p, core);
     membershipByPrincipal.put(p, m);
+  };
+
+  /// Keep digits only (allows pasted codes with spaces or separators).
+  private func normalizeJoinAccessCode(t : Text) : Text {
+    var out = "";
+    for (c in Text.toIter(t)) {
+      if (Char.isDigit(c)) {
+        out := out # Char.toText(c);
+      };
+    };
+    out;
+  };
+
+  private func digitCharSmall(d : Nat) : Text {
+    switch (Nat.rem(d, 10)) {
+      case 0 { "0" };
+      case 1 { "1" };
+      case 2 { "2" };
+      case 3 { "3" };
+      case 4 { "4" };
+      case 5 { "5" };
+      case 6 { "6" };
+      case 7 { "7" };
+      case 8 { "8" };
+      case _ { "9" };
+    };
+  };
+
+  private func randomEightDigitCandidate() : Text {
+    var rng : Nat = Int.abs(Time.now());
+    var s = "";
+    var i = 0;
+    while (i < 8) {
+      rng := Nat.rem(rng * 31 + 17, 1_000_000_000);
+      s := s # digitCharSmall(Nat.rem(rng, 10));
+      i += 1;
+    };
+    s;
+  };
+
+  private func isJoinInviteCodeTaken(code : Text) : Bool {
+    switch (joinInvitesByCode.get(code)) {
+      case (?_) { true };
+      case null {
+        switch (accessCodeToArtistId.get(code)) {
+          case (?_) { true };
+          case null { false };
+        };
+      };
+    };
+  };
+
+  private func principalAlreadyLinkedToArtist(aid : Text) : Bool {
+    for ((_, core) in accountsByPrincipal.entries()) {
+      switch (core.linkedArtistId) {
+        case (?x) {
+          if (x == aid) {
+            return true;
+          };
+        };
+        case null {};
+      };
+    };
+    false;
+  };
+
+  private func roleAllowedForJoinInvite(r : Types.UserRole) : Bool {
+    switch (r) {
+      case (#artist) { true };
+      case (#gallery) { true };
+      case (#curator) { true };
+      case (#collector) { true };
+      case (#staff) { false };
+      case (#admin) { false };
+    };
   };
 
   private func putStripePeriodEndForPrincipal(p : Principal, t : ?Text) {
@@ -509,6 +624,7 @@ persistent actor {
     artistFilterCohortYearsStable := _Iter.toArray(artistFilterCohortYearsById.entries());
     artistFeaturedFeaturableIdsStable := featurableIdsSorted();
     artistFeaturedManualIdsStable := Buffer.toArray(manualFeaturedArtistIds);
+    joinInvitesStable := _Iter.toArray(joinInvitesByCode.entries());
   };
 
   system func postupgrade() {
@@ -567,6 +683,18 @@ persistent actor {
       artistSlugToId.put(rec.profile.slug, id);
     };
     artistsStable := [];
+
+    joinInvitesByCode := _HashMap.HashMap<Text, Types.JoinInviteRecord>(
+      joinInvitesStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in joinInvitesStable.vals()) {
+      joinInvitesByCode.put(entry.0, entry.1);
+    };
+    joinInvitesStable := [];
+
+    rebuildAccessCodeToArtistIdIndex();
 
     artistFilterCohortYearsById := _HashMap.HashMap<Text, [Nat]>(
       artistFilterCohortYearsStable.size(),
@@ -762,6 +890,17 @@ persistent actor {
     for (id in artistFeaturedManualIdsStable.vals()) {
       manualFeaturedArtistIds.add(id);
     };
+
+    joinInvitesByCode := _HashMap.HashMap<Text, Types.JoinInviteRecord>(
+      joinInvitesStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in joinInvitesStable.vals()) {
+      joinInvitesByCode.put(entry.0, entry.1);
+    };
+
+    rebuildAccessCodeToArtistIdIndex();
   };
 
   /// Admin-only: full backup of persisted application state (for JSON download in Studio).
@@ -788,6 +927,7 @@ persistent actor {
       artistMostRecentProgramStable = _Iter.toArray(mostRecentProgramByArtistId.entries());
       artistFeaturedFeaturableIdsStable = featurableIdsSorted();
       artistFeaturedManualIdsStable = Buffer.toArray(manualFeaturedArtistIds);
+      joinInvitesStable = _Iter.toArray(joinInvitesByCode.entries());
     };
   };
 
@@ -816,6 +956,7 @@ persistent actor {
     artistMostRecentProgramStable := snapshot.artistMostRecentProgramStable;
     artistFeaturedFeaturableIdsStable := snapshot.artistFeaturedFeaturableIdsStable;
     artistFeaturedManualIdsStable := snapshot.artistFeaturedManualIdsStable;
+    joinInvitesStable := snapshot.joinInvitesStable;
     rebuildTransientFromImportedStableArrays();
   };
 
@@ -926,6 +1067,116 @@ persistent actor {
     switch (membershipByPrincipal.get(msg.caller)) {
       case null { membershipByPrincipal.put(msg.caller, defaultMembership()) };
       case (?_) {};
+    };
+  };
+
+  /// Admin: create a single-use 8-digit join invite for gallery / curator / collector / artist (no profile).
+  public shared (msg) func adminCreateJoinInviteCode(role : Types.UserRole) : async Text {
+    assertAdmin(msg.caller);
+    if (not roleAllowedForJoinInvite(role)) {
+      Debug.trap("Invalid role for join invite");
+    };
+    let now = "1970-01-01T00:00:00.000Z";
+    var attempts : Nat = 0;
+    while (attempts < 50) {
+      let cand = randomEightDigitCandidate();
+      if (not isJoinInviteCodeTaken(cand)) {
+        let rec : Types.JoinInviteRecord = {
+          role = role;
+          active = true;
+          createdAt = now;
+        };
+        joinInvitesByCode.put(cand, rec);
+        return cand;
+      };
+      attempts += 1;
+    };
+    Debug.trap("Could not allocate join code");
+  };
+
+  /// Register with an 8-digit invite or artist roster access code — creates an **active** exempt account.
+  public shared (msg) func registerWithJoinAccessCode(
+    role : Types.UserRole,
+    codeRaw : Text,
+  ) : async Types.RegisterWithJoinAccessCodeResult {
+    if (roleIsPrivileged(role)) {
+      return #wrongRole;
+    };
+    switch (accountsByPrincipal.get(msg.caller)) {
+      case (?_) { return #accountExists };
+      case null {};
+    };
+    let code = normalizeJoinAccessCode(codeRaw);
+    if (not isEightDigitAccessCode(code)) {
+      return #invalidCode;
+    };
+
+    switch (joinInvitesByCode.get(code)) {
+      case (?inv) {
+        if (not inv.active) {
+          return #inviteInactive;
+        };
+        if (inv.role != role) {
+          return #wrongRole;
+        };
+        let now = "1970-01-01T00:00:00.000Z";
+        let core : Types.UserAccountCore = {
+          role = inv.role;
+          status = #active;
+          linkedArtistId = null;
+          linkedOrgId = null;
+          updatedAt = now;
+        };
+        let dm = defaultMembership();
+        let m : Types.MembershipFields = {
+          dm with membershipExemptManual = true;
+        };
+        putUserAccountParts(core, m, msg.caller);
+        let invDone : Types.JoinInviteRecord = {
+          inv with active = false;
+        };
+        joinInvitesByCode.put(code, invDone);
+        return #ok;
+      };
+      case null {};
+    };
+
+    switch (accessCodeToArtistId.get(code)) {
+      case null { return #invalidCode };
+      case (?artistId) {
+        if (role != #artist) {
+          return #wrongRole;
+        };
+        switch (artistsById.get(artistId)) {
+          case null { return #invalidCode };
+          case (?rec) {
+            if (rec.accessCode != code) {
+              return #invalidCode;
+            };
+            if (principalAlreadyLinkedToArtist(artistId)) {
+              return #artistAlreadyLinked;
+            };
+            let now = "1970-01-01T00:00:00.000Z";
+            let core : Types.UserAccountCore = {
+              role = #artist;
+              status = #active;
+              linkedArtistId = ?artistId;
+              linkedOrgId = null;
+              updatedAt = now;
+            };
+            let dm = defaultMembership();
+            let m : Types.MembershipFields = {
+              dm with membershipExemptManual = true;
+            };
+            putUserAccountParts(core, m, msg.caller);
+            let cleared : Types.ArtistRecord = {
+              rec with accessCode = "";
+            };
+            putArtistRecord(cleared);
+            return #ok;
+          };
+        };
+      };
     };
   };
 
@@ -1530,11 +1781,24 @@ persistent actor {
         if (old.profile.slug != slug) {
           ignore artistSlugToId.remove(old.profile.slug);
         };
+        if (isEightDigitAccessCode(old.accessCode)) {
+          switch (accessCodeToArtistId.get(old.accessCode)) {
+            case (?mappedId) {
+              if (mappedId == id) {
+                ignore accessCodeToArtistId.remove(old.accessCode);
+              };
+            };
+            case null {};
+          };
+        };
       };
       case null {};
     };
     artistsById.put(id, record);
     artistSlugToId.put(slug, id);
+    if (isEightDigitAccessCode(record.accessCode)) {
+      accessCodeToArtistId.put(record.accessCode, id);
+    };
   };
 
   private let maxApplicationEntryChars : Nat = 100_000;
@@ -1598,6 +1862,16 @@ persistent actor {
     switch (artistsById.get(artistId)) {
       case null { false };
       case (?rec) {
+        if (isEightDigitAccessCode(rec.accessCode)) {
+          switch (accessCodeToArtistId.get(rec.accessCode)) {
+            case (?mappedId) {
+              if (mappedId == artistId) {
+                ignore accessCodeToArtistId.remove(rec.accessCode);
+              };
+            };
+            case null {};
+          };
+        };
         unlinkAccountsAndAppsForArtist(artistId);
         cleanupFeaturedForDeletedArtist(artistId);
         ignore artistsById.remove(artistId);

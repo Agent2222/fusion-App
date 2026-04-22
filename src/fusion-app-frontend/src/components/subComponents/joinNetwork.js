@@ -39,6 +39,17 @@ import {
 import { getStripePublishableKeyResolved } from "../../utils/studioServicesConfig.js";
 import { saveProfileSetupDraft } from "../../utils/profileSetupDraft.js";
 
+/** Persisted while the join dialog is on the exempt (access-code) path so refresh keeps the digits. */
+const PENDING_JOIN_ACCESS_CODE_KEY = "fusion-pending-join-access-code";
+
+/**
+ * @param {string | undefined} raw
+ * @returns {string} digits only (matches canister `normalizeJoinAccessCode`)
+ */
+function normalizeJoinAccessCodeInput(raw) {
+  return String(raw || "").replace(/\D/g, "");
+}
+
 /**
  * Set by `fusion-open-join-network` with `detail.logoutIfDismissedWithoutAccount` (post–II login with no account).
  * Consumed on next `_openModal` so header “Register” does not trigger logout on dismiss.
@@ -153,6 +164,10 @@ class JoinNetworkComponent extends HTMLElement {
     /** @type {ModalType} */
     this._modalType = "membership";
     this._formFullName = "";
+    this._formFirstName = "";
+    this._formLastName = "";
+    /** Skip value + payment; complete with II + `registerWithJoinAccessCode`. */
+    this._joinExemptCodePath = false;
     this._formEmail = "";
     /** @type {string} */
     this._lastFocused = null;
@@ -486,10 +501,26 @@ class JoinNetworkComponent extends HTMLElement {
         entryFoot.textContent = fd;
         entryFoot.style.whiteSpace = fd.includes("\n") ? "pre-line" : "";
       }
-      const inpName = this.shadowRoot?.querySelector("#jnFullName");
+      const inpFn = this.shadowRoot?.querySelector("#jnFirstName");
+      const inpLn = this.shadowRoot?.querySelector("#jnLastName");
       const inpEmail = this.shadowRoot?.querySelector("#jnEmail");
-      if (inpName) inpName.placeholder = entry.namePlaceholder || "";
+      const acLab = this.shadowRoot?.querySelector("#jnAccessCodeLabel");
+      const inpAc = this.shadowRoot?.querySelector("#jnAccessCode");
+      if (inpFn) inpFn.placeholder = entry.firstNamePlaceholder || "";
+      if (inpLn) inpLn.placeholder = entry.lastNamePlaceholder || "";
       if (inpEmail) inpEmail.placeholder = entry.emailPlaceholder || "";
+      const acl = String(entry.accessCodeLabel ?? "").trim();
+      if (acLab instanceof HTMLElement) {
+        acLab.textContent = acl;
+        acLab.hidden = !acl;
+      }
+      if (inpAc instanceof HTMLInputElement) {
+        inpAc.placeholder = entry.accessCodePlaceholder || "";
+        inpAc.setAttribute(
+          "aria-label",
+          acl || "Access code (optional)",
+        );
+      }
       set("#jnRoleLabel", entry.roleLabel);
       const ec = this.shadowRoot?.querySelector("#jnEntryContinue");
       if (ec) ec.textContent = entry.continueLabel || "Continue";
@@ -580,7 +611,8 @@ class JoinNetworkComponent extends HTMLElement {
     }
 
     {
-      const la =
+      /** @type {Record<string, string>} */
+      let la =
         linkAccount ||
         (loc === "ja"
           ? {
@@ -603,6 +635,48 @@ class JoinNetworkComponent extends HTMLElement {
               help: "",
               signInLabel: "Continue with Internet Identity",
             });
+      if (this._joinExemptCodePath) {
+        const ex = getFlowSlice(flow, mt, "linkAccountExempt", loc);
+        if (ex && typeof ex === "object") {
+          for (const k of [
+            "paymentSuccessLine",
+            "iiExplainer",
+            "linkKicker",
+            "title",
+            "lead",
+            "help",
+            "signInLabel",
+          ]) {
+            const v = /** @type {Record<string, unknown>} */ (ex)[k];
+            if (v != null && String(v).trim() !== "") {
+              la[/** @type {keyof typeof la} */ (k)] = String(v);
+            }
+          }
+        } else {
+          la =
+            loc === "ja"
+              ? {
+                  paymentSuccessLine: "",
+                  iiExplainer:
+                    "Internet Identity はパスワードを使わず、あなたのログインに安全に紐づけます。",
+                  linkKicker: "",
+                  title: "登録を完了",
+                  lead: "Internet Identity でサインインすると、アクセスコードでアカウントが有効になります。すでにサインイン済みの場合は自動で完了します。",
+                  help: "",
+                  signInLabel: "Internet Identity で続行",
+                }
+              : {
+                  paymentSuccessLine: "",
+                  iiExplainer:
+                    "Internet Identity ties your membership to a secure login—no separate Fusion password.",
+                  linkKicker: "",
+                  title: "Sign in to complete registration",
+                  lead: "Sign in with Internet Identity to activate your membership with this access code. If you are already signed in, we will finish automatically.",
+                  help: "",
+                  signInLabel: "Continue with Internet Identity",
+                };
+        }
+      }
       set("#jnLinkPaymentOk", la.paymentSuccessLine ?? "");
       const payOk = this.shadowRoot?.querySelector("#jnLinkPaymentOk");
       if (payOk) payOk.hidden = !String(la.paymentSuccessLine ?? "").trim();
@@ -715,6 +789,22 @@ class JoinNetworkComponent extends HTMLElement {
     ).trim();
   }
 
+  /** First + last from inputs or saved step-1 state (for early access + profile draft). */
+  _concatProfileFullName() {
+    const r = this.shadowRoot;
+    const fn = (
+      r?.querySelector("#jnFirstName")?.value ||
+      this._formFirstName ||
+      ""
+    ).trim();
+    const ln = (
+      r?.querySelector("#jnLastName")?.value ||
+      this._formLastName ||
+      ""
+    ).trim();
+    return `${fn} ${ln}`.trim();
+  }
+
   /**
    * Resubscribe: requires II only (existing member).
    * Full join: anonymous early-access only — payment first, then II + `registerOrUpdateAccount` after link step.
@@ -732,13 +822,11 @@ class JoinNetworkComponent extends HTMLElement {
     }
     const email = this._getEmailForSubscription();
     const cat = this._getSelectedCategoryNormalized();
-    const fullName = (
-      this.shadowRoot?.querySelector("#jnFullName")?.value ||
-      this._formFullName ||
-      ""
-    ).trim();
+    const fullName = this._concatProfileFullName();
     if (!email.includes("@") || !cat) {
-      throw new Error("Complete name, email, and role on step 1 first.");
+      throw new Error(
+        "Complete first name, last name, email, and role on step 1 first.",
+      );
     }
     await submitEarlyAccessToCanister(email, cat, fullName, this._modalType);
     this._preStripeCanisterSyncDone = false;
@@ -748,7 +836,12 @@ class JoinNetworkComponent extends HTMLElement {
    * After pay-first checkout + II sign-in: link Stripe subscription to principal, register account, finish confirmation.
    */
   async _tryCompletePendingLink() {
-    if (this._stage !== "linkAccount" || !this._fusionPendingId) return;
+    if (this._stage !== "linkAccount") return;
+    if (this._joinExemptCodePath) {
+      await this._tryCompleteExemptAccessCodeJoin();
+      return;
+    }
+    if (!this._fusionPendingId) return;
     const root = this.shadowRoot;
     const errEl = root?.querySelector("#jnLinkErr");
     const linkingEl = root?.querySelector("#jnLinkLinking");
@@ -821,18 +914,153 @@ class JoinNetworkComponent extends HTMLElement {
   }
 
   /**
+   * Access-code exempt path: after II, redeem code on the canister (no Stripe / pending id).
+   */
+  async _tryCompleteExemptAccessCodeJoin() {
+    const root = this.shadowRoot;
+    const errEl = root?.querySelector("#jnLinkErr");
+    const linkingEl = root?.querySelector("#jnLinkLinking");
+    const signInBtn = root?.querySelector("#jnLinkSignIn");
+    if (errEl) errEl.textContent = "";
+    let code = "";
+    try {
+      code = normalizeJoinAccessCodeInput(
+        sessionStorage.getItem(PENDING_JOIN_ACCESS_CODE_KEY) || "",
+      );
+    } catch {
+      code = "";
+    }
+    if (code.length !== 8) {
+      if (errEl)
+        errEl.textContent =
+          "Missing or invalid access code. Close and start again from step 1.";
+      return;
+    }
+    try {
+      const { getIdentityIfAuthenticated } =
+        await import("../../utils/icAuth.js");
+      const identity = await getIdentityIfAuthenticated();
+      if (!identity) return;
+      if (linkingEl) {
+        linkingEl.textContent = "Completing registration…";
+        linkingEl.hidden = false;
+      }
+      if (signInBtn) signInBtn.hidden = true;
+      const cat = this._getSelectedCategoryNormalized();
+      const { categoryToUserRole } = await import("../../utils/authHeader.js");
+      const { registerWithJoinAccessCodeForCaller } =
+        await import("../../utils/database.js");
+      const outcome = await registerWithJoinAccessCodeForCaller(
+        categoryToUserRole(cat),
+        code,
+      );
+      if (outcome !== "ok") {
+        const map = {
+          invalidCode: "This access code is not valid.",
+          wrongRole: "This code does not match the role you selected.",
+          artistAlreadyLinked: "This artist profile is already linked to another account.",
+          accountExists: "This Internet Identity already has a Fusion account.",
+          inviteInactive: "This invite code has already been used or is inactive.",
+          unknown: "Registration could not be completed. Try again.",
+        };
+        if (linkingEl) {
+          linkingEl.textContent = "";
+          linkingEl.hidden = true;
+        }
+        if (signInBtn) signInBtn.hidden = false;
+        if (errEl) errEl.textContent = map[outcome] || map.unknown;
+        return;
+      }
+      try {
+        sessionStorage.removeItem(PENDING_JOIN_ACCESS_CODE_KEY);
+      } catch {
+        /* ignore */
+      }
+      this._joinExemptCodePath = false;
+      try {
+        const { ensureMyLinkedArtistProfile } =
+          await import("../../utils/database.js");
+        await ensureMyLinkedArtistProfile();
+        const { maybeSeedLocalesFromProfileSetupDraftIfEmpty } = await import(
+          "../../utils/profileSetupSeedLocales.js"
+        );
+        await maybeSeedLocalesFromProfileSetupDraftIfEmpty();
+      } catch (ensErr) {
+        if (DEV_MODE)
+          console.warn("[JoinNetwork] ensureMyLinkedArtistProfile", ensErr);
+      }
+      await this._afterExemptJoinSaved();
+    } catch (e) {
+      if (DEV_MODE) console.error("[JoinNetwork] exempt join", e);
+      if (linkingEl) {
+        linkingEl.textContent = "";
+        linkingEl.hidden = true;
+      }
+      if (signInBtn) signInBtn.hidden = false;
+      if (errEl) {
+        errEl.textContent =
+          e instanceof Error
+            ? e.message
+            : "Could not complete registration. Try again.";
+      }
+    }
+  }
+
+  /** Tail for exempt access-code registration (early access already saved at step 1). */
+  async _afterExemptJoinSaved() {
+    const root = this.shadowRoot;
+    const email = this._getEmailForSubscription() || this._formEmail.trim();
+    const fullName = this._concatProfileFullName();
+    saveProfileSetupDraft({
+      firstName: this._formFirstName,
+      lastName: this._formLastName,
+      fullName,
+      email,
+    });
+    this._preStripeCanisterSyncDone = false;
+    if (email.includes("@")) {
+      try {
+        await sendEmail({
+          to: email,
+          subject: "You're in — Fusion membership active",
+          text: [
+            "Your Fusion account is active with the access code you used.",
+            "",
+            "You signed in with Internet Identity — use the same login to return.",
+            "",
+            "Questions? Reply to this email or use Contact on the site.",
+          ].join("\n"),
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.warn(
+          "[JoinNetwork] confirmation email failed (signup still saved):",
+          msg,
+        );
+      }
+    }
+    posthog.capture("join_access_code_redeemed", {
+      modal_type:
+        this._modalType || this.getAttribute("data-modal-type") || "membership",
+    });
+    this._joinFlowCompleted = true;
+    this._showStage("confirmation");
+  }
+
+  /**
    * Shared tail: optional early-access + register (when `_preStripeCanisterSyncDone` is false), welcome email, confirmation stage.
    */
   async _afterJoinSaved() {
     const root = this.shadowRoot;
     const email = this._getEmailForSubscription() || this._formEmail.trim();
     const cat = this._getSelectedCategoryNormalized();
-    const fullName = (
-      this.shadowRoot?.querySelector("#jnFullName")?.value ||
-      this._formFullName ||
-      ""
-    ).trim();
-    saveProfileSetupDraft({ fullName, email });
+    const fullName = this._concatProfileFullName();
+    saveProfileSetupDraft({
+      firstName: this._formFirstName,
+      lastName: this._formLastName,
+      fullName,
+      email,
+    });
     if (!this._preStripeCanisterSyncDone) {
       try {
         await submitEarlyAccessToCanister(
@@ -1278,6 +1506,13 @@ class JoinNetworkComponent extends HTMLElement {
                     line-height: 1.45;
                 }
                 .jn-field { width: 100%; margin-bottom: 0.75rem; }
+                .jn-field-label {
+                    display: block;
+                    font-size: 0.88rem;
+                    margin: 0 0 0.35rem;
+                    font-variation-settings: var(--fv-label-strong);
+                    color: var(--jn-c2);
+                }
                 .jn-field input,
                 .jn-pay-fields input {
                     width: 100%;
@@ -1652,11 +1887,18 @@ class JoinNetworkComponent extends HTMLElement {
                                 <p id="jnEntrySubtitle"></p>
                         </div>
                             <div class="jn-field">
-                                <input type="text" id="jnFullName" name="jn-full-name" autocomplete="name" placeholder="Full Name" />
-                    </div>
+                                <input type="text" id="jnFirstName" name="jn-first-name" autocomplete="given-name" placeholder="First name" />
+                            </div>
+                            <div class="jn-field">
+                                <input type="text" id="jnLastName" name="jn-last-name" autocomplete="family-name" placeholder="Last name" />
+                            </div>
                             <div class="jn-field">
                                 <input type="email" id="jnEmail" name="jn-email" autocomplete="email" placeholder="Email" />
-                    </div>
+                            </div>
+                            <div class="jn-field">
+                                <label id="jnAccessCodeLabel" class="jn-field-label" for="jnAccessCode"></label>
+                                <input type="text" id="jnAccessCode" name="jn-access-code" inputmode="numeric" autocomplete="one-time-code" placeholder="" />
+                            </div>
                             <p class="jn-role-label" id="jnRoleLabel">I'm joining as:</p>
                             <div id="jnRoleRow">
                                 <button type="button" class="categoryButton active" data-role="Artist">Artist</button>
@@ -1799,6 +2041,7 @@ class JoinNetworkComponent extends HTMLElement {
       (!detail || detail.mode !== "resubscribe");
 
     if (resumeLink) {
+      this._joinExemptCodePath = false;
       this._fusionPendingId = pendingRestore.fusionPendingId;
       this._fusionSubscriptionId = pendingRestore.subscriptionId;
       if (pendingRestore.email) {
@@ -1821,11 +2064,13 @@ class JoinNetworkComponent extends HTMLElement {
       this._fusionPendingId = null;
       this._fusionSubscriptionId = null;
       if (detail && detail.mode === "resubscribe") {
+        this._joinExemptCodePath = false;
         this._joinMode = "resubscribe";
         this._stage = "payment";
         this._logoutIfDismissedWithoutJoin = false;
         void import("@stripe/stripe-js");
       } else {
+        this._joinExemptCodePath = false;
         this._joinMode = "full";
         this._stage = "entry";
         const dbg = (this.getAttribute("stage") || "").trim().toLowerCase();
@@ -1839,17 +2084,29 @@ class JoinNetworkComponent extends HTMLElement {
     }
     this._fillDialogCopy();
     this._joinFlowCompleted = false;
-    const name = root.querySelector("#jnFullName");
+    const fnEl = root.querySelector("#jnFirstName");
+    const lnEl = root.querySelector("#jnLastName");
     const email = root.querySelector("#jnEmail");
-    if (name) name.value = this._formFullName;
-    if (email) email.value = this._formEmail;
+    const acEl = root.querySelector("#jnAccessCode");
+    if (fnEl instanceof HTMLInputElement) fnEl.value = this._formFirstName;
+    if (lnEl instanceof HTMLInputElement) lnEl.value = this._formLastName;
+    if (email instanceof HTMLInputElement) email.value = this._formEmail;
+    if (acEl instanceof HTMLInputElement) {
+      let persisted = "";
+      try {
+        persisted = sessionStorage.getItem(PENDING_JOIN_ACCESS_CODE_KEY) || "";
+      } catch {
+        persisted = "";
+      }
+      acEl.value = normalizeJoinAccessCodeInput(persisted);
+    }
     this._lastFocused = document.activeElement;
     if (dlg && typeof dlg.showModal === "function") {
       dlg.showModal();
       // Same backend actor as loadscreen `#csCTAForm` — warm connection early (before payment).
       prefetchFusionBackendActor();
       requestAnimationFrame(() => {
-        const focusEl = root.querySelector("#jnFullName") || openBtn;
+        const focusEl = root.querySelector("#jnFirstName") || openBtn;
         focusEl?.focus?.();
       });
     }
@@ -1872,6 +2129,12 @@ class JoinNetworkComponent extends HTMLElement {
 
     dlg?.addEventListener("close", () => {
       this._teardownStripePayment();
+      this._joinExemptCodePath = false;
+      try {
+        sessionStorage.removeItem(PENDING_JOIN_ACCESS_CODE_KEY);
+      } catch {
+        /* ignore */
+      }
       try {
         if (this._stage === "linkAccount") {
           sessionStorage.removeItem(FUSION_PENDING_MEMBERSHIP_LINK_KEY);
@@ -1910,25 +2173,77 @@ class JoinNetworkComponent extends HTMLElement {
     root.querySelector("#jnEntryContinue")?.addEventListener("click", () => {
       const err = root.querySelector("#jnEntryErr");
       if (err) err.textContent = "";
-      const name = (root.querySelector("#jnFullName")?.value || "").trim();
+      const fn = (root.querySelector("#jnFirstName")?.value || "").trim();
+      const ln = (root.querySelector("#jnLastName")?.value || "").trim();
       const email = (root.querySelector("#jnEmail")?.value || "").trim();
+      const codeNorm = normalizeJoinAccessCodeInput(
+        root.querySelector("#jnAccessCode")?.value || "",
+      );
       const cat = this._getSelectedCategoryNormalized();
       if (!cat) {
         if (err) err.textContent = "Please select a role first.";
         return;
       }
-      if (!name) {
-        if (err) err.textContent = "Please enter your name.";
+      if (!fn || !ln) {
+        if (err) err.textContent = "Please enter your first and last name.";
         return;
       }
       if (!email || !email.includes("@")) {
         if (err) err.textContent = "Please enter a valid email.";
         return;
       }
-      this._formFullName = name;
+      const fullName = `${fn} ${ln}`.trim();
+      this._formFirstName = fn;
+      this._formLastName = ln;
+      this._formFullName = fullName;
       this._formEmail = email;
-      saveProfileSetupDraft({ fullName: name, email });
+      saveProfileSetupDraft({
+        firstName: fn,
+        lastName: ln,
+        fullName,
+        email,
+      });
       prefetchFusionBackendActor();
+      if (codeNorm.length === 8) {
+        try {
+          sessionStorage.setItem(PENDING_JOIN_ACCESS_CODE_KEY, codeNorm);
+        } catch {
+          /* ignore */
+        }
+        void (async () => {
+          try {
+            await submitEarlyAccessToCanister(
+              email,
+              cat,
+              fullName,
+              this._modalType,
+            );
+            this._joinExemptCodePath = true;
+            this._stage = "linkAccount";
+            this._fillDialogCopy();
+          } catch (subErr) {
+            try {
+              sessionStorage.removeItem(PENDING_JOIN_ACCESS_CODE_KEY);
+            } catch {
+              /* ignore */
+            }
+            if (DEV_MODE) console.error("[JoinNetwork] early access (exempt)", subErr);
+            if (err) {
+              err.textContent =
+                subErr instanceof Error
+                  ? subErr.message
+                  : "Could not save your signup. Please try again.";
+            }
+          }
+        })();
+        return;
+      }
+      this._joinExemptCodePath = false;
+      try {
+        sessionStorage.removeItem(PENDING_JOIN_ACCESS_CODE_KEY);
+      } catch {
+        /* ignore */
+      }
       this._showStage("value");
     });
 
