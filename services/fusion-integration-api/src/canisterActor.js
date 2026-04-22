@@ -3,6 +3,7 @@
  */
 import { createPrivateKey } from 'node:crypto';
 import { Actor, HttpAgent } from '@dfinity/agent';
+import { Secp256k1KeyIdentity } from '@dfinity/identity-secp256k1';
 import { Ed25519KeyIdentity } from '@dfinity/identity';
 import { Principal } from '@dfinity/principal';
 import { idlFactory } from './fusion_backend.idl.js';
@@ -11,38 +12,49 @@ import { idlFactory } from './fusion_backend.idl.js';
 let _actor = null;
 
 /**
- * `dfx identity export` prints PEM — use `INTEGRATION_IC_IDENTITY_PEM` (or paste PEM into this helper).
- * JSON array `["hex","hex"]` from older flows uses `INTEGRATION_IC_IDENTITY_JSON`.
+ * `dfx identity export` PEM — Ed25519 or secp256k1 (current dfx defaults).
+ * JSON array uses `INTEGRATION_IC_IDENTITY_JSON` (Ed25519 `fromParsedJson` only).
  * @param {string} pem
+ * @returns {import('@dfinity/agent').SignIdentity}
  */
-function ed25519IdentityFromPem(pem) {
-    const key = createPrivateKey({ key: pem.trim(), format: 'pem' });
+function integrationIdentityFromPem(pem) {
+    const trimmed = pem.trim();
+    const key = createPrivateKey({ key: trimmed, format: 'pem' });
     const jwk = key.export({ format: 'jwk' });
-    if (!jwk || typeof jwk !== 'object' || jwk.crv !== 'Ed25519' || typeof jwk.d !== 'string') {
-        throw new Error('PEM must be an Ed25519 private key (dfx identity export)');
+    if (!jwk || typeof jwk !== 'object') {
+        throw new Error('Invalid PEM private key');
     }
-    const secret = Buffer.from(jwk.d, 'base64url');
-    if (secret.length !== 32) {
-        throw new Error('Invalid Ed25519 secret length');
+    if (jwk.crv === 'Ed25519' && typeof jwk.d === 'string') {
+        const secret = Buffer.from(jwk.d, 'base64url');
+        if (secret.length !== 32) {
+            throw new Error('Invalid Ed25519 secret length');
+        }
+        return Ed25519KeyIdentity.fromSecretKey(new Uint8Array(secret));
     }
-    return Ed25519KeyIdentity.fromSecretKey(new Uint8Array(secret));
+    if (jwk.crv === 'secp256k1') {
+        return Secp256k1KeyIdentity.fromPem(trimmed);
+    }
+    const crv = /** @type {{ crv?: string }} */ (jwk).crv;
+    throw new Error(
+        `Unsupported PEM key curve: ${crv ?? 'unknown'} (supported: Ed25519, secp256k1 from dfx identity export)`,
+    );
 }
 
 /**
- * @returns {import('@dfinity/identity').Ed25519KeyIdentity}
+ * @returns {import('@dfinity/agent').SignIdentity}
  */
 function loadIntegrationIdentity() {
     const pem = process.env.INTEGRATION_IC_IDENTITY_PEM || '';
     const json = process.env.INTEGRATION_IC_IDENTITY_JSON || '';
     if (pem.trim()) {
-        return ed25519IdentityFromPem(pem);
+        return integrationIdentityFromPem(pem);
     }
     if (json.trim().startsWith('[')) {
         const arr = JSON.parse(json);
         return Ed25519KeyIdentity.fromParsedJson(arr);
     }
     if (json.includes('BEGIN')) {
-        return ed25519IdentityFromPem(json);
+        return integrationIdentityFromPem(json);
     }
     throw new Error('Set INTEGRATION_IC_IDENTITY_PEM or INTEGRATION_IC_IDENTITY_JSON');
 }
