@@ -5,6 +5,8 @@
  * Click advances to next slide and restarts the hold + progress bar.
  */
 
+import { SEO_MEDIA_DEFAULT, withSeoImageAlt } from '../../utils/mediaAltSeo.js';
+
 const FADE_MS = 450;
 const MAX_IMAGES = 10;
 const DEFAULT_DURATION_SEC = 3;
@@ -62,6 +64,8 @@ class ProgramFadeGalleryElement extends HTMLElement {
         this.attachShadow({ mode: 'open' });
         /** @type {string[]} */
         this._urls = [];
+        /** @type {string} */
+        this._altBase = '';
         /** @type {number} */
         this._durationSec = DEFAULT_DURATION_SEC;
         this._runId = 0;
@@ -95,14 +99,24 @@ class ProgramFadeGalleryElement extends HTMLElement {
 
     /**
      * @param {unknown[]} urls
-     * @param {{ durationSec?: unknown }} [opts]
+     * @param {{ durationSec?: unknown, altBase?: unknown }} [opts]
      */
     setImages(urls, opts = {}) {
         this._urls = Array.isArray(urls)
             ? urls.map((u) => String(u ?? '').trim()).filter(Boolean).slice(0, MAX_IMAGES)
             : [];
         this._durationSec = clampDurationSec(opts?.durationSec);
+        this._altBase = String(opts?.altBase ?? '').trim();
         this._render();
+    }
+
+    /**
+     * @param {number} slideIndex
+     * @returns {string}
+     */
+    _altForSlide(slideIndex) {
+        const base = this._altBase || 'Program';
+        return withSeoImageAlt(`${base} gallery slide ${slideIndex + 1}`);
     }
 
     connectedCallback() {
@@ -199,6 +213,7 @@ class ProgramFadeGalleryElement extends HTMLElement {
             while (attempts < this._urls.length) {
                 try {
                     await assignImageWhenLoaded(img, this._urls[this._idx]);
+                    img.alt = this._altForSlide(this._idx);
                     break;
                 } catch {
                     this._idx = (this._idx + 1) % this._urls.length;
@@ -312,7 +327,7 @@ class ProgramFadeGalleryElement extends HTMLElement {
                 }
             </style>
             <div class="pfade-wrap" part="frame" role="button" tabindex="0" aria-label="Advance gallery image">
-                <img class="pfade-img" alt="" decoding="async" loading="eager" />
+                <img class="pfade-img" alt="${SEO_MEDIA_DEFAULT}" decoding="async" loading="eager" />
                 <div class="pfade-progress-track" part="progress-track">
                     <div class="pfade-progress-fill" part="progress-fill"></div>
                 </div>
@@ -337,6 +352,7 @@ class ProgramFadeGalleryElement extends HTMLElement {
         void assignImageWhenLoaded(img, this._urls[0])
             .then(() => {
                 if (this._runId !== runId || !this.isConnected) return;
+                img.alt = this._altForSlide(0);
                 requestAnimationFrame(() => {
                     img.style.opacity = '1';
                 });

@@ -508,15 +508,27 @@ function escapeStripeMetadataQueryValue(s) {
     return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
+/** @param {import('stripe').Stripe.Subscription} s */
+function rankStripeSubscription(s) {
+    if (s.status === 'active' || s.status === 'trialing') return 0;
+    if (s.status === 'past_due') return 1;
+    if (s.status === 'unpaid') return 2;
+    return 3;
+}
+
 /**
- * Find customer by `metadata.principal`, pick the best subscription (active/trialing first), push to canister.
+ * Find Stripe customer + single “best” subscription for this IC principal (same ranking as sync).
  * @param {import('stripe').Stripe} stripeClient
  * @param {string} principalText
+ * @returns {Promise<
+ *   | { ok: true; customer: import('stripe').Stripe.Customer; subscription: import('stripe').Stripe.Subscription }
+ *   | { ok: false; reason: string; customerId?: string }
+ * >}
  */
-async function syncStripeSubscriptionForPrincipal(stripeClient, principalText) {
+async function getStripeCustomerAndBestSubscription(stripeClient, principalText) {
     const trimmed = principalText.trim();
     if (!trimmed) {
-        return { synced: false, reason: 'invalid_principal' };
+        return { ok: false, reason: 'invalid_principal' };
     }
     const escaped = escapeStripeMetadataQueryValue(trimmed);
     const search = await stripeClient.customers.search({
@@ -524,7 +536,7 @@ async function syncStripeSubscriptionForPrincipal(stripeClient, principalText) {
         limit: 1,
     });
     if (!search.data.length) {
-        return { synced: false, reason: 'no_stripe_customer' };
+        return { ok: false, reason: 'no_stripe_customer' };
     }
     const customer = search.data[0];
     const subs = await stripeClient.subscriptions.list({
@@ -533,21 +545,79 @@ async function syncStripeSubscriptionForPrincipal(stripeClient, principalText) {
         limit: 100,
     });
     if (!subs.data.length) {
-        return { synced: false, reason: 'no_subscription', customerId: customer.id };
+        return { ok: false, reason: 'no_subscription', customerId: customer.id };
     }
-    /** @param {import('stripe').Stripe.Subscription} s */
-    const rank = (s) => {
-        if (s.status === 'active' || s.status === 'trialing') return 0;
-        if (s.status === 'past_due') return 1;
-        if (s.status === 'unpaid') return 2;
-        return 3;
-    };
     const sorted = [...subs.data].sort((a, b) => {
-        const d = rank(a) - rank(b);
+        const d = rankStripeSubscription(a) - rankStripeSubscription(b);
         if (d !== 0) return d;
         return b.created - a.created;
     });
     const best = sorted[0];
+    return { ok: true, customer, subscription: best };
+}
+
+/**
+ * @param {import('stripe').Stripe.Price} price
+ * @returns {string}
+ */
+function formatStripePriceLine(price) {
+    if (!price || !price.recurring) return '';
+    const n = price.unit_amount;
+    if (typeof n !== 'number' || !Number.isFinite(n)) return '';
+    const major = n / 100;
+    const cur = String(price.currency || 'usd').toUpperCase();
+    const sym = cur === 'USD' ? '$' : `${cur} `;
+    const interval = price.recurring.interval;
+    const count = price.recurring.interval_count || 1;
+    let cadence = '';
+    if (interval === 'month') {
+        cadence = count === 1 ? 'every month' : `every ${count} months`;
+    } else if (interval === 'year') {
+        cadence = count === 1 ? 'every year' : `every ${count} years`;
+    } else if (interval === 'week') {
+        cadence = count === 1 ? 'every week' : `every ${count} weeks`;
+    } else {
+        cadence = `per ${interval}`;
+    }
+    const shown = major % 1 === 0 ? String(Math.round(major)) : major.toFixed(2);
+    return `${sym}${shown} ${cadence}`;
+}
+
+/**
+ * @param {import('stripe').Stripe.Subscription} sub
+ * @returns {string}
+ */
+function planLabelFromSubscription(sub) {
+    const items = sub.items?.data;
+    if (!items || !items.length) return 'Subscription';
+    const first = items[0];
+    const price = first.price;
+    if (!price) return 'Subscription';
+    const nick = typeof price.nickname === 'string' ? price.nickname.trim() : '';
+    if (nick) return nick;
+    const prod = price.product;
+    if (prod && typeof prod === 'object' && 'name' in prod && typeof prod.name === 'string' && prod.name.trim()) {
+        return prod.name.trim();
+    }
+    return 'Subscription';
+}
+
+/**
+ * Find customer by `metadata.principal`, pick the best subscription (active/trialing first), push to canister.
+ * @param {import('stripe').Stripe} stripeClient
+ * @param {string} principalText
+ */
+async function syncStripeSubscriptionForPrincipal(stripeClient, principalText) {
+    const trimmed = principalText.trim();
+    const picked = await getStripeCustomerAndBestSubscription(stripeClient, principalText);
+    if (!picked.ok) {
+        return {
+            synced: false,
+            reason: picked.reason,
+            ...(picked.customerId ? { customerId: picked.customerId } : {}),
+        };
+    }
+    const { customer, subscription: best } = picked;
     const meta =
         best.metadata && typeof best.metadata === 'object'
             ? /** @type {Record<string, string>} */ ({ ...best.metadata })
@@ -584,6 +654,143 @@ app.post('/stripe/sync-subscription', requireApiKey, async (req, res) => {
         }
         const result = await syncStripeSubscriptionForPrincipal(stripe, principal);
         return res.json(result);
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return res.status(500).json({ error: msg });
+    }
+});
+
+/** Stripe Customer Portal — billing history, payment method, cancel (configure portal in Stripe Dashboard). */
+app.post('/stripe/billing-portal-session', requireApiKey, async (req, res) => {
+    try {
+        if (!stripe) {
+            return res.status(503).json({ error: 'Stripe not configured' });
+        }
+        const principal = req.body?.principal;
+        const returnUrl = req.body?.returnUrl;
+        if (typeof principal !== 'string' || !principal.trim()) {
+            return res.status(400).json({ error: 'principal required' });
+        }
+        if (typeof returnUrl !== 'string' || !returnUrl.startsWith('http')) {
+            return res.status(400).json({ error: 'returnUrl required (absolute https URL)' });
+        }
+        const trimmed = principal.trim();
+        const escaped = escapeStripeMetadataQueryValue(trimmed);
+        const search = await stripe.customers.search({
+            query: `metadata['principal']:'${escaped}'`,
+            limit: 1,
+        });
+        if (!search.data.length) {
+            return res.status(404).json({ error: 'no_stripe_customer' });
+        }
+        const customer = search.data[0];
+        const session = await stripe.billingPortal.sessions.create({
+            customer: customer.id,
+            return_url: returnUrl.trim(),
+        });
+        return res.json({ url: session.url });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return res.status(500).json({ error: msg });
+    }
+});
+
+/** Masked card + plan copy for member dashboard (expand subscription items). */
+app.post('/stripe/member-billing-summary', requireApiKey, async (req, res) => {
+    try {
+        if (!stripe) {
+            return res.status(503).json({ error: 'Stripe not configured' });
+        }
+        const principal = req.body?.principal;
+        if (typeof principal !== 'string' || !principal.trim()) {
+            return res.status(400).json({ error: 'principal required' });
+        }
+        const picked = await getStripeCustomerAndBestSubscription(stripe, principal);
+        if (!picked.ok) {
+            return res.json({
+                ok: false,
+                reason: picked.reason,
+                ...(picked.customerId ? { customerId: picked.customerId } : {}),
+            });
+        }
+        const { customer, subscription: best } = picked;
+        const full = await stripe.subscriptions.retrieve(best.id, {
+            expand: ['default_payment_method', 'items.data.price.product'],
+        });
+        let brand = '';
+        let last4 = '';
+        let pm = full.default_payment_method;
+        if (typeof pm === 'string' && pm) {
+            try {
+                pm = await stripe.paymentMethods.retrieve(pm);
+            } catch {
+                pm = null;
+            }
+        }
+        if (pm && typeof pm === 'object' && 'card' in pm && pm.card) {
+            const c = /** @type {{ brand?: string, last4?: string }} */ (pm.card);
+            brand = typeof c.brand === 'string' ? c.brand : '';
+            last4 = typeof c.last4 === 'string' ? c.last4 : '';
+        }
+        const firstItem = full.items?.data?.[0];
+        const price = firstItem?.price;
+        const planLabel = planLabelFromSubscription(full);
+        const planPriceLine = price ? formatStripePriceLine(price) : '';
+        const cpe = full.current_period_end;
+        const currentPeriodEnd =
+            typeof cpe === 'number' && Number.isFinite(cpe) ? new Date(cpe * 1000).toISOString() : '';
+        return res.json({
+            ok: true,
+            customerId: customer.id,
+            subscriptionId: full.id,
+            status: full.status,
+            cancelAtPeriodEnd: Boolean(full.cancel_at_period_end),
+            currentPeriodEnd,
+            planLabel,
+            planPriceLine,
+            paymentMethod:
+                brand || last4
+                    ? {
+                          brand,
+                          last4,
+                      }
+                    : null,
+        });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return res.status(500).json({ error: msg });
+    }
+});
+
+/** Cancel at end of current period; syncs canister via pushSubscriptionToCanister. */
+app.post('/stripe/cancel-subscription-at-period-end', requireApiKey, async (req, res) => {
+    try {
+        if (!stripe) {
+            return res.status(503).json({ error: 'Stripe not configured' });
+        }
+        const principal = req.body?.principal;
+        if (typeof principal !== 'string' || !principal.trim()) {
+            return res.status(400).json({ error: 'principal required' });
+        }
+        const actor = await getIntegrationActor();
+        if (!actor) {
+            return res.status(503).json({ error: 'Canister integration not configured' });
+        }
+        const picked = await getStripeCustomerAndBestSubscription(stripe, principal);
+        if (!picked.ok) {
+            return res.status(400).json({ error: picked.reason, customerId: picked.customerId });
+        }
+        const { customer, subscription: best } = picked;
+        if (best.status === 'canceled') {
+            return res.status(400).json({ error: 'subscription_already_canceled' });
+        }
+        const updated = await stripe.subscriptions.update(best.id, { cancel_at_period_end: true });
+        try {
+            await pushSubscriptionToCanister(updated, customer.id);
+        } catch (e) {
+            console.warn('[stripe] cancel-at-period-end canister sync:', e);
+        }
+        return res.json({ ok: true, cancelAtPeriodEnd: true, subscriptionId: updated.id });
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         return res.status(500).json({ error: msg });

@@ -21,6 +21,7 @@ import { getFusionBackendActor } from './earlyAccessSubscribe.js';
 import { getStudioAuthenticatedActor } from './studioAuth.js';
 import {
     artistRecordToTestOverlayShape,
+    cohortNatPairsForCanisterBulk,
     collectAccessCodesFromArtists,
     extractArrayFromBatchJson,
     normalizeArtistImportRow,
@@ -171,31 +172,82 @@ export async function setApplicationPaymentGlobal(value) {
 }
 
 /**
+ * Where this slug is primarily edited in Fusion Studio (Content tab lists only `content`).
+ * @typedef {'home' | 'programs' | 'products' | 'journal' | 'content'} StudioSurface
+ */
+
+/**
  * CMS pages: slug for canister + testData root key.
  * `editorMode`: `locales` = top-level EN/JA in Studio (merge with siblings like `order`, `routeLink`);
  * `full` = entire JSON blob (nested keys, arrays, join flows), including `info`, `allPrograms`, `editions`, `journals`, `programHero`.
- * Entity tabs (Programs, Products, Journal, Artists) own overlapping data — see docs/STUDIO_TESTDATA_MATRIX.md.
- * @type {readonly { key: string, slug: string, testKey: keyof typeof testData | string, label: string, editorMode?: 'locales' | 'full' }[]}
+ * `primaryStudioSurface`: drives the slim Content tab; entity/Home tabs embed the same slug UIs.
+ * `studioSurfaces`: all surfaces that may open an editor for this slug (e.g. site-info chapters).
+ * Entity tabs — see docs/STUDIO_TESTDATA_MATRIX.md.
+ * @type {readonly { key: string, slug: string, testKey: keyof typeof testData | string, label: string, editorMode?: 'locales' | 'full', primaryStudioSurface: StudioSurface, studioSurfaces: StudioSurface[] }[]}
  */
 export const CONTENT_PAGE_REGISTRY = [
-    { key: 'terms', slug: 'terms', testKey: 'termsAndConditions', label: 'Terms & Conditions', editorMode: 'locales' },
-    { key: 'privacy', slug: 'privacy', testKey: 'privacyPolicy', label: 'Privacy Policy', editorMode: 'locales' },
-    { key: 'contact', slug: 'contact', testKey: 'contact', label: 'Contact', editorMode: 'locales' },
-    { key: 'faq', slug: 'faq', testKey: 'faq', label: 'FAQ', editorMode: 'locales' },
+    {
+        key: 'terms',
+        slug: 'terms',
+        testKey: 'termsAndConditions',
+        label: 'Terms & Conditions',
+        editorMode: 'locales',
+        primaryStudioSurface: 'content',
+        studioSurfaces: ['content'],
+    },
+    {
+        key: 'privacy',
+        slug: 'privacy',
+        testKey: 'privacyPolicy',
+        label: 'Privacy Policy',
+        editorMode: 'locales',
+        primaryStudioSurface: 'content',
+        studioSurfaces: ['content'],
+    },
+    {
+        key: 'contact',
+        slug: 'contact',
+        testKey: 'contact',
+        label: 'Contact',
+        editorMode: 'locales',
+        primaryStudioSurface: 'content',
+        studioSurfaces: ['content'],
+    },
+    {
+        key: 'faq',
+        slug: 'faq',
+        testKey: 'faq',
+        label: 'FAQ',
+        editorMode: 'locales',
+        primaryStudioSurface: 'content',
+        studioSurfaces: ['content'],
+    },
     {
         key: 'applicationProcess',
         slug: 'application-process',
         testKey: 'applicationProcess',
         label: 'Application process',
         editorMode: 'locales',
+        primaryStudioSurface: 'content',
+        studioSurfaces: ['content'],
     },
-    { key: 'context', slug: 'context', testKey: 'context', label: 'Context page', editorMode: 'locales' },
+    {
+        key: 'context',
+        slug: 'context',
+        testKey: 'context',
+        label: 'Context page',
+        editorMode: 'locales',
+        primaryStudioSurface: 'content',
+        studioSurfaces: ['content'],
+    },
     {
         key: 'siteInfo',
         slug: 'site-info',
         testKey: 'info',
         label: 'Site info blocks (home, programs, editions, journal)',
         editorMode: 'full',
+        primaryStudioSurface: 'home',
+        studioSurfaces: ['home', 'programs', 'products', 'journal'],
     },
     {
         key: 'allProgramsBlock',
@@ -203,6 +255,8 @@ export const CONTENT_PAGE_REGISTRY = [
         testKey: 'allPrograms',
         label: 'Programs block (order + program cards)',
         editorMode: 'full',
+        primaryStudioSurface: 'programs',
+        studioSurfaces: ['programs'],
     },
     {
         key: 'editionsFeed',
@@ -210,6 +264,8 @@ export const CONTENT_PAGE_REGISTRY = [
         testKey: 'editions',
         label: 'Editions grid (items)',
         editorMode: 'full',
+        primaryStudioSurface: 'products',
+        studioSurfaces: ['products'],
     },
     {
         key: 'journalsBlock',
@@ -217,37 +273,117 @@ export const CONTENT_PAGE_REGISTRY = [
         testKey: 'journals',
         label: 'Journal — home list (order + entries)',
         editorMode: 'full',
+        primaryStudioSurface: 'journal',
+        studioSurfaces: ['journal'],
     },
-    { key: 'programHero', slug: 'program-hero', testKey: 'programHero', label: 'Home — program hero', editorMode: 'full' },
+    {
+        key: 'programHero',
+        slug: 'program-hero',
+        testKey: 'programHero',
+        label: 'Home — program hero',
+        editorMode: 'full',
+        primaryStudioSurface: 'home',
+        studioSurfaces: ['home'],
+    },
     {
         key: 'galleryAccessCta',
         slug: 'gallery-access-cta',
         testKey: 'galleryAccessCta',
         label: 'Home — gallery access CTA',
         editorMode: 'locales',
+        primaryStudioSurface: 'home',
+        studioSurfaces: ['home'],
     },
-    { key: 'eventRow', slug: 'event-row', testKey: 'eventRow', label: 'Event row (by context)', editorMode: 'full' },
-    { key: 'objectsHighlight', slug: 'objects-highlight', testKey: 'objectsHighlight', label: 'Objects highlight', editorMode: 'full' },
-    { key: 'joinNetwork', slug: 'join-network', testKey: 'joinNetwork', label: 'Join network blocks', editorMode: 'full' },
+    {
+        key: 'eventRow',
+        slug: 'event-row',
+        testKey: 'eventRow',
+        label: 'Event row (by context)',
+        editorMode: 'full',
+        primaryStudioSurface: 'home',
+        studioSurfaces: ['home'],
+    },
+    {
+        key: 'objectsHighlight',
+        slug: 'objects-highlight',
+        testKey: 'objectsHighlight',
+        label: 'Objects highlight',
+        editorMode: 'full',
+        primaryStudioSurface: 'home',
+        studioSurfaces: ['home'],
+    },
+    {
+        key: 'joinNetwork',
+        slug: 'join-network',
+        testKey: 'joinNetwork',
+        label: 'Join network blocks',
+        editorMode: 'full',
+        primaryStudioSurface: 'home',
+        studioSurfaces: ['home'],
+    },
     {
         key: 'joinNetworkFlow',
         slug: 'join-network-flow',
         testKey: 'joinNetworkFlow',
         label: 'Join network modal flows',
         editorMode: 'full',
+        primaryStudioSurface: 'home',
+        studioSurfaces: ['home'],
     },
-    { key: 'quoteRow', slug: 'quote-row', testKey: 'quoteRow', label: 'Quote row (by context)', editorMode: 'full' },
-    { key: 'featureCards', slug: 'feature-cards', testKey: 'featureCards', label: 'Feature cards (by area)', editorMode: 'full' },
-    { key: 'events', slug: 'events', testKey: 'events', label: 'Events list', editorMode: 'full' },
-    { key: 'audio', slug: 'audio', testKey: 'audio', label: 'Audio tracks', editorMode: 'full' },
+    {
+        key: 'quoteRow',
+        slug: 'quote-row',
+        testKey: 'quoteRow',
+        label: 'Quote row (by context)',
+        editorMode: 'full',
+        primaryStudioSurface: 'home',
+        studioSurfaces: ['home'],
+    },
+    {
+        key: 'featureCards',
+        slug: 'feature-cards',
+        testKey: 'featureCards',
+        label: 'Feature cards (by area)',
+        editorMode: 'full',
+        primaryStudioSurface: 'home',
+        studioSurfaces: ['home'],
+    },
+    {
+        key: 'events',
+        slug: 'events',
+        testKey: 'events',
+        label: 'Events list',
+        editorMode: 'full',
+        primaryStudioSurface: 'home',
+        studioSurfaces: ['home'],
+    },
+    {
+        key: 'audio',
+        slug: 'audio',
+        testKey: 'audio',
+        label: 'Audio tracks',
+        editorMode: 'full',
+        primaryStudioSurface: 'home',
+        studioSurfaces: ['home'],
+    },
     {
         key: 'artistsPage',
         slug: 'artists-page',
         testKey: 'artistsPage',
         label: 'Artists page — shout headline',
         editorMode: 'locales',
+        primaryStudioSurface: 'content',
+        studioSurfaces: ['content'],
     },
 ];
+
+/**
+ * @param {StudioSurface} surface
+ * @returns {typeof CONTENT_PAGE_REGISTRY[number][]}
+ */
+export function getRegistryEntriesForSurface(surface) {
+    return CONTENT_PAGE_REGISTRY.filter((e) => e.studioSurfaces.includes(surface));
+}
 
 /**
  * @param {unknown} block
@@ -422,14 +558,47 @@ export function unwrapOpt(opt) {
 }
 
 /**
+ * @param {import('@dfinity/agent').ActorSubclass} actor
+ * @returns {Promise<Map<string, number[]>>}
+ */
+async function fetchArtistCohortMap(actor) {
+    const m = new Map();
+    if (!actor || typeof actor.listArtistFilterCohortYearsPublic !== 'function') {
+        return m;
+    }
+    try {
+        const rows = await actor.listArtistFilterCohortYearsPublic();
+        if (!Array.isArray(rows)) return m;
+        for (const row of rows) {
+            if (!Array.isArray(row) || row.length < 2) continue;
+            const id = String(row[0] ?? '');
+            const ys = row[1];
+            if (!id || !Array.isArray(ys)) continue;
+            m.set(
+                id,
+                ys
+                    .map((x) => (typeof x === 'bigint' ? Number(x) : Number(x)))
+                    .filter((n) => Number.isFinite(n) && n > 0)
+                    .map((n) => Math.floor(n))
+            );
+        }
+    } catch {
+        /* older canister */
+    }
+    return m;
+}
+
+/**
  * Map canister `Artist` into frontend roster shape (aligned with testData artists).
  * @param {Record<string, unknown>} a
+ * @param {Map<string, number[]>} [cohortByArtistId] — from `listArtistFilterCohortYearsPublic` when reading `ArtistRecord` profiles
  */
-function mapCanisterArtistRow(a) {
+function mapCanisterArtistRow(a, cohortByArtistId) {
+    const id = String(a.id ?? '');
     const filterRaw = unwrapOpt(a.filter);
     const galleryRaw = unwrapOpt(a.gallery_filter ?? a.galleryFilter);
     return {
-        id: String(a.id ?? ''),
+        id,
         slug: String(a.slug ?? ''),
         image: String(a.image ?? ''),
         featuredOrder: Number(a.featured_order ?? a.featuredOrder ?? 0),
@@ -437,12 +606,40 @@ function mapCanisterArtistRow(a) {
         updatedAt: String(a.updated_at ?? a.updatedAt ?? ''),
         mostRecentProgram: String(a.most_recent_program ?? a.mostRecentProgram ?? ''),
         filter: filterRaw
-            ? {
-                  connection: String(filterRaw.connection ?? ''),
-                  cohortYear: Number(filterRaw.cohort_year ?? filterRaw.cohortYear ?? 0),
-                  disciplineKey: String(filterRaw.discipline_key ?? filterRaw.disciplineKey ?? ''),
-                  locationKey: String(filterRaw.location_key ?? filterRaw.locationKey ?? ''),
-              }
+            ? (() => {
+                  const raw = /** @type {Record<string, unknown>} */ (filterRaw);
+                  /** @type {number[]} */
+                  let cohortYears = [];
+                  if (cohortByArtistId && cohortByArtistId.has(id)) {
+                      cohortYears = cohortByArtistId.get(id) ?? [];
+                  } else {
+                      let arr = raw.cohort_years ?? raw.cohortYears;
+                      if (Array.isArray(arr) && arr.length === 1 && Array.isArray(arr[0])) {
+                          arr = arr[0];
+                      }
+                      if (Array.isArray(arr)) {
+                          cohortYears = arr
+                              .map((x) => (typeof x === 'bigint' ? Number(x) : Number(x)))
+                              .filter((n) => Number.isFinite(n) && n > 0)
+                              .map((n) => Math.floor(n));
+                      }
+                      const legacy = Number(raw.cohort_year ?? raw.cohortYear ?? 0);
+                      if (cohortYears.length === 0 && Number.isFinite(legacy) && legacy > 0) {
+                          cohortYears = [Math.floor(legacy)];
+                      }
+                  }
+                  const cySingle = Math.max(
+                      0,
+                      Math.floor(Number(raw.cohort_year ?? raw.cohortYear ?? 0))
+                  );
+                  return {
+                      connection: String(raw.connection ?? ''),
+                      cohortYear: cohortYears.length > 0 ? cohortYears[0] : cySingle,
+                      cohortYears,
+                      disciplineKey: String(raw.discipline_key ?? raw.disciplineKey ?? ''),
+                      locationKey: String(raw.location_key ?? raw.locationKey ?? ''),
+                  };
+              })()
             : undefined,
         galleryFilter: galleryRaw
             ? {
@@ -470,12 +667,13 @@ function normalizeArtistDefaults(a) {
 /**
  * Merge `ArtistRecord` from canister into testData-like artist (adds `locales` from JSON).
  * @param {Record<string, unknown>} rec
+ * @param {Map<string, number[]>} [cohortByArtistId]
  */
-function artistFromRecord(rec) {
+function artistFromRecord(rec, cohortByArtistId) {
     if (!rec || typeof rec !== 'object') return null;
     const prof = rec.profile;
     if (!prof || typeof prof !== 'object') return null;
-    const profile = mapCanisterArtistRow(prof);
+    const profile = mapCanisterArtistRow(prof, cohortByArtistId);
     const out = { ...profile };
     const ljRaw = rec.locales_json ?? rec.localesJson;
     const json = typeof ljRaw === 'string' ? ljRaw : unwrapOpt(ljRaw);
@@ -763,35 +961,48 @@ export async function setRandomFeaturedModeStudio(on) {
 }
 
 /**
+ * Test data + overlay merge (full roster, including private — use for Studio).
+ * @returns {object[]}
+ */
+function getMergedTestArtists() {
+    const base = (testData.allArtists?.artists || []).map((x) => normalizeArtistDefaults(x));
+    const overlay = readStudioLs(LS_ARTISTS_OVERLAY) || {};
+    const merged = base.map((a) => {
+        const o = overlay[a.id];
+        return o ? normalizeArtistDefaults({ ...a, ...o }) : a;
+    });
+    const baseIds = new Set(base.map((a) => a.id));
+    for (const [id, v] of Object.entries(overlay)) {
+        if (!baseIds.has(id) && v && typeof v === 'object') {
+            merged.push(normalizeArtistDefaults(v));
+        }
+    }
+    _lastFeaturedMergeMeta = readArtistFeaturedMeta();
+    return dedupePublicArtistRows(merged.map((a) => mergeArtistFeaturedExtension(a, _lastFeaturedMergeMeta)));
+}
+
+/**
  * @returns {Promise<object[]>}
  */
 export async function getArtists() {
     if (getDataSource() === 'test') {
-        const base = (testData.allArtists?.artists || []).map((x) => normalizeArtistDefaults(x));
-        const overlay = readStudioLs(LS_ARTISTS_OVERLAY) || {};
-        const merged = base.map((a) => {
-            const o = overlay[a.id];
-            return o ? normalizeArtistDefaults({ ...a, ...o }) : a;
-        });
-        const baseIds = new Set(base.map((a) => a.id));
-        for (const [id, v] of Object.entries(overlay)) {
-            if (!baseIds.has(id) && v && typeof v === 'object') {
-                merged.push(normalizeArtistDefaults(v));
-            }
-        }
-        _lastFeaturedMergeMeta = readArtistFeaturedMeta();
-        return dedupePublicArtistRows(merged.map((a) => mergeArtistFeaturedExtension(a, _lastFeaturedMergeMeta)));
+        return getMergedTestArtists().filter(
+            (a) => String(a.visibility ?? '').toLowerCase() !== 'private'
+        );
     }
     try {
         const actor = await getFusionBackendActor();
         if (typeof actor.listArtistRecordsPublic === 'function') {
             const metaForMerge = await fetchFeaturedMergeMetaLive();
             _lastFeaturedMergeMeta = metaForMerge;
-            const rows = await actor.listArtistRecordsPublic();
+            const [rows, cohortMap] = await Promise.all([
+                actor.listArtistRecordsPublic(),
+                fetchArtistCohortMap(actor),
+            ]);
             if (!Array.isArray(rows)) return [];
             const out = [];
             for (const r of rows) {
-                const a = artistFromRecord(r);
+                const a = artistFromRecord(r, cohortMap);
                 if (a) out.push(a);
             }
             await mergeMostRecentProgramsFromCanister(actor, out);
@@ -817,12 +1028,12 @@ export async function getArtists() {
  * Map full canister `ArtistRecord` (Studio) to roster row with `imported` + `accessCode`.
  * @param {Record<string, unknown>} rec
  */
-function mapStudioArtistFromFullRecord(rec) {
+function mapStudioArtistFromFullRecord(rec, cohortByArtistId) {
     const prof = rec.profile;
     if (!prof || typeof prof !== 'object') {
         return { id: '', slug: '', imported: false, accessCode: '' };
     }
-    const base = mapCanisterArtistRow(prof);
+    const base = mapCanisterArtistRow(prof, cohortByArtistId);
     /** @type {Record<string, unknown> | undefined} */
     let locales;
     const ljRaw = rec.locales_json ?? rec.localesJson;
@@ -851,17 +1062,20 @@ function mapStudioArtistFromFullRecord(rec) {
  */
 export async function getArtistsForStudio() {
     if (getDataSource() === 'test') {
-        return getArtists();
+        return getMergedTestArtists();
     }
     try {
         const actor = await getStudioAuthenticatedActor();
         if (typeof actor.listArtistRecordsForStudio === 'function') {
             const metaForMerge = await fetchFeaturedMergeMetaLive();
             _lastFeaturedMergeMeta = metaForMerge;
-            const rows = await actor.listArtistRecordsForStudio();
+            const [rows, cohortMap] = await Promise.all([
+                actor.listArtistRecordsForStudio(),
+                fetchArtistCohortMap(actor),
+            ]);
             if (!Array.isArray(rows)) return [];
             const mapped = rows.map((r) =>
-                mergeArtistFeaturedExtension(mapStudioArtistFromFullRecord(r), metaForMerge)
+                mergeArtistFeaturedExtension(mapStudioArtistFromFullRecord(r, cohortMap), metaForMerge)
             );
             await mergeMostRecentProgramsFromCanister(actor, mapped);
             return mapped;
@@ -1064,6 +1278,12 @@ export async function bulkUpsertArtistsStudio(records) {
             await actor.upsertArtist(r);
         }
     }
+    if (typeof actor.bulkPutArtistFilterCohortYears === 'function') {
+        const pairs = cohortNatPairsForCanisterBulk(records);
+        if (pairs.length) {
+            await actor.bulkPutArtistFilterCohortYears(pairs);
+        }
+    }
     return records.length;
 }
 
@@ -1159,7 +1379,8 @@ export async function getArtistBySlug(slug) {
             const recOpt = await actor.getArtistRecordBySlug(slug);
             const rec = unwrapOpt(recOpt);
             if (rec) {
-                const merged = artistFromRecord(rec);
+                const cohortMap = await fetchArtistCohortMap(actor);
+                const merged = artistFromRecord(rec, cohortMap);
                 if (merged) {
                     if (typeof actor.getArtistBySlug === 'function') {
                         const profOpt = await actor.getArtistBySlug(slug);
@@ -1591,6 +1812,43 @@ export async function updateMyArtistProfilePatch(imageUrl, updatedAt) {
         throw new Error('updateMyArtistProfilePatch unavailable — sign in and run dfx generate fusion-app-backend.');
     }
     await actor.updateMyArtistProfilePatch(url, ts);
+}
+
+/**
+ * Set roster visibility for the caller's linked artist (`public` | `private`). Private artists are omitted from public feed lists.
+ * @param {string} visibility
+ * @param {string} [updatedAt] ISO timestamp
+ * @returns {Promise<void>}
+ */
+export async function updateMyArtistVisibility(visibility, updatedAt) {
+    const vis = String(visibility ?? '').trim().toLowerCase();
+    if (vis !== 'public' && vis !== 'private') {
+        throw new Error('Visibility must be public or private.');
+    }
+    const ts = updatedAt || new Date().toISOString();
+    if (getDataSource() === 'test') {
+        const id = getProfileSettingsDevArtistId();
+        if (!id) {
+            throw new Error('Select which artist profile to edit (test mode).');
+        }
+        const artists = await getArtistsForStudio();
+        const base = artists.find((x) => x.id === id);
+        if (!base) throw new Error('Artist not found');
+        const merged = normalizeArtistDefaults({ ...base, visibility: vis, updatedAt: ts });
+        const overlay = readStudioLs(LS_ARTISTS_OVERLAY) || {};
+        overlay[id] = merged;
+        writeStudioLs(LS_ARTISTS_OVERLAY, overlay);
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('fusion-data-source-change', { detail: { source: 'test' } }));
+        }
+        return;
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.updateMyArtistVisibility !== 'function') {
+        throw new Error('updateMyArtistVisibility unavailable — sign in and run dfx generate fusion-app-backend.');
+    }
+    await actor.updateMyArtistVisibility(vis, ts);
 }
 
 /**
@@ -2072,11 +2330,17 @@ function dispatchHomeObjectsHighlightRefresh() {
 
 /**
  * Summaries for Studio Content tab (registry drives rows; mirrors testData when no canister row).
+ * @param {{ forContentTab?: boolean }} [options] When `forContentTab` is true (default), only entries with `primaryStudioSurface === 'content'`.
  * @returns {Promise<{ slug: string, title: string, snippet: string, label: string, editorMode: 'locales' | 'full' }[]>}
  */
-export async function getContentSummary() {
+export async function getContentSummary(options = {}) {
+    const forContentTab = options.forContentTab !== false;
+    const registrySlice = forContentTab
+        ? CONTENT_PAGE_REGISTRY.filter((e) => e.primaryStudioSurface === 'content')
+        : CONTENT_PAGE_REGISTRY;
+
     const fromRegistry = (blockGetter) =>
-        CONTENT_PAGE_REGISTRY.map((entry) => {
+        registrySlice.map((entry) => {
             const block = blockGetter(entry);
             return contentSummaryFromBlock(block, entry);
         });
@@ -2097,7 +2361,7 @@ export async function getContentSummary() {
                 if (slug) rowBySlug.set(slug, row);
             }
         }
-        return CONTENT_PAGE_REGISTRY.map((entry) => {
+        return registrySlice.map((entry) => {
             const row = rowBySlug.get(entry.slug);
             if (!row) {
                 const block = testData[entry.testKey];
@@ -2125,6 +2389,17 @@ export async function getContentSummary() {
     } catch {
         return fromRegistry((entry) => testData[entry.testKey]);
     }
+}
+
+/**
+ * Summaries for a Studio surface tab (e.g. Home) — previews for every registry entry that includes `surface`.
+ * @param {StudioSurface} surface
+ * @returns {Promise<{ slug: string, title: string, snippet: string, label: string, editorMode: 'locales' | 'full' }[]>}
+ */
+export async function getContentSummaryForSurface(surface) {
+    const allowed = new Set(getRegistryEntriesForSurface(surface).map((e) => e.slug));
+    const full = await getContentSummary({ forContentTab: false });
+    return full.filter((s) => allowed.has(s.slug));
 }
 
 /**
@@ -2558,17 +2833,57 @@ export async function studioReinterpretWithPrompt(prompt, sourceText, localeTag)
 }
 
 /**
- * Generate Kamauu-style `world` via LLM from English locale bio/discipline, translate to JA, upsert canister.
- * @param {object} artistRow — row from {@link getArtistsForStudio} (includes `locales`, roster fields)
- * @param {'fillEmpty' | 'overwrite'} [mergeMode]
- * @returns {Promise<void>}
+ * Linked member: translate English to Japanese via backend LLM (same model as Studio).
+ * @param {string} englishText
+ * @returns {Promise<string>}
  */
-export async function generateAndUpsertArtistWorldFromBio(artistRow, mergeMode = 'fillEmpty') {
+export async function memberTranslateEnToJa(englishText) {
     if (getDataSource() === 'test') {
-        throw new Error('Artist world LLM requires live data source.');
+        throw new Error('Member world LLM requires Live data source (IC LLM runs on the backend canister).');
     }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.memberTranslateEnToJa !== 'function') {
+        throw new Error('memberTranslateEnToJa missing — run dfx generate fusion-app-backend.');
+    }
+    return actor.memberTranslateEnToJa(englishText);
+}
+
+/**
+ * Linked member: rewrite source text using a prompt (same behavior as `studioReinterpretWithPrompt`).
+ * @param {string} prompt
+ * @param {string} sourceText
+ * @param {string} localeTag
+ * @returns {Promise<string>}
+ */
+export async function memberReinterpretWithPrompt(prompt, sourceText, localeTag) {
+    if (getDataSource() === 'test') {
+        throw new Error('Member world LLM requires Live data source (IC LLM runs on the backend canister).');
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.memberReinterpretWithPrompt !== 'function') {
+        throw new Error('memberReinterpretWithPrompt missing — run dfx generate fusion-app-backend.');
+    }
+    return actor.memberReinterpretWithPrompt(prompt, sourceText, localeTag);
+}
+
+/**
+ * Merge generated EN/JA world blocks into locales (shared by Studio batch and member dashboard).
+ * @param {object} artistRow — Studio row or {@link artistRowFromMyArtistRecord} shape (`locales`, `slug`, …)
+ * @param {'fillEmpty' | 'overwrite'} mergeMode
+ * @param {(prompt: string, source: string, localeTag: string) => Promise<string>} reinterpretFn
+ * @param {(s: string) => Promise<string>} translateEnToJa
+ * @returns {Promise<Record<string, unknown>>}
+ */
+export async function buildMergedLocalesWithGeneratedWorld(
+    artistRow,
+    mergeMode,
+    reinterpretFn,
+    translateEnToJa,
+) {
     const sourceJson = buildTrimmedSourceJsonForLlm(artistRow);
-    const worldGen = await generateEnglishWorldWithLlm(studioReinterpretWithPrompt, sourceJson);
+    const worldGen = await generateEnglishWorldWithLlm(reinterpretFn, sourceJson);
     let locales = parseLocalesFromArtistRow(artistRow);
     locales = normalizeLocalesWorldForStorage(locales);
     const prevEn =
@@ -2588,13 +2903,64 @@ export async function generateAndUpsertArtistWorldFromBio(artistRow, mergeMode =
             ? /** @type {Record<string, unknown>} */ (locales.ja.world)
             : {};
     const enWorld = mergeWorldBlocks(prevEn, worldGen, mergeMode);
-    const wJa = await translateWorldEnToJa(studioTranslateEnToJa, enWorld);
+    const wJa = await translateWorldEnToJa(translateEnToJa, enWorld);
     const jaWorld = mergeWorldBlocks(prevJa, wJa, mergeMode);
     if (!locales.en || typeof locales.en !== 'object') locales.en = {};
     if (!locales.ja || typeof locales.ja !== 'object') locales.ja = {};
     locales.en = { ...locales.en, world: enWorld };
     locales.ja = { ...locales.ja, world: jaWorld };
-    locales = normalizeLocalesWorldForStorage(locales);
+    return normalizeLocalesWorldForStorage(locales);
+}
+
+/**
+ * Build a Studio-compatible artist row from `getMyArtistRecord()` for LLM source + locale merge.
+ * @param {Record<string, unknown> | null | undefined} rec
+ * @returns {object | null}
+ */
+export function artistRowFromMyArtistRecord(rec) {
+    if (!rec || typeof rec !== 'object') return null;
+    const prof = rec.profile && typeof rec.profile === 'object' ? /** @type {Record<string, unknown>} */ (rec.profile) : {};
+    const ljRaw = rec.locales_json ?? rec.localesJson;
+    /** @type {Record<string, unknown>} */
+    let locales = { en: {}, ja: {} };
+    if (typeof ljRaw === 'string' && ljRaw.trim()) {
+        try {
+            const p = JSON.parse(ljRaw);
+            if (p && typeof p === 'object' && !Array.isArray(p)) locales = /** @type {Record<string, unknown>} */ (p);
+        } catch {
+            /* keep default */
+        }
+    }
+    return {
+        id: String(rec.id ?? ''),
+        slug: String(prof.slug ?? ''),
+        image: String(prof.image ?? ''),
+        featuredOrder: Number(rec.featured_order ?? rec.featuredOrder ?? 0),
+        visibility: String(prof.visibility ?? rec.visibility ?? 'public'),
+        filter: rec.filter,
+        galleryFilter: rec.gallery_filter ?? rec.galleryFilter,
+        imported: rec.imported,
+        accessCode: rec.access_code ?? rec.accessCode,
+        locales,
+    };
+}
+
+/**
+ * Generate Kamauu-style `world` via LLM from English locale bio/discipline, translate to JA, upsert canister.
+ * @param {object} artistRow — row from {@link getArtistsForStudio} (includes `locales`, roster fields)
+ * @param {'fillEmpty' | 'overwrite'} [mergeMode]
+ * @returns {Promise<void>}
+ */
+export async function generateAndUpsertArtistWorldFromBio(artistRow, mergeMode = 'fillEmpty') {
+    if (getDataSource() === 'test') {
+        throw new Error('Artist world LLM requires live data source.');
+    }
+    const locales = await buildMergedLocalesWithGeneratedWorld(
+        artistRow,
+        mergeMode,
+        studioReinterpretWithPrompt,
+        studioTranslateEnToJa,
+    );
     const pool = collectAccessCodesFromArtists([artistRow]);
     const rec = normalizeArtistImportRow(
         {
@@ -2614,6 +2980,26 @@ export async function generateAndUpsertArtistWorldFromBio(artistRow, mergeMode =
         { forceImported: false }
     );
     await bulkUpsertArtistsStudio([rec]);
+}
+
+/**
+ * Member: same world merge as Studio batch, persisted with {@link updateMyArtistLocalesJson}.
+ * @param {object} artistRowLike — from {@link artistRowFromMyArtistRecord}
+ * @param {'fillEmpty' | 'overwrite'} [mergeMode]
+ * @returns {Promise<void>}
+ */
+export async function generateAndUpdateMyArtistWorldFromBio(artistRowLike, mergeMode = 'fillEmpty') {
+    if (getDataSource() === 'test') {
+        throw new Error('Artist world LLM requires live data source.');
+    }
+    const locales = await buildMergedLocalesWithGeneratedWorld(
+        artistRowLike,
+        mergeMode,
+        memberReinterpretWithPrompt,
+        memberTranslateEnToJa,
+    );
+    const ts = new Date().toISOString();
+    await updateMyArtistLocalesJson(JSON.stringify(locales), ts);
 }
 
 /**
@@ -3169,7 +3555,7 @@ function parsePrincipalAccountPair(pair) {
 }
 
 /**
- * @typedef {{ principal: string, role: string, status: string, linkedArtistId?: string, linkedOrgId?: string, updatedAt: string, stripeSubscriptionStatus?: string, membershipExemptManual?: boolean }} StudioAccountRow
+ * @typedef {{ principal: string, role: string, status: string, linkedArtistId?: string, linkedOrgId?: string, updatedAt: string, stripeSubscriptionStatus?: string, stripeCurrentPeriodEnd?: string, membershipExemptManual?: boolean }} StudioAccountRow
  */
 
 /**
@@ -3210,6 +3596,7 @@ export async function getAccountsForStudio() {
             linkedOrgId: unwrapOpt(a.linkedOrgId ?? a.linked_org_id),
             updatedAt: String(a.updated_at ?? a.updatedAt ?? ''),
             stripeSubscriptionStatus: unwrapOpt(a.stripeSubscriptionStatus ?? a.stripe_subscription_status),
+            stripeCurrentPeriodEnd: unwrapOpt(a.stripeCurrentPeriodEnd ?? a.stripe_current_period_end),
             membershipExemptManual: Boolean(a.membershipExemptManual ?? a.membership_exempt_manual),
         });
     }

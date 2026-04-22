@@ -3,6 +3,7 @@ import fusionNature2 from '../../assets/fusion-nature2.mp4';
 import { DEV_MODE, getHost, config } from '../../config.js';
 import { activateDeactivate, navigate } from '../../router.js';
 import { submitEarlyAccessToCanister } from '../../utils/earlyAccessSubscribe.js';
+import { withSeoVideoLabel } from '../../utils/mediaAltSeo.js';
 
 // Load Screen Custom Element Component
 class LoadScreenComponent extends HTMLElement {
@@ -2093,6 +2094,8 @@ class LoadScreenComponent extends HTMLElement {
                         loop
                         playsinline
                         preload="metadata"
+                        aria-label="${withSeoVideoLabel('Fusion loadscreen background')}"
+                        title="${withSeoVideoLabel('Fusion loadscreen background')}"
                     ></video>
                 </div>
                 <div class="circle1"></div>

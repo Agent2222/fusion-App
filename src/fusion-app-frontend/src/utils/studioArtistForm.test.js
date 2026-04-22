@@ -43,7 +43,7 @@ describe('studioArtistForm', () => {
             updatedAt: '2026-01-15T00:00:00.000Z',
             filter: {
                 connection: 'artist',
-                cohortYear: 2025,
+                cohortYears: [2025],
                 disciplineKey: 'sound',
                 locationKey: 'us',
             },

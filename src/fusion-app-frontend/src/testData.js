@@ -600,7 +600,7 @@ export const testData = {
                     "updatedAt": "2026-04-01T12:00:00.000Z",
                     "filter": {
                         "connection": "artist",
-                        "cohortYear": 2025,
+                        "cohortYears": [2025],
                         "disciplineKey": "sound",
                         "locationKey": "us"
                     },
@@ -821,7 +821,7 @@ export const testData = {
                     updatedAt: "2026-04-01T12:00:00.000Z",
                     filter: {
                         connection: "artist",
-                        cohortYear: 2024,
+                        cohortYears: [2024],
                         disciplineKey: "mixedMedia",
                         locationKey: "us",
                     },
@@ -1001,7 +1001,7 @@ export const testData = {
                     updatedAt: "2026-04-01T12:00:00.000Z",
                     filter: {
                         connection: "alumni",
-                        cohortYear: 2019,
+                        cohortYears: [2019],
                         disciplineKey: "performanceArt",
                         locationKey: "us",
                     },
@@ -1181,7 +1181,7 @@ export const testData = {
                     updatedAt: "2026-04-01T12:00:00.000Z",
                     filter: {
                         connection: "artist",
-                        cohortYear: 2024,
+                        cohortYears: [2024],
                         disciplineKey: "photography",
                         locationKey: "us",
                     },
@@ -1351,7 +1351,7 @@ export const testData = {
                     updatedAt: "2026-04-01T12:00:00.000Z",
                     filter: {
                         connection: "artist",
-                        cohortYear: 2026,
+                        cohortYears: [2026],
                         disciplineKey: "other",
                         locationKey: "us",
                     },
@@ -1531,7 +1531,7 @@ export const testData = {
                     updatedAt: "2026-04-01T12:00:00.000Z",
                     filter: {
                         connection: "artist",
-                        cohortYear: 2025,
+                        cohortYears: [2025],
                         disciplineKey: "other",
                         locationKey: "uk",
                     },
@@ -1711,7 +1711,7 @@ export const testData = {
                     updatedAt: "2026-04-01T12:00:00.000Z",
                     filter: {
                         connection: "artist",
-                        cohortYear: 2024,
+                        cohortYears: [2024],
                         disciplineKey: "photography",
                         locationKey: "canada",
                     },
@@ -1891,7 +1891,7 @@ export const testData = {
                     updatedAt: "2026-04-01T12:00:00.000Z",
                     filter: {
                         connection: "artist",
-                        cohortYear: 2025,
+                        cohortYears: [2025],
                         disciplineKey: "performanceArt",
                         locationKey: "europe",
                     },

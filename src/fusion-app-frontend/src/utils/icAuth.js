@@ -6,6 +6,7 @@ import { AuthClient, ERROR_USER_INTERRUPT } from '@dfinity/auth-client';
 import { DEV_MODE, getInternetIdentityUrl } from '../config.js';
 import { FUSION_PENDING_MEMBERSHIP_LINK_KEY } from './integrationApi.js';
 import { getProfileSetupDraft } from './profileSetupDraft.js';
+import { clearAdminPerspective } from './adminPerspective.js';
 import posthog from 'posthog-js';
 
 function linkedArtistIdFromAccount(acc) {
@@ -125,6 +126,7 @@ export async function loginInternetIdentity() {
 }
 
 export async function logoutInternetIdentity() {
+    clearAdminPerspective();
     await clearAuthActorCaches();
     const client = await getAuthClientSingleton();
     await client.logout();
@@ -173,8 +175,48 @@ export async function runPostLoginPipeline() {
         );
         return;
     }
-    const linkedArtistId = linkedArtistIdFromAccount(acc);
+
+    /** Push Stripe subscription status to the canister, then create minimal linked artist when membership allows (pay-first recovery). */
+    try {
+        const { principal } = await getAuthSnapshot();
+        const pText = principal.toText();
+        const { syncSubscriptionFromStripe } = await import('./integrationApi.js');
+        await syncSubscriptionFromStripe(pText);
+        const { ensureMyLinkedArtistProfile } = await import('./database.js');
+        await ensureMyLinkedArtistProfile();
+        const { maybeSeedLocalesFromProfileSetupDraftIfEmpty } = await import(
+            './profileSetupSeedLocales.js'
+        );
+        await maybeSeedLocalesFromProfileSetupDraftIfEmpty();
+    } catch (_) {
+        /* integration / canister optional */
+    }
+
+    try {
+        if (typeof actor.getAccountForCaller === 'function') {
+            const raw = await actor.getAccountForCaller();
+            acc = Array.isArray(raw) ? (raw.length ? raw[0] : null) : raw;
+        }
+    } catch (_) {
+        /* ignore */
+    }
+
+    let linkedArtistId = linkedArtistIdFromAccount(acc);
     if (!linkedArtistId) {
+        try {
+            const { getMembershipAccessForCaller } = await import('./database.js');
+            const gate = await getMembershipAccessForCaller();
+            if (gate === 'needsSubscription') {
+                window.dispatchEvent(
+                    new CustomEvent('fusion-open-join-network', {
+                        detail: { mode: 'resubscribe' },
+                    })
+                );
+                return;
+            }
+        } catch (_) {
+            /* ignore */
+        }
         const draft = getProfileSetupDraft();
         posthog.capture('profile_setup_opened', { trigger: 'post_login_no_linked_artist' });
         window.dispatchEvent(
@@ -187,13 +229,7 @@ export async function runPostLoginPipeline() {
         );
         return;
     }
-    try {
-        const { principal } = await getAuthSnapshot();
-        const { syncSubscriptionFromStripe } = await import('./integrationApi.js');
-        await syncSubscriptionFromStripe(principal.toText());
-    } catch (_) {
-        /* integration optional */
-    }
+
     try {
         const { getMembershipAccessForCaller } = await import('./database.js');
         const gate = await getMembershipAccessForCaller();

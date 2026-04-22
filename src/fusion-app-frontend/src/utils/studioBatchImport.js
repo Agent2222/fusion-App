@@ -39,11 +39,24 @@ export function collectAccessCodesFromArtists(artists) {
  */
 function mapFilter(f) {
     if (!f || typeof f !== 'object') return null;
+    const o = /** @type {Record<string, unknown>} */ (f);
+    const raw = o.cohort_years ?? o.cohortYears;
+    /** @type {number[]} */
+    let cohortYears = [];
+    if (Array.isArray(raw)) {
+        cohortYears = raw
+            .map((x) => Math.max(0, Math.floor(Number(x))))
+            .filter((n) => n > 0);
+    }
+    const legacy = Math.max(0, Math.floor(Number(o.cohort_year ?? o.cohortYear ?? 0)));
+    if (cohortYears.length === 0 && legacy > 0) cohortYears = [legacy];
+    const cohortYear = cohortYears.length > 0 ? cohortYears[0] : legacy;
     return {
-        connection: String(f.connection ?? ''),
-        cohortYear: Math.max(0, Math.floor(Number(f.cohort_year ?? f.cohortYear ?? 0))),
-        disciplineKey: String(f.discipline_key ?? f.disciplineKey ?? ''),
-        locationKey: String(f.location_key ?? f.locationKey ?? ''),
+        connection: String(o.connection ?? ''),
+        cohortYear,
+        cohortYears,
+        disciplineKey: String(o.discipline_key ?? o.disciplineKey ?? ''),
+        locationKey: String(o.location_key ?? o.locationKey ?? ''),
     };
 }
 
@@ -146,8 +159,68 @@ export function extractArrayFromBatchJson(data, kind) {
  * Candid-friendly `ArtistRecord` for `@dfinity` actor calls.
  * @param {{ profile: object, localesJson: string | null, notesEncrypted: null, imported?: boolean, accessCode?: string }} rec
  */
+/**
+ * @param {unknown} filter
+ * @returns {bigint[]}
+ */
+function cohortYearsBigIntsForMotoko(filter) {
+    if (!filter || typeof filter !== 'object') return [];
+    const o = /** @type {Record<string, unknown>} */ (filter);
+    const raw = o.cohortYears ?? o.cohort_years;
+    if (Array.isArray(raw)) {
+        return raw
+            .map((n) => BigInt(Math.max(0, Math.floor(Number(n)))))
+            .filter((b) => b > BigInt(0));
+    }
+    const leg = Math.max(0, Math.floor(Number(o.cohortYear ?? o.cohort_year ?? 0)));
+    return leg > 0 ? [BigInt(leg)] : [];
+}
+
+/**
+ * Cohort years for `bulkPutArtistFilterCohortYears` (parallel to `ArtistFilterStored` on-chain).
+ * @param {Array<{ profile?: { id?: unknown, filter?: unknown } }>} records
+ * @returns {Array<[string, bigint[]]>}
+ */
+export function cohortNatPairsForCanisterBulk(records) {
+    const out = [];
+    if (!Array.isArray(records)) return out;
+    for (const rec of records) {
+        const p = rec?.profile;
+        if (!p || typeof p !== 'object') continue;
+        const id = String(/** @type {Record<string, unknown>} */ (p).id ?? '').trim();
+        if (!id) continue;
+        const ys = cohortYearsBigIntsForMotoko(/** @type {Record<string, unknown>} */ (p).filter);
+        out.push([id, ys]);
+    }
+    return out;
+}
+
 export function toMotokoArtistRecord(rec) {
     const p = rec.profile;
+    const filterMotoko = p.filter
+        ? (() => {
+              const ys = cohortYearsBigIntsForMotoko(p.filter);
+              const legacy = Math.max(
+                  0,
+                  Math.floor(
+                      Number(
+                          /** @type {Record<string, unknown>} */ (p.filter).cohortYear ??
+                              /** @type {Record<string, unknown>} */ (p.filter).cohort_year ??
+                              0
+                      )
+                  )
+              );
+              const cohortYear = ys.length > 0 ? ys[0] : BigInt(legacy);
+              return [
+                  {
+                      connection: p.filter.connection,
+                      cohortYear,
+                      disciplineKey: p.filter.disciplineKey,
+                      locationKey: p.filter.locationKey,
+                  },
+              ];
+          })()
+        : [];
     return {
         profile: {
             id: p.id,
@@ -156,7 +229,7 @@ export function toMotokoArtistRecord(rec) {
             featuredOrder: p.featuredOrder,
             visibility: p.visibility,
             updatedAt: p.updatedAt,
-            filter: p.filter ? [p.filter] : [],
+            filter: filterMotoko,
             galleryFilter: p.galleryFilter ? [p.galleryFilter] : [],
         },
         localesJson: rec.localesJson ? [rec.localesJson] : [],

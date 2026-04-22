@@ -111,10 +111,16 @@ export async function pushSubscriptionToCanister(subscription, customerId) {
         (typeof subscription.customer === 'string'
             ? subscription.customer
             : subscription.customer?.id || '');
+    const cpe = subscription.current_period_end;
+    const periodEndIso =
+        typeof cpe === 'number' && Number.isFinite(cpe)
+            ? new Date(cpe * 1000).toISOString()
+            : '';
     await actor.integrationRecordStripeSubscription(
         p,
         cid ? [cid] : [],
         [subscription.id],
         [subscription.status],
+        periodEndIso ? [periodEndIso] : [],
     );
 }

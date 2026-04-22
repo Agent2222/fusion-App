@@ -1,6 +1,7 @@
 import { getPublicSiteOrigin } from '../config.js';
 import { getJournalEntries, subscribeDataSource } from '../utils/database.js';
 import { applyDocumentSeo } from '../utils/documentSeo.js';
+import { SEO_MEDIA_DEFAULT, withSeoImageAlt } from '../utils/mediaAltSeo.js';
 import { firstNonEmptyString, mergeLocaleDeep } from '../utils/localeFallback.js';
 
 /**
@@ -64,7 +65,7 @@ export function generateJournalEntryContent() {
                         </nav>
                         <article class="journal-entry-detail" id="journalEntryDetail" hidden>
                             <div class="journal-entry-hero">
-                                <img id="journalEntryImage" src="" alt="" width="960" height="540" />
+                                <img id="journalEntryImage" src="" alt="${SEO_MEDIA_DEFAULT}" width="960" height="540" />
                             </div>
                             <div class="journal-entry-body">
                                 <h1 id="journalEntryTitle" class="journal-entry-title"></h1>
@@ -100,7 +101,7 @@ function applyJournalEntry(entry) {
 
     if (imgEl) {
         imgEl.src = firstNonEmptyString(entry.imageSrc, jaE?.imageSrc, enE?.imageSrc);
-        imgEl.alt = imageAlt;
+        imgEl.alt = withSeoImageAlt(imageAlt);
     }
     if (titleEl) titleEl.textContent = title;
     if (descEl) {

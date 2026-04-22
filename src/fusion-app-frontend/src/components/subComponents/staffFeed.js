@@ -2,6 +2,7 @@
  * Staff grid for the Context page — CMS `context` bundle, EN merged with active locale.
  */
 import { getContentBundleForStudio, subscribeDataSource } from '../../utils/database.js';
+import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
 
 function escapeHtml(s) {
     return String(s)
@@ -205,7 +206,7 @@ class StaffFeedComponent extends HTMLElement {
                 return `
                     <article class="staff-card" part="staff-card" data-staff-index="${index}" tabindex="0" role="button" aria-pressed="${index === 0 ? 'true' : 'false'}">
                         <div class="staff-card-image">
-                            <img src="${escapeHtml(imageSrc)}" alt="${escapeHtml(name)}" width="400" height="480" />
+                            <img src="${escapeHtml(imageSrc)}" alt="${escapeHtml(withSeoImageAlt(name))}" width="400" height="480" />
                         </div>
                         <div class="staff-card-body">
                             <h3 class="staff-card-name${index === 0 ? ' staff-card-name--selected' : ''}">${escapeHtml(name)}</h3>

@@ -1,6 +1,7 @@
 import { getPublicSiteOrigin } from '../config.js';
 import { getEventsList, subscribeDataSource } from '../utils/database.js';
 import { applyDocumentSeo } from '../utils/documentSeo.js';
+import { SEO_MEDIA_DEFAULT, withSeoImageAlt } from '../utils/mediaAltSeo.js';
 import { firstNonEmptyString, mergeLocaleDeep } from '../utils/localeFallback.js';
 
 /**
@@ -31,7 +32,7 @@ export function generateEventContent() {
                         </nav>
                         <article class="event-detail" id="eventDetail" hidden>
                             <div class="event-detail-hero">
-                                <img id="eventDetailImage" src="" alt="" width="960" height="540" />
+                                <img id="eventDetailImage" src="" alt="${SEO_MEDIA_DEFAULT}" width="960" height="540" />
                             </div>
                             <div class="event-detail-body">
                                 <p id="eventDetailCategory" class="event-detail-category"></p>
@@ -105,7 +106,7 @@ function applyEventToDom(ev) {
 
     if (imgEl) {
         imgEl.src = firstNonEmptyString(ev.image, jaE?.image, enE?.image);
-        imgEl.alt = title;
+        imgEl.alt = withSeoImageAlt(title);
     }
     if (catEl) catEl.textContent = category;
     if (titleEl) titleEl.textContent = title;

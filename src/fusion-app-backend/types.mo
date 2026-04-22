@@ -13,12 +13,54 @@ module {
         intent : Text;
     };
 
-    /// Feed row for `deriveArtistFilterRow` / `app-feed-filter` — align with `testData.allArtists.artists[].filter`.
-    public type ArtistFilter = {
+    /// Stored on-chain in `ArtistCore.profile.filter` — must keep **all** legacy fields (see stable upgrade M0216).
+    /// Single `cohortYear` matches older deployments; multi-year lists use `artistFilterCohortYearsStable` in the actor.
+    public type ArtistFilterStored = {
         connection : Text;
         cohortYear : Nat;
         disciplineKey : Text;
         locationKey : Text;
+    };
+
+    /// Public API (`listArtists`, `getArtistBySlug`): merged from stored filter + cohort side map.
+    public type ArtistFilter = {
+        connection : Text;
+        disciplineKey : Text;
+        locationKey : Text;
+        cohortYears : ?[Nat];
+    };
+
+    /// Build public filter for queries (multi-year side map overrides / extends `cohortYear`).
+    public func mergeArtistFilterForPublic(stored : ?ArtistFilterStored, cohortYearsSide : ?[Nat]) : ?ArtistFilter {
+        switch (stored) {
+            case null { null };
+            case (?f) {
+                let cy : ?[Nat] = switch (cohortYearsSide) {
+                    case (?ys) {
+                        if (ys.size() > 0) {
+                            ?ys;
+                        } else if (f.cohortYear > 0) {
+                            ?[f.cohortYear];
+                        } else {
+                            null;
+                        };
+                    };
+                    case null {
+                        if (f.cohortYear > 0) {
+                            ?[f.cohortYear];
+                        } else {
+                            null;
+                        };
+                    };
+                };
+                ?{
+                    connection = f.connection;
+                    disciplineKey = f.disciplineKey;
+                    locationKey = f.locationKey;
+                    cohortYears = cy;
+                };
+            };
+        };
     };
 
     /// Gallery access row — align with `testData` / `deriveGalleryAccessRow`.
@@ -36,7 +78,7 @@ module {
         featuredOrder : Nat;
         visibility : Text;
         updatedAt : Text;
-        filter : ?ArtistFilter;
+        filter : ?ArtistFilterStored;
         galleryFilter : ?ArtistGalleryFilter;
     };
 
@@ -86,6 +128,7 @@ module {
     };
 
     /// Stripe subscription + manual exemption (stored in `membershipByPrincipal` stable map).
+    /// Renewal end date is stored separately (`membershipStripePeriodEndStable` in the actor) so this record stays compatible with older canisters.
     public type MembershipFields = {
         stripeCustomerId : ?Text;
         stripeSubscriptionId : ?Text;
@@ -104,6 +147,7 @@ module {
         stripeCustomerId : ?Text;
         stripeSubscriptionId : ?Text;
         stripeSubscriptionStatus : ?Text;
+        stripeCurrentPeriodEnd : ?Text;
         membershipExemptManual : Bool;
     };
 
@@ -215,5 +259,30 @@ module {
         updatedAt : Text;
         visibility : Text;
         localesJson : ?Text;
+    };
+
+    /// Admin-only full canister backup / restore (`adminExportFullDatabase` / `adminImportFullDatabase`).
+    public type DatabaseSnapshotV1 = {
+        version : Nat;
+        adminPrincipals : [Principal];
+        integrationServicePrincipal : ?Principal;
+        artistFeaturedRandomMode : Bool;
+        subscribersStable : [(Text, Subscriber)];
+        accountsStable : [(Principal, UserAccountCore)];
+        membershipByPrincipalStable : [(Principal, MembershipFields)];
+        membershipStripePeriodEndStable : [(Principal, Text)];
+        /// Artist id → cohort years for feed filters (parallel to `artistsStable.profile.filter`).
+        artistFilterCohortYearsStable : [(Text, [Nat])];
+        artistsStable : [(Text, ArtistRecord)];
+        programsStable : [(Text, ProgramRecord)];
+        journalsStable : [(Text, JournalRecord)];
+        editionsStable : [(Text, EditionRecord)];
+        contentPagesStable : [(Text, ContentPageRecord)];
+        applicantsStable : [(Text, ApplicantRecord)];
+        siteSettingsStable : [(Text, Text)];
+        applicationByArtistProgramStable : [(Text, Text)];
+        artistMostRecentProgramStable : [(Text, Text)];
+        artistFeaturedFeaturableIdsStable : [Text];
+        artistFeaturedManualIdsStable : [Text];
     };
 };

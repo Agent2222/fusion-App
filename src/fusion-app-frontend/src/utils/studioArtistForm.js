@@ -91,6 +91,34 @@ function rowWorldParas2(escapeHtml, label, path, enRoot, jaRoot) {
 const LINK_ROW_COUNT = 8;
 
 /**
+ * @param {unknown} filter
+ * @returns {string}
+ */
+function formatCohortYearsForForm(filter) {
+    const f = filter && typeof filter === 'object' ? /** @type {Record<string, unknown>} */ (filter) : {};
+    const arr = f.cohortYears ?? f.cohort_years;
+    if (Array.isArray(arr) && arr.length) {
+        return arr.map((x) => String(x)).join(', ');
+    }
+    const cy = f.cohortYear ?? f.cohort_year;
+    if (cy != null && String(cy).trim() !== '') return String(cy);
+    return '';
+}
+
+/**
+ * @param {string} s
+ * @returns {number[]}
+ */
+function parseCohortYearsFromFormField(s) {
+    const raw = String(s ?? '').trim();
+    if (!raw) return [];
+    return raw
+        .split(/[\s,]+/)
+        .map((x) => Math.floor(Number(x)))
+        .filter((n) => Number.isFinite(n) && n > 1900 && n < 2100);
+}
+
+/**
  * @param {(s: string) => string} escapeHtml
  * @param {'en' | 'ja'} locale
  * @param {unknown[]} links
@@ -177,6 +205,7 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
       <button type="button" class="studio-tabs__tab" role="tab" aria-selected="false" aria-controls="studio-art-panel-new-world" id="studio-art-tab-new-world">New World</button>
       <button type="button" class="studio-tabs__tab" role="tab" aria-selected="false" aria-controls="studio-art-panel-media" id="studio-art-tab-media">Media</button>
       <button type="button" class="studio-tabs__tab" role="tab" aria-selected="false" aria-controls="studio-art-panel-links" id="studio-art-tab-links">Links &amp; SEO</button>
+      <button type="button" class="studio-tabs__tab" role="tab" aria-selected="false" aria-controls="studio-art-panel-programs" id="studio-art-tab-programs">Programs</button>
       <button type="button" class="studio-tabs__tab" role="tab" aria-selected="false" aria-controls="studio-art-panel-advanced" id="studio-art-tab-advanced">Advanced</button>
     </div>
     <div class="studio-tabs__panels">
@@ -208,7 +237,7 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
         <h4 class="studio-prog-subhead">Feed filter defaults</h4>
         <div class="studio-modal-fields-row">
           <label class="studio-field"><span>connection</span><input name="art-filter-connection" class="studio-input" value="${esc(escapeHtml, String(filter.connection ?? ''))}" /></label>
-          <label class="studio-field"><span>cohortYear</span><input name="art-filter-cohortYear" type="number" class="studio-input" value="${esc(escapeHtml, String(filter.cohortYear ?? ''))}" /></label>
+          <label class="studio-field studio-field--grow"><span>cohort years</span><input name="art-filter-cohortYears" class="studio-input" placeholder="e.g. 2024, 2025" value="${esc(escapeHtml, formatCohortYearsForForm(filter))}" title="Comma-separated years — artist can match multiple cohort filters" /></label>
         </div>
         <div class="studio-modal-fields-row">
           <label class="studio-field"><span>disciplineKey</span><input name="art-filter-disciplineKey" class="studio-input" value="${esc(escapeHtml, String(filter.disciplineKey ?? ''))}" /></label>
@@ -291,6 +320,27 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
         ${renderIntroSlot(escapeHtml, 'ja', jaW, 0)}
         ${renderIntroSlot(escapeHtml, 'ja', jaW, 1)}
         ${renderIntroSlot(escapeHtml, 'ja', jaW, 2)}
+      </div>
+
+      <div id="studio-art-panel-programs" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-art-tab-programs" hidden>
+        <p class="studio-modal-hint">Application status is read-only. <strong>Reserved</strong> adds or removes this artist from the program&rsquo;s confirmed list (English name) and updates remaining slots.</p>
+        <p id="studio-art-programs-status" class="studio-muted studio-art-programs-status" role="status"></p>
+        <div class="studio-table-wrap studio-table-wrap--modal-programs">
+          <table class="studio-table studio-table--dense studio-table--programs">
+            <thead>
+              <tr>
+                <th>Program</th>
+                <th>Total slots</th>
+                <th>Remaining</th>
+                <th>Applied</th>
+                <th>Reserved</th>
+              </tr>
+            </thead>
+            <tbody id="studio-art-programs-tbody">
+              <tr><td colspan="5" class="studio-muted">Loading programs…</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div id="studio-art-panel-links" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-art-tab-links" hidden>
@@ -428,7 +478,7 @@ export function collectArtistRecordFromForm(root, baseArtist) {
 
     const filter = {
         connection: String(fd.get('art-filter-connection') ?? ''),
-        cohortYear: Math.max(0, Math.floor(Number(fd.get('art-filter-cohortYear') || 0))),
+        cohortYears: parseCohortYearsFromFormField(String(fd.get('art-filter-cohortYears') ?? '')),
         disciplineKey: String(fd.get('art-filter-disciplineKey') ?? ''),
         locationKey: String(fd.get('art-filter-locationKey') ?? ''),
     };

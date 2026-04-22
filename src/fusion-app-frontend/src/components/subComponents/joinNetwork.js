@@ -22,11 +22,15 @@ import {
   submitEarlyAccessToCanister,
 } from "../../utils/earlyAccessSubscribe.js";
 import {
+  clearPendingMembershipPayload,
   createSubscription,
   FUSION_PENDING_MEMBERSHIP_LINK_KEY,
   getIntegrationBaseUrl,
   linkSubscriptionToPrincipal,
   mapIntegrationUserMessage,
+  markPendingMembershipPaymentCompleted,
+  readPendingMembershipPayload,
+  savePendingMembershipPayload,
   sendEmail,
 } from "../../utils/integrationApi.js";
 import { getStripePublishableKeyResolved } from "../../utils/studioServicesConfig.js";
@@ -250,12 +254,34 @@ class JoinNetworkComponent extends HTMLElement {
         }
     }
 
+  /**
+   * After refresh, restore pay-first state so the user can still complete Internet Identity link.
+   * @returns {boolean} true if pending link state was restored
+   */
+  _restorePendingMembershipFromStorage() {
+    const p = readPendingMembershipPayload();
+    if (!p?.paymentCompleted || !p.fusionPendingId) return false;
+    this._fusionPendingId = p.fusionPendingId;
+    this._fusionSubscriptionId = p.subscriptionId;
+    if (p.email) this._formEmail = p.email;
+    this._stage = "linkAccount";
+    this._joinMode = "full";
+    this._preStripeCanisterSyncDone = true;
+    try {
+      sessionStorage.setItem(FUSION_PENDING_MEMBERSHIP_LINK_KEY, "1");
+    } catch {
+      /* ignore */
+    }
+    return true;
+  }
+
     connectedCallback() {
     window.addEventListener("fusion-localechange", this._onLocaleChange);
     window.addEventListener("fusion-auth-change", this._onFusionAuthChange);
     this._modalType = resolveModalType(this);
+    const restoredPending = this._restorePendingMembershipFromStorage();
     const dbg = (this.getAttribute("stage") || "").trim().toLowerCase();
-    if (STAGES.includes(/** @type {FlowStage} */ (dbg))) {
+    if (!restoredPending && STAGES.includes(/** @type {FlowStage} */ (dbg))) {
       this._stage = /** @type {FlowStage} */ (dbg);
     }
         this.render();
@@ -755,6 +781,10 @@ class JoinNetworkComponent extends HTMLElement {
         const { ensureMyLinkedArtistProfile } =
           await import("../../utils/database.js");
         await ensureMyLinkedArtistProfile();
+        const { maybeSeedLocalesFromProfileSetupDraftIfEmpty } = await import(
+          "../../utils/profileSetupSeedLocales.js"
+        );
+        await maybeSeedLocalesFromProfileSetupDraftIfEmpty();
       } catch (ensErr) {
         if (DEV_MODE)
           console.warn("[JoinNetwork] ensureMyLinkedArtistProfile", ensErr);
@@ -767,6 +797,7 @@ class JoinNetworkComponent extends HTMLElement {
       } catch {
         /* ignore */
       }
+      clearPendingMembershipPayload();
       await this._afterJoinSaved();
     } catch (e) {
       if (DEV_MODE) console.error("[JoinNetwork] link pending", e);
@@ -845,7 +876,9 @@ class JoinNetworkComponent extends HTMLElement {
           to: email,
           subject: "You're in — next: link Internet Identity",
           text: [
-            "Thanks — your FUSION access is recorded.",
+            "Thanks — your FUSION access is recorded (email and signup details).",
+            "",
+            "Active membership on your account requires completing Register with Internet Identity and, if you paid before signing in, linking that payment to your login — then your profile can unlock.",
             "",
             "Next step: sign in with Internet Identity on the site (Register) so we can tie this access to a login you can reuse.",
             "If II doesn't open or fails, try again in the same browser, or continue later from Register with this email.",
@@ -984,6 +1017,7 @@ class JoinNetworkComponent extends HTMLElement {
       } else {
         this._fusionPendingId = null;
         this._fusionSubscriptionId = null;
+        clearPendingMembershipPayload();
       }
 
       if (myGen !== this._stripePrepareGen || this._stage !== "payment") return;
@@ -1007,6 +1041,12 @@ class JoinNetworkComponent extends HTMLElement {
       if (subRes.fusionPendingId) {
         this._fusionPendingId = subRes.fusionPendingId;
         this._fusionSubscriptionId = subRes.subscriptionId || null;
+        savePendingMembershipPayload({
+          fusionPendingId: subRes.fusionPendingId,
+          email: emailForSub,
+          subscriptionId: subRes.subscriptionId || null,
+          paymentCompleted: false,
+        });
       }
       if (myGen !== this._stripePrepareGen || this._stage !== "payment") return;
 
@@ -1745,24 +1785,47 @@ class JoinNetworkComponent extends HTMLElement {
         this._modalType || this.getAttribute("data-modal-type") || "membership",
       mode: (detail && detail.mode) || "full",
     });
-    this._preStripeCanisterSyncDone = false;
-    this._fusionPendingId = null;
-    this._fusionSubscriptionId = null;
-    if (detail && detail.mode === "resubscribe") {
-      this._joinMode = "resubscribe";
-      this._stage = "payment";
-      this._logoutIfDismissedWithoutJoin = false;
-      void import("@stripe/stripe-js");
-    } else {
+    const pendingRestore =
+      (!detail || detail.mode !== "resubscribe") &&
+      readPendingMembershipPayload();
+    const resumeLink =
+      pendingRestore?.paymentCompleted &&
+      pendingRestore?.fusionPendingId &&
+      (!detail || detail.mode !== "resubscribe");
+
+    if (resumeLink) {
+      this._fusionPendingId = pendingRestore.fusionPendingId;
+      this._fusionSubscriptionId = pendingRestore.subscriptionId;
+      if (pendingRestore.email) this._formEmail = pendingRestore.email;
       this._joinMode = "full";
-      this._stage = "entry";
-      const dbg = (this.getAttribute("stage") || "").trim().toLowerCase();
-      if (STAGES.includes(/** @type {FlowStage} */ (dbg))) {
-        this._stage = /** @type {FlowStage} */ (dbg);
+      this._stage = "linkAccount";
+      this._preStripeCanisterSyncDone = true;
+      this._logoutIfDismissedWithoutJoin = false;
+      try {
+        sessionStorage.setItem(FUSION_PENDING_MEMBERSHIP_LINK_KEY, "1");
+      } catch {
+        /* ignore */
       }
-      this._logoutIfDismissedWithoutJoin =
-        _pendingLogoutIfDismissedWithoutAccount;
-      _pendingLogoutIfDismissedWithoutAccount = false;
+    } else {
+      this._preStripeCanisterSyncDone = false;
+      this._fusionPendingId = null;
+      this._fusionSubscriptionId = null;
+      if (detail && detail.mode === "resubscribe") {
+        this._joinMode = "resubscribe";
+        this._stage = "payment";
+        this._logoutIfDismissedWithoutJoin = false;
+        void import("@stripe/stripe-js");
+      } else {
+        this._joinMode = "full";
+        this._stage = "entry";
+        const dbg = (this.getAttribute("stage") || "").trim().toLowerCase();
+        if (STAGES.includes(/** @type {FlowStage} */ (dbg))) {
+          this._stage = /** @type {FlowStage} */ (dbg);
+        }
+        this._logoutIfDismissedWithoutJoin =
+          _pendingLogoutIfDismissedWithoutAccount;
+        _pendingLogoutIfDismissedWithoutAccount = false;
+      }
     }
     this._fillDialogCopy();
     this._joinFlowCompleted = false;
@@ -1950,6 +2013,7 @@ class JoinNetworkComponent extends HTMLElement {
             } catch {
               /* ignore */
             }
+            markPendingMembershipPaymentCompleted();
             this._showStage("linkAccount");
             return;
           }

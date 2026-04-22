@@ -87,7 +87,7 @@ class VeteranBannerComponent extends HTMLElement {
     }
 
     static get observedAttributes() {
-        return ['data-program-id', 'data-residency-year'];
+        return ['data-program-id', 'data-program-ids', 'data-residency-year'];
     }
 
     attributeChangedCallback() {
@@ -124,50 +124,113 @@ class VeteranBannerComponent extends HTMLElement {
         return raw == null || raw === '' ? null : String(raw).trim();
     }
 
-    render() {
-        const programId = this._getProgramId();
-        const residencyYearAttr = (this.getAttribute('data-residency-year') || '').trim();
-        const resolved = programId ? resolveProgram(programId, this._programsBlock) : null;
+    /**
+     * Ordered program ids (canonical order: oldest → newest). Display uses newest first.
+     * @returns {string[]}
+     */
+    _getProgramIdsList() {
+        const raw = this.getAttribute('data-program-ids');
+        if (raw != null && String(raw).trim() !== '') {
+            try {
+                const j = JSON.parse(String(raw));
+                if (Array.isArray(j) && j.length) {
+                    return j.map((x) => String(x ?? '').trim()).filter(Boolean);
+                }
+            } catch {
+                /* fall through */
+            }
+        }
+        const one = this._getProgramId();
+        return one ? [one] : [];
+    }
 
+    render() {
+        const residencyYearAttr = (this.getAttribute('data-residency-year') || '').trim();
+        let ids = this._getProgramIdsList();
         const locale = typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
 
-        /** @type {string} */
-        let focusText = '';
-        /** @type {string} */
-        let yearStr = '';
-        if (programId) {
-            focusText = displayFocusForProgram(resolved, programId);
-            yearStr = displayYearForProgram(resolved, programId) || residencyYearAttr;
-        } else if (residencyYearAttr) {
-            focusText =
-                locale === 'ja' ? 'ジャパン・アーティスト・レジデンシー' : 'Japan Artist Residency';
-            yearStr = residencyYearAttr;
+        /** @type {{ programId: string, focusText: string, yearStr: string, badgePast: boolean }[]} */
+        const entries = [];
+        if (ids.length === 0 && residencyYearAttr) {
+            ids = [''];
+        }
+        const displayIds = [...ids].reverse();
+
+        for (const programId of displayIds) {
+            if (programId) {
+                const resolved = resolveProgram(programId, this._programsBlock);
+                const focusText = displayFocusForProgram(resolved, programId);
+                let yearStr = displayYearForProgram(resolved, programId) || residencyYearAttr;
+                if (!yearStr && residencyYearAttr) yearStr = residencyYearAttr;
+                let badgePast = false;
+                const cs = String(this._currentSeason || '').trim();
+                if (cs && yearStr) {
+                    const seasonYear =
+                        yearFromProgramSlug(cs) ||
+                        (() => {
+                            const m = cs.match(/\b(19|20)\d{2}\b/);
+                            return m ? m[0] : '';
+                        })();
+                    const y = String(yearStr).trim();
+                    if (!seasonYear || y !== seasonYear) {
+                        badgePast = true;
+                    }
+                }
+                entries.push({ programId, focusText, yearStr, badgePast });
+            } else if (residencyYearAttr) {
+                const focusText =
+                    locale === 'ja' ? 'ジャパン・アーティスト・レジデンシー' : 'Japan Artist Residency';
+                const yearStr = residencyYearAttr;
+                let badgePast = false;
+                const cs = String(this._currentSeason || '').trim();
+                if (cs && yearStr) {
+                    const seasonYear =
+                        yearFromProgramSlug(cs) ||
+                        (() => {
+                            const m = cs.match(/\b(19|20)\d{2}\b/);
+                            return m ? m[0] : '';
+                        })();
+                    const y = String(yearStr).trim();
+                    if (!seasonYear || y !== seasonYear) {
+                        badgePast = true;
+                    }
+                }
+                entries.push({ programId: '', focusText, yearStr, badgePast });
+            }
         }
 
-        const emphasis = [focusText, yearStr].filter(Boolean).join(' ');
-        const yearBadgeHtml = yearStr
-            ? ` <span id="programYear">${escapeHtml(yearStr)}</span>`
-            : '';
-
-        let fusionBadgePastClass = '';
-        const cs = String(this._currentSeason || '').trim();
-        if (cs && yearStr) {
-            const seasonYear =
-                yearFromProgramSlug(cs) ||
-                (() => {
-                    const m = cs.match(/\b(19|20)\d{2}\b/);
-                    return m ? m[0] : '';
-                })();
-            const y = String(yearStr).trim();
-            if (!seasonYear || y !== seasonYear) {
-                fusionBadgePastClass = 'fusion-badge--past-season';
-            }
+        if (entries.length === 0) {
+            this.shadow.innerHTML = '';
+            return;
         }
 
         const lead =
             locale === 'ja'
                 ? 'プログラム卒業生 — '
                 : 'Program Alumni — ';
+
+        const badgesHtml = entries
+            .map((e, i) => {
+                const yearBadgeHtml = e.yearStr
+                    ? ` <span class="programYear">${escapeHtml(e.yearStr)}</span>`
+                    : '';
+                const cls = e.badgePast ? 'fusion-badge--past-season' : '';
+                const sizeCls = i === 0 ? 'fusion-badge-wrap--primary' : 'fusion-badge-wrap--secondary';
+                return `<div class="fusion-badge-wrap ${sizeCls}">
+                    <div class="fusion-badge ${cls}">
+                        <p class="fusion-badge-title">FUSION</p>
+                        <p class="fusion-badge-line2"><span class="programBadgeFocus">${escapeHtml(e.focusText)}</span>${yearBadgeHtml}</p>
+                    </div>
+                </div>`;
+            })
+            .join('');
+
+        const linesHtml = entries
+            .map((e) => {
+                const emphasis = [e.focusText, e.yearStr].filter(Boolean).join(' ');
+                return `<div class="veteran-banner__line"><strong>${escapeHtml(emphasis)}</strong></div>`;
+            })
+            .join('');
 
         this.shadow.innerHTML = `
             <style>
@@ -201,32 +264,42 @@ class VeteranBannerComponent extends HTMLElement {
                     overflow: hidden;
                 }
 
-                .veteran-banner__text {
+                .veteran-banner__col--badges {
                     display: flex;
-                    align-items: center;
-                    justify-content: flex-end;
-                    text-align: right;
-                    padding-right: 3rem;
-                    font-size: clamp(0.75rem, 1.6vw, 1.35rem);
+                    flex-direction: column;
+                    align-items: flex-start;
+                    justify-content: center;
+                    gap: 0.65rem;
+                    padding: 0.75rem 0 0.75rem 1.5rem;
+                    box-sizing: border-box;
+                }
+
+                .veteran-banner__lead {
+                    font-size: clamp(0.8rem, 1.5vw, 1rem);
                     font-variation-settings: var(--fv-emphasis);
-                    letter-spacing: 0.04em;
                     color: var(--c2);
-                    line-height: 1.35;
+                    letter-spacing: 0.06em;
+                    margin: 0;
                 }
 
-                .veteran-banner__badge {
-                    width: 100%;
-                    height: 100%;
-                    text-align: center;
+                .veteran-banner__badge-stack {
                     display: flex;
-                    align-items: center;
-                    justify-content: start;
-                    padding-left: 2rem;
-                    color: var(--c2);
-                    color: var(--c3);
+                    flex-direction: column;
+                    align-items: flex-start;
+                    gap: 0.35rem;
                 }
 
-                #fusionBadge {
+                .fusion-badge-wrap {
+                    flex: 0 0 auto;
+                }
+
+                .fusion-badge-wrap--secondary .fusion-badge {
+                    transform: scale(0.5);
+                    transform-origin: center left;
+                    margin: -2.25rem 0 -2.25rem 0;
+                }
+
+                .fusion-badge {
                     width: 150px;
                     height: 150px;
                     display: flex;
@@ -244,17 +317,17 @@ class VeteranBannerComponent extends HTMLElement {
                     line-height: 1;
                 }
 
-                #fusionBadge.fusion-badge--past-season {
+                .fusion-badge.fusion-badge--past-season {
                     background-color: var(--c1);
                 }
-                    
-                #fusionBadge p {
+
+                .fusion-badge p {
                     margin: 0;
                     padding: 0;
                     line-height: 1.3;
                 }
 
-                #fusionBadgeTitle {
+                .fusion-badge-title {
                     font-size: clamp(1.25rem, 1.2vw, 1.5rem);
                     font-variation-settings: var(--fv-headline-wide);
                     letter-spacing: 0.1em;
@@ -271,19 +344,44 @@ class VeteranBannerComponent extends HTMLElement {
                     box-sizing: border-box;
                 }
 
-                #programBadgeFocus {
+                .programBadgeFocus {
                     font-size: clamp(0.65rem, 1.1vw, 0.95rem);
                     font-variation-settings: var(--fv-subtitle);
                     line-height: 1.25;
                 }
 
-                #programYear {
+                .programYear {
                     font-size: clamp(0.75rem, 1.4vw, 1.15rem);
                     font-variation-settings: var(--fv-subtitle);
                     color: var(--c3);
                     padding: 0;
                     margin: 0;
                     line-height: 1;
+                }
+
+                .veteran-banner__col--text {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: flex-end;
+                    justify-content: center;
+                    gap: 0.5rem;
+                    text-align: right;
+                    padding: 0.75rem 2.5rem 0.75rem 0.75rem;
+                    font-size: clamp(0.75rem, 1.6vw, 1.35rem);
+                    font-variation-settings: var(--fv-emphasis);
+                    letter-spacing: 0.04em;
+                    color: var(--c2);
+                    line-height: 1.35;
+                }
+
+                .veteran-banner__text-lead {
+                    margin: 0 0 0.15rem;
+                    padding: 0;
+                }
+
+                .veteran-banner__line {
+                    margin: 0;
+                    max-width: 100%;
                 }
 
                 @media (max-width: 768px) {
@@ -293,25 +391,33 @@ class VeteranBannerComponent extends HTMLElement {
                         min-height: 0;
                     }
 
-                    .veteran-banner__badge {
+                    .veteran-banner__col--badges {
+                        align-items: center;
                         padding: 1rem 1rem 0;
-                        justify-content: center;
                     }
 
-                    .veteran-banner__text {
-                        justify-content: center;
+                    .veteran-banner__badge-stack {
+                        align-items: center;
+                    }
+
+                    .fusion-badge-wrap--secondary .fusion-badge {
+                        transform-origin: center center;
+                    }
+
+                    .veteran-banner__col--text {
+                        align-items: center;
                         text-align: center;
-                        padding: 1rem 1.25rem 1.5rem;
+                        padding: 0.5rem 1.25rem 1.25rem;
                     }
 
-                    #fusionBadge {
+                    .fusion-badge {
                         width: min(120px, 28vw);
                         height: min(120px, 28vw);
                     }
                 }
 
                 @media (max-width: 480px) {
-                    .veteran-banner__text {
+                    .veteran-banner__col--text {
                         font-size: clamp(0.75rem, 3.5vw, 1.1rem);
                         padding-left: 1rem;
                         padding-right: 1rem;
@@ -319,14 +425,14 @@ class VeteranBannerComponent extends HTMLElement {
                 }
             </style>
             <div class="veteran-banner" part="veteran-banner">
-                <div class="veteran-banner__badge">
-                    <div id="fusionBadge" class="${fusionBadgePastClass}">
-                        <p id="fusionBadgeTitle">FUSION</p>
-                        <p class="fusion-badge-line2"><span id="programBadgeFocus">${escapeHtml(focusText)}</span>${yearBadgeHtml}</p>
+                <div class="veteran-banner__col veteran-banner__col--badges">
+                    <p class="veteran-banner__lead">${escapeHtml(lead)}</p>
+                    <div class="veteran-banner__badge-stack">
+                        ${badgesHtml}
                     </div>
                 </div>
-                <div class="veteran-banner__text">
-                    ${escapeHtml(lead)}<strong>${escapeHtml(emphasis)}</strong>
+                <div class="veteran-banner__col veteran-banner__col--text">
+                    ${linesHtml}
                 </div>
             </div>
         `;

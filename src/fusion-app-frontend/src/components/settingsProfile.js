@@ -12,8 +12,15 @@ import {
   ensureMyLinkedArtistProfile,
   getAccountForCaller,
   updateMyArtistPublicSlug,
+  updateMyArtistVisibility,
   getPrograms,
+  generateAndUpdateMyArtistWorldFromBio,
+  artistRowFromMyArtistRecord,
+  normalizeProgramVisibility,
+  unwrapOpt,
+  getApplicationPaymentGlobal,
 } from "../utils/database.js";
+import { withSeoImageAlt } from "../utils/mediaAltSeo.js";
 import {
   copyIntroGalleryEnToJa,
   introSlotsFromWorld,
@@ -32,6 +39,8 @@ import { uploadBlobToS3 } from "../utils/studioS3Upload.js";
 import { getProfileSetupDraft } from "../utils/profileSetupDraft.js";
 import { navigate } from "../router.js";
 import { applyDocumentSeo } from "../utils/documentSeo.js";
+import { getEffectiveAccountForSettingsUi } from "../utils/adminPerspective.js";
+import { firstNonEmptyString } from "../utils/localeFallback.js";
 
 function applySettingsProfileDocumentSeo(dashTitle) {
   applyDocumentSeo({
@@ -45,6 +54,132 @@ function applySettingsProfileDocumentSeo(dashTitle) {
 
 /** Default residency program path for Apply CTA (matched against `getPrograms()` rows). */
 const MPD_APPLY_PROGRAM_PATH = "/program/kaga-ishikawa";
+
+/** Max upload size per image (hero + intro slots). */
+export const MPD_MAX_IMAGE_BYTES = 1 * 1024 * 1024;
+
+const MPD_IMAGE_LIMIT_NOTICE =
+  "Each image must be 1 MB or smaller. Use JPEG or WebP for best results.";
+
+/**
+ * Panel-specific shout (HTML allowed) and plain hint for `#settingsProfileHint`.
+ * Overview keeps the default marketing lines; other sections align copy to the task.
+ */
+const MPD_PANEL_CHROME = {
+  overview: {
+    shoutHtml:
+      "Your work exists in context.<br />This is where it begins.",
+    hint:
+      "Shape how you appear on the public site. Save each section as you go.",
+  },
+  location: {
+    shoutHtml: "Where you are in your practice.",
+    hint:
+      "Set your studio status and location so visitors and partners see the right context.",
+  },
+  story: {
+    shoutHtml:
+      "We're building new interactions between artists and patrons—your story is the bridge.",
+    hint:
+      "An extended gallery profile page is coming soon. Craft your narrative here first.",
+  },
+  links: {
+    shoutHtml: "Your presence beyond Fusion.",
+    hint:
+      "Link to your site, socials, and portfolios so people can follow your work everywhere.",
+  },
+  programs: {
+    shoutHtml: "Programs and opportunities.",
+    hint:
+      "Track applications and explore public programs that match your practice.",
+  },
+  membership: {
+    shoutHtml: "Your membership keeps your practice visible.",
+    hint:
+      "View billing, update payment, or manage your subscription. We are here if you need help.",
+  },
+  dev: {
+    shoutHtml: "Developer tools.",
+    hint: "Raw locales JSON for debugging. Use with care.",
+  },
+};
+
+/**
+ * @param {Record<string, unknown> | null | undefined} acc
+ * @param {...string} keys
+ */
+function mpdAccountStringField(acc, ...keys) {
+  if (!acc || typeof acc !== "object") return "";
+  const o = /** @type {Record<string, unknown>} */ (acc);
+  for (const k of keys) {
+    const v = o[k];
+    if (v == null) continue;
+    if (Array.isArray(v)) {
+      const u = unwrapOpt(/** @type {[]} */ (v));
+      if (u != null) return String(u).trim();
+    } else if (typeof v === "string") {
+      return v.trim();
+    }
+  }
+  return "";
+}
+
+/** @param {string} st */
+function mpdMembershipStatusLabel(st) {
+  const s = String(st || "").toLowerCase();
+  if (!s) return "No subscription";
+  const map = {
+    active: "Active",
+    trialing: "Trialing",
+    past_due: "Past due",
+    canceled: "Canceled",
+    unpaid: "Unpaid",
+    incomplete: "Incomplete",
+    incomplete_expired: "Incomplete (expired)",
+    paused: "Paused",
+  };
+  return map[s] || String(st);
+}
+
+/** @param {string} [iso] */
+function mpdFormatLongDate(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: "long",
+    }).format(d);
+  } catch {
+    return iso.slice(0, 10);
+  }
+}
+
+/** @param {string} [iso] */
+function mpdRelativeDaysFromIso(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const now = new Date();
+  const diff = Math.ceil((d.getTime() - now.getTime()) / 86400000);
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Tomorrow";
+  if (diff > 1) return `In ${diff} days`;
+  if (diff === -1) return "Yesterday";
+  return `${Math.abs(diff)} days ago`;
+}
+
+/**
+ * @param {File} f
+ */
+function assertMpdImageSizeOk(f) {
+  if (f.size > MPD_MAX_IMAGE_BYTES) {
+    const kb = Math.round(f.size / 1024);
+    throw new Error(
+      `Image is too large (${kb} KB). ${MPD_IMAGE_LIMIT_NOTICE}`,
+    );
+  }
+}
 
 /**
  * @param {string} id
@@ -62,6 +197,7 @@ function dashboardTitleFromAccount(acc) {
   if (!acc || typeof acc !== "object") return "User Profile";
   const r = /** @type {Record<string, unknown>} */ (acc).role;
   if (r && typeof r === "object") {
+    if ("user" in r) return "User Profile";
     if ("artist" in r) return "Artist Dashboard";
     if ("gallery" in r) return "Gallery Dashboard";
     if ("curator" in r) return "Curator Dashboard";
@@ -79,6 +215,7 @@ function sidebarRoleLabel(acc) {
   if (!acc || typeof acc !== "object") return "Member";
   const r = /** @type {Record<string, unknown>} */ (acc).role;
   if (r && typeof r === "object") {
+    if ("user" in r) return "User";
     if ("artist" in r) return "Artist";
     if ("gallery" in r) return "Gallery";
     if ("curator" in r) return "Curator";
@@ -219,6 +356,129 @@ function fillFormFromLocales(locales, active) {
 }
 
 /**
+ * Merge fields from the most recently submitted program application into empty locale blocks
+ * (in-memory until the user saves).
+ *
+ * @param {Record<string, unknown>} localesState
+ * @param {unknown} appliedRaw
+ */
+function mergeLatestApplicationPayloadIntoLocales(localesState, appliedRaw) {
+  if (!localesState || typeof localesState !== "object") return;
+  /** @type {Record<string, unknown>} */
+  let applied = {};
+  try {
+    if (appliedRaw)
+      applied =
+        typeof appliedRaw === "string" ? JSON.parse(appliedRaw) : appliedRaw;
+    if (!applied || typeof applied !== "object") applied = {};
+  } catch {
+    return;
+  }
+
+  /** @type {Record<string, unknown> | null} */
+  let best = null;
+  let bestTs = -Infinity;
+  for (const [, entry] of Object.entries(applied)) {
+    if (!entry || typeof entry !== "object") continue;
+    const er = /** @type {Record<string, unknown>} */ (entry);
+    const p = er.payload;
+    if (!p || typeof p !== "object") continue;
+    const sub = er.submittedAt ?? er.submitted_at;
+    let ts = -Infinity;
+    if (typeof sub === "number" && Number.isFinite(sub)) ts = sub;
+    else if (typeof sub === "string") {
+      const d = Date.parse(sub);
+      if (!Number.isNaN(d)) ts = d;
+    }
+    if (ts >= bestTs) {
+      bestTs = ts;
+      best = er;
+    }
+  }
+  if (!best || !best.payload || typeof best.payload !== "object") {
+    for (const [, entry] of Object.entries(applied)) {
+      if (
+        entry &&
+        typeof entry === "object" &&
+        /** @type {Record<string, unknown>} */ (entry).payload &&
+        typeof /** @type {Record<string, unknown>} */ (entry).payload ===
+          "object"
+      ) {
+        best = /** @type {Record<string, unknown>} */ (entry);
+        break;
+      }
+    }
+  }
+  if (!best || !best.payload || typeof best.payload !== "object") return;
+  const payload = /** @type {Record<string, unknown>} */ (best.payload);
+
+  for (const code of /** @type {const} */ (["en", "ja"])) {
+    if (
+      !localesState[code] ||
+      typeof localesState[code] !== "object" ||
+      Array.isArray(localesState[code])
+    ) {
+      /** @type {Record<string, unknown>} */ (localesState)[code] = {};
+    }
+    const block = /** @type {Record<string, unknown>} */ (
+      localesState[code]
+    );
+
+    const fn = String(block.firstName ?? "").trim();
+    const ln = String(block.lastName ?? "").trim();
+    if (!fn && payload.firstName != null)
+      block.firstName = String(payload.firstName).trim();
+    if (!ln && payload.lastName != null)
+      block.lastName = String(payload.lastName).trim();
+    const nameWas = String(block.name ?? "").trim();
+    if (!nameWas) {
+      const nf = String(block.firstName ?? "").trim();
+      const nl = String(block.lastName ?? "").trim();
+      if (nf || nl) block.name = `${nf} ${nl}`.trim();
+    }
+
+    /** @type {Record<string, unknown>} */
+    let loc =
+      block.location &&
+      typeof block.location === "object" &&
+      !Array.isArray(block.location)
+        ? { .../** @type {Record<string, unknown>} */ (block.location) }
+        : {};
+    const mergeLoc = (key, val) => {
+      if (val == null) return;
+      const s = String(val).trim();
+      if (!s) return;
+      if (!String(loc[key] ?? "").trim()) loc[key] = s;
+    };
+    mergeLoc("country", payload.country);
+    mergeLoc("state", payload.stateProvince);
+    mergeLoc("city", payload.city);
+    if (Object.keys(loc).length) block.location = loc;
+
+    if (!String(block.discipline ?? "").trim() && payload.discipline != null)
+      block.discipline = String(payload.discipline).trim();
+
+    if (!String(block.bio ?? "").trim() && payload.bioStatement != null)
+      block.bio = String(payload.bioStatement).trim();
+
+    const web = payload.website != null ? String(payload.website).trim() : "";
+    if (web) {
+      const links = Array.isArray(block.links) ? [...block.links] : [];
+      const hasUrl = links.some(
+        (x) =>
+          x &&
+          typeof x === "object" &&
+          String(/** @type {{ url?: unknown }} */ (x).url ?? "").trim(),
+      );
+      if (!hasUrl) {
+        links.push({ type: "website", url: web, label: web });
+        block.links = links;
+      }
+    }
+  }
+}
+
+/**
  * @param {unknown[]} links
  */
 function renderLinkRows(links) {
@@ -280,6 +540,33 @@ function closeMpdResidencyComingSoonModal() {
   if (!modal) return;
   modal.hidden = true;
   modal.setAttribute("aria-hidden", "true");
+}
+
+function openMpdMembershipCancelModal() {
+  const modal = document.getElementById("mpdMembershipCancelModal");
+  if (!modal) return;
+  document.body.appendChild(modal);
+  modal.hidden = false;
+  modal.setAttribute("aria-hidden", "false");
+}
+
+function closeMpdMembershipCancelModal() {
+  const modal = document.getElementById("mpdMembershipCancelModal");
+  if (!modal) return;
+  modal.hidden = true;
+  modal.setAttribute("aria-hidden", "true");
+}
+
+function wireMpdMembershipCancelModal() {
+  const modal = document.getElementById("mpdMembershipCancelModal");
+  if (!modal || modal.dataset.mpdMembershipModalWired === "1") return;
+  modal.dataset.mpdMembershipModalWired = "1";
+  const scrim = modal.querySelector(".profile-gallery-access-modal__scrim");
+  scrim?.addEventListener("click", closeMpdMembershipCancelModal);
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && modal && !modal.hidden)
+      closeMpdMembershipCancelModal();
+  });
 }
 
 function wireMpdResidencyComingSoonModal() {
@@ -391,6 +678,124 @@ async function hydrateProgramsPanel(rec, locales, active) {
   }
 }
 
+/**
+ * All public programs as discovery cards (opens in new tab).
+ */
+async function hydratePublicProgramDiscoveryCards() {
+  const container = document.getElementById("mpd_public_programs_all");
+  if (!container) return;
+  /** @type {object[]} */
+  let programs = [];
+  try {
+    programs = await getPrograms();
+  } catch {
+    programs = [];
+  }
+  const publicProgs = programs.filter(
+    (p) => normalizeProgramVisibility(p.visibility) === "public",
+  );
+  container.replaceChildren();
+  if (publicProgs.length === 0) {
+    const p = document.createElement("p");
+    p.className = "studio-muted mpd-programs-empty";
+    p.textContent = "No public programs are listed yet.";
+    container.appendChild(p);
+    return;
+  }
+  const grid = document.createElement("div");
+  grid.className = "mpd-public-programs-grid";
+  for (const pr of publicProgs) {
+    const en = pr?.enCard && typeof pr.enCard === "object" ? pr.enCard : {};
+    const ja =
+      pr?.jaCard && typeof pr.jaCard === "object" ? pr.jaCard : {};
+    const focus = String(en.focus ?? en.headline ?? "").trim();
+    const location =
+      typeof en.location === "string"
+        ? en.location.trim()
+        : String(en.location ?? "").trim() ||
+          String(en.headline ?? "").trim();
+    const title =
+      focus ||
+      location ||
+      String(en.headline ?? "").trim() ||
+      String(pr.id ?? "");
+    const startDate = String(en.startDate ?? "").trim();
+    const endDate = String(en.endDate ?? "").trim();
+    const year = String(en.year ?? "").trim();
+    const imageSrc = firstNonEmptyString(
+      /** @type {Record<string, unknown>} */ (ja).imageSrc,
+      /** @type {Record<string, unknown>} */ (en).imageSrc,
+    );
+    const imageAlt = String(en.imageAlt ?? en.focus ?? title).trim() || title;
+    let route = "/programs";
+    if (pr?.routeLink) {
+      const rl = String(pr.routeLink);
+      route = rl.startsWith("/") ? rl : `/${rl}`;
+    }
+    const card = document.createElement("article");
+    card.className = "mpd-public-program-card mpd-public-program-card--rich";
+
+    const link = document.createElement("a");
+    link.className = "mpd-public-program-card__link-rich";
+    link.href = route;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+
+    const imgWrap = document.createElement("div");
+    imgWrap.className = "mpd-public-program-card__image-wrap";
+    if (focus) {
+      const foc = document.createElement("div");
+      foc.className = "mpd-public-program-card__focus";
+      foc.textContent = focus;
+      imgWrap.appendChild(foc);
+    }
+    if (imageSrc) {
+      const img = document.createElement("img");
+      img.className = "mpd-public-program-card__img";
+      img.src = String(imageSrc);
+      img.alt = withSeoImageAlt(imageAlt);
+      img.loading = "lazy";
+      imgWrap.appendChild(img);
+    } else {
+      const ph = document.createElement("div");
+      ph.className = "mpd-public-program-card__placeholder";
+      ph.textContent = "Fusion";
+      imgWrap.appendChild(ph);
+    }
+    link.appendChild(imgWrap);
+
+    const body = document.createElement("div");
+    body.className = "mpd-public-program-card__body";
+    const tEl = document.createElement("div");
+    tEl.className = "mpd-public-program-card__title";
+    tEl.textContent = location || title;
+    body.appendChild(tEl);
+    const dates = document.createElement("div");
+    dates.className = "mpd-public-program-card__dates";
+    if (startDate || endDate) {
+      const range = document.createElement("span");
+      range.className = "mpd-public-program-card__range";
+      range.textContent =
+        startDate && endDate
+          ? `${startDate} – ${endDate}`
+          : startDate || endDate;
+      dates.appendChild(range);
+    }
+    if (year) {
+      const y = document.createElement("span");
+      y.className = "mpd-public-program-card__year";
+      y.textContent = year;
+      dates.appendChild(y);
+    }
+    if (dates.childElementCount) body.appendChild(dates);
+    link.appendChild(body);
+
+    card.appendChild(link);
+    grid.appendChild(card);
+  }
+  container.appendChild(grid);
+}
+
 async function syncResidencyApplyCta() {
   const btn = document.getElementById("mpd_apply_residency");
   if (!btn) return;
@@ -441,7 +846,7 @@ export function generateSettingsProfileContent() {
                             <div class="member-profile-dashboard__intro-preview-col">
                                 <div class="member-profile-dashboard__intro-preview-wrap">
                                     <div class="mpd-media-spinner" id="mpd_intro_${i}_spinner" hidden aria-hidden="true"></div>
-                                    <img id="mpd_intro_${i}_thumb" class="member-profile-dashboard__intro-thumb" alt="" style="display:none" />
+                                    <img id="mpd_intro_${i}_thumb" class="member-profile-dashboard__intro-thumb" alt="${withSeoImageAlt('Profile intro artwork preview')}" style="display:none" />
                                 </div>
                                 <input type="hidden" id="mpd_intro_${i}_src" />
                                 <input type="hidden" id="mpd_intro_${i}_alt" />
@@ -484,6 +889,7 @@ export function generateSettingsProfileContent() {
                     <button type="button" class="studio-nav-item mpd-nav-btn" data-mpd-panel="story">Story &amp; world</button>
                     <button type="button" class="studio-nav-item mpd-nav-btn" data-mpd-panel="links">Digital Footprint</button>
                     <button type="button" class="studio-nav-item mpd-nav-btn" data-mpd-panel="programs">Programs</button>
+                    <button type="button" class="studio-nav-item mpd-nav-btn" data-mpd-panel="membership">Membership</button>
                     ${devNavBtn}
                     <div class="studio-nav-contact mpd-sidebar-contact" id="settingsProfileNavContact">
                         <p class="studio-nav-contact__headline">
@@ -526,6 +932,10 @@ export function generateSettingsProfileContent() {
                     Your work exists in context.<br />This is where it begins.
                 </div>
                 <p id="settingsProfileHint" class="studio-muted mpd-settings-hint"></p>
+                <div id="settingsProfileMembershipActions" class="mpd-membership-actions" style="display:none" hidden>
+                    <button type="button" class="studio-btn-primary" id="settingsProfileFinishMembership">Finish membership setup</button>
+                    <button type="button" class="studio-btn-ghost" id="settingsProfileSyncSubscription">Refresh subscription status</button>
+                </div>
                 <div id="settingsTestPicker" class="studio-field studio-field--full" style="display:none">
                     <span>Test mode</span>
                     <select id="settingsTestArtistSelect" class="studio-input"></select>
@@ -547,6 +957,14 @@ export function generateSettingsProfileContent() {
                                     <a class="program-intro-cta mpd-program-intro-cta" id="mpd_view_profile" href="#" target="_blank" rel="noopener noreferrer">View public profile</a>
                                     <button type="button" class="program-intro-cta mpd-program-intro-cta" id="mpd_apply_residency" data-program-path="${MPD_APPLY_PROGRAM_PATH}" data-apply-open="true">Apply to Residency</button>
                                 </div>
+                                <label class="studio-field studio-field--full mpd-visibility-field">
+                                    <span>Artist feed visibility</span>
+                                    <select id="mpd_profile_visibility" class="studio-input" aria-describedby="mpd_profile_visibility_hint">
+                                        <option value="public">Public — listed on artist feeds</option>
+                                        <option value="private">Private — hidden from feeds (your profile URL still works)</option>
+                                    </select>
+                                    <span id="mpd_profile_visibility_hint" class="mpd-field-hint">Private only removes you from public artist lists; people with your link can still open your page.</span>
+                                </label>
                                 <p id="mpd_datasource_pill" class="member-profile-dashboard__pill" style="display:none;margin-top:0.75rem"></p>
 
                                 <h2 class="mpd-identity-h2">Identity &amp; presence</h2>
@@ -575,15 +993,23 @@ export function generateSettingsProfileContent() {
                                 </div>
 
                                 <h3 class="studio-subheading mpd-media-subhead">Hero image</h3>
+                                <p class="studio-muted mpd-media-helper">
+                                  Use a high-quality image of your work. A <strong>4:5</strong> aspect ratio
+                                  (portrait) is preferred. Max <strong>1 MB</strong> per file.
+                                </p>
                                 <div class="member-profile-dashboard__hero-preview-wrap">
                                     <div class="mpd-media-spinner" id="mpd_hero_spinner" hidden aria-hidden="true"></div>
-                                    <img id="mpd_hero_preview" class="member-profile-dashboard__hero-preview" alt="" />
+                                    <img id="mpd_hero_preview" class="member-profile-dashboard__hero-preview" alt="${withSeoImageAlt('Profile hero image preview')}" />
                                 </div>
                                 <input type="hidden" id="mpd_hero_url" value="" />
                                 <input type="file" id="mpd_hero_file" class="mpd-file-input-hidden" accept="image/*" />
                                 <label for="mpd_hero_file" class="mpd-upload-btn">Upload hero image</label>
 
                                 <h3 class="studio-subheading mpd-media-subhead">Intro artwork (max 3)</h3>
+                                <p class="studio-muted mpd-media-helper">
+                                  Supporting images for your profile; same <strong>4:5</strong> ratio works well.
+                                  Max <strong>1 MB</strong> each.
+                                </p>
                                 ${introSlotsHtml}
                                 ${cardFooter}
                             </section>
@@ -623,6 +1049,15 @@ export function generateSettingsProfileContent() {
                             <section class="member-profile-dashboard__card" id="mpd-story">
                                 <h2>Story &amp; world</h2>
                                 <p class="studio-muted">Separate paragraphs with a blank line where noted. Text is stored in a consistent format for the site.</p>
+                                <div class="mpd-story-world-toolbar">
+                                    <button type="button" class="studio-btn-primary" id="mpd_gen_world_btn">
+                                        Generate from profile info
+                                    </button>
+                                    <label class="mpd-story-world-overwrite-label">
+                                        <input type="checkbox" id="mpd_gen_world_overwrite" />
+                                        Replace existing world fields
+                                    </label>
+                                </div>
                                 <div class="studio-form-grid">
                                     <label class="studio-field studio-field--full"><span>Practice</span>
                                         <textarea id="mpd_w_practice" class="studio-textarea" rows="3"></textarea>
@@ -668,6 +1103,98 @@ export function generateSettingsProfileContent() {
                                 <h2>Programs</h2>
                                 <p class="studio-muted">Programs you are associated with and your application status.</p>
                                 <div id="mpd_programs_list" class="mpd-programs-list" aria-live="polite"></div>
+                                <div class="mpd-public-programs-discovery" id="mpd_public_programs_discovery">
+                                    <h3 class="mpd-public-programs-discovery__h">Explore programs</h3>
+                                    <p class="studio-muted">
+                                        Browse all public Fusion programs — each link opens in a new tab.
+                                    </p>
+                                    <div id="mpd_public_programs_all" class="mpd-public-programs-list" aria-live="polite"></div>
+                                </div>
+                            </section>
+                        </div>
+
+                        <div class="mpd-panel" id="mpd-panel-membership" data-mpd-panel="membership" hidden>
+                            <section class="member-profile-dashboard__card mpd-membership-card" id="mpd-membership-section">
+                                <h2>Membership</h2>
+                                <p class="studio-muted">
+                                    Manage your subscription, view billing details, and update your membership.
+                                </p>
+                                <p id="mpd_membership_error" class="mpd-membership-inline-error" role="alert" hidden></p>
+                                <p id="mpd_membership_scheduled_cancel" class="mpd-membership-scheduled-cancel" role="status" hidden></p>
+
+                                <div class="mpd-membership-status-card" id="mpd_membership_status_grid">
+                                    <div class="mpd-membership-status-col mpd-membership-status-col--badge">
+                                        <div class="mpd-membership-badge" id="mpd_membership_badge">
+                                            <span class="mpd-membership-badge__icon" aria-hidden="true"></span>
+                                            <span class="mpd-membership-badge__text">
+                                                <strong id="mpd_membership_badge_label">—</strong>
+                                                <span class="studio-muted" id="mpd_membership_badge_line">—</span>
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div class="mpd-membership-status-col">
+                                        <span class="mpd-membership-k">Plan</span>
+                                        <strong id="mpd_membership_plan_name">—</strong>
+                                        <span class="studio-muted" id="mpd_membership_plan_price">—</span>
+                                    </div>
+                                    <div class="mpd-membership-status-col">
+                                        <span class="mpd-membership-k">Next renewal</span>
+                                        <strong id="mpd_membership_renewal_date">—</strong>
+                                        <span class="studio-muted" id="mpd_membership_renewal_relative"></span>
+                                    </div>
+                                    <div class="mpd-membership-status-col">
+                                        <span class="mpd-membership-k">Payment method</span>
+                                        <span class="mpd-membership-pm-line">
+                                            <span id="mpd_membership_pm_brand" class="mpd-membership-pm-brand"></span>
+                                            <span id="mpd_membership_pm_last4">—</span>
+                                        </span>
+                                        <button type="button" class="mpd-membership-text-link" id="mpd_membership_pm_update">
+                                            Update
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="mpd-membership-included" id="mpd_membership_included_wrap">
+                                    <h3 class="mpd-membership-subh">What&apos;s included</h3>
+                                    <ul class="mpd-membership-checklist" id="mpd_membership_included_list"></ul>
+                                </div>
+
+                                <div class="mpd-membership-manage-grid">
+                                    <div class="mpd-membership-actions-card">
+                                        <button type="button" class="mpd-membership-action-row" id="mpd_membership_row_billing">
+                                            <span class="mpd-membership-action-row__icon" aria-hidden="true"></span>
+                                            <span class="mpd-membership-action-row__main">
+                                                <strong>Billing history</strong>
+                                                <span class="studio-muted">View your past payments and invoices.</span>
+                                            </span>
+                                            <span class="mpd-membership-action-row__chev" aria-hidden="true"></span>
+                                        </button>
+                                        <button type="button" class="mpd-membership-action-row" id="mpd_membership_row_payment">
+                                            <span class="mpd-membership-action-row__icon mpd-membership-action-row__icon--card" aria-hidden="true"></span>
+                                            <span class="mpd-membership-action-row__main">
+                                                <strong>Update payment method</strong>
+                                                <span class="studio-muted">Change the card used for your subscription.</span>
+                                            </span>
+                                            <span class="mpd-membership-action-row__chev" aria-hidden="true"></span>
+                                        </button>
+                                    </div>
+                                    <div class="mpd-membership-cancel-card" id="mpd_membership_cancel_wrap">
+                                        <h3 class="mpd-membership-subh">Cancel membership</h3>
+                                        <p class="studio-muted">
+                                            Cancel your membership. You&apos;ll continue to have access until the end of your
+                                            current billing period.
+                                        </p>
+                                        <button type="button" class="mpd-membership-cancel-outline" id="mpd_membership_cancel_btn">
+                                            Cancel membership
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <p id="mpd_membership_exempt_note" class="mpd-membership-exempt-note" role="status" hidden></p>
+                                <p class="mpd-membership-footer-hint studio-muted">
+                                    Need help? Contact the Fusion team and we&apos;ll get back to you within a few business
+                                    days.
+                                </p>
                             </section>
                         </div>
 
@@ -699,6 +1226,46 @@ export function generateSettingsProfileContent() {
                         <button type="button" class="profile-gallery-access-modal__close">Close</button>
                     </div>
                 </div>
+                <div
+                    id="mpdMembershipCancelModal"
+                    class="profile-gallery-access-modal mpd-membership-cancel-modal"
+                    hidden
+                    aria-hidden="true"
+                >
+                    <div class="profile-gallery-access-modal__scrim" aria-hidden="true"></div>
+                    <div
+                        class="profile-gallery-access-modal__panel mpd-membership-cancel-modal__panel"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="mpdMembershipCancelTitle"
+                    >
+                        <h2 id="mpdMembershipCancelTitle" class="profile-gallery-access-modal__title">
+                            Before you cancel
+                        </h2>
+                        <div class="mpd-membership-cancel-modal__body">
+                            <p>
+                                Great things happen through consistency and commitment — we hope you&apos;ll stay and keep
+                                shaping your presence here.
+                            </p>
+                            <p>
+                                We designed this platform for artists to shape for impact: your profile, programs, and
+                                story deserve a steady home.
+                            </p>
+                            <p>
+                                If you cancel, your profile will be kept for another <strong>15 days</strong> so you can
+                                return without starting from zero — we&apos;d love to welcome you back.
+                            </p>
+                        </div>
+                        <div class="mpd-membership-cancel-modal__actions">
+                            <button type="button" class="studio-btn-primary" id="mpdMembershipCancelStay">
+                                Stay subscribed
+                            </button>
+                            <button type="button" class="mpd-membership-cancel-outline" id="mpdMembershipCancelContinue">
+                                Continue to cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </main>
         </div>
     `;
@@ -708,9 +1275,10 @@ export function generateSettingsProfileContent() {
  * @param {Record<string, unknown>} locales
  * @param {'en'|'ja'} active
  * @param {string} heroUrl
+ * @param {string} visibility
  */
-function snapshotState(locales, active, heroUrl) {
-  return JSON.stringify({ locales, active, hero: heroUrl });
+function snapshotState(locales, active, heroUrl, visibility) {
+  return JSON.stringify({ locales, active, hero: heroUrl, visibility });
 }
 
 /** @type {((e: BeforeUnloadEvent) => void) | null} */
@@ -721,7 +1289,12 @@ export default function initSettingsProfile() {
     const sm = document.getElementById("settingsMain");
     if (sm && !sm.contains(m)) m.remove();
   });
+  document.querySelectorAll("#mpdMembershipCancelModal").forEach((m) => {
+    const sm = document.getElementById("settingsMain");
+    if (sm && !sm.contains(m)) m.remove();
+  });
   wireMpdResidencyComingSoonModal();
+  wireMpdMembershipCancelModal();
 
   /** @type {'en'|'ja'} */
   let activeLocale = "en";
@@ -738,6 +1311,95 @@ export default function initSettingsProfile() {
 
   const setStatus = (t) => {
     if (statusEl) statusEl.textContent = t || "";
+  };
+
+  let worldGenRunning = false;
+
+  /**
+   * After-save: fill empty world fields only (live IC).
+   */
+  const runMemberWorldGenerationAfterSave = async () => {
+    if (getDataSource() === "test") {
+      setStatus("Saved.");
+      return;
+    }
+    setStatus("Generating story & world…");
+    try {
+      const rec = await getMyArtistRecord();
+      const row = artistRowFromMyArtistRecord(rec);
+      if (!row) throw new Error("Could not load profile for world generation.");
+      await generateAndUpdateMyArtistWorldFromBio(row, "fillEmpty");
+      const fresh = await getMyArtistRecord();
+      if (!fresh) throw new Error("Could not reload profile after world generation.");
+      const ljRaw = fresh.locales_json ?? fresh.localesJson;
+      const json = typeof ljRaw === "string" ? ljRaw : "";
+      try {
+        localesState = json ? JSON.parse(json) : { en: {}, ja: {} };
+      } catch {
+        localesState = { en: {}, ja: {} };
+      }
+      if (!localesState || typeof localesState !== "object")
+        localesState = { en: {}, ja: {} };
+      fillFormFromLocales(
+        /** @type {Record<string, unknown>} */ (localesState),
+        activeLocale,
+      );
+      refreshBaseline();
+      setStatus("Saved.");
+    } catch (e) {
+      setStatus(
+        e instanceof Error ? e.message : String(e),
+      );
+    }
+  };
+
+  /**
+   * Story panel: manual generate (optional overwrite).
+   */
+  const runMemberWorldFromToolbar = async () => {
+    if (getDataSource() === "test") {
+      setStatus(
+        "World generation needs Live data (IC backend LLM). Switch data source or use a deployed build.",
+      );
+      return;
+    }
+    if (worldGenRunning) return;
+    const btn = document.getElementById("mpd_gen_world_btn");
+    const ov = /** @type {HTMLInputElement | null} */ (
+      document.getElementById("mpd_gen_world_overwrite")
+    );
+    worldGenRunning = true;
+    if (btn) btn.disabled = true;
+    setStatus("Generating story & world…");
+    try {
+      const rec = await getMyArtistRecord();
+      const row = artistRowFromMyArtistRecord(rec);
+      if (!row) throw new Error("Could not load profile for world generation.");
+      const mode = ov?.checked ? "overwrite" : "fillEmpty";
+      await generateAndUpdateMyArtistWorldFromBio(row, mode);
+      const fresh = await getMyArtistRecord();
+      if (!fresh) throw new Error("Could not reload profile after world generation.");
+      const ljRaw = fresh.locales_json ?? fresh.localesJson;
+      const json = typeof ljRaw === "string" ? ljRaw : "";
+      try {
+        localesState = json ? JSON.parse(json) : { en: {}, ja: {} };
+      } catch {
+        localesState = { en: {}, ja: {} };
+      }
+      if (!localesState || typeof localesState !== "object")
+        localesState = { en: {}, ja: {} };
+      fillFormFromLocales(
+        /** @type {Record<string, unknown>} */ (localesState),
+        activeLocale,
+      );
+      refreshBaseline();
+      setStatus("Story & world updated.");
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : String(e));
+    } finally {
+      worldGenRunning = false;
+      if (btn) btn.disabled = false;
+    }
   };
 
   const closeSettingsProfileMobileNav = () => {
@@ -759,9 +1421,245 @@ export default function initSettingsProfile() {
     }
   };
 
+  /**
+   * Membership panel: Stripe summary + canister account fields.
+   */
+  const hydrateMembershipPanel = async () => {
+    const errEl = document.getElementById("mpd_membership_error");
+    const schedEl = document.getElementById("mpd_membership_scheduled_cancel");
+    const exemptNote = document.getElementById("mpd_membership_exempt_note");
+    const includedList = document.getElementById("mpd_membership_included_list");
+    const cancelWrap = document.getElementById("mpd_membership_cancel_wrap");
+    const rowBilling = document.getElementById("mpd_membership_row_billing");
+    const rowPayment = document.getElementById("mpd_membership_row_payment");
+    const pmUpdate = document.getElementById("mpd_membership_pm_update");
+    const badge = document.getElementById("mpd_membership_badge");
+    const badgeLabel = document.getElementById("mpd_membership_badge_label");
+    const badgeLine = document.getElementById("mpd_membership_badge_line");
+    const planName = document.getElementById("mpd_membership_plan_name");
+    const planPrice = document.getElementById("mpd_membership_plan_price");
+    const renewalDate = document.getElementById("mpd_membership_renewal_date");
+    const renewalRel = document.getElementById("mpd_membership_renewal_relative");
+    const pmBrand = document.getElementById("mpd_membership_pm_brand");
+    const pmLast4 = document.getElementById("mpd_membership_pm_last4");
+    const cancelBtn = document.getElementById("mpd_membership_cancel_btn");
+
+    const setBadgeVariant = (variant) => {
+      if (!badge) return;
+      badge.className = "mpd-membership-badge";
+      if (variant === "ok") badge.classList.add("mpd-membership-badge--ok");
+      else if (variant === "warn") badge.classList.add("mpd-membership-badge--warn");
+      else badge.classList.add("mpd-membership-badge--muted");
+    };
+
+    /** @type {string[]} */
+    const bullets = [
+      "Application submission",
+      "Profile on the public site",
+      "Member benefits and updates",
+    ];
+    try {
+      const g = await getApplicationPaymentGlobal();
+      const en = g?.en?.whatsIncludedBullets;
+      if (Array.isArray(en) && en[0] && String(en[0]).trim())
+        bullets[0] = String(en[0]).trim();
+    } catch {
+      /* ignore */
+    }
+    if (includedList) {
+      includedList.replaceChildren();
+      for (const b of bullets) {
+        const li = document.createElement("li");
+        li.className = "mpd-membership-checklist__item";
+        li.textContent = b;
+        includedList.appendChild(li);
+      }
+    }
+
+    if (errEl) {
+      errEl.hidden = true;
+      errEl.textContent = "";
+    }
+    if (schedEl) {
+      schedEl.hidden = true;
+      schedEl.textContent = "";
+    }
+
+    if (getDataSource() === "test") {
+      if (exemptNote) exemptNote.hidden = true;
+      if (cancelWrap) cancelWrap.style.display = "";
+      if (rowBilling) rowBilling.style.display = "";
+      if (rowPayment) rowPayment.style.display = "";
+      if (pmUpdate) pmUpdate.style.display = "";
+      setBadgeVariant("ok");
+      if (badgeLabel) badgeLabel.textContent = "Active";
+      if (badgeLine)
+        badgeLine.textContent =
+          "Your membership is active and in good standing. (Test mode — sample data.)";
+      if (planName) planName.textContent = "Application + Subscription";
+      if (planPrice) planPrice.textContent = "$50 every 2 months";
+      if (renewalDate) renewalDate.textContent = "July 12, 2025";
+      if (renewalRel) renewalRel.textContent = "In 28 days";
+      if (pmBrand) pmBrand.textContent = "VISA";
+      if (pmLast4) pmLast4.textContent = "•••• 4242";
+      if (cancelBtn) cancelBtn.disabled = false;
+      return;
+    }
+
+    const snap = await getAuthSnapshot();
+    if (!snap.authenticated) return;
+
+    const acc = await getAccountForCaller();
+    const accObj =
+      acc && typeof acc === "object"
+        ? /** @type {Record<string, unknown>} */ (acc)
+        : null;
+    const exempt = Boolean(
+      accObj?.membershipExemptManual ?? accObj?.membership_exempt_manual,
+    );
+
+    if (rowBilling) rowBilling.style.display = "";
+    if (rowPayment) rowPayment.style.display = "";
+    if (pmUpdate) pmUpdate.style.display = "";
+    if (cancelWrap) cancelWrap.style.display = "";
+    if (exemptNote) exemptNote.hidden = true;
+
+    if (exempt) {
+      if (exemptNote) {
+        exemptNote.hidden = false;
+        exemptNote.textContent =
+          "Your membership is complimentary. Stripe billing and self-service cancellation are not required.";
+      }
+      if (cancelWrap) cancelWrap.style.display = "none";
+      if (rowBilling) rowBilling.style.display = "none";
+      if (rowPayment) rowPayment.style.display = "none";
+      if (pmUpdate) pmUpdate.style.display = "none";
+      setBadgeVariant("ok");
+      if (badgeLabel) badgeLabel.textContent = "Active";
+      if (badgeLine)
+        badgeLine.textContent = "Your membership is active (complimentary).";
+      if (planName) planName.textContent = "Fusion member";
+      if (planPrice) planPrice.textContent = "—";
+      const pe = mpdAccountStringField(
+        accObj,
+        "stripeCurrentPeriodEnd",
+        "stripe_current_period_end",
+      );
+      if (renewalDate)
+        renewalDate.textContent = pe ? mpdFormatLongDate(pe) : "—";
+      if (renewalRel) renewalRel.textContent = pe ? mpdRelativeDaysFromIso(pe) : "";
+      if (pmBrand) pmBrand.textContent = "";
+      if (pmLast4) pmLast4.textContent = "—";
+      return;
+    }
+
+    const principal = snap.principal.toText();
+    const stripeStatus = mpdAccountStringField(
+      accObj,
+      "stripeSubscriptionStatus",
+      "stripe_subscription_status",
+    );
+    const periodCanister = mpdAccountStringField(
+      accObj,
+      "stripeCurrentPeriodEnd",
+      "stripe_current_period_end",
+    );
+
+    const integrationApi = await import("../utils/integrationApi.js");
+    const summary = await integrationApi.fetchMemberBillingSummary(principal);
+
+    /** @type {Record<string, unknown>} */
+    const s = summary && typeof summary === "object" ? summary : {};
+    const ok = Boolean(s.ok);
+    const statusRaw = ok && s.status != null ? String(s.status) : stripeStatus;
+    const periodEnd =
+      ok && typeof s.currentPeriodEnd === "string" && s.currentPeriodEnd.trim()
+        ? String(s.currentPeriodEnd).trim()
+        : periodCanister;
+    const cancelAtEnd = ok && Boolean(s.cancelAtPeriodEnd);
+    const planL =
+      ok && typeof s.planLabel === "string" && s.planLabel.trim()
+        ? String(s.planLabel).trim()
+        : "Application + Subscription";
+    const planP =
+      ok && typeof s.planPriceLine === "string" && s.planPriceLine.trim()
+        ? String(s.planPriceLine).trim()
+        : "—";
+    /** @type {{ brand?: string, last4?: string } | null} */
+    let pm = null;
+    if (ok && s.paymentMethod && typeof s.paymentMethod === "object") {
+      pm = /** @type {{ brand?: string, last4?: string }} */ (s.paymentMethod);
+    }
+
+    if (!ok && s.reason && String(s.reason) !== "no_integration_url") {
+      if (errEl) {
+        errEl.hidden = false;
+        errEl.textContent =
+          "Billing details could not be loaded from the payment service. Showing your Fusion account status; use Refresh subscription status or check Studio → Services.";
+      }
+    }
+
+    const st = String(statusRaw || "").toLowerCase();
+    if (badgeLabel) badgeLabel.textContent = mpdMembershipStatusLabel(statusRaw);
+
+    let lineCopy = "Your membership status could not be determined.";
+    if (st === "active" || st === "trialing") {
+      lineCopy = "Your membership is active and in good standing.";
+      setBadgeVariant("ok");
+    } else if (st === "past_due" || st === "unpaid") {
+      lineCopy =
+        "Payment needs attention — update your card or billing in the portal to stay active.";
+      setBadgeVariant("warn");
+    } else if (st === "canceled" || st === "cancelled") {
+      lineCopy = "This subscription is no longer active.";
+      setBadgeVariant("muted");
+    } else if (!st) {
+      lineCopy =
+        "No Stripe subscription is linked yet. If you recently paid, use Refresh subscription status or complete Join.";
+      setBadgeVariant("muted");
+    } else {
+      setBadgeVariant("muted");
+    }
+    if (badgeLine) badgeLine.textContent = lineCopy;
+
+    if (planName) planName.textContent = planL;
+    if (planPrice) planPrice.textContent = planP;
+
+    if (renewalDate)
+      renewalDate.textContent = periodEnd ? mpdFormatLongDate(periodEnd) : "—";
+    if (renewalRel)
+      renewalRel.textContent = periodEnd ? mpdRelativeDaysFromIso(periodEnd) : "";
+
+    if (pmBrand) {
+      const br = pm?.brand ? String(pm.brand).toUpperCase() : "";
+      pmBrand.textContent = br;
+    }
+    if (pmLast4) {
+      const l4 = pm?.last4 ? String(pm.last4) : "";
+      pmLast4.textContent = l4 ? `•••• ${l4}` : "—";
+    }
+
+    if (schedEl && cancelAtEnd && periodEnd) {
+      schedEl.hidden = false;
+      schedEl.textContent = `Cancellation scheduled — access continues until ${mpdFormatLongDate(periodEnd)}.`;
+    }
+
+    if (cancelBtn) {
+      const hasSub =
+        Boolean(st) ||
+        (ok && typeof s.subscriptionId === "string" && s.subscriptionId.trim());
+      const dis =
+        cancelAtEnd ||
+        st === "canceled" ||
+        st === "cancelled" ||
+        !hasSub;
+      cancelBtn.disabled = Boolean(dis);
+    }
+  };
+
   const validMpdPanels = () => {
     /** @type {string[]} */
-    const keys = ["overview", "location", "story", "links", "programs"];
+    const keys = ["overview", "location", "story", "links", "programs", "membership"];
     if (DEV_MODE) keys.push("dev");
     return keys;
   };
@@ -769,6 +1667,16 @@ export default function initSettingsProfile() {
   /**
    * @param {string} key
    */
+  const applyMpdPanelChrome = (panelKey) => {
+    const shoutEl = document.getElementById("settingsProfileShout");
+    const hintEl = document.getElementById("settingsProfileHint");
+    const allowed = new Set(validMpdPanels());
+    const k = allowed.has(panelKey) ? panelKey : "overview";
+    const c = MPD_PANEL_CHROME[k] ?? MPD_PANEL_CHROME.overview;
+    if (shoutEl) shoutEl.innerHTML = c.shoutHtml;
+    if (hintEl) hintEl.textContent = c.hint;
+  };
+
   const showMpdPanel = (key) => {
     const allowed = new Set(validMpdPanels());
     const k = allowed.has(key) ? key : "overview";
@@ -781,7 +1689,9 @@ export default function initSettingsProfile() {
       const id = b.getAttribute("data-mpd-panel");
       if (id) b.classList.toggle("is-active", id === k);
     });
+    applyMpdPanelChrome(k);
     closeSettingsProfileMobileNav();
+    if (k === "membership") void hydrateMembershipPanel();
     try {
       if (
         typeof history !== "undefined" &&
@@ -813,6 +1723,7 @@ export default function initSettingsProfile() {
       "mpd-links": "links",
       "mpd-seo": "overview",
       "mpd-programs": "programs",
+      "mpd-membership": "membership",
       "mpd-dev": "dev",
     };
     h = legacy[h] || h;
@@ -827,6 +1738,10 @@ export default function initSettingsProfile() {
       merged,
       activeLocale,
       getVal("mpd_hero_url").trim(),
+      (getVal("mpd_profile_visibility").trim() || "public").toLowerCase() ===
+        "private"
+        ? "private"
+        : "public",
     );
     return cur !== baselineSnapshot;
   };
@@ -835,7 +1750,12 @@ export default function initSettingsProfile() {
     if (!localesState) return;
     const merged = readLocalesFromDom(localesState, activeLocale, getVal);
     heroImageUrl = getVal("mpd_hero_url").trim();
-    baselineSnapshot = snapshotState(merged, activeLocale, heroImageUrl);
+    const vis =
+      (getVal("mpd_profile_visibility").trim() || "public").toLowerCase() ===
+      "private"
+        ? "private"
+        : "public";
+    baselineSnapshot = snapshotState(merged, activeLocale, heroImageUrl, vis);
   };
 
   const saveProfileFromDom = async () => {
@@ -859,6 +1779,11 @@ export default function initSettingsProfile() {
       const heroUrl = getVal("mpd_hero_url").trim();
       await updateMyArtistLocalesJson(JSON.stringify(merged), ts);
       await updateMyArtistProfilePatch(heroUrl, ts);
+      const visRaw = (getVal("mpd_profile_visibility").trim() || "public").toLowerCase();
+      await updateMyArtistVisibility(
+        visRaw === "private" ? "private" : "public",
+        ts,
+      );
       heroImageUrl = heroUrl;
       const en = merged.en && typeof merged.en === "object" ? merged.en : {};
       const prefSlug = publicSlugFromEnglishFirstLast(
@@ -886,7 +1811,7 @@ export default function initSettingsProfile() {
       refreshBaseline();
       if (!slugSaveFailed) {
         posthog.capture("profile_settings_saved");
-        setStatus("Saved.");
+        await runMemberWorldGenerationAfterSave();
       }
     } catch (e) {
       setStatus(e instanceof Error ? e.message : String(e));
@@ -947,6 +1872,14 @@ export default function initSettingsProfile() {
         void saveProfileFromDom();
         return;
       }
+      const genWorldBtn = /** @type {Element | null} */ (
+        e.target && /** @type {Element} */ (e.target).closest?.("#mpd_gen_world_btn")
+      );
+      if (genWorldBtn && rootEl.contains(genWorldBtn)) {
+        e.preventDefault();
+        void runMemberWorldFromToolbar();
+        return;
+      }
       const t = e.target;
       if (t && "id" in t && t.id === "mpd_apply_residency") {
         e.preventDefault();
@@ -970,6 +1903,13 @@ export default function initSettingsProfile() {
       if (!(t instanceof HTMLInputElement)) return;
       if (t.id === "mpd_hero_file" && t.files?.[0]) {
         const f = t.files[0];
+        try {
+          assertMpdImageSizeOk(f);
+        } catch (err) {
+          setStatus(err instanceof Error ? err.message : String(err));
+          t.value = "";
+          return;
+        }
         setHeroSpinnerVisible(true);
         try {
           setStatus("Uploading hero…");
@@ -991,6 +1931,13 @@ export default function initSettingsProfile() {
       if (slot != null && t.files?.[0]) {
         const i = Number(slot);
         const f = t.files[0];
+        try {
+          assertMpdImageSizeOk(f);
+        } catch (err) {
+          setStatus(err instanceof Error ? err.message : String(err));
+          t.value = "";
+          return;
+        }
         setIntroSpinnerVisible(i, true);
         try {
           setStatus("Uploading…");
@@ -1111,10 +2058,62 @@ export default function initSettingsProfile() {
           const { sendEmail } = await import("../utils/integrationApi.js");
           const { DEFAULT_APPLICATION_STAFF_EMAIL } =
             await import("../utils/studioServicesConfig.js");
+          const snap = await getAuthSnapshot();
+          const fn = getVal("mpd_first_name").trim();
+          const ln = getVal("mpd_last_name").trim();
+          let displayName = [fn, ln].filter(Boolean).join(" ").trim();
+          if (!displayName && localesState) {
+            const en = localeBlock(
+              /** @type {Record<string, unknown>} */ (localesState),
+              "en",
+            );
+            displayName = String(en.name ?? "").trim();
+          }
+          let emailLine = "n/a";
+          try {
+            const acc = await getAccountForCaller();
+            if (acc && typeof acc === "object") {
+              const raw =
+                /** @type {Record<string, unknown>} */ (acc).email ??
+                /** @type {Record<string, unknown>} */ (acc).emailAddress;
+              if (raw != null && String(raw).trim())
+                emailLine = String(raw).trim();
+            }
+          } catch {
+            /* ignore */
+          }
+          if (emailLine === "n/a") {
+            const draft = getProfileSetupDraft();
+            if (draft.email && String(draft.email).trim())
+              emailLine = String(draft.email).trim();
+          }
+          const principalText =
+            snap.authenticated && snap.principal
+              ? snap.principal.toText()
+              : "n/a";
+          const tail =
+            principalText.length > 6
+              ? principalText.slice(-6)
+              : principalText;
+          const origin =
+            typeof window !== "undefined" ? window.location.origin : "";
+          const slug = profileSlug || "";
+          const profileUrl =
+            slug && origin ? `${origin}/profile/${encodeURIComponent(slug)}` : "n/a";
+          const header = [
+            `Name: ${displayName || "n/a"}`,
+            `Email: ${emailLine}`,
+            `Principal: ${principalText}`,
+            `Profile: ${profileUrl}`,
+            "",
+          ].join("\n");
+          const subjName = displayName
+            ? displayName.slice(0, 48)
+            : `…${tail}`;
           await sendEmail({
             to: DEFAULT_APPLICATION_STAFF_EMAIL,
-            subject: "[Fusion Profile settings] Message",
-            text: text,
+            subject: `[Fusion Profile settings] Message — ${subjName}`,
+            text: `${header}${text}`,
           });
           if (statusEl)
             statusEl.textContent = "Sent. We will get back to you soon.";
@@ -1128,6 +2127,14 @@ export default function initSettingsProfile() {
 
   const load = async () => {
     setStatus("");
+    const membershipActionsEl = document.getElementById(
+      "settingsProfileMembershipActions",
+    );
+    if (membershipActionsEl) {
+      membershipActionsEl.style.display = "none";
+      membershipActionsEl.setAttribute("hidden", "");
+    }
+
     const snap = await getAuthSnapshot();
     const isTest = getDataSource() === "test";
 
@@ -1160,14 +2167,15 @@ export default function initSettingsProfile() {
     }
 
     const acc = await getAccountForCaller();
-    const dashTitle = dashboardTitleFromAccount(acc);
+    const accForUi = await getEffectiveAccountForSettingsUi(acc);
+    const dashTitle = dashboardTitleFromAccount(accForUi);
     const headingEl = document.getElementById("settingsProfileHeading");
     const sideRoleEl = document.getElementById("settingsProfileSidebarRole");
     const avatarEl = document.getElementById("settingsProfileAvatar");
     if (headingEl) headingEl.textContent = dashTitle;
-    if (sideRoleEl) sideRoleEl.textContent = sidebarRoleLabel(acc);
+    if (sideRoleEl) sideRoleEl.textContent = sidebarRoleLabel(accForUi);
     if (avatarEl) {
-      const lab = sidebarRoleLabel(acc);
+      const lab = sidebarRoleLabel(accForUi);
       avatarEl.textContent = lab ? lab.charAt(0).toUpperCase() : "U";
     }
 
@@ -1203,7 +2211,11 @@ export default function initSettingsProfile() {
         if (!recSub) {
           if (hint) {
             hint.textContent =
-              "An active membership is required to create your public profile. Use Join in the header to subscribe, then come back here to finish your profile.";
+              "Your account does not show an active membership yet. If you already paid, finish linking your payment to this Internet Identity login (Join), or refresh status from Stripe.";
+          }
+          if (membershipActionsEl) {
+            membershipActionsEl.style.display = "flex";
+            membershipActionsEl.removeAttribute("hidden");
           }
           if (formWrap) formWrap.setAttribute("hidden", "");
           applySettingsProfileDocumentSeo(dashTitle);
@@ -1262,9 +2274,17 @@ export default function initSettingsProfile() {
       }
     }
 
+    mergeLatestApplicationPayloadIntoLocales(
+      /** @type {Record<string, unknown>} */ (localesState),
+      rec.applied_json ?? rec.appliedJson,
+    );
+
     heroImageUrl = String(p.image ?? "");
     setVal("mpd_hero_url", heroImageUrl);
     updateHeroPreview();
+
+    const visRaw = String(p.visibility ?? "public").trim().toLowerCase();
+    setVal("mpd_profile_visibility", visRaw === "private" ? "private" : "public");
 
     const vu = document.getElementById("mpd_view_profile");
     if (vu && vu instanceof HTMLAnchorElement)
@@ -1273,10 +2293,6 @@ export default function initSettingsProfile() {
     const side = document.getElementById("mpd_sidebar_slug");
     if (side) side.textContent = profileSlug ? `/${profileSlug}` : "—";
 
-    if (hint) {
-      hint.textContent =
-        "Shape how you appear on the public site. Save each section as you go.";
-    }
     if (formWrap) formWrap.removeAttribute("hidden");
 
     const pill = document.getElementById("mpd_datasource_pill");
@@ -1305,6 +2321,7 @@ export default function initSettingsProfile() {
       /** @type {Record<string, unknown>} */ (localesState),
       activeLocale,
     );
+    void hydratePublicProgramDiscoveryCards();
     void syncResidencyApplyCta();
 
     showMpdPanel(panelKeyFromHash());
@@ -1338,6 +2355,7 @@ export default function initSettingsProfile() {
         const r = await getMyArtistRecord();
         if (r && localesState)
           await hydrateProgramsPanel(r, localesState, activeLocale);
+        await hydratePublicProgramDiscoveryCards();
         await syncResidencyApplyCta();
       })();
     });
@@ -1363,6 +2381,7 @@ export default function initSettingsProfile() {
         const r = await getMyArtistRecord();
         if (r && localesState)
           await hydrateProgramsPanel(r, localesState, activeLocale);
+        await hydratePublicProgramDiscoveryCards();
         await syncResidencyApplyCta();
       })();
       setStatus("Intro images copied from English to Japanese.");
@@ -1370,6 +2389,78 @@ export default function initSettingsProfile() {
 
   window.addEventListener("hashchange", () => {
     showMpdPanel(panelKeyFromHash());
+  });
+
+  document
+    .getElementById("settingsProfileFinishMembership")
+    ?.addEventListener("click", () => {
+      window.dispatchEvent(new CustomEvent("fusion-open-join-network", { detail: {} }));
+    });
+  document
+    .getElementById("settingsProfileSyncSubscription")
+    ?.addEventListener("click", async () => {
+      const snap = await getAuthSnapshot();
+      if (!snap.authenticated) return;
+      setStatus("Refreshing subscription status…");
+      try {
+        const { syncSubscriptionFromStripe } = await import("../utils/integrationApi.js");
+        await syncSubscriptionFromStripe(snap.principal.toText());
+        await ensureMyLinkedArtistProfile();
+        setStatus("Done. Loading profile…");
+      } catch (e) {
+        setStatus(e instanceof Error ? e.message : String(e));
+        return;
+      }
+      void load();
+    });
+
+  const openMpdBillingPortal = async () => {
+    const snap = await getAuthSnapshot();
+    if (!snap.authenticated) return;
+    setStatus("Opening billing portal…");
+    try {
+      const { createBillingPortalSession } = await import("../utils/integrationApi.js");
+      const href =
+        typeof window !== "undefined" && window.location?.href
+          ? window.location.href
+          : "https://fusionart.world/settings/profile";
+      const { url } = await createBillingPortalSession(snap.principal.toText(), href);
+      window.location.assign(url);
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  document.getElementById("mpd_membership_row_billing")?.addEventListener("click", () => {
+    void openMpdBillingPortal();
+  });
+  document.getElementById("mpd_membership_row_payment")?.addEventListener("click", () => {
+    void openMpdBillingPortal();
+  });
+  document.getElementById("mpd_membership_pm_update")?.addEventListener("click", () => {
+    void openMpdBillingPortal();
+  });
+  document.getElementById("mpd_membership_cancel_btn")?.addEventListener("click", () => {
+    openMpdMembershipCancelModal();
+  });
+  document.getElementById("mpdMembershipCancelStay")?.addEventListener("click", () => {
+    closeMpdMembershipCancelModal();
+  });
+  document.getElementById("mpdMembershipCancelContinue")?.addEventListener("click", async () => {
+    const snap = await getAuthSnapshot();
+    if (!snap.authenticated) return;
+    closeMpdMembershipCancelModal();
+    setStatus("Scheduling cancellation…");
+    try {
+      const { cancelSubscriptionAtPeriodEnd, syncSubscriptionFromStripe } =
+        await import("../utils/integrationApi.js");
+      await cancelSubscriptionAtPeriodEnd(snap.principal.toText());
+      await syncSubscriptionFromStripe(snap.principal.toText());
+      setStatus("Cancellation scheduled for the end of your billing period.");
+      await hydrateMembershipPanel();
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : String(e));
+    }
   });
 
   const onBeforeUnload = (e) => {
@@ -1386,6 +2477,7 @@ export default function initSettingsProfile() {
 
   void load();
   window.addEventListener("fusion-auth-change", () => void load());
+  window.addEventListener("fusion-admin-perspective-change", () => void load());
   window.addEventListener("fusion-data-source-change", () => void load());
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") void load();

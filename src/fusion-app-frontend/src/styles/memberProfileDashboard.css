@@ -267,6 +267,14 @@
   margin-bottom: 1rem;
 }
 
+.settings-profile-page .mpd-membership-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 1rem;
+}
+
 .settings-profile-page .mpd-identity-h2 {
   margin: 1.5rem 0 0.35rem;
   font-size: 0.95rem;
@@ -474,5 +482,522 @@
 
 .settings-profile-page .mpd-programs-empty {
   margin: 0;
+}
+
+.settings-profile-page .mpd-story-world-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.settings-profile-page .mpd-story-world-overwrite-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.88rem;
+  font-variation-settings: var(--fv-body);
+  color: var(--c2, #0f172a);
+  cursor: pointer;
+  user-select: none;
+}
+
+.settings-profile-page .mpd-public-programs-discovery {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.settings-profile-page .mpd-public-programs-discovery__h {
+  margin: 0 0 0.35rem;
+  font-size: 1.05rem;
+  font-variation-settings: var(--fv-subtitle);
+  color: var(--c2, #0f172a);
+}
+
+.settings-profile-page .mpd-public-programs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.settings-profile-page .mpd-public-program-card.mpd-program-card {
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+.settings-profile-page .mpd-public-program-card__link {
+  display: block;
+  padding: 1rem 1.1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fafafa;
+  color: var(--c2, #0f172a);
+  text-decoration: none;
+  font-variation-settings: var(--fv-subtitle);
+  font-size: 0.95rem;
+  line-height: 1.35;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.settings-profile-page .mpd-public-program-card__link:hover {
+  background: #fff;
+  border-color: color-mix(in srgb, var(--c2, #0f172a) 28%, #e2e8f0);
+}
+
+/* Explore programs — home-like cards (image + focus + title + dates) */
+.settings-profile-page .mpd-public-program-card--rich {
+  padding: 0;
+  background: transparent;
+  border: none;
+  overflow: hidden;
+}
+
+.settings-profile-page .mpd-public-program-card__link-rich {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fafafa;
+  color: var(--c2, #0f172a);
+  text-decoration: none;
+  overflow: hidden;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.settings-profile-page .mpd-public-program-card__link-rich:hover {
+  background: #fff;
+  border-color: color-mix(in srgb, var(--c2, #0f172a) 28%, #e2e8f0);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+}
+
+.settings-profile-page .mpd-public-program-card__link-rich:hover .mpd-public-program-card__title {
+  text-decoration: underline;
+}
+
+.settings-profile-page .mpd-public-program-card__image-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  overflow: hidden;
+  background: #e2e8f0;
+}
+
+.settings-profile-page .mpd-public-program-card__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.settings-profile-page .mpd-public-program-card__placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-variation-settings: var(--fv-subtitle);
+  font-size: 1rem;
+  color: #64748b;
+  background: linear-gradient(145deg, #f1f5f9, #e2e8f0);
+}
+
+.settings-profile-page .mpd-public-program-card__focus {
+  position: absolute;
+  top: 4%;
+  right: 0;
+  z-index: 2;
+  max-width: 72%;
+  min-height: 2rem;
+  padding: 0.35rem 0.65rem 0.35rem 0.5rem;
+  font-size: 0.8rem;
+  font-variation-settings: var(--fv-body-wide);
+  letter-spacing: 0.06em;
+  color: var(--c3, #faf3f4);
+  background-color: var(--c2, #0f172a);
+  line-height: 1.25;
+}
+
+.settings-profile-page .mpd-public-program-card__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.85rem 1rem 1rem;
+  min-height: 0;
+}
+
+.settings-profile-page .mpd-public-program-card__title {
+  font-size: clamp(1.05rem, 2.5vw, 1.35rem);
+  font-variation-settings: var(--fv-emphasis);
+  color: var(--c2, #0f172a);
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+}
+
+.settings-profile-page .mpd-public-program-card__dates {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.65rem;
+  font-size: 0.82rem;
+  font-variation-settings: var(--fv-body);
+  color: var(--c2, #0f172a);
+  opacity: 0.9;
+}
+
+.settings-profile-page .mpd-public-program-card__year {
+  font-variation-settings: var(--fv-label);
+  opacity: 0.85;
+}
+
+/* —— Membership panel —— */
+.settings-profile-page .mpd-membership-inline-error {
+  margin: 0.75rem 0 0;
+  padding: 0.65rem 0.85rem;
+  border-radius: 6px;
+  background: #fef2f2;
+  color: #991b1b;
+  font-size: 0.9rem;
+}
+
+.settings-profile-page .mpd-membership-scheduled-cancel {
+  margin: 0.75rem 0 0;
+  padding: 0.65rem 0.85rem;
+  border-radius: 6px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 0.9rem;
+}
+
+.settings-profile-page .mpd-membership-status-card {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr 1fr;
+  gap: 1rem 1.25rem;
+  margin-top: 1.25rem;
+  padding: 1.15rem 1.25rem;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--studio-card-radius, 8px);
+  background: #fff;
+  align-items: start;
+}
+
+@media (max-width: 960px) {
+  .settings-profile-page .mpd-membership-status-card {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .settings-profile-page .mpd-membership-status-card {
+    grid-template-columns: 1fr;
+  }
+}
+
+.settings-profile-page .mpd-membership-k {
+  display: block;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-variation-settings: var(--fv-label);
+  color: #64748b;
+  margin-bottom: 0.25rem;
+}
+
+.settings-profile-page .mpd-membership-status-col--badge {
+  min-width: 0;
+}
+
+.settings-profile-page .mpd-membership-badge {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+
+.settings-profile-page .mpd-membership-badge__icon {
+  flex-shrink: 0;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.settings-profile-page .mpd-membership-badge--ok .mpd-membership-badge__icon {
+  background: #16a34a;
+  color: #fff;
+}
+
+.settings-profile-page .mpd-membership-badge--ok .mpd-membership-badge__icon::before {
+  content: '♔';
+}
+
+.settings-profile-page .mpd-membership-badge--warn .mpd-membership-badge__icon {
+  background: #d97706;
+  color: #fff;
+}
+
+.settings-profile-page .mpd-membership-badge--warn .mpd-membership-badge__icon::before {
+  content: '!';
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.settings-profile-page .mpd-membership-badge--muted .mpd-membership-badge__icon {
+  background: #94a3b8;
+  color: #fff;
+}
+
+.settings-profile-page .mpd-membership-badge--muted .mpd-membership-badge__icon::before {
+  content: '—';
+  font-size: 0.85rem;
+}
+
+.settings-profile-page .mpd-membership-badge__text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.settings-profile-page .mpd-membership-badge__text strong {
+  font-variation-settings: var(--fv-emphasis);
+}
+
+.settings-profile-page .mpd-membership-badge--ok .mpd-membership-badge__text strong {
+  color: #15803d;
+}
+
+.settings-profile-page .mpd-membership-pm-line {
+  display: block;
+  font-variation-settings: var(--fv-body);
+}
+
+.settings-profile-page .mpd-membership-pm-brand {
+  font-variation-settings: var(--fv-label);
+  margin-right: 0.35rem;
+}
+
+.settings-profile-page .mpd-membership-text-link {
+  margin-top: 0.35rem;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--c2, #0f172a);
+  text-decoration: underline;
+  cursor: pointer;
+  font-variation-settings: var(--fv-subtitle);
+}
+
+.settings-profile-page .mpd-membership-text-link:hover {
+  opacity: 0.85;
+}
+
+.settings-profile-page .mpd-membership-subh {
+  margin: 0 0 0.65rem;
+  font-size: 1rem;
+  font-variation-settings: var(--fv-emphasis);
+}
+
+.settings-profile-page .mpd-membership-included {
+  margin-top: 1.75rem;
+}
+
+.settings-profile-page .mpd-membership-checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1.5rem;
+}
+
+.settings-profile-page .mpd-membership-checklist__item {
+  position: relative;
+  padding-left: 1.5rem;
+  font-size: 0.95rem;
+}
+
+.settings-profile-page .mpd-membership-checklist__item::before {
+  content: '✓';
+  position: absolute;
+  left: 0;
+  top: 0.1rem;
+  color: #16a34a;
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.settings-profile-page .mpd-membership-manage-grid {
+  display: grid;
+  grid-template-columns: 1fr minmax(240px, 320px);
+  gap: 1.25rem;
+  margin-top: 1.75rem;
+  align-items: start;
+}
+
+@media (max-width: 768px) {
+  .settings-profile-page .mpd-membership-manage-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.settings-profile-page .mpd-membership-actions-card {
+  border: 1px solid #e2e8f0;
+  border-radius: var(--studio-card-radius, 8px);
+  background: #fff;
+  overflow: hidden;
+}
+
+.settings-profile-page .mpd-membership-action-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 1rem 1rem;
+  border: none;
+  border-bottom: 1px solid #e2e8f0;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.settings-profile-page .mpd-membership-action-row:last-child {
+  border-bottom: none;
+}
+
+.settings-profile-page .mpd-membership-action-row:hover {
+  background: #f8fafc;
+}
+
+.settings-profile-page .mpd-membership-action-row__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.settings-profile-page .mpd-membership-action-row__main strong {
+  font-variation-settings: var(--fv-emphasis);
+}
+
+.settings-profile-page .mpd-membership-action-row__icon {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 6px;
+  background: #f1f5f9;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.settings-profile-page .mpd-membership-action-row__icon::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 0.85rem;
+  height: 0.85rem;
+  border: 2px solid #64748b;
+  border-radius: 3px;
+}
+
+.settings-profile-page .mpd-membership-action-row__icon--card::before {
+  width: 1rem;
+  height: 0.7rem;
+  border-radius: 2px;
+}
+
+.settings-profile-page .mpd-membership-action-row__chev::before {
+  content: '›';
+  font-size: 1.35rem;
+  line-height: 1;
+  color: #94a3b8;
+}
+
+.settings-profile-page .mpd-membership-cancel-card {
+  border: 1px solid #e2e8f0;
+  border-radius: var(--studio-card-radius, 8px);
+  background: #fff;
+  padding: 1rem 1.1rem;
+}
+
+.settings-profile-page .mpd-membership-cancel-outline {
+  margin-top: 0.75rem;
+  width: 100%;
+  padding: 0.55rem 0.85rem;
+  border-radius: 6px;
+  border: 1px solid #dc2626;
+  background: transparent;
+  color: #b91c1c;
+  font: inherit;
+  font-variation-settings: var(--fv-subtitle);
+  cursor: pointer;
+}
+
+.settings-profile-page .mpd-membership-cancel-outline:hover:not(:disabled) {
+  background: #fef2f2;
+}
+
+.settings-profile-page .mpd-membership-cancel-outline:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.settings-profile-page .mpd-membership-exempt-note {
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  background: #f0fdf4;
+  color: #166534;
+  font-size: 0.92rem;
+}
+
+.settings-profile-page .mpd-membership-footer-hint {
+  margin: 1.75rem 0 0;
+  text-align: center;
+  font-size: 0.82rem;
+}
+
+.settings-profile-page .mpd-membership-cancel-modal .mpd-membership-cancel-modal__panel {
+  max-width: 28rem;
+}
+
+.settings-profile-page .mpd-membership-cancel-modal__body p {
+  margin: 0 0 0.85rem;
+  line-height: 1.5;
+}
+
+.settings-profile-page .mpd-membership-cancel-modal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+
+.settings-profile-page .mpd-membership-cancel-modal__actions .studio-btn-primary {
+  flex: 1;
+  min-width: 10rem;
+}
+
+.settings-profile-page .mpd-membership-cancel-modal .mpd-membership-cancel-outline {
+  width: auto;
+  flex: 1;
+  min-width: 10rem;
 }
 

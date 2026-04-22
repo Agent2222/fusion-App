@@ -11,6 +11,7 @@ import {
 } from '../../utils/artistSlug.js';
 import { applyArtistCardImage } from '../../utils/artistCardPlaceholder.js';
 import { getCurrentProgramSeason } from '../../utils/database.js';
+import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
 
 function escapeHtml(s) {
     return String(s)
@@ -94,7 +95,7 @@ class FeaturedArtistComponent extends HTMLElement {
             card.innerHTML = `
                 <div class="artist-card-image">
                     <div class="residency-badge" hidden></div>
-                    <img alt="${escapeHtml(artistName)}" loading="lazy" decoding="async">
+                    <img alt="${escapeHtml(withSeoImageAlt(artistName))}" loading="lazy" decoding="async">
                 </div>
                 <div class="artist-card-content">
                     <div class="artist-card-title">${escapeHtml(artistName)}</div>

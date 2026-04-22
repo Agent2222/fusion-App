@@ -1,5 +1,7 @@
 import { navigate } from '../../router.js';
 import { firstNonEmptyString, mergeLocaleDeep } from '../../utils/localeFallback.js';
+import { escapeHtml } from '../../utils/textPreview.js';
+import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
 
 // Compact program card block, modeled after program-hero.
 class ProgramBlockComponent extends HTMLElement {
@@ -376,7 +378,7 @@ class ProgramBlockComponent extends HTMLElement {
             </style>
             <div class="program-block ${layout}">
                 <div class="image-wrap">
-                    <img src="${imageSrc}" alt="${imageAlt}">
+                    <img src="${imageSrc}" alt="${escapeHtml(withSeoImageAlt(imageAlt))}">
                 </div>
                 <div class="content">
                     <div class="content-inner">

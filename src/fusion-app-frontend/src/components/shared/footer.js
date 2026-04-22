@@ -1,6 +1,7 @@
 // Footer Custom Element Component
 import gsap from 'gsap';
 import SymbolLogo from '../../assets/Fusion-X-SymbolLogo.png';
+import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
 
 /** Pixels from bottom to treat as "at bottom" (0 = flush with scroll end; avoids early reveal on mobile). */
 const BOTTOM_THRESHOLD_PX = 0;
@@ -491,7 +492,7 @@ class FooterComponent extends HTMLElement {
             </style>
             <footer>
                 <div id="footerLogo">
-                    <img id="footerSymbolLogo" src="${SymbolLogo}" alt="Logo">
+                    <img id="footerSymbolLogo" src="${SymbolLogo}" alt="${withSeoImageAlt('Fusion logo')}">
                 </div>
                 <div id="footerContent">
                     <div id="footerc1" class="fcColumn">

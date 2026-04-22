@@ -75,8 +75,64 @@ export async function fetchIntegrationHealth() {
 /** Set while pay-first join awaits Internet Identity after Stripe (`icAuth.runPostLoginPipeline` guard). */
 export const FUSION_PENDING_MEMBERSHIP_LINK_KEY = 'fusion-pending-membership-link';
 
+/** Pay-first: persisted until II link succeeds or a new checkout replaces it (`sessionStorage`). */
+export const FUSION_PENDING_MEMBERSHIP_PAYLOAD_KEY = 'fusion-pending-membership-payload';
+
 /** Pay-first program application: subscription ids + email for linking after II signup (JSON). */
 export const FUSION_PENDING_APPLICATION_SUB_KEY = 'fusion-pending-application-subscription';
+
+/**
+ * Persist pay-first link ids so refresh before Internet Identity does not strand the user.
+ *
+ * @param {{ fusionPendingId: string, email: string, subscriptionId?: string | null, paymentCompleted?: boolean }} p
+ */
+export function savePendingMembershipPayload(p) {
+    try {
+        const o = {
+            fusionPendingId: String(p.fusionPendingId || '').trim(),
+            email: String(p.email || '').trim(),
+            subscriptionId: p.subscriptionId ? String(p.subscriptionId).trim() : '',
+            paymentCompleted: Boolean(p.paymentCompleted),
+        };
+        if (!o.fusionPendingId) return;
+        sessionStorage.setItem(FUSION_PENDING_MEMBERSHIP_PAYLOAD_KEY, JSON.stringify(o));
+    } catch {
+        /* quota / private mode */
+    }
+}
+
+/** @returns {{ fusionPendingId: string, email: string, subscriptionId: string | null, paymentCompleted: boolean } | null} */
+export function readPendingMembershipPayload() {
+    try {
+        const raw = sessionStorage.getItem(FUSION_PENDING_MEMBERSHIP_PAYLOAD_KEY);
+        if (!raw) return null;
+        const o = JSON.parse(raw);
+        if (!o || typeof o.fusionPendingId !== 'string' || !o.fusionPendingId.trim()) return null;
+        return {
+            fusionPendingId: o.fusionPendingId.trim(),
+            email: typeof o.email === 'string' ? o.email : '',
+            subscriptionId: o.subscriptionId ? String(o.subscriptionId).trim() : null,
+            paymentCompleted: Boolean(o.paymentCompleted),
+        };
+    } catch {
+        return null;
+    }
+}
+
+export function clearPendingMembershipPayload() {
+    try {
+        sessionStorage.removeItem(FUSION_PENDING_MEMBERSHIP_PAYLOAD_KEY);
+    } catch {
+        /* ignore */
+    }
+}
+
+/** Call after card payment succeeds, before the link-account stage. */
+export function markPendingMembershipPaymentCompleted() {
+    const cur = readPendingMembershipPayload();
+    if (!cur) return;
+    savePendingMembershipPayload({ ...cur, paymentCompleted: true });
+}
 
 /**
  * Create a Stripe Subscription (bi-monthly Price) and return the first invoice PaymentIntent client secret.
@@ -207,6 +263,91 @@ export async function syncSubscriptionFromStripe(principalText) {
         console.warn('[Fusion] sync-subscription failed:', e);
         return undefined;
     }
+}
+
+/**
+ * @param {string} principalText
+ * @param {string} returnUrl Absolute URL (e.g. window.location.href)
+ * @returns {Promise<{ url: string }>}
+ */
+export async function createBillingPortalSession(principalText, returnUrl) {
+    if (typeof principalText !== 'string' || !principalText.trim()) {
+        throw new Error('principal required');
+    }
+    if (typeof returnUrl !== 'string' || !returnUrl.startsWith('http')) {
+        throw new Error('return URL required');
+    }
+    const base = getIntegrationBaseUrl();
+    if (!base) {
+        throw new Error('Integration API URL not configured.');
+    }
+    const res = await fetch(`${base}/stripe/billing-portal-session`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify({ principal: principalText.trim(), returnUrl: returnUrl.trim() }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        const raw = typeof err.error === 'string' ? err.error : '';
+        throw new Error(mapIntegrationUserMessage(raw || `Billing portal HTTP ${res.status}`, res.status));
+    }
+    const data = await res.json();
+    if (!data.url) throw new Error('Invalid billing portal response');
+    return data;
+}
+
+/**
+ * @param {string} principalText
+ * @returns {Promise<Record<string, unknown>>}
+ */
+export async function fetchMemberBillingSummary(principalText) {
+    if (typeof principalText !== 'string' || !principalText.trim()) {
+        return { ok: false, reason: 'invalid_principal' };
+    }
+    const base = getIntegrationBaseUrl();
+    if (!base) {
+        return { ok: false, reason: 'no_integration_url' };
+    }
+    try {
+        const res = await fetch(`${base}/stripe/member-billing-summary`, {
+            method: 'POST',
+            headers: integrationHeadersJson(),
+            body: JSON.stringify({ principal: principalText.trim() }),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            const raw = typeof err.error === 'string' ? err.error : `HTTP ${res.status}`;
+            return { ok: false, reason: raw };
+        }
+        return await res.json();
+    } catch (e) {
+        return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+    }
+}
+
+/**
+ * @param {string} principalText
+ * @returns {Promise<{ ok: boolean, cancelAtPeriodEnd?: boolean, subscriptionId?: string }>}
+ */
+export async function cancelSubscriptionAtPeriodEnd(principalText) {
+    if (typeof principalText !== 'string' || !principalText.trim()) {
+        throw new Error('principal required');
+    }
+    const base = getIntegrationBaseUrl();
+    if (!base) {
+        throw new Error('Integration API URL not configured.');
+    }
+    const res = await fetch(`${base}/stripe/cancel-subscription-at-period-end`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify({ principal: principalText.trim() }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        const raw = typeof err.error === 'string' ? err.error : '';
+        throw new Error(mapIntegrationUserMessage(raw || `Cancel subscription HTTP ${res.status}`, res.status));
+    }
+    return res.json();
 }
 
 /**

@@ -1,5 +1,7 @@
 import { navigate } from '../../router.js';
 import { firstNonEmptyString, mergeLocaleDeep } from '../../utils/localeFallback.js';
+import { escapeHtml } from '../../utils/textPreview.js';
+import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
 
 // Placeholder — structure, content, and styles TBD
 class ComingUpComponent extends HTMLElement {
@@ -86,7 +88,7 @@ class ComingUpComponent extends HTMLElement {
             cardEl.innerHTML = `
                 <div class="program-card-image">
                     <div class="programFocus">${focus}</div>
-                    <img src="${imageSrc}" alt="${imageAlt}">
+                    <img src="${imageSrc}" alt="${escapeHtml(withSeoImageAlt(imageAlt))}">
                 </div>
                 <div class="program-card-content">
                     <div class="program-card-title">${location}</div>

@@ -3,6 +3,14 @@ import { navigate, activateDeactivate } from '../../router.js';
 import gsap from 'gsap';
 import SymbolLogo from '../../assets/Fusion-X-SymbolLogo.png';
 import HeaderWideLogo from '../../assets/Fusion-X-logo-02.png';
+import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
+import {
+    getAdminPerspective,
+    getPerspectiveButtonShortLabel,
+    getPerspectiveAriaLabel,
+    cycleAdminPerspective,
+    buildEffectiveAccountForPerspective,
+} from '../../utils/adminPerspective.js';
 
 const MENU_IDLE_MS = 2000;
 const SCROLL_DELTA_PX = 4;
@@ -50,8 +58,12 @@ class HeaderComponent extends HTMLElement {
          * @type {{ kind: 'guest' } | { kind: 'admin' } | { kind: 'staff' } | { kind: 'needsRegistration' } | { kind: 'member', profileHref: string, pending: boolean, needsProfileCompletion?: boolean }}
          */
         this._authUi = { kind: 'guest' };
+        /** True when the canister reports `isCallerAdmin` (used to show perspective toggle). */
+        this._realIsAdmin = false;
         /** @type {(() => void) | null} */
         this._onFusionAuthBound = null;
+        /** @type {(() => void) | null} */
+        this._onFusionPerspectiveBound = null;
         /** @type {((e: Event) => void) | null} */
         this._onProfileSetupPromptBound = null;
         this._profileSetupPrompt = { open: false, fullName: '', email: '' };
@@ -386,6 +398,10 @@ class HeaderComponent extends HTMLElement {
             void this._refreshHeaderAuthState();
         };
         window.addEventListener('fusion-auth-change', this._onFusionAuthBound);
+        this._onFusionPerspectiveBound = () => {
+            void this._refreshHeaderAuthState();
+        };
+        window.addEventListener('fusion-admin-perspective-change', this._onFusionPerspectiveBound);
         this._onProfileSetupPromptBound = (ev) => {
             const detail =
                 ev && typeof ev === 'object' && 'detail' in ev
@@ -418,6 +434,10 @@ class HeaderComponent extends HTMLElement {
         if (this._onFusionAuthBound) {
             window.removeEventListener('fusion-auth-change', this._onFusionAuthBound);
             this._onFusionAuthBound = null;
+        }
+        if (this._onFusionPerspectiveBound) {
+            window.removeEventListener('fusion-admin-perspective-change', this._onFusionPerspectiveBound);
+            this._onFusionPerspectiveBound = null;
         }
         if (this._onProfileSetupPromptBound) {
             window.removeEventListener('fusion-open-profile-setup', this._onProfileSetupPromptBound);
@@ -462,6 +482,12 @@ class HeaderComponent extends HTMLElement {
                 .replace(/"/g, '&quot;')
                 .replace(/</g, '&lt;');
 
+        const perspectiveHtml = this._realIsAdmin
+            ? `<button type="button" class="headerRectBtn headerRectBtn--perspective" data-action="cycle-perspective" aria-label="${esc(
+                  getPerspectiveAriaLabel(getAdminPerspective(), en)
+              )}">${esc(getPerspectiveButtonShortLabel(getAdminPerspective(), en))}</button>`
+            : '';
+
         if (ui.kind === 'guest') {
             slot.innerHTML = `
                         <button type="button" class="headerRectBtn" data-action="sign-in">${en ? 'SIGN-IN' : 'サインイン'}</button>
@@ -471,6 +497,7 @@ class HeaderComponent extends HTMLElement {
         if (ui.kind === 'admin' || ui.kind === 'staff') {
             slot.innerHTML = `
                         <button type="button" class="headerRectBtn" data-action="sign-out">${en ? 'SIGN OUT' : 'サインアウト'}</button>
+                        ${perspectiveHtml}
                         <button type="button" class="headerRectBtn headerRectBtn--register" data-href="/studio">${en ? 'STUDIO' : 'スタジオ'}</button>`;
             return;
         }
@@ -492,6 +519,7 @@ class HeaderComponent extends HTMLElement {
             const completeProfileLabel = en ? 'COMPLETE PROFILE' : 'プロフィールを完成';
             slot.innerHTML = `
                         <button type="button" class="headerRectBtn" data-action="sign-out">${en ? 'SIGN OUT' : 'サインアウト'}</button>
+                        ${perspectiveHtml}
                         <button type="button" class="headerRectBtn headerRectBtn--register" data-href="${href}">${profLabel}</button>
                         ${
                             ui.needsProfileCompletion
@@ -554,6 +582,7 @@ class HeaderComponent extends HTMLElement {
 
     async _refreshHeaderAuthState() {
         try {
+            this._realIsAdmin = false;
             const { getAuthSnapshot } = await import('../../utils/icAuth.js');
             const snap = await getAuthSnapshot();
             if (!snap.authenticated) {
@@ -577,7 +606,43 @@ class HeaderComponent extends HTMLElement {
                 /* ignore */
             }
             if (isAdmin) {
-                this._authUi = { kind: 'admin' };
+                this._realIsAdmin = true;
+                let acc = null;
+                try {
+                    if (typeof actor.getAccountForCaller === 'function') {
+                        const raw = await actor.getAccountForCaller();
+                        acc = Array.isArray(raw) ? (raw.length ? raw[0] : null) : raw;
+                    }
+                } catch (_) {
+                    /* ignore */
+                }
+                const perspective = getAdminPerspective();
+                const effectiveAcc = buildEffectiveAccountForPerspective(
+                    acc && typeof acc === 'object' ? acc : null,
+                    perspective
+                );
+                if (perspective === 'admin' || perspective === 'staff') {
+                    this._authUi = { kind: perspective === 'staff' ? 'staff' : 'admin' };
+                } else {
+                    const { resolveProfilePathForAccount } = await import('../../utils/authHeader.js');
+                    const profileHref = await resolveProfilePathForAccount(effectiveAcc);
+                    const st = acc && typeof acc === 'object' ? acc.status : null;
+                    const pending = Boolean(st && typeof st === 'object' && 'pending' in st);
+                    const linkedRaw = acc && typeof acc === 'object' ? acc.linkedArtistId ?? acc.linked_artist_id : undefined;
+                    const linkedId = Array.isArray(linkedRaw)
+                        ? linkedRaw.length
+                            ? String(linkedRaw[0] ?? '').trim()
+                            : ''
+                        : linkedRaw != null
+                          ? String(linkedRaw).trim()
+                          : '';
+                    this._authUi = {
+                        kind: 'member',
+                        profileHref,
+                        pending,
+                        needsProfileCompletion: !linkedId,
+                    };
+                }
                 this._fillAuthPair();
                 return;
             }
@@ -842,6 +907,11 @@ class HeaderComponent extends HTMLElement {
             if (rectBtn) {
                 e.preventDefault();
                 const action = rectBtn.getAttribute('data-action');
+                if (action === 'cycle-perspective') {
+                    this.closeMobileMenu();
+                    cycleAdminPerspective();
+                    return;
+                }
                 if (action === 'sign-in') {
                     this.closeMobileMenu();
                     window.dispatchEvent(new CustomEvent('fusion-open-sign-in'));
@@ -867,6 +937,9 @@ class HeaderComponent extends HTMLElement {
                     void import('../../utils/database.js').then(async (m) => {
                         try {
                             await m.ensureMyLinkedArtistProfile();
+                            const { maybeSeedLocalesFromProfileSetupDraftIfEmpty } =
+                                await import('../../utils/profileSetupSeedLocales.js');
+                            await maybeSeedLocalesFromProfileSetupDraftIfEmpty();
                         } catch {
                             /* ignore */
                         }
@@ -1161,6 +1234,12 @@ class HeaderComponent extends HTMLElement {
                     color: var(--c2, #000);
                 }
 
+                .headerRectBtn--perspective {
+                    padding: 0.45rem 0.5rem;
+                    min-width: 2.6rem;
+                    font-size: clamp(0.58rem, 0.85vw, 0.7rem);
+                }
+
                 .headerRectBtn--complete-profile {
                     position: fixed;
                     top: 1rem;
@@ -1446,8 +1525,8 @@ class HeaderComponent extends HTMLElement {
             </style>
             <header>
                 <div id="logo">
-                    <img id="headerLogo" class="header-logo-wide" src="${HeaderWideLogo}" alt="Logo">
-                    <img id="headerLogoSymbol" class="header-logo-symbol" src="${SymbolLogo}" alt="Logo">
+                    <img id="headerLogo" class="header-logo-wide" src="${HeaderWideLogo}" alt="${withSeoImageAlt('Fusion logo')}">
+                    <img id="headerLogoSymbol" class="header-logo-symbol" src="${SymbolLogo}" alt="${withSeoImageAlt('Fusion logo')}">
                 </div>
                 <button type="button" id="headerMenuToggle" class="header-menu-toggle" aria-expanded="false" aria-controls="headerNavCluster" aria-label="${en ? 'Open menu' : 'メニューを開く'}">
                     <span class="header-menu-toggle__bar" aria-hidden="true"></span>
@@ -1473,7 +1552,7 @@ class HeaderComponent extends HTMLElement {
             <div id="headerDrawerBackdrop" class="header-drawer-backdrop" aria-hidden="true"></div>
             <div id="logoHeader">
                 <div id="logoHeaderInner">
-                    <img id="headerSymbolLogo" src="${SymbolLogo}" alt="Logo">
+                    <img id="headerSymbolLogo" src="${SymbolLogo}" alt="${withSeoImageAlt('Fusion logo')}">
                 </div>
             </div>
             <div id="headerProfileSetupPrompt" class="header-profile-setup-host" hidden></div>

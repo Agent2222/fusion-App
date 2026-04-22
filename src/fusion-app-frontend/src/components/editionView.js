@@ -1,6 +1,7 @@
 import { getPublicSiteOrigin } from '../config.js';
 import { getEditions, subscribeDataSource } from '../utils/database.js';
 import { applyDocumentSeo } from '../utils/documentSeo.js';
+import { SEO_MEDIA_DEFAULT, withSeoImageAlt } from '../utils/mediaAltSeo.js';
 import { firstNonEmptyString, mergeLocaleDeep } from '../utils/localeFallback.js';
 
 /**
@@ -26,7 +27,7 @@ export function generateEditionViewContent() {
                         </nav>
                         <article class="edition-detail" id="editionDetail" hidden>
                             <div class="edition-detail-hero">
-                                <img id="editionDetailImage" src="" alt="" width="960" height="540" />
+                                <img id="editionDetailImage" src="" alt="${SEO_MEDIA_DEFAULT}" width="960" height="540" />
                             </div>
                             <div class="edition-detail-body">
                                 <h1 id="editionDetailTitle" class="edition-detail-title"></h1>
@@ -59,7 +60,7 @@ function applyEdition(edition) {
 
     if (imgEl) {
         imgEl.src = firstNonEmptyString(edition.imageSrc, jaE?.imageSrc, enE?.imageSrc);
-        imgEl.alt = alt;
+        imgEl.alt = withSeoImageAlt(alt);
     }
     if (titleEl) titleEl.textContent = title;
     const pageTitle = `${title || "Edition"} · Fusion`;

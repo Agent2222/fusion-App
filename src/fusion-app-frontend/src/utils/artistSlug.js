@@ -190,8 +190,8 @@ export function artistResidencyCardYear(artist) {
     const sy = artistGallerySeasonYear(artist);
     if (sy) return String(sy);
     const f = artist && typeof artist === 'object' ? /** @type {{ filter?: unknown }} */ (artist).filter : null;
-    const cy = f && typeof f === 'object' ? Number(/** @type {{ cohortYear?: unknown }} */ (f).cohortYear ?? 0) : 0;
-    if (Number.isFinite(cy) && cy > 0) return String(Math.floor(cy));
+    const cy = primaryCohortYearFromFilter(f);
+    if (cy > 0) return String(cy);
     return '';
 }
 
@@ -234,6 +234,21 @@ export function artistHasResidencySignal(artist) {
     if (artistProgramIds(artist).length > 0) return true;
     if (artistGallerySeasonYear(artist) > 0) return true;
     const f = artist?.filter;
-    const cy = f && typeof f === 'object' ? Number(/** @type {{ cohortYear?: unknown }} */ (f).cohortYear ?? 0) : 0;
-    return Number.isFinite(cy) && cy > 0;
+    return primaryCohortYearFromFilter(f) > 0;
+}
+
+/**
+ * @param {unknown} f — roster `filter`
+ * @returns {number}
+ */
+function primaryCohortYearFromFilter(f) {
+    if (!f || typeof f !== 'object') return 0;
+    const o = /** @type {Record<string, unknown>} */ (f);
+    const arr = o.cohortYears ?? o.cohort_years;
+    if (Array.isArray(arr) && arr.length) {
+        const nums = arr.map((x) => Math.floor(Number(x))).filter((n) => Number.isFinite(n) && n > 0);
+        if (nums.length) return Math.max(...nums);
+    }
+    const cy = Number(o.cohortYear ?? o.cohort_year ?? 0);
+    return Number.isFinite(cy) && cy > 0 ? Math.floor(cy) : 0;
 }

@@ -1,4 +1,5 @@
 import { mergeLocaleDeep } from '../../utils/localeFallback.js';
+import { SEO_MEDIA_DEFAULT, withSeoImageAlt } from '../../utils/mediaAltSeo.js';
 
 class ObjectsHighlightComponent extends HTMLElement {
     constructor() {
@@ -107,7 +108,7 @@ class ObjectsHighlightComponent extends HTMLElement {
         const copy = String(slice.copy ?? '');
 
         img.src = imageSrc;
-        img.alt = imageAlt;
+        img.alt = withSeoImageAlt(imageAlt || name);
 
         const setBlock = (el, text, className) => {
             const t = text.trim();
@@ -205,13 +206,13 @@ class ObjectsHighlightComponent extends HTMLElement {
             objectCard.setAttribute('aria-label', String(slice.name ?? objectAlt ?? 'View object'));
             objectCard.innerHTML = `
                 <div class="object-card-image" id="object-card-${i}">
-                    <img alt="" />
+                    <img alt="${SEO_MEDIA_DEFAULT}" />
                 </div>
             `;
             const thumbImg = objectCard.querySelector('img');
             if (thumbImg) {
                 thumbImg.src = String(objectImage);
-                thumbImg.alt = String(objectAlt);
+                thumbImg.alt = withSeoImageAlt(String(objectAlt || slice.name || ''));
             }
 
             const parent = targets[i]();
@@ -557,7 +558,7 @@ class ObjectsHighlightComponent extends HTMLElement {
             >
                 <button type="button" class="oh-lightbox-close" aria-label="Close">×</button>
                 <div class="oh-lightbox-scroll">
-                    <img class="oh-lightbox-img" src="" alt="" />
+                    <img class="oh-lightbox-img" src="" alt="${SEO_MEDIA_DEFAULT}" />
                 </div>
                 <div class="oh-lightbox-meta">
                     <h2 class="oh-lightbox-title"></h2>

@@ -1295,6 +1295,15 @@ button.studio-wordmark-btn:hover {
   flex-wrap: wrap;
 }
 
+.studio-modal-actions--applicant-delete {
+  justify-content: flex-start;
+}
+
+.studio-th-actions {
+  width: 6.5rem;
+  text-align: right;
+}
+
 .studio-btn-danger {
   border: 1px solid #b91c1c;
   background: #fef2f2;
@@ -2371,5 +2380,155 @@ button.studio-wordmark-btn:hover {
   font-size: 0.78rem;
   font-variation-settings: var(--fv-label);
   color: color-mix(in srgb, var(--c2, #000) 72%, transparent);
+  margin-top: 0.35rem;
+}
+
+/* Account: modal overlay above Studio workspace (embeds member dashboard) */
+.studio-account-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0)
+    env(safe-area-inset-left, 0);
+  box-sizing: border-box;
+}
+
+.studio-account-overlay[hidden] {
+  display: none !important;
+}
+
+.studio-account-overlay__scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.studio-account-overlay__panel {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 90rem);
+  max-height: min(92vh, 100dvh);
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--studio-workspace-bg, #faf3f4);
+  border-radius: var(--studio-card-radius, 8px);
+  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.28);
+  overflow: hidden;
+}
+
+.studio-account-overlay__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1.25rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--c2, #0f172a) 12%, transparent);
+  background: var(--studio-card-bg, #fff);
+  flex-shrink: 0;
+}
+
+.studio-account-overlay__title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-variation-settings: var(--fv-title);
+}
+
+#studioAccountOverlayClose:focus-visible {
+  outline: 2px solid var(--c2, #0f172a);
+  outline-offset: 2px;
+}
+
+.studio-account-overlay__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.studio-account-overlay__body .settings-profile-page {
+  margin-bottom: 0;
+}
+
+.studio-account-overlay__body .settings-profile-studio.studio-app {
+  min-height: min(70vh, 800px);
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.studio-user-sub-dot {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  margin-right: 0.4rem;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.studio-user-sub-dot--ok {
+  background: #16a34a;
+}
+
+.studio-user-sub-dot--err {
+  background: #dc2626;
+}
+
+/* Studio Settings — admin full database backup */
+.studio-db-admin-tools {
+  margin-top: var(--studio-space-xl);
+  padding-top: var(--studio-space-lg);
+  border-top: 1px solid rgba(15, 23, 42, 0.12);
+}
+
+.studio-db-admin-tools__warn {
+  color: #991b1b;
+}
+
+.studio-db-admin-tools__actions {
+  flex-wrap: wrap;
+  gap: var(--studio-space-sm);
+  align-items: center;
+}
+
+.studio-file-input-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Artist manage modal — Programs tab */
+.studio-table-wrap--modal-programs {
+  margin-top: 0.5rem;
+  max-height: min(50vh, 22rem);
+  overflow: auto;
+}
+
+.studio-table--programs .studio-td-title {
+  min-width: 10rem;
+  max-width: 18rem;
+}
+
+.studio-table--programs .studio-td-num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.studio-table--programs .studio-td-cb {
+  text-align: center;
+  width: 4.5rem;
+}
+
+.studio-art-programs-status.studio-banner--error {
   margin-top: 0.35rem;
 }

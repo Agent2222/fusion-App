@@ -51,21 +51,47 @@ export function disciplineButtonIdToKey(buttonId) {
 }
 
 /**
+ * @param {unknown} f
+ * @returns {number[]}
+ */
+function cohortYearsFromFilterObject(f) {
+    if (!f || typeof f !== 'object') return [];
+    const o = /** @type {Record<string, unknown>} */ (f);
+    let raw = o.cohort_years ?? o.cohortYears;
+    /** Unwrap Motoko `?[Nat]` when Candid encodes `Some` as a single-element wrapper */
+    if (Array.isArray(raw) && raw.length === 1 && Array.isArray(raw[0])) {
+        raw = raw[0];
+    }
+    if (Array.isArray(raw)) {
+        return raw
+            .map((x) => Math.floor(Number(x)))
+            .filter((n) => Number.isFinite(n) && n > 1900 && n < 2100);
+    }
+    const legacy = Number(o.cohort_year ?? o.cohortYear ?? 0);
+    if (Number.isFinite(legacy) && legacy > 0) return [Math.floor(legacy)];
+    return [];
+}
+
+/**
  * @param {object} artist
- * @returns {{ connection: 'alumni'|'artist', cohortYear: number, disciplineKey: string, locationKey: string }}
+ * @returns {{ connection: 'alumni'|'artist', cohortYears: number[], disciplineKey: string, locationKey: string }}
  */
 export function deriveArtistFilterRow(artist) {
     if (artist?.filter && typeof artist.filter === 'object') {
         const f = artist.filter;
+        let cohortYears = cohortYearsFromFilterObject(f);
+        if (cohortYears.length === 0) {
+            cohortYears = [COHORT_YEARS[stableHash(artist.id) % COHORT_YEARS.length]];
+        }
         return {
             connection: f.connection === 'alumni' ? 'alumni' : 'artist',
-            cohortYear: typeof f.cohortYear === 'number' ? f.cohortYear : COHORT_YEARS[stableHash(artist.id) % COHORT_YEARS.length],
+            cohortYears,
             disciplineKey: f.disciplineKey || disciplineStringToKey(artistEnglishBlock(artist)?.discipline),
             locationKey: f.locationKey || 'other',
         };
     }
     const h = stableHash(artist?.id || '');
-    const cohortYear = COHORT_YEARS[h % COHORT_YEARS.length];
+    const cohortYears = [COHORT_YEARS[h % COHORT_YEARS.length]];
     const connection = h % 5 === 0 ? 'alumni' : 'artist';
     const en = artistEnglishBlock(artist);
     const disciplineKey = disciplineStringToKey(en?.discipline);
@@ -83,7 +109,7 @@ export function deriveArtistFilterRow(artist) {
     ) {
         locationKey = 'europe';
     }
-    return { connection, cohortYear, disciplineKey, locationKey };
+    return { connection, cohortYears, disciplineKey, locationKey };
 }
 
 /**
@@ -116,7 +142,7 @@ export function applyArtistFilters(artists, c) {
             const cm = /^(\d{4})CohortConnection$/.exec(connectionId);
             if (cm) {
                 const y = Number(cm[1]);
-                if (m.cohortYear !== y) return false;
+                if (!m.cohortYears.includes(y)) return false;
             }
         }
         return true;

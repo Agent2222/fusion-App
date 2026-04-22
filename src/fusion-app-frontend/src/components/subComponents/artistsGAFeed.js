@@ -7,6 +7,7 @@ import {
     artistSlugFromName,
 } from '../../utils/artistSlug.js';
 import { applyArtistCardImage } from '../../utils/artistCardPlaceholder.js';
+import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
 
 import prepIcon from '../../assets/icon-cal.png';
 import showingIcon from '../../assets/icon-loc.png';
@@ -375,11 +376,11 @@ class ArtistsGAFeedElement extends HTMLElement {
             case 'studio':
                 return `<div class="status-icon-studio"></div>`;
             case 'prep':
-                return `<img src="${prepIcon}" alt="Prep" class="status-icon">`;
+                return `<img src="${prepIcon}" alt="${escapeHtml(withSeoImageAlt('Prep'))}" class="status-icon">`;
             case 'showing':
-                return `<img src="${showingIcon}" alt="Showing" class="status-icon">`;
+                return `<img src="${showingIcon}" alt="${escapeHtml(withSeoImageAlt('Showing'))}" class="status-icon">`;
             case 'available':
-                return `<img src="${availableIcon}" alt="Available" class="status-icon">`;
+                return `<img src="${availableIcon}" alt="${escapeHtml(withSeoImageAlt('Available'))}" class="status-icon">`;
         }
     }
 
@@ -443,7 +444,7 @@ class ArtistsGAFeedElement extends HTMLElement {
 
             card.innerHTML = `
                 <div class="artist-card-image">
-                    <img alt="${escapeHtml(artistName)}" loading="lazy" decoding="async">
+                    <img alt="${escapeHtml(withSeoImageAlt(artistName))}" loading="lazy" decoding="async">
                 </div>
                 <div class="artist-card-content">
                     <div class="artist-card-title">${escapeHtml(artistName)}</div>

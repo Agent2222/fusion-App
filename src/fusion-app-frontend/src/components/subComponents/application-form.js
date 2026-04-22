@@ -54,6 +54,20 @@ function isLooseEmail(email) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t);
 }
 
+/**
+ * @param {unknown} links
+ * @returns {string}
+ */
+function pickWebsiteFromProfileLinks(links) {
+    if (!Array.isArray(links)) return '';
+    const lower = (s) => String(s ?? '').toLowerCase();
+    const preferred = links.find(
+        (l) => l && typeof l === 'object' && lower(/** @type {{ type?: unknown }} */ (l).type) === 'website' && String(/** @type {{ url?: unknown }} */ (l).url ?? '').trim()
+    );
+    const row = preferred || links.find((l) => l && typeof l === 'object' && String(/** @type {{ url?: unknown }} */ (l).url ?? '').trim());
+    return row && typeof row === 'object' ? String(/** @type {{ url?: unknown }} */ (row).url ?? '').trim() : '';
+}
+
 class ApplicationFormComponent extends HTMLElement {
     constructor() {
         super();
@@ -85,6 +99,8 @@ class ApplicationFormComponent extends HTMLElement {
         this._fusionSubscriptionId = null;
         /** @type {AbortController | null} */
         this._wireAbort = null;
+        /** User has a stored application for this `data-program-id` — hide fee UI; submit without Stripe. */
+        this._alreadyApplied = false;
     }
 
     get active() {
@@ -402,6 +418,8 @@ class ApplicationFormComponent extends HTMLElement {
                 lead1: '連絡先と所在地を入力してください。',
                 lead2:
                     '正解よりも、あなたの視点や文脈を知りたいと考えています。率直にご記入のうえ、下の応募料でお支払い・送信を完了してください。',
+                lead2AlreadyApplied:
+                    '応募内容を更新して保存できます。追加の応募料はかかりません。',
                 firstName: '名（ファーストネーム）',
                 lastName: '姓（ラストネーム）',
                 email: 'メールアドレス',
@@ -429,7 +447,8 @@ class ApplicationFormComponent extends HTMLElement {
                 submitting: '送信中…',
                 submitReceivedTitle: '応募を受け付けました。',
                 submitReceivedBody: 'プロフィールダッシュボードで進捗を確認できます。',
-                alreadyApplied: 'このプログラムには既に応募済みです。内容を更新して再送信できます。',
+                alreadyApplied: 'このプログラムには既に応募済みです。下のボタンで内容を更新して保存できます（追加の応募料はありません）。',
+                saveApplicationUpdates: '応募内容を保存',
                 payAndSubmit: '支払って送信',
                 paymentPreparing: '決済フォームを準備しています…',
                 paymentLoadingForm: 'カード入力フォームを読み込み中…',
@@ -498,6 +517,8 @@ class ApplicationFormComponent extends HTMLElement {
             lead1: 'Enter your name, email, and location.',
             lead2:
                 'We’re less interested in perfect answers, more in perspective. Share what feels true to you, then pay the application fee and submit below.',
+            lead2AlreadyApplied:
+                'You can update your answers below and save. No additional application fee.',
             firstName: 'First name',
             lastName: 'Last name',
             email: 'Email',
@@ -527,7 +548,9 @@ class ApplicationFormComponent extends HTMLElement {
             submitting: 'Submitting...',
             submitReceivedTitle: 'Your application was received.',
             submitReceivedBody: 'You can track your progress in your profile dashboard.',
-            alreadyApplied: 'You already applied to this program. You can update and resubmit.',
+            alreadyApplied:
+                'You already applied to this program. Update your answers below and save—no additional application fee.',
+            saveApplicationUpdates: 'Save application updates',
             payAndSubmit: 'Pay and submit',
             paymentPreparing: 'Preparing payment…',
             paymentLoadingForm: 'Loading card form…',
@@ -542,6 +565,32 @@ class ApplicationFormComponent extends HTMLElement {
                 'Membership also lets you apply to other Fusion programs at no additional application fee, so you get lasting value while selection is ongoing, and a path to deeper connection beyond the residency alone.',
             feeInfoP3:
                 'After your payment completes and your application is sent, you can use your profile dashboard to update or cancel your subscription at any time.',
+        };
+    }
+
+    /**
+     * Analytics locale (no PII).
+     * @returns {'en' | 'ja'}
+     */
+    _analyticsLocale() {
+        return typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
+    }
+
+    /**
+     * Shared PostHog props for program application + payment funnels (no PII).
+     * @returns {Record<string, string | number | boolean>}
+     */
+    _posthogApplicationBaseProps() {
+        const programId = this.getAttribute('data-program-id') || '';
+        const centsRaw = this._programFormContext.applicationFeeAmountCents;
+        const oneTimeOk = typeof centsRaw === 'number' && Number.isFinite(centsRaw) && centsRaw >= 50;
+        return {
+            program_id: programId,
+            locale: this._analyticsLocale(),
+            one_time_payment_available: oneTimeOk,
+            bimonthly_plan_offered: true,
+            annual_plan_offered: true,
+            ...(oneTimeOk ? { application_fee_amount_cents: Math.round(centsRaw) } : {}),
         };
     }
 
@@ -673,6 +722,7 @@ class ApplicationFormComponent extends HTMLElement {
     }
 
     async _prepareStripePayment() {
+        if (this._alreadyApplied) return;
         const prepareKey = this._computeStripePrepareKey();
         if (
             this._stripePaymentReady &&
@@ -697,19 +747,10 @@ class ApplicationFormComponent extends HTMLElement {
 
         const root = this.shadowRoot;
         const L = this._labels();
-        const hint = root?.querySelector('#app-payment-hint');
         const payBtn = root?.querySelector('#app-pay-submit');
-        const loadingEl = root?.querySelector('#app-payment-loading');
 
         const setHint = (text, busy) => {
-            if (hint) {
-                hint.textContent = text;
-                hint.classList.toggle('is-busy', !!busy);
-            }
-            if (loadingEl instanceof HTMLElement) {
-                if (busy) loadingEl.removeAttribute('hidden');
-                else loadingEl.setAttribute('hidden', '');
-            }
+            this._syncPaymentHintChrome(root, { busy, text });
         };
 
         if (!this._paymentPlan) {
@@ -763,6 +804,15 @@ class ApplicationFormComponent extends HTMLElement {
                 const raw = e instanceof Error ? e.message : String(e);
                 setHint(mapIntegrationUserMessage(raw, 0), false);
                 if (payBtn) payBtn.disabled = true;
+                try {
+                    posthog.capture('program_application_payment_prepare_failed', {
+                        ...this._posthogApplicationBaseProps(),
+                        payment_plan: 'one_time',
+                        failure_stage: 'payment_intent',
+                    });
+                } catch {
+                    /* ignore */
+                }
                 return;
             }
         } else {
@@ -790,6 +840,15 @@ class ApplicationFormComponent extends HTMLElement {
                 const raw = e instanceof Error ? e.message : String(e);
                 setHint(mapIntegrationUserMessage(raw, 0), false);
                 if (payBtn) payBtn.disabled = true;
+                try {
+                    posthog.capture('program_application_payment_prepare_failed', {
+                        ...this._posthogApplicationBaseProps(),
+                        payment_plan: this._paymentPlan === 'annual' ? 'annual' : 'bimonthly',
+                        failure_stage: 'subscription',
+                    });
+                } catch {
+                    /* ignore */
+                }
                 return;
             }
         }
@@ -835,6 +894,15 @@ class ApplicationFormComponent extends HTMLElement {
             const raw = e instanceof Error ? e.message : String(e);
             setHint(mapIntegrationUserMessage(raw, 0), false);
             if (payBtn) payBtn.disabled = true;
+            try {
+                posthog.capture('program_application_payment_prepare_failed', {
+                    ...this._posthogApplicationBaseProps(),
+                    payment_plan: this._paymentPlan || 'unknown',
+                    failure_stage: 'stripe_elements',
+                });
+            } catch {
+                /* ignore */
+            }
         }
     }
 
@@ -870,7 +938,11 @@ class ApplicationFormComponent extends HTMLElement {
                 redirect: 'if_required',
             });
             if (error) {
-                throw new Error(error.message || L.paymentFailed);
+                const wrapped = new Error(error.message || L.paymentFailed);
+                /** @type {{ stripeError?: import('@stripe/stripe-js').StripeError }} */
+                const w = /** @type {any} */ (wrapped);
+                w.stripeError = error;
+                throw wrapped;
             }
             try {
                 const email = String(root?.querySelector('#app-email')?.value ?? '').trim();
@@ -894,6 +966,29 @@ class ApplicationFormComponent extends HTMLElement {
             }
             await this._submitApplication();
         } catch (err) {
+            const stripeErr =
+                err &&
+                typeof err === 'object' &&
+                'stripeError' in err &&
+                /** @type {{ stripeError?: import('@stripe/stripe-js').StripeError }} */ (err).stripeError
+                    ? /** @type {{ stripeError?: import('@stripe/stripe-js').StripeError }} */ (err).stripeError
+                    : null;
+            try {
+                posthog.capture('program_application_payment_failed', {
+                    ...this._posthogApplicationBaseProps(),
+                    payment_plan: this._paymentPlan || 'unknown',
+                    failure_stage: 'stripe_confirm',
+                    ...(stripeErr && typeof stripeErr === 'object'
+                        ? {
+                              ...(stripeErr.type ? { stripe_error_type: String(stripeErr.type) } : {}),
+                              ...(stripeErr.code ? { stripe_error_code: String(stripeErr.code) } : {}),
+                              ...(stripeErr.decline_code ? { stripe_decline_code: String(stripeErr.decline_code) } : {}),
+                          }
+                        : { error_kind: 'exception' }),
+                });
+            } catch {
+                /* ignore */
+            }
             const line = err instanceof Error ? err.message : L.paymentFailed;
             if (statusEl) {
                 statusEl.textContent = line;
@@ -904,15 +999,44 @@ class ApplicationFormComponent extends HTMLElement {
         }
     }
 
+    /**
+     * Payment fee row: spinner + copy + notice styling (Stripe prepare + pay submit).
+     * @param {ShadowRoot | null | undefined} root
+     * @param {{ busy?: boolean, text?: string }} opts — `text` omitted leaves copy unchanged
+     */
+    _syncPaymentHintChrome(root, opts) {
+        const busy = !!opts?.busy;
+        const text = opts?.text;
+        const hint = root?.querySelector('#app-payment-hint');
+        const wrap = root?.querySelector('#app-payment-hint-wrap');
+        const loadingEl = root?.querySelector('#app-payment-loading');
+        if (hint) {
+            if (text !== undefined) hint.textContent = text;
+            hint.classList.toggle('is-busy', busy);
+        }
+        if (wrap instanceof HTMLElement) {
+            wrap.classList.toggle('is-busy', busy);
+            wrap.setAttribute('aria-busy', busy ? 'true' : 'false');
+        }
+        if (loadingEl instanceof HTMLElement) {
+            if (busy) {
+                loadingEl.removeAttribute('hidden');
+                loadingEl.setAttribute('aria-hidden', 'false');
+            } else {
+                loadingEl.setAttribute('hidden', '');
+                loadingEl.setAttribute('aria-hidden', 'true');
+            }
+        }
+    }
+
     _setPaySubmittingState(on, text) {
         const root = this.shadowRoot;
         const payBtn = root?.querySelector('#app-pay-submit');
-        const hint = root?.querySelector('#app-payment-hint');
         if (payBtn) {
             payBtn.disabled = on;
             payBtn.classList.toggle('is-loading', on);
         }
-        if (hint && on && text) hint.textContent = text;
+        this._syncPaymentHintChrome(root, { busy: on, text });
     }
 
     _wireControls() {
@@ -958,6 +1082,7 @@ class ApplicationFormComponent extends HTMLElement {
             (e) => {
                 const t = e.target;
                 if (!(t instanceof Element)) return;
+                if (this._alreadyApplied) return;
                 const btn = t.closest('[data-app-payment-plan]');
                 if (!btn || !root.contains(btn)) return;
                 if (btn.hasAttribute('disabled')) return;
@@ -971,6 +1096,14 @@ class ApplicationFormComponent extends HTMLElement {
 
         form?.addEventListener('input', () => this._touchDirty(), { passive: true, signal });
         form?.addEventListener('change', () => this._touchDirty(), { passive: true, signal });
+
+        root.querySelector('#app-submit-updates')?.addEventListener(
+            'click',
+            () => {
+                void this._onSubmitUpdatesClick();
+            },
+            { signal }
+        );
 
         window.addEventListener(
             'fusion-localechange',
@@ -992,9 +1125,43 @@ class ApplicationFormComponent extends HTMLElement {
     }
 
     /**
+     * @param {boolean} on
+     */
+    _applyAlreadyAppliedUi(on) {
+        const root = this.shadowRoot;
+        if (!root) return;
+        const L = this._labels();
+        const pay = root.querySelector('#app-payment-section');
+        const wrap = root.querySelector('#app-submit-updates-wrap');
+        const lead = root.querySelector('#app-portfolio-lead');
+        if (pay instanceof HTMLElement) {
+            if (on) pay.setAttribute('hidden', '');
+            else pay.removeAttribute('hidden');
+        }
+        if (wrap instanceof HTMLElement) {
+            if (on) wrap.removeAttribute('hidden');
+            else wrap.setAttribute('hidden', '');
+        }
+        if (lead) lead.textContent = on ? L.lead2AlreadyApplied : L.lead2;
+        if (on) this._teardownStripePayment();
+    }
+
+    async _onSubmitUpdatesClick() {
+        if (!this._alreadyApplied) return;
+        const err = this._validateStep0Soft();
+        if (err) {
+            this._setFormStatusMessage(err, 'error');
+            return;
+        }
+        this._setFormStatusMessage('', 'neutral');
+        await this._submitApplication();
+    }
+
+    /**
      * @param {'one_time' | 'bimonthly' | 'annual'} plan
      */
     _onPaymentPlanSelected(plan) {
+        if (this._alreadyApplied) return;
         if (plan === 'one_time') {
             const centsRaw = this._programFormContext.applicationFeeAmountCents;
             const ok = typeof centsRaw === 'number' && Number.isFinite(centsRaw) && centsRaw >= 50;
@@ -1009,10 +1176,9 @@ class ApplicationFormComponent extends HTMLElement {
         this._paymentPlan = plan;
         this._syncPaymentPlanUi();
         this._teardownStripePayment();
-        const programId = this.getAttribute('data-program-id') || '';
         try {
             posthog.capture('program_application_payment_plan_selected', {
-                program_id: programId,
+                ...this._posthogApplicationBaseProps(),
                 payment_plan: plan,
             });
         } catch {
@@ -1091,7 +1257,7 @@ class ApplicationFormComponent extends HTMLElement {
         try {
             await submitProgramApplication(programId, payload);
             posthog.capture('program_application_submitted', {
-                program_id: programId,
+                ...this._posthogApplicationBaseProps(),
                 ...(this._paymentPlan ? { payment_plan: this._paymentPlan } : {}),
             });
             if (statusEl) statusEl.classList.add('is-success');
@@ -1113,7 +1279,11 @@ class ApplicationFormComponent extends HTMLElement {
             ) {
                 line = raw;
             }
-            posthog.capture('program_application_failed', { program_id: programId, error_code: code || 'unknown' });
+            posthog.capture('program_application_failed', {
+                ...this._posthogApplicationBaseProps(),
+                error_code: code || 'unknown',
+                ...(this._paymentPlan ? { payment_plan: this._paymentPlan } : {}),
+            });
             if (statusEl) {
                 statusEl.textContent = line;
                 statusEl.classList.add('is-error');
@@ -1173,6 +1343,9 @@ class ApplicationFormComponent extends HTMLElement {
     async _prefillFromArtist() {
         const root = this.shadowRoot;
         if (!root) return;
+        this._alreadyApplied = false;
+        this._applyAlreadyAppliedUi(false);
+
         const programId = this.getAttribute('data-program-id') || '';
         let rec;
         try {
@@ -1228,6 +1401,12 @@ class ApplicationFormComponent extends HTMLElement {
         setIfEmpty('app-last-name', draftLast);
         setIfEmpty('app-email', String(draft.email || '').trim());
 
+        const webFromLinks = pickWebsiteFromProfileLinks(block.links);
+        const bioFromProfile =
+            String(block.bio || '').trim() || String(block.bioLong || '').trim();
+        setIfEmpty('app-website', webFromLinks);
+        setIfEmpty('app-bio', bioFromProfile);
+
         const appliedRaw = rec.applied_json ?? rec.appliedJson;
         if (programId && appliedRaw) {
             try {
@@ -1249,9 +1428,12 @@ class ApplicationFormComponent extends HTMLElement {
                 }
                 const L = this._labels();
                 const statusEl = root.querySelector('#app-form-status');
-                if (entry && statusEl) {
+                if (entry && typeof entry === 'object' && statusEl) {
                     statusEl.textContent = L.alreadyApplied;
+                    statusEl.classList.remove('is-error');
                     statusEl.classList.add('is-success');
+                    this._alreadyApplied = true;
+                    this._applyAlreadyAppliedUi(true);
                     window.dispatchEvent(
                         new CustomEvent('fusion-program-application-submitted', {
                             detail: { programId, status: 'reviewing' },
@@ -1283,12 +1465,12 @@ class ApplicationFormComponent extends HTMLElement {
     connectedCallback() {
         this.render();
         this._afterRender();
-        const programId = this.getAttribute('data-program-id') || '';
-        posthog.capture('program_application_started', { program_id: programId });
+        posthog.capture('program_application_started', { ...this._posthogApplicationBaseProps() });
     }
 
     render() {
         this._paymentPlan = null;
+        this._alreadyApplied = false;
         this._teardownStripePayment();
         const L = this._labels();
         this.shadow.innerHTML = `
@@ -1775,15 +1957,30 @@ class ApplicationFormComponent extends HTMLElement {
 
                 .app-payment-hint-wrap {
                     display: flex;
-                    align-items: flex-start;
-                    gap: 0.55rem;
+                    align-items: center;
+                    gap: 0.65rem;
                     margin: 0.5rem 0;
                     min-height: 1.5em;
+                    border-radius: 4px;
+                    transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+                }
+
+                .app-payment-hint-wrap.is-busy {
+                    margin: 0.85rem 0 1.1rem;
+                    padding: 0.95rem 1.1rem;
+                    border: 1px solid var(--c2);
+                    background: linear-gradient(180deg, rgba(0, 0, 0, 0.045) 0%, rgba(0, 0, 0, 0.02) 100%);
+                    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.07);
+                    gap: 0.85rem;
+                    min-height: 3.1rem;
+                    align-items: center;
                 }
 
                 #app-payment-loading {
                     flex-shrink: 0;
-                    padding-top: 0.12em;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
                 }
 
                 #app-payment-loading[hidden] {
@@ -1792,13 +1989,14 @@ class ApplicationFormComponent extends HTMLElement {
 
                 .app-payment-spinner {
                     display: block;
-                    width: 16px;
-                    height: 16px;
+                    width: 26px;
+                    height: 26px;
                     box-sizing: border-box;
-                    border: 1px solid rgba(0, 0, 0, 0.22);
-                    border-top-color: var(--c2);
+                    border: 2px solid rgba(0, 0, 0, 0.14);
+                    border-top-color: var(--c4, var(--c2));
+                    border-right-color: rgba(0, 0, 0, 0.1);
                     border-radius: 50%;
-                    animation: app-payment-spin 0.65s linear infinite;
+                    animation: app-payment-spin 0.72s linear infinite;
                 }
 
                 @keyframes app-payment-spin {
@@ -1814,10 +2012,15 @@ class ApplicationFormComponent extends HTMLElement {
                     font-variation-settings: var(--fv-caption);
                     color: var(--c2);
                     min-height: 1.5em;
+                    line-height: 1.45;
                 }
 
                 #app-payment-hint.is-busy {
-                    opacity: 0.85;
+                    font-size: clamp(0.92rem, 1.15vw, 1.05rem);
+                    font-variation-settings: var(--fv-body-wide);
+                    font-weight: 600;
+                    letter-spacing: 0.02em;
+                    opacity: 1;
                 }
 
                 .app-payment-slot-wrap {
@@ -1845,6 +2048,14 @@ class ApplicationFormComponent extends HTMLElement {
                 .app-payment-mail {
                     color: inherit;
                     text-underline-offset: 0.12em;
+                }
+
+                #app-payment-section[hidden] {
+                    display: none !important;
+                }
+
+                #app-submit-updates-wrap[hidden] {
+                    display: none !important;
                 }
             </style>
             <div class="application-form-root">
@@ -1885,7 +2096,7 @@ class ApplicationFormComponent extends HTMLElement {
 
                         <div class="app-form-card app-form-card--spaced">
                             <h3 class="app-step-heading">${L.portfolioSectionTitle}</h3>
-                            <p class="app-step-lead">${L.lead2}</p>
+                            <p class="app-step-lead" id="app-portfolio-lead">${L.lead2}</p>
                             <div class="app-field">
                                 <label for="app-website">${L.website}</label>
                                 <p class="app-field-byline" id="app-website-byline">${L.websiteByline}</p>
@@ -1913,7 +2124,13 @@ class ApplicationFormComponent extends HTMLElement {
                             </div>
                         </div>
 
-                        <div class="app-form-card app-form-card--payment">
+                        <div id="app-submit-updates-wrap" class="app-form-card app-form-card--spaced" hidden>
+                            <div class="app-form-actions">
+                                <button type="button" class="app-btn app-btn--primary" id="app-submit-updates">${L.saveApplicationUpdates}</button>
+                            </div>
+                        </div>
+
+                        <div id="app-payment-section" class="app-form-card app-form-card--payment">
                             <h3 class="app-step-heading">${L.applicationFeeHeading}</h3>
                             <p class="app-application-fee-line" id="app-application-fee-line">
                                 <span id="app-application-fee-amount"></span>
@@ -1974,9 +2191,9 @@ class ApplicationFormComponent extends HTMLElement {
                             <div class="app-payment-slot-wrap">
                                 <slot name="app-stripe-mount"></slot>
                             </div>
-                            <div class="app-payment-hint-wrap">
+                            <div id="app-payment-hint-wrap" class="app-payment-hint-wrap" aria-busy="false">
                                 <div id="app-payment-loading" class="app-payment-loading" hidden aria-hidden="true">
-                                    <span class="app-payment-spinner"></span>
+                                    <span class="app-payment-spinner" role="presentation"></span>
                                 </div>
                                 <p id="app-payment-hint" aria-live="polite"></p>
                             </div>

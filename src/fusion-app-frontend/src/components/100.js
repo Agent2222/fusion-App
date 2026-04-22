@@ -1,4 +1,5 @@
 import mainHyaku2 from '../assets/main-hyaku-2.jpg';
+import { withSeoImageAlt } from '../utils/mediaAltSeo.js';
 
 function buildContent() {
     let element = document.createElement("div")
@@ -29,7 +30,7 @@ function buildContent() {
                 <div id="TBDLocation100">Ishikawa,<br>Japan</div>
             </div>
             <div id="imageBlock100">
-                <img src="${mainHyaku2}" alt="Test">
+                <img src="${mainHyaku2}" alt="${withSeoImageAlt('FUSION 100 hero')}">
             </div>
         </div>
         <div class="feedBlock" id="ConceptFeedBlock100">

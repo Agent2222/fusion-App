@@ -3,6 +3,7 @@
  * Data: CMS `context` bundle merged by locale.
  */
 import { getContentBundleForStudio, subscribeDataSource } from '../../utils/database.js';
+import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
 
 function escapeHtml(s) {
     return String(s)
@@ -277,7 +278,7 @@ class ExtendedNetworkFeedElement extends HTMLElement {
             el.className = 'network-card';
             el.innerHTML = `
                 <div class="network-card-image">
-                    <img src="${imageSrc}" alt="${escapeHtml(name)}">
+                    <img src="${imageSrc}" alt="${escapeHtml(withSeoImageAlt(name))}">
                 </div>
                 <div class="network-card-content">
                     <div class="network-card-name">${escapeHtml(name)}</div>

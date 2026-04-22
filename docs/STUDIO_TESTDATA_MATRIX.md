@@ -2,28 +2,31 @@
 
 URL / field-kind rules for the Content editor: [`STUDIO_FIELD_REGISTRY.md`](STUDIO_FIELD_REGISTRY.md) (`getFieldKind` in `src/fusion-app-frontend/src/utils/studioFieldRegistry.js`).
 
-| `testData` root | Studio surface | Persist (test / live) |
-|-----------------|----------------|------------------------|
-| `programHero` | Content → program-hero | `upsertContentPage` slug `program-hero` |
+Registry metadata (`primaryStudioSurface`, `studioSurfaces`) lives on each entry in `CONTENT_PAGE_REGISTRY` in [`database.js`](../src/fusion-app-frontend/src/utils/database.js). The **Content** tab lists only `primaryStudioSurface === 'content'`. **Home**, **Programs**, **Products**, and **Journal** tabs embed editors for the same canister slugs where noted.
+
+| `testData` root | Primary Studio surface | Persist (test / live) |
+|-----------------|------------------------|------------------------|
+| `programHero` | Home | `upsertContentPage` slug `program-hero` |
 | `applicationProcess` | Content | slug `application-process` |
 | `termsAndConditions` | Content | `terms` |
 | `privacyPolicy` | Content | `privacy` |
 | `contact` | Content | `contact` |
 | `faq` | Content | `faq` |
 | `context` | Content | `context` |
-| `info` | Content | `site-info` |
-| `allPrograms` | Content (`all-programs`) + Programs tab | Content page + `programs` / `LS_PROGRAMS_BLOCK` overlay |
-| `editions` | Content (`editions-feed`) + Products (editions) | Content + `editions` canister |
-| `journals` | Content (`journals-block`) + Journal tab | Content + `journals` canister |
-| `eventRow` | Content | `event-row` |
-| `objectsHighlight` | Content | `objects-highlight` |
-| `galleryAccessCta` | Content | `gallery-access-cta` |
-| `joinNetwork` | Content | `join-network` |
-| `joinNetworkFlow` | Content | `join-network-flow` |
-| `quoteRow` | Content | `quote-row` |
-| `featureCards` | Content | `feature-cards` |
-| `events` | Content | `events` |
-| `audio` | Content | `audio` |
+| `info` | Home (blob; chapters also edited under Programs / Products / Journal) | `site-info` |
+| `allPrograms` | Programs | Content page `all-programs` + `programs` canister / `LS_PROGRAMS_BLOCK` overlay |
+| `editions` | Products | `editions-feed` + `editions` canister |
+| `journals` | Journal | `journals-block` + `journals` canister |
+| `eventRow` | Home | `event-row` |
+| `objectsHighlight` | Home | `objects-highlight` |
+| `galleryAccessCta` | Home | `gallery-access-cta` |
+| `joinNetwork` | Home | `join-network` |
+| `joinNetworkFlow` | Home | `join-network-flow` |
+| `quoteRow` | Home | `quote-row` |
+| `featureCards` | Home | `feature-cards` |
+| `events` | Home | `events` |
+| `audio` | Home | `audio` |
+| `artistsPage` | Content | `artists-page` |
 | `allArtists` | Artists tab | `artists` canister + `LS_ARTISTS_OVERLAY` |
 
 Deep artist `locales.*` may move to user profile editing; Studio remains admin roster — see `STUDIO_COVERAGE_EXCEPTIONS.md`.

@@ -1,7 +1,7 @@
 /**
  * Studio section panels: dashboard + all sidebar tabs (data via database.js).
  */
-import { DEV_MODE } from '../../config.js';
+import { DEV_MODE, getPublicSiteOrigin } from '../../config.js';
 import { getFusionBackendActor, normalizeEarlyAccessCategory } from '../../utils/earlyAccessSubscribe.js';
 import {
     batchImportArtistsFromJson,
@@ -39,6 +39,7 @@ import {
     getSubscribersCsv,
     setDataSource,
     upsertApplicantStudio,
+    deleteApplicantStudio,
     studioReinterpretWithPrompt,
     upsertEditionStudio,
     upsertJournalStudio,
@@ -69,9 +70,23 @@ import {
 import { MAX_MANUAL_FEATURED, readArtistFeaturedMeta } from '../../utils/artistFeaturedExtension.js';
 import { LEGACY_PROFILE_BASE } from '../../utils/studioLegacyProfileUrls.js';
 import { openStudioModal } from '../../utils/studioModal.js';
-import { createPaymentIntent, fetchIntegrationHealth, sendEmail } from '../../utils/integrationApi.js';
+import {
+    createPaymentIntent,
+    fetchIntegrationHealth,
+    sendEmail,
+    getIntegrationBaseUrl,
+    syncSubscriptionFromStripe,
+} from '../../utils/integrationApi.js';
 import { uploadBlobToS3 } from '../../utils/studioS3Upload.js';
-import { renderContent, initContent } from './sections/contentSection.js';
+import {
+    renderContent,
+    initContent,
+    renderHome,
+    initHome,
+    loadStudioContentEditorPayload,
+    persistStudioContentPage,
+    attachStudioContentFileUpload,
+} from './sections/contentSection.js';
 import { getFieldKind, getFieldKindBadgeLabel } from '../../utils/studioFieldRegistry.js';
 import { appendContentLocalePairRow } from './studioFieldRender.js';
 import { shoutHtmlToPlain } from '../../utils/shoutHeadlineText.js';
@@ -87,6 +102,7 @@ import {
     renderArtistManageModalHtml,
 } from '../../utils/studioArtistForm.js';
 import { collectAccessCodesFromArtists, normalizeArtistImportRow } from '../../utils/studioBatchImport.js';
+import { initArtistProgramsTab } from '../../utils/studioArtistPrograms.js';
 import {
     LS_APPLICATION_ADMIN_EMAILS,
     LS_INTEGRATION_API_KEY,
@@ -111,10 +127,11 @@ import {
 } from '../../utils/studioCategoryLayout.js';
 
 /**
- * Twelve categories (sidebar). Default landing `#dashboard`.
+ * Sidebar sections (excluding `#dashboard`). Default landing `#dashboard`.
  * @type {{ id: string, label: string }[]}
  */
 export const STUDIO_NAV = [
+    { id: 'home', label: 'Home' },
     { id: 'subscribers', label: 'Subscribers' },
     { id: 'applicants', label: 'Applicants' },
     { id: 'artists', label: 'Artists' },
@@ -168,6 +185,8 @@ export function renderStudioMain(sectionId) {
             return renderGalleryAccess();
         case 'journal':
             return renderJournal();
+        case 'home':
+            return renderHome();
         case 'content':
             return renderContent();
         case 'email':
@@ -327,9 +346,13 @@ function renderApplicants() {
                             <th>Program</th>
                             <th>Status</th>
                             <th>Created</th>
+                            <th>Profile</th>
+                            <th class="studio-th-actions">View</th>
+                            <th class="studio-th-actions">Email</th>
+                            <th class="studio-th-actions">Actions</th>
                         </tr>
                     </thead>
-                    <tbody id="studio-applicants-tbody"><tr><td colspan="5">Loading…</td></tr></tbody>
+                    <tbody id="studio-applicants-tbody"><tr><td colspan="9">Loading…</td></tr></tbody>
                 </table>
             </div>
             ${studioPaginationBarHtml({
@@ -419,7 +442,7 @@ function renderPrograms() {
         <div class="studio-section-stack studio-category-page">
             ${studioPageHeaderHtml({
                 title: 'Programs',
-                subtitle: 'Program cards and program page copy (structured editor in Manage)',
+                subtitle: 'Program records (Manage) — home block & page headline in the section below',
                 countId: 'studio-programs-header-count',
                 countLabel: 'programs',
             })}
@@ -427,7 +450,25 @@ function renderPrograms() {
                 searchId: 'studio-programs-search',
                 searchPlaceholder: 'Search id, focus, location, route…',
             })}
-            <p class="studio-muted">Programs are <code>ProgramRecord</code> — locale fields include card copy and nested <code>programPage</code> (costs, details, FAQ) in the Manage dialog. For block order + shared media see <strong>Content → Programs block</strong>. Test mode uses <code>localStorage</code>.</p>
+            <p class="studio-muted">Programs are <code>ProgramRecord</code> — locale fields include card copy and nested <code>programPage</code> (costs, details, FAQ) in the Manage dialog. Test mode uses <code>localStorage</code>.</p>
+            <details class="studio-embed-block" open>
+                <summary class="studio-subheading">Home block &amp; programs page copy</summary>
+                <p class="studio-muted">Edit the all-programs block (card order and fields) and the <strong>/programs</strong> page headline from <code>site-info</code> (same storage as Studio → Home).</p>
+                <div class="studio-toolbar-actions" style="margin:0.5rem 0;flex-wrap:wrap;gap:0.5rem">
+                    <button type="button" class="studio-btn-primary" id="studio-programs-edit-block">Edit programs block</button>
+                    <button type="button" class="studio-btn-ghost" id="studio-programs-edit-siteinfo">Edit programs page headline</button>
+                </div>
+                <div id="studio-programs-embed-editor" class="studio-content-editor" style="display:none;margin-top:12px">
+                    <h3 class="studio-subheading" id="studio-programs-embed-title">Edit</h3>
+                    <p id="studio-programs-embed-unsaved" class="studio-banner studio-banner--warn" style="display:none" role="status">You have unsaved changes.</p>
+                    <div id="studio-programs-embed-fields" class="studio-content-fields studio-content-fields--scroll" style="max-height:min(50vh,28rem)"></div>
+                    <div class="studio-toolbar-actions" style="margin-top:12px">
+                        <button type="button" class="studio-btn-primary" id="studio-programs-embed-save">Save</button>
+                        <button type="button" class="studio-btn-ghost" id="studio-programs-embed-cancel">Cancel</button>
+                    </div>
+                    <p id="studio-programs-embed-msg" class="studio-banner studio-banner--info" style="display:none"></p>
+                </div>
+            </details>
             <div class="studio-subscribers-toolbar">
                 <button type="button" class="studio-btn-primary" id="studio-program-add">ADD PROGRAM</button>
                 <button type="button" class="studio-btn-ghost" id="studio-programs-refresh">Refresh</button>
@@ -468,7 +509,7 @@ function renderProducts() {
         <div class="studio-section-stack studio-category-page">
             ${studioPageHeaderHtml({
                 title: 'Products',
-                subtitle: 'Edition grid items (locales + commerce fields in Manage)',
+                subtitle: 'Edition records (Manage) — grid JSON & page headline in the section below',
                 countId: 'studio-products-header-count',
                 countLabel: 'editions',
             })}
@@ -476,7 +517,25 @@ function renderProducts() {
                 searchId: 'studio-products-search',
                 searchPlaceholder: 'Search id, title, href, status…',
             })}
-            <p class="studio-muted studio-banner studio-banner--info">Editions here power the public <code>/editions</code> grid (<code>listEditions</code>). Home “Objects Highlights” uses Content → <strong>Objects highlight</strong> when that JSON includes an <code>objects</code> array; if it is empty or missing, the home block shows up to four of these edition records instead.</p>
+            <p class="studio-muted studio-banner studio-banner--info">Editions here power the public <code>/editions</code> grid (<code>listEditions</code>). Home “Objects Highlights” uses Studio → <strong>Home</strong> → <strong>Objects highlight</strong> when that JSON includes an <code>objects</code> array; if it is empty or missing, the home block shows up to four of these edition records instead.</p>
+            <details class="studio-embed-block" open>
+                <summary class="studio-subheading">Editions grid &amp; editions page copy</summary>
+                <p class="studio-muted">Structured grid items (often mirror Manage rows) and the <strong>/editions</strong> page headline from <code>site-info</code>.</p>
+                <div class="studio-toolbar-actions" style="margin:0.5rem 0;flex-wrap:wrap;gap:0.5rem">
+                    <button type="button" class="studio-btn-primary" id="studio-products-edit-grid">Edit editions grid</button>
+                    <button type="button" class="studio-btn-ghost" id="studio-products-edit-siteinfo">Edit editions page headline</button>
+                </div>
+                <div id="studio-products-embed-editor" class="studio-content-editor" style="display:none;margin-top:12px">
+                    <h3 class="studio-subheading" id="studio-products-embed-title">Edit</h3>
+                    <p id="studio-products-embed-unsaved" class="studio-banner studio-banner--warn" style="display:none" role="status">You have unsaved changes.</p>
+                    <div id="studio-products-embed-fields" class="studio-content-fields studio-content-fields--scroll" style="max-height:min(50vh,28rem)"></div>
+                    <div class="studio-toolbar-actions" style="margin-top:12px">
+                        <button type="button" class="studio-btn-primary" id="studio-products-embed-save">Save</button>
+                        <button type="button" class="studio-btn-ghost" id="studio-products-embed-cancel">Cancel</button>
+                    </div>
+                    <p id="studio-products-embed-msg" class="studio-banner studio-banner--info" style="display:none"></p>
+                </div>
+            </details>
             <div class="studio-subscribers-toolbar">
                 <button type="button" class="studio-btn-primary" id="studio-product-add">ADD EDITION</button>
                 <button type="button" class="studio-btn-ghost" id="studio-products-refresh">Refresh</button>
@@ -529,7 +588,7 @@ function renderJournal() {
         <div class="studio-section-stack studio-category-page">
             ${studioPageHeaderHtml({
                 title: 'Journal',
-                subtitle: 'Journal entries (also listed from Content → journals-block)',
+                subtitle: 'Journal entries — structured home list below or Studio → Home',
                 countId: 'studio-journal-header-count',
                 countLabel: 'entries',
             })}
@@ -537,6 +596,24 @@ function renderJournal() {
                 searchId: 'studio-journal-search',
                 searchPlaceholder: 'Search title, id, link…',
             })}
+            <details class="studio-embed-block" open>
+                <summary class="studio-subheading">Journal home list &amp; journal page copy</summary>
+                <p class="studio-muted">Order and entries on the home journal block plus the <strong>/journal</strong> page headline from <code>site-info</code>.</p>
+                <div class="studio-toolbar-actions" style="margin:0.5rem 0;flex-wrap:wrap;gap:0.5rem">
+                    <button type="button" class="studio-btn-primary" id="studio-journal-edit-block">Edit journal home list</button>
+                    <button type="button" class="studio-btn-ghost" id="studio-journal-edit-siteinfo">Edit journal page headline</button>
+                </div>
+                <div id="studio-journal-embed-editor" class="studio-content-editor" style="display:none;margin-top:12px">
+                    <h3 class="studio-subheading" id="studio-journal-embed-title">Edit</h3>
+                    <p id="studio-journal-embed-unsaved" class="studio-banner studio-banner--warn" style="display:none" role="status">You have unsaved changes.</p>
+                    <div id="studio-journal-embed-fields" class="studio-content-fields studio-content-fields--scroll" style="max-height:min(50vh,28rem)"></div>
+                    <div class="studio-toolbar-actions" style="margin-top:12px">
+                        <button type="button" class="studio-btn-primary" id="studio-journal-embed-save">Save</button>
+                        <button type="button" class="studio-btn-ghost" id="studio-journal-embed-cancel">Cancel</button>
+                    </div>
+                    <p id="studio-journal-embed-msg" class="studio-banner studio-banner--info" style="display:none"></p>
+                </div>
+            </details>
             <div class="studio-subscribers-toolbar">
                 <button type="button" class="studio-btn-primary" id="studio-journal-add">ADD ENTRY</button>
                 <button type="button" class="studio-btn-ghost" id="studio-journal-refresh">Refresh</button>
@@ -621,11 +698,17 @@ function renderUsers() {
                 </label>
                 </div>
             </div>
-            <h3 class="studio-subheading">All accounts</h3>
+            <div class="studio-toolbar-actions studio-users-sync-toolbar" style="margin:0.5rem 0 0.75rem;flex-wrap:wrap;gap:0.5rem;align-items:center">
+                <h3 class="studio-subheading" style="margin:0;width:100%">All accounts</h3>
+                <button type="button" class="studio-btn-primary" id="studio-users-sync-all" aria-busy="false">
+                    Sync subscriptions
+                </button>
+                <span id="studio-users-sync-msg" class="studio-muted" role="status"></span>
+            </div>
             <div class="studio-table-wrap studio-table-wrap--sticky-head">
                 <table class="studio-table studio-table--dense">
-                    <thead><tr><th>Identity</th><th>Role</th><th>Status</th><th>Linked artist</th><th>Org</th><th>Updated</th><th class="studio-td-actions">Account</th></tr></thead>
-                    <tbody id="studio-users-tbody"><tr><td colspan="7">Loading…</td></tr></tbody>
+                    <thead><tr><th><span class="studio-sr-only">Health</span></th><th>Identity</th><th>Role</th><th>Status</th><th>Membership</th><th>Renews</th><th>Linked artist</th><th>Org</th><th>Updated</th><th class="studio-td-actions">Account</th></tr></thead>
+                    <tbody id="studio-users-tbody"><tr><td colspan="10">Loading…</td></tr></tbody>
                 </table>
             </div>
         </div>
@@ -826,6 +909,24 @@ function renderSettings() {
                 </label>
             </div>
             <p class="studio-muted">Same as the loadscreen Debug control. Internet Identity has no site password — recovery uses II docs.</p>
+            <div id="studio-db-admin-tools" class="studio-db-admin-tools" hidden>
+                <h3 class="studio-subheading">Admin — full database backup</h3>
+                <p class="studio-muted">
+                    Download or restore the entire Fusion backend state (subscribers, accounts, artists, programs, settings, etc.).
+                    Restore is destructive and replaces the live canister data in one update.
+                </p>
+                <p class="studio-muted studio-db-admin-tools__warn">
+                    <strong>Warning:</strong> Keep backups safe. A bad restore can lock you out if the JSON does not include your admin principal.
+                    Internet Computer ingress limits apply — very large datasets may fail; use a dedicated migration if needed.
+                </p>
+                <div class="studio-field-row studio-db-admin-tools__actions">
+                    <button type="button" class="studio-btn-primary" id="studio-db-download">Download full database (JSON)</button>
+                    <input type="file" id="studio-db-restore-file" accept="application/json,.json" class="studio-file-input-hidden" aria-label="Choose backup JSON file" />
+                    <button type="button" class="studio-btn-ghost" id="studio-db-restore-pick">Choose backup file…</button>
+                    <button type="button" class="studio-btn-ghost" id="studio-db-restore-run" disabled>Restore from file</button>
+                </div>
+                <p id="studio-db-admin-status" class="studio-muted" role="status" aria-live="polite"></p>
+            </div>
         </div>
     `;
 }
@@ -882,6 +983,82 @@ function escapeHtml(s) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
 }
+
+/** @param {string | undefined} st */
+function studioMembershipStatusLabel(st) {
+    const s = String(st || '').toLowerCase();
+    if (!s) return 'No subscription';
+    const map = {
+        active: 'Active',
+        trialing: 'Trialing',
+        past_due: 'Past due',
+        canceled: 'Canceled',
+        unpaid: 'Unpaid',
+        incomplete: 'Incomplete',
+        incomplete_expired: 'Incomplete (expired)',
+        paused: 'Paused',
+    };
+    return map[s] || String(st);
+}
+
+/** @param {{ membershipExemptManual?: boolean, stripeSubscriptionStatus?: string }} row */
+function studioMembershipDotClass(row) {
+    if (row.membershipExemptManual) return 'studio-user-sub-dot--ok';
+    const s = String(row.stripeSubscriptionStatus || '').toLowerCase();
+    if (s === 'active' || s === 'trialing') return 'studio-user-sub-dot--ok';
+    return 'studio-user-sub-dot--err';
+}
+
+/** @param {string | undefined} iso */
+function formatSubscriptionPeriodEnd(iso) {
+    if (!iso) return '—';
+    try {
+        const d = new Date(String(iso));
+        if (Number.isNaN(d.getTime())) return '—';
+        return d.toISOString().slice(0, 10);
+    } catch {
+        return '—';
+    }
+}
+
+/**
+ * @param {object[]} artists
+ * @returns {Map<string, string>}
+ */
+function buildApplicantEmailToSlugMap(artists) {
+    const m = new Map();
+    for (const a of artists || []) {
+        const slug = String(a.slug || '').trim();
+        if (!slug) continue;
+        const locs = a.locales && typeof a.locales === 'object' ? a.locales : null;
+        if (!locs) continue;
+        for (const code of ['en', 'ja']) {
+            const b = locs[code];
+            if (!b || typeof b !== 'object') continue;
+            const raw = /** @type {Record<string, unknown>} */ (b);
+            const em = String(raw.email ?? raw.contactEmail ?? '')
+                .trim()
+                .toLowerCase();
+            if (em.includes('@')) m.set(em, slug);
+        }
+    }
+    return m;
+}
+
+const STUDIO_APPLICANT_EMAIL_PRESETS = {
+    schedule: {
+        label: 'Schedule meeting',
+        /** @param {{ fullName?: string, programId?: string }} r */
+        body: (r) =>
+            `Hello ${String(r.fullName || 'there').trim()},\n\nWe would like to schedule a meeting to discuss your application for program ${String(r.programId || '').trim()}.\n\nPlease reply with your availability.\n\n— Fusion`,
+    },
+    confirmation: {
+        label: 'Send confirmation',
+        /** @param {{ fullName?: string, programId?: string }} r */
+        body: (r) =>
+            `Hello ${String(r.fullName || 'there').trim()},\n\nThis confirms we have received your application for program ${String(r.programId || '').trim()}.\n\nWe will be in touch with next steps.\n\n— Fusion`,
+    },
+};
 
 /**
  * @param {object} row
@@ -1128,6 +1305,7 @@ function applicantStatusPillHtml(status) {
 /** @type {Record<string, (mainEl: HTMLElement) => Promise<void>>} */
 const STUDIO_INIT = {
     [STUDIO_DASHBOARD_ID]: initDashboard,
+    home: initHome,
     subscribers: initSubscribers,
     applicants: initApplicants,
     artists: initArtists,
@@ -1410,12 +1588,33 @@ async function initApplicants(mainEl) {
     let page = 0;
     /** @type {'all' | 'pending' | 'reviewing' | 'needsInfo' | 'accepted' | 'rejected'} */
     let statusTab = 'all';
+    /** @type {Map<string, string>} */
+    let applicantEmailToSlug = new Map();
+
+    let canDeleteApplicants = false;
+    if (getDataSource() === 'test') {
+        canDeleteApplicants = true;
+    } else {
+        try {
+            const { getStudioAuthenticatedActor } = await import('../../utils/studioAuth.js');
+            const actor = await getStudioAuthenticatedActor();
+            if (actor && typeof actor.isCallerAdmin === 'function') {
+                canDeleteApplicants = await actor.isCallerAdmin();
+            }
+        } catch {
+            /* ignore */
+        }
+    }
 
     if (banner) {
-        banner.textContent =
+        let base =
             getDataSource() === 'test'
                 ? 'Test mode uses saved applicants on this browser. Open a row to change status or notes.'
                 : 'Live canister — listApplicants (staff/admin). Open a row to edit.';
+        if (getDataSource() !== 'test' && !canDeleteApplicants) {
+            base += ' Only admins can delete applicant records.';
+        }
+        banner.textContent = base;
     }
 
     const syncStatusTabs = () => {
@@ -1472,25 +1671,64 @@ async function initApplicants(mainEl) {
         const start = page * APPLICANTS_PAGE_SIZE;
         const slice = rows.slice(start, start + APPLICANTS_PAGE_SIZE);
         if (!slice.length) {
-            tbody.innerHTML = `<tr><td colspan="5">${allRows.length ? 'No applicants match filters.' : 'No applicants.'}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="9">${allRows.length ? 'No applicants match filters.' : 'No applicants.'}</td></tr>`;
         } else {
+            const origin = getPublicSiteOrigin();
+            const delBtn = (id) =>
+                canDeleteApplicants
+                    ? `<td class="studio-td-actions"><button type="button" class="studio-btn-danger studio-app-delete" data-id="${escapeHtml(id)}">Delete</button></td>`
+                    : '<td class="studio-td-actions">—</td>';
             tbody.innerHTML = slice
-                .map(
-                    (r) => `
+                .map((r) => {
+                    const em = String(r.email || '')
+                        .trim()
+                        .toLowerCase();
+                    const slug = em ? applicantEmailToSlug.get(em) : '';
+                    const profileCell = slug
+                        ? `<a href="${escapeHtml(`${origin}/profile/${encodeURIComponent(slug)}`)}" target="_blank" rel="noopener noreferrer" class="studio-app-profile-link">/${escapeHtml(slug)}</a>`
+                        : '<span class="studio-muted">—</span>';
+                    return `
         <tr class="studio-app-row" data-id="${escapeHtml(r.id)}" tabindex="0" role="button">
             <td>${escapeHtml(r.email)}</td>
             <td>${escapeHtml(r.fullName || '')}</td>
             <td>${escapeHtml(r.programId)}</td>
             <td>${applicantStatusPillHtml(r.status)}</td>
             <td>${escapeHtml(r.createdAt)}</td>
-        </tr>`
-                )
+            <td>${profileCell}</td>
+            <td class="studio-td-actions"><button type="button" class="studio-btn-ghost studio-app-view" data-id="${escapeHtml(r.id)}">View</button></td>
+            <td class="studio-td-actions"><button type="button" class="studio-btn-ghost studio-app-email" data-id="${escapeHtml(r.id)}">Send email</button></td>
+            ${delBtn(r.id)}
+        </tr>`;
+                })
                 .join('');
             tbody.querySelectorAll('.studio-app-row').forEach((tr) => {
-                const open = () => openApplicantModal(tr.getAttribute('data-id'));
-                tr.addEventListener('click', open);
+                const openEdit = () => openApplicantModal(tr.getAttribute('data-id'));
+                tr.addEventListener('click', (ev) => {
+                    const t = ev.target && /** @type {Element} */ (ev.target).closest?.(
+                        '.studio-app-delete, .studio-app-view, .studio-app-email, .studio-app-profile-link',
+                    );
+                    if (t) {
+                        ev.preventDefault();
+                        return;
+                    }
+                    openEdit();
+                });
                 tr.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter' || e.key === ' ') open();
+                    if (e.key === 'Enter' || e.key === ' ') openEdit();
+                });
+            });
+            tbody.querySelectorAll('.studio-app-view').forEach((btn) => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const id = btn.getAttribute('data-id');
+                    if (id) openApplicantViewModal(id);
+                });
+            });
+            tbody.querySelectorAll('.studio-app-email').forEach((btn) => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const id = btn.getAttribute('data-id');
+                    if (id) openApplicantEmailModal(id);
                 });
             });
         }
@@ -1508,10 +1746,108 @@ async function initApplicants(mainEl) {
         }
     };
 
+    const openApplicantViewModal = (id) => {
+        const r = allRows.find((x) => x.id === id);
+        if (!r) return;
+        let payloadPretty = String(r.payloadJson || '').trim();
+        try {
+            const o = JSON.parse(payloadPretty);
+            payloadPretty = JSON.stringify(o, null, 2);
+        } catch {
+            /* raw */
+        }
+        const body = `
+          <div class="studio-modal-form">
+            <p><strong>Email:</strong> ${escapeHtml(r.email)}</p>
+            <p><strong>Name:</strong> ${escapeHtml(r.fullName || '—')}</p>
+            <p><strong>Program:</strong> ${escapeHtml(r.programId)}</p>
+            <p><strong>Status:</strong> ${applicantStatusPillHtml(r.status)}</p>
+            <p><strong>Created:</strong> ${escapeHtml(r.createdAt)}</p>
+            <label class="studio-field studio-field--full"><span>Application payload (read-only)</span>
+              <textarea class="studio-textarea studio-textarea-mono" rows="16" readonly spellcheck="false">${escapeHtml(payloadPretty)}</textarea>
+            </label>
+          </div>`;
+        openStudioModal(body, { title: 'View application', wide: true });
+    };
+
+    const openApplicantEmailModal = (id) => {
+        const r = allRows.find((x) => x.id === id);
+        if (!r) return;
+        const body = `
+          <div class="studio-modal-form">
+            <p class="studio-muted">To: <strong>${escapeHtml(r.email)}</strong></p>
+            <label class="studio-field studio-field--full"><span>Category</span>
+              <select id="studio-app-email-category" class="studio-select">
+                <option value="schedule">${escapeHtml(STUDIO_APPLICANT_EMAIL_PRESETS.schedule.label)}</option>
+                <option value="confirmation">${escapeHtml(STUDIO_APPLICANT_EMAIL_PRESETS.confirmation.label)}</option>
+              </select>
+            </label>
+            <label class="studio-field studio-field--full"><span>Message</span>
+              <textarea id="studio-app-email-body" class="studio-textarea" rows="12" spellcheck="true"></textarea>
+            </label>
+            <button type="button" class="studio-btn-primary" id="studio-app-email-send">Send</button>
+            <p id="studio-app-email-msg" class="studio-banner studio-banner--info" style="display:none;margin-top:0.75rem" role="status"></p>
+          </div>`;
+        const { close, root } = openStudioModal(body, {
+            title: `Send email — ${escapeHtml(r.email)}`,
+            wide: true,
+        });
+        const cat = root.querySelector('#studio-app-email-category');
+        const ta = root.querySelector('#studio-app-email-body');
+        const msg = root.querySelector('#studio-app-email-msg');
+        const applyPreset = () => {
+            const k = cat instanceof HTMLSelectElement ? cat.value : 'schedule';
+            const preset = STUDIO_APPLICANT_EMAIL_PRESETS[k] || STUDIO_APPLICANT_EMAIL_PRESETS.schedule;
+            if (ta instanceof HTMLTextAreaElement) ta.value = preset.body(r);
+        };
+        applyPreset();
+        cat?.addEventListener('change', applyPreset);
+        root.querySelector('#studio-app-email-send')?.addEventListener('click', async () => {
+            if (!getIntegrationBaseUrl()) {
+                if (msg) {
+                    msg.style.display = 'block';
+                    msg.className = 'studio-banner studio-banner--warn';
+                    msg.textContent = 'Integration API URL is not configured.';
+                }
+                return;
+            }
+            const text = ta instanceof HTMLTextAreaElement ? ta.value.trim() : '';
+            if (!text) {
+                if (msg) {
+                    msg.style.display = 'block';
+                    msg.className = 'studio-banner studio-banner--warn';
+                    msg.textContent = 'Message is empty.';
+                }
+                return;
+            }
+            const subject = `[Fusion] Program application — ${String(r.programId || '').trim()}`;
+            try {
+                await sendEmail({ to: r.email, subject, text });
+                if (msg) {
+                    msg.style.display = 'block';
+                    msg.className = 'studio-banner studio-banner--info';
+                    msg.textContent = 'Sent.';
+                }
+                close();
+            } catch (e) {
+                if (msg) {
+                    msg.style.display = 'block';
+                    msg.className = 'studio-banner studio-banner--warn';
+                    msg.textContent = e instanceof Error ? e.message : String(e);
+                }
+            }
+        });
+    };
+
     const openApplicantModal = (id) => {
         const r = allRows.find((x) => x.id === id);
         if (!r) return;
         const notesPlain = applicantPayloadToPlainNotes(r.payloadJson);
+        const deleteBlock = canDeleteApplicants
+            ? `<div class="studio-modal-actions studio-modal-actions--applicant-delete">
+            <button type="button" class="studio-btn-danger" id="studio-app-modal-delete">Delete applicant</button>
+          </div>`
+            : '';
         const body = `
           <div class="studio-modal-form">
             <p class="studio-muted">Reference: <code class="studio-code-inline">${escapeHtml(shortRefLabel(r.id))}</code></p>
@@ -1529,6 +1865,7 @@ async function initApplicants(mainEl) {
               <textarea id="studio-app-modal-payload" class="studio-textarea" rows="14" placeholder="Internal notes (plain text). Structured data is preserved when you only add notes."></textarea>
             </label>
             <button type="button" class="studio-btn-primary" id="studio-app-modal-save">Save</button>
+            ${deleteBlock}
           </div>`;
         const { close, root } = openStudioModal(body, {
             title: `Applicant — ${escapeHtml(r.email)}`,
@@ -1551,12 +1888,65 @@ async function initApplicants(mainEl) {
                 alert(e instanceof Error ? e.message : String(e));
             }
         });
+        root.querySelector('#studio-app-modal-delete')?.addEventListener('click', async () => {
+            if (
+                !confirm(
+                    `Delete applicant ${r.email} (${shortRefLabel(r.id)})? This cannot be undone.`,
+                )
+            ) {
+                return;
+            }
+            try {
+                const ok = await deleteApplicantStudio(r.id);
+                if (!ok) {
+                    alert(
+                        'Delete failed — the record may be read-only, or your admin session may have expired.',
+                    );
+                    return;
+                }
+                close();
+                allRows = await getApplicants();
+                renderPage();
+            } catch (e) {
+                alert(e instanceof Error ? e.message : String(e));
+            }
+        });
     };
 
     const reload = async () => {
         allRows = await getApplicants();
+        try {
+            const artists = await getArtistsForStudio();
+            applicantEmailToSlug = buildApplicantEmailToSlugMap(artists);
+        } catch {
+            applicantEmailToSlug = new Map();
+        }
         renderPage();
     };
+
+    tbody?.addEventListener('click', async (e) => {
+        const btn = e.target && /** @type {Element} */ (e.target).closest?.('.studio-app-delete');
+        if (!btn || !tbody.contains(btn)) return;
+        e.stopPropagation();
+        if (!canDeleteApplicants) return;
+        const id = btn.getAttribute('data-id');
+        if (!id) return;
+        const row = allRows.find((x) => x.id === id);
+        const label = row ? `${row.email} (${shortRefLabel(id)})` : id;
+        if (!confirm(`Delete applicant ${label}? This cannot be undone.`)) return;
+        try {
+            const ok = await deleteApplicantStudio(id);
+            if (!ok) {
+                alert(
+                    'Delete failed — the record may be read-only, or your admin session may have expired.',
+                );
+                return;
+            }
+            await reload();
+        } catch (err) {
+            alert(err instanceof Error ? err.message : String(err));
+        }
+    });
 
     prevBtn?.addEventListener('click', () => {
         page = Math.max(0, page - 1);
@@ -1801,6 +2191,7 @@ async function initArtists(mainEl) {
               ${renderArtistManageModalHtml(escapeHtml, full, { isTest: getDataSource() === 'test' })}
             `;
             initArtistManageTabs(root);
+            void initArtistProgramsTab(root, full);
 
             root.querySelector('#studio-art-translate-to-new-world')?.addEventListener('click', async () => {
                 const promptEl = root.querySelector('#studio-art-new-world-prompt');
@@ -2168,6 +2559,105 @@ ${urlHelp}
     await load();
 }
 
+/**
+ * Embedded CMS block on Programs / Products / Journal tabs (same slugs as Studio → Home / Content).
+ *
+ * @param {HTMLElement} mainEl
+ * @param {{
+ *   embedEditor: string,
+ *   embedFields: string,
+ *   embedTitle: string,
+ *   embedUnsaved: string,
+ *   embedMsg: string,
+ *   btnSave: string,
+ *   btnCancel: string,
+ *   btnBlock: string,
+ *   btnSiteInfo: string,
+ *   slugBlock: string,
+ *   siteInfoChapter: 'programs' | 'editions' | 'journal',
+ *   titleBlock: string,
+ *   titleSiteInfo: string,
+ *   uploadArea: string,
+ * }} c
+ */
+function wireStudioEntityContentEmbed(mainEl, c) {
+    const embed = mainEl.querySelector(c.embedEditor);
+    const fieldsEl = mainEl.querySelector(c.embedFields);
+    const titleEl = mainEl.querySelector(c.embedTitle);
+    const unsavedEl = mainEl.querySelector(c.embedUnsaved);
+    const msgEl = mainEl.querySelector(c.embedMsg);
+    /** @type {string | null} */
+    let activeSlug = null;
+    /** @type {string | undefined} */
+    let chapterId = undefined;
+
+    const showMsg = (kind, text) => {
+        if (!msgEl) return;
+        msgEl.style.display = text ? 'block' : 'none';
+        msgEl.className = `studio-banner studio-banner--${kind}`;
+        msgEl.textContent = text;
+    };
+
+    const setDirty = (dirty) => {
+        if (unsavedEl) unsavedEl.style.display = dirty ? 'block' : 'none';
+    };
+
+    /**
+     * @param {string} slug
+     * @param {string | undefined} ch
+     * @param {string} titleText
+     */
+    const open = async (slug, ch, titleText) => {
+        activeSlug = slug;
+        chapterId = ch;
+        if (embed) embed.style.display = 'block';
+        if (titleEl) titleEl.textContent = titleText;
+        showMsg('info', '');
+        setDirty(false);
+        if (!fieldsEl) return;
+        await loadStudioContentEditorPayload(
+            fieldsEl,
+            slug,
+            { markDirty: () => setDirty(true) },
+            { chapterId: ch },
+        );
+        setDirty(false);
+        embed?.scrollIntoView({ behavior: 'smooth' });
+    };
+
+    mainEl.querySelector(c.btnBlock)?.addEventListener('click', () => open(c.slugBlock, undefined, c.titleBlock));
+    mainEl.querySelector(c.btnSiteInfo)?.addEventListener('click', () =>
+        open('site-info', c.siteInfoChapter, c.titleSiteInfo),
+    );
+
+    if (fieldsEl) {
+        attachStudioContentFileUpload(fieldsEl, {
+            markDirty: () => setDirty(true),
+            showMsg,
+            uploadArea: c.uploadArea,
+        });
+    }
+
+    mainEl.querySelector(c.btnSave)?.addEventListener('click', async () => {
+        if (!activeSlug || !fieldsEl) return;
+        try {
+            await persistStudioContentPage(activeSlug, fieldsEl);
+            showMsg('ok', 'Saved.');
+            setDirty(false);
+        } catch (e) {
+            showMsg('error', e instanceof Error ? e.message : String(e));
+        }
+    });
+
+    mainEl.querySelector(c.btnCancel)?.addEventListener('click', () => {
+        if (embed) embed.style.display = 'none';
+        activeSlug = null;
+        chapterId = undefined;
+        setDirty(false);
+        showMsg('info', '');
+    });
+}
+
 async function initPrograms(mainEl) {
     const tbody = mainEl.querySelector('#studio-programs-tbody');
     const banner = mainEl.querySelector('#studio-programs-banner');
@@ -2503,6 +2993,23 @@ async function initPrograms(mainEl) {
     mainEl.querySelector('#studio-programs-refresh')?.addEventListener('click', () => load());
     mainEl.querySelector('#studio-programs-search')?.addEventListener('input', () => applyProgramFilter());
 
+    wireStudioEntityContentEmbed(mainEl, {
+        embedEditor: '#studio-programs-embed-editor',
+        embedFields: '#studio-programs-embed-fields',
+        embedTitle: '#studio-programs-embed-title',
+        embedUnsaved: '#studio-programs-embed-unsaved',
+        embedMsg: '#studio-programs-embed-msg',
+        btnSave: '#studio-programs-embed-save',
+        btnCancel: '#studio-programs-embed-cancel',
+        btnBlock: '#studio-programs-edit-block',
+        btnSiteInfo: '#studio-programs-edit-siteinfo',
+        slugBlock: 'all-programs',
+        siteInfoChapter: 'programs',
+        titleBlock: 'Edit: Programs block',
+        titleSiteInfo: 'Edit: Programs page headline (site-info)',
+        uploadArea: 'studio/programs-content',
+    });
+
     await load();
 }
 
@@ -2709,6 +3216,24 @@ async function initProducts(mainEl) {
     mainEl.querySelector('#studio-product-add')?.addEventListener('click', () => openEditionModal(null, load));
     mainEl.querySelector('#studio-products-refresh')?.addEventListener('click', () => load());
     mainEl.querySelector('#studio-products-search')?.addEventListener('input', () => applyEditionFilter());
+
+    wireStudioEntityContentEmbed(mainEl, {
+        embedEditor: '#studio-products-embed-editor',
+        embedFields: '#studio-products-embed-fields',
+        embedTitle: '#studio-products-embed-title',
+        embedUnsaved: '#studio-products-embed-unsaved',
+        embedMsg: '#studio-products-embed-msg',
+        btnSave: '#studio-products-embed-save',
+        btnCancel: '#studio-products-embed-cancel',
+        btnBlock: '#studio-products-edit-grid',
+        btnSiteInfo: '#studio-products-edit-siteinfo',
+        slugBlock: 'editions-feed',
+        siteInfoChapter: 'editions',
+        titleBlock: 'Edit: Editions grid',
+        titleSiteInfo: 'Edit: Editions page headline (site-info)',
+        uploadArea: 'studio/products-content',
+    });
+
     await load();
 }
 
@@ -2980,6 +3505,24 @@ async function initJournal(mainEl) {
     mainEl.querySelector('#studio-journal-add')?.addEventListener('click', () => openJournalModal(null, load));
     mainEl.querySelector('#studio-journal-refresh')?.addEventListener('click', () => load());
     mainEl.querySelector('#studio-journal-search')?.addEventListener('input', () => applyJournalFilter());
+
+    wireStudioEntityContentEmbed(mainEl, {
+        embedEditor: '#studio-journal-embed-editor',
+        embedFields: '#studio-journal-embed-fields',
+        embedTitle: '#studio-journal-embed-title',
+        embedUnsaved: '#studio-journal-embed-unsaved',
+        embedMsg: '#studio-journal-embed-msg',
+        btnSave: '#studio-journal-embed-save',
+        btnCancel: '#studio-journal-embed-cancel',
+        btnBlock: '#studio-journal-edit-block',
+        btnSiteInfo: '#studio-journal-edit-siteinfo',
+        slugBlock: 'journals-block',
+        siteInfoChapter: 'journal',
+        titleBlock: 'Edit: Journal home list',
+        titleSiteInfo: 'Edit: Journal page headline (site-info)',
+        uploadArea: 'studio/journal-content',
+    });
+
     await load();
 }
 
@@ -3059,9 +3602,18 @@ async function initUsers(mainEl) {
     const roleFilter = mainEl.querySelector('#studio-users-filter-role');
     const statusFilter = mainEl.querySelector('#studio-users-filter-status');
     const countHeader = mainEl.querySelector('#studio-users-header-count');
+    const syncAllBtn = mainEl.querySelector('#studio-users-sync-all');
+    const syncMsg = mainEl.querySelector('#studio-users-sync-msg');
 
     /** @type {Awaited<ReturnType<typeof getAccountsForStudio>>} */
     let allPairs = [];
+
+    const membershipCellHtml = (r) => {
+        if (r.membershipExemptManual) {
+            return escapeHtml('Exempt (manual)');
+        }
+        return escapeHtml(studioMembershipStatusLabel(r.stripeSubscriptionStatus));
+    };
 
     const renderTable = () => {
         if (!tbody) return;
@@ -3078,15 +3630,18 @@ async function initUsers(mainEl) {
                 allPairs.length === 0 && !wantRole && !wantSt
                     ? 'No accounts on this canister yet.'
                     : 'No accounts match filters.';
-            tbody.innerHTML = `<tr><td colspan="7">${emptyMsg}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="10">${emptyMsg}</td></tr>`;
             return;
         }
         tbody.innerHTML = rows
             .map(
                 (r) => `<tr>
+                <td><span class="studio-user-sub-dot ${studioMembershipDotClass(r)}" title="Subscription health" aria-hidden="true"></span></td>
                 <td><span class="studio-identity-short" title="${escapeHtml(r.principal)}">${escapeHtml(shortPrincipalDisplay(r.principal))}</span></td>
                 <td>${escapeHtml(r.role)}</td>
                 <td>${escapeHtml(r.status)}</td>
+                <td>${membershipCellHtml(r)}</td>
+                <td><span class="studio-muted" title="${escapeHtml(r.stripeCurrentPeriodEnd || '')}">${escapeHtml(formatSubscriptionPeriodEnd(r.stripeCurrentPeriodEnd))}</span></td>
                 <td>${r.linkedArtistId ? escapeHtml(String(r.linkedArtistId)) : '—'}</td>
                 <td>${r.linkedOrgId ? escapeHtml(String(r.linkedOrgId)) : '—'}</td>
                 <td><span class="studio-muted" title="${escapeHtml(r.updatedAt)}">${escapeHtml(r.updatedAt ? r.updatedAt.slice(0, 19) : '—')}</span></td>
@@ -3110,7 +3665,7 @@ async function initUsers(mainEl) {
         if (typeof actor.listAccounts !== 'function') {
             if (tbody) {
                 tbody.innerHTML =
-                    '<tr><td colspan="7">listAccounts missing from declarations — run <code>dfx generate fusion-app-backend</code>.</td></tr>';
+                    '<tr><td colspan="10">listAccounts missing from declarations — run <code>dfx generate fusion-app-backend</code>.</td></tr>';
             }
             return;
         }
@@ -3118,7 +3673,7 @@ async function initUsers(mainEl) {
             allPairs = await getAccountsForStudio();
         } catch (listErr) {
             if (tbody) {
-                tbody.innerHTML = `<tr><td colspan="7">${escapeHtml(listErr instanceof Error ? listErr.message : String(listErr))}</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="10">${escapeHtml(listErr instanceof Error ? listErr.message : String(listErr))}</td></tr>`;
             }
             roleFilter?.addEventListener('change', renderTable);
             statusFilter?.addEventListener('change', renderTable);
@@ -3127,9 +3682,47 @@ async function initUsers(mainEl) {
         renderTable();
         roleFilter?.addEventListener('change', renderTable);
         statusFilter?.addEventListener('change', renderTable);
+
+        const syncBtn = syncAllBtn instanceof HTMLButtonElement ? syncAllBtn : null;
+        if (syncBtn) {
+            syncBtn.disabled = !getIntegrationBaseUrl();
+            if (!getIntegrationBaseUrl() && syncMsg) {
+                syncMsg.textContent = 'Set integration API URL to sync subscriptions.';
+            }
+            syncBtn.addEventListener('click', async () => {
+                if (!getIntegrationBaseUrl()) return;
+                syncBtn.disabled = true;
+                syncBtn.setAttribute('aria-busy', 'true');
+                if (syncMsg) syncMsg.textContent = 'Syncing…';
+                let ok = 0;
+                let fail = 0;
+                for (const row of allPairs) {
+                    try {
+                        await syncSubscriptionFromStripe(row.principal);
+                        ok += 1;
+                    } catch {
+                        fail += 1;
+                    }
+                }
+                try {
+                    allPairs = await getAccountsForStudio();
+                    renderTable();
+                } catch {
+                    /* ignore */
+                }
+                if (syncMsg) {
+                    syncMsg.textContent =
+                        fail > 0
+                            ? `Done: ${ok} synced, ${fail} failed (check integration logs).`
+                            : `Done: ${ok} synced.`;
+                }
+                syncBtn.disabled = false;
+                syncBtn.setAttribute('aria-busy', 'false');
+            });
+        }
     } catch (e) {
         if (tbody) {
-            tbody.innerHTML = `<tr><td colspan="7">${escapeHtml(e instanceof Error ? e.message : String(e))}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="10">${escapeHtml(e instanceof Error ? e.message : String(e))}</td></tr>`;
         }
     }
 }
@@ -3463,7 +4056,43 @@ async function initServices(mainEl) {
     });
 }
 
-function initSettings(mainEl) {
+/**
+ * Settings / admin: confirmation dialog (Studio modal). Resolves true only when the primary button is pressed.
+ * @param {{ title: string, paragraphs: string[], confirmLabel: string, danger?: boolean }} opts
+ * @returns {Promise<boolean>}
+ */
+function studioSettingsConfirmModal(opts) {
+    const body = opts.paragraphs
+        .map((p) => `<p class="studio-muted" style="margin:0 0 0.75rem">${escapeHtml(p)}</p>`)
+        .join('');
+    const btnClass = opts.danger ? 'studio-btn-danger' : 'studio-btn-primary';
+    const inner = `${body}
+<div class="studio-modal-actions" style="margin-top:1rem;padding-top:0.75rem;border-top:1px solid #e2e8f0">
+<button type="button" class="studio-btn-ghost" data-studio-modal-close="1">Cancel</button>
+<button type="button" class="${btnClass}" id="studio-settings-confirm-ok">${escapeHtml(opts.confirmLabel)}</button>
+</div>`;
+    return new Promise((resolve) => {
+        let settled = false;
+        const { close, root } = openStudioModal(inner, {
+            title: opts.title,
+            compact: true,
+            onClose: () => {
+                if (!settled) {
+                    settled = true;
+                    resolve(false);
+                }
+            },
+        });
+        root.querySelector('#studio-settings-confirm-ok')?.addEventListener('click', () => {
+            if (settled) return;
+            settled = true;
+            resolve(true);
+            close();
+        });
+    });
+}
+
+async function initSettings(mainEl) {
     const ds = mainEl.querySelector('#studio-set-datasource');
     const net = mainEl.querySelector('#studio-set-network');
     const rTest = mainEl.querySelector('#studio-ds-test');
@@ -3489,5 +4118,133 @@ function initSettings(mainEl) {
 
     import('../../config.js').then((cfg) => {
         if (net) net.textContent = cfg.DEV_MODE ? 'devMode true (local / fetch root key)' : 'devMode false (icp-api.io)';
+    });
+
+    const adminWrap = mainEl.querySelector('#studio-db-admin-tools');
+    const adminStatus = mainEl.querySelector('#studio-db-admin-status');
+    const btnDl = mainEl.querySelector('#studio-db-download');
+    const fileInput = mainEl.querySelector('#studio-db-restore-file');
+    const btnPick = mainEl.querySelector('#studio-db-restore-pick');
+    const btnRestore = mainEl.querySelector('#studio-db-restore-run');
+
+    const setAdminStatus = (t) => {
+        if (adminStatus) adminStatus.textContent = t || '';
+    };
+
+    /** @type {File | null} */
+    let pendingRestoreFile = null;
+
+    if (!adminWrap) return;
+
+    if (getDataSource() !== 'live') {
+        adminWrap.hidden = true;
+        return;
+    }
+
+    const { getAuthenticatedFusionBackendActor } = await import('../../utils/earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    let isAdmin = false;
+    if (actor && typeof actor.isCallerAdmin === 'function') {
+        try {
+            isAdmin = await actor.isCallerAdmin();
+        } catch {
+            isAdmin = false;
+        }
+    }
+
+    if (!isAdmin) {
+        adminWrap.hidden = true;
+        return;
+    }
+
+    adminWrap.hidden = false;
+
+    if (!actor?.adminExportFullDatabase || !actor?.adminImportFullDatabase) {
+        setAdminStatus(
+            'Database export/import requires an updated backend and fresh declarations. Deploy `fusion-app-backend` with adminExportFullDatabase / adminImportFullDatabase, then run `dfx generate fusion-app-backend` from the project root.',
+        );
+        if (btnDl) btnDl.disabled = true;
+        if (btnPick) btnPick.disabled = true;
+        if (btnRestore) btnRestore.disabled = true;
+        return;
+    }
+
+    btnPick?.addEventListener('click', () => fileInput?.click());
+
+    fileInput?.addEventListener('change', () => {
+        const f = fileInput.files?.[0];
+        pendingRestoreFile = f || null;
+        if (btnRestore) btnRestore.disabled = !pendingRestoreFile;
+        setAdminStatus(f ? `Selected: ${f.name}` : '');
+    });
+
+    btnDl?.addEventListener('click', async () => {
+        const okDl = await studioSettingsConfirmModal({
+            title: 'Download full database?',
+            paragraphs: [
+                'This exports all live canister data (accounts, artists, programs, subscribers, site settings, and more) to a JSON file on your device.',
+                'Treat the file as highly sensitive. Store it securely; anyone with the file can inspect your data or use it to overwrite a canister when restoring.',
+            ],
+            confirmLabel: 'Download JSON',
+            danger: false,
+        });
+        if (!okDl) return;
+
+        setAdminStatus('Exporting…');
+        if (btnDl) btnDl.disabled = true;
+        try {
+            const snapshot = await actor.adminExportFullDatabase();
+            const { serializeDatabaseSnapshotToJson } = await import('../../utils/databaseSnapshotJson.js');
+            const json = serializeDatabaseSnapshotToJson(snapshot);
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+            a.href = url;
+            a.download = `fusion-database-backup-${stamp}.json`;
+            a.rel = 'noopener';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            setAdminStatus('Download started.');
+        } catch (e) {
+            setAdminStatus(e instanceof Error ? e.message : String(e));
+        } finally {
+            if (btnDl) btnDl.disabled = false;
+        }
+    });
+
+    btnRestore?.addEventListener('click', async () => {
+        if (!pendingRestoreFile) return;
+        const name = pendingRestoreFile.name || 'selected file';
+        const okRestore = await studioSettingsConfirmModal({
+            title: 'Restore entire database?',
+            paragraphs: [
+                `This will replace ALL live canister data with the contents of “${name}”. This cannot be undone.`,
+                'Use only trusted backups. Ensure the JSON includes your admin principal or you may be locked out of Studio.',
+            ],
+            confirmLabel: 'Replace database',
+            danger: true,
+        });
+        if (!okRestore) return;
+
+        setAdminStatus('Reading file…');
+        if (btnRestore) btnRestore.disabled = true;
+        try {
+            const text = await pendingRestoreFile.text();
+            const { parseDatabaseSnapshotJson, normalizeDatabaseSnapshotV1 } = await import(
+                '../../utils/databaseSnapshotJson.js'
+            );
+            const snapshot = normalizeDatabaseSnapshotV1(parseDatabaseSnapshotJson(text));
+            setAdminStatus('Restoring on-chain…');
+            await actor.adminImportFullDatabase(snapshot);
+            setAdminStatus('Restore complete. Reload the app to refresh Studio data.');
+            window.dispatchEvent(new CustomEvent('fusion-data-source-change', { detail: { source: 'live' } }));
+        } catch (e) {
+            setAdminStatus(e instanceof Error ? e.message : String(e));
+        } finally {
+            if (btnRestore) btnRestore.disabled = !pendingRestoreFile;
+        }
     });
 }

@@ -12,6 +12,19 @@ const ENTITY_TAB_ROOTS = ['allArtists', 'featuredArtist'];
 const ALLOWED_ROOTS = new Set([...REGISTRY_ROOTS, ...ENTITY_TAB_ROOTS]);
 
 describe('Studio testData coverage registry', () => {
+    it('CONTENT_PAGE_REGISTRY entries have Studio surface metadata', () => {
+        for (const e of CONTENT_PAGE_REGISTRY) {
+            expect(
+                e.primaryStudioSurface,
+                `registry entry ${e.slug} missing primaryStudioSurface`
+            ).toBeTruthy();
+            expect(
+                Array.isArray(e.studioSurfaces) && e.studioSurfaces.length > 0,
+                `registry entry ${e.slug} missing studioSurfaces`
+            ).toBe(true);
+        }
+    });
+
     it('CONTENT_PAGE_REGISTRY covers every planned CMS root except entity tabs', () => {
         const mustHave = [
             'programHero',

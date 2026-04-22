@@ -1,6 +1,7 @@
 import { navigate } from '../../router.js';
 import { mergeLocaleDeep, firstNonEmptyString } from '../../utils/localeFallback.js';
 import { escapeHtml, previewPlainText } from '../../utils/textPreview.js';
+import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
 
 // Placeholder — structure, content, and styles TBD
 class JournalHeroComponent extends HTMLElement {
@@ -99,7 +100,7 @@ class JournalHeroComponent extends HTMLElement {
                     </div>
                 </div>
                 <div class="right-content">
-                    <img class="journal-card-image" src="${escapeHtml(journalImage)}" alt="${escapeHtml(slice.imageAlt ?? journalTitle)}">
+                    <img class="journal-card-image" src="${escapeHtml(journalImage)}" alt="${escapeHtml(withSeoImageAlt(slice.imageAlt ?? journalTitle))}">
                 </div>
             `;
 

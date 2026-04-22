@@ -23,6 +23,7 @@ import { mergeLocaleDeep } from "../utils/localeFallback.js";
 import { getPublicSiteOrigin } from "../config.js";
 import { applyDocumentSeo } from "../utils/documentSeo.js";
 import { buildProgramApplicationFormContext } from "../utils/programApplicationFormContext.js";
+import { withSeoImageAlt, withSeoVideoLabel } from "../utils/mediaAltSeo.js";
 
 function toTrimmedList(values) {
   if (!Array.isArray(values)) return [];
@@ -94,7 +95,7 @@ function setProgramHeroMedia(container, url, alt, posterStillUrl) {
     const posterImg = document.createElement("img");
     posterImg.className = "program-detail-hero-poster";
     posterImg.src = poster;
-    posterImg.alt = "";
+    posterImg.alt = withSeoImageAlt(alt || "Program hero");
     posterImg.decoding = "async";
     posterImg.setAttribute("fetchpriority", "high");
 
@@ -107,7 +108,9 @@ function setProgramHeroMedia(container, url, alt, posterStillUrl) {
     v.muted = true;
     v.autoplay = true;
     v.loop = true;
-    v.setAttribute("aria-label", alt || "Program");
+    const vLabel = withSeoVideoLabel(alt || "Program hero");
+    v.setAttribute("aria-label", vLabel);
+    v.setAttribute("title", vLabel);
     v.style.opacity = "0";
     v.style.transition = "opacity 0.65s ease";
 
@@ -130,7 +133,7 @@ function setProgramHeroMedia(container, url, alt, posterStillUrl) {
   }
   const img = document.createElement("img");
   img.src = u;
-  img.alt = alt || "";
+  img.alt = withSeoImageAlt(alt);
   container.appendChild(img);
 }
 
@@ -231,7 +234,11 @@ function wireProgramApplicationSection(programId, applicationsOpen = true) {
   }
 
   const onPrimaryCta = () => {
-    posthog.capture("program_apply_cta_clicked", { program_id: programId });
+    const locale =
+      typeof window.getLocale === "function" && window.getLocale() === "ja"
+        ? "ja"
+        : "en";
+    posthog.capture("program_apply_cta_clicked", { program_id: programId, locale });
     void revealProgramApplicationOrOpenJoin();
   };
 
@@ -515,11 +522,17 @@ async function applyProgramToDom(programPair) {
   const fadeDur = Number(programPage?.fadeGalleryDurationSec);
   const fadeDurationSec =
     Number.isFinite(fadeDur) && fadeDur > 0 ? fadeDur : 3;
+  const galleryAltBase = String(
+    programPage?.headline || titleText || "Program",
+  ).trim();
   if (
     fadeGalleryEl &&
     typeof fadeGalleryEl.setImages === "function"
   ) {
-    fadeGalleryEl.setImages(fadeUrls, { durationSec: fadeDurationSec });
+    fadeGalleryEl.setImages(fadeUrls, {
+      durationSec: fadeDurationSec,
+      altBase: galleryAltBase,
+    });
   }
 
   const stripGalleryEl = document.getElementById("programStripGallery");
@@ -534,7 +547,7 @@ async function applyProgramToDom(programPair) {
     stripGalleryEl &&
     typeof stripGalleryEl.setImages === "function"
   ) {
-    stripGalleryEl.setImages(stripUrls);
+    stripGalleryEl.setImages(stripUrls, { altBase: galleryAltBase });
   }
 
   if (

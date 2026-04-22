@@ -5,6 +5,7 @@ import {
     CONTENT_PAGE_REGISTRY,
     getContentBundleForStudio,
     getContentSummary,
+    getContentSummaryForSurface,
     studioTranslateEnToJa,
     upsertContentPageStudio,
 } from '../../../utils/database.js';
@@ -30,15 +31,21 @@ function escapeHtml(s) {
         .replace(/"/g, '&quot;');
 }
 
-export function renderContent() {
+/**
+ * Shared markup for Content and Home Studio tabs (`prefix` e.g. `studio-content`, `studio-home`).
+ *
+ * @param {string} prefix
+ * @param {string} introHtml
+ */
+export function renderStudioContentPanelHtml(prefix, introHtml) {
     return `
         <div class="studio-section-stack">
-            <p class="studio-muted">Edit wording for each site section below. Labels describe where text appears (English and 日本語). You never need to paste structured data or storage keys.</p>
+            ${introHtml}
             <div class="studio-content-toolbar">
                 <label class="studio-field studio-field--inline"><span class="studio-toolbar-label">Search</span>
-                    <input type="search" id="studio-content-filter" class="studio-input" placeholder="Filter sections…" autocomplete="off" />
+                    <input type="search" id="${prefix}-filter" class="studio-input" placeholder="Filter sections…" autocomplete="off" />
                 </label>
-                <span id="studio-content-count" class="studio-muted studio-content-count"></span>
+                <span id="${prefix}-count" class="studio-muted studio-content-count"></span>
             </div>
             <div class="studio-table-wrap studio-table-wrap--rounded">
                 <table class="studio-table studio-table--rows">
@@ -49,32 +56,47 @@ export function renderContent() {
                             <th></th>
                         </tr>
                     </thead>
-                    <tbody id="studio-content-tbody"><tr><td colspan="3">Loading…</td></tr></tbody>
+                    <tbody id="${prefix}-tbody"><tr><td colspan="3">Loading…</td></tr></tbody>
                 </table>
             </div>
-            <div id="studio-content-editor" class="studio-content-editor" style="display:none">
+            <div id="${prefix}-editor" class="studio-content-editor" style="display:none">
                 <div class="studio-content-editor__header">
-                    <h3 class="studio-subheading" id="studio-content-editor-title">Edit</h3>
-                    <p class="studio-muted studio-content-editor-slug" id="studio-content-editor-slug" hidden></p>
+                    <h3 class="studio-subheading" id="${prefix}-editor-title">Edit</h3>
+                    <p class="studio-muted studio-content-editor-slug" id="${prefix}-editor-slug" hidden></p>
                 </div>
-                <p class="studio-modal-hint studio-content-hint" id="studio-content-hint">Fields are labeled by kind (Route, Media, Text, …). Uploads use Services → S3. Save to persist to storage.</p>
-                <p id="studio-content-live-placeholder" class="studio-banner studio-banner--placeholder" style="display:none" role="status">
+                <p class="studio-modal-hint studio-content-hint" id="${prefix}-hint">Fields are labeled by kind (Route, Media, Text, …). Uploads use Services → S3. Save to persist to storage.</p>
+                <p id="${prefix}-live-placeholder" class="studio-banner studio-banner--placeholder" style="display:none" role="status">
                     Sample copy only — this section is not stored on the canister yet. Use <strong>Save</strong> or <strong>Adopt sample</strong> to persist (including any edits).
                 </p>
-                <p id="studio-content-unsaved" class="studio-banner studio-banner--warn" style="display:none" role="status">You have unsaved changes.</p>
-                <div id="studio-content-fields" class="studio-content-fields studio-content-fields--scroll"></div>
+                <p id="${prefix}-unsaved" class="studio-banner studio-banner--warn" style="display:none" role="status">You have unsaved changes.</p>
+                <div id="${prefix}-fields" class="studio-content-fields studio-content-fields--scroll"></div>
                 <div class="studio-content-editor__footer">
                     <div class="studio-toolbar-actions studio-content-editor__actions">
-                        <button type="button" class="studio-btn-primary" id="studio-content-save">Save</button>
-                        <button type="button" class="studio-btn-primary" id="studio-content-adopt" style="display:none">Adopt sample</button>
-                        <button type="button" class="studio-btn-ghost" id="studio-content-cancel">Cancel</button>
+                        <button type="button" class="studio-btn-primary" id="${prefix}-save">Save</button>
+                        <button type="button" class="studio-btn-primary" id="${prefix}-adopt" style="display:none">Adopt sample</button>
+                        <button type="button" class="studio-btn-ghost" id="${prefix}-cancel">Cancel</button>
                     </div>
-                    <p id="studio-content-saved-at" class="studio-muted studio-content-saved-at" style="display:none" aria-live="polite"></p>
-                    <p id="studio-content-msg" class="studio-banner studio-banner--info" style="display:none"></p>
+                    <p id="${prefix}-saved-at" class="studio-muted studio-content-saved-at" style="display:none" aria-live="polite"></p>
+                    <p id="${prefix}-msg" class="studio-banner studio-banner--info" style="display:none"></p>
                 </div>
             </div>
         </div>
     `;
+}
+
+export function renderContent() {
+    return renderStudioContentPanelHtml(
+        'studio-content',
+        `<p class="studio-muted">Legal pages, application copy, and site sections that are not edited under <strong>Home</strong>, <strong>Programs</strong>, <strong>Products</strong>, or <strong>Journal</strong>. Labels describe where text appears (English and 日本語).</p>`,
+    );
+}
+
+/** @returns {string} */
+export function renderHome() {
+    return renderStudioContentPanelHtml(
+        'studio-home',
+        `<p class="studio-muted">Homepage and global blocks (program hero, objects, events, audio, <strong>site-info</strong> home chapter, …). Same canister storage as before — one content page per slug.</p>`,
+    );
 }
 
 /**
@@ -85,8 +107,10 @@ export function renderContent() {
  * @param {unknown} bundle
  * @param {string} slug
  * @param {{ markDirty: () => void }} hooks
+ * @param {{ chapterId?: string }} [options] When set (e.g. `site-info` + `programs`), only that chapter’s fields render.
  */
-export function fillStudioContentPlainFields(container, bundle, slug, hooks) {
+export function fillStudioContentPlainFields(container, bundle, slug, hooks, options = {}) {
+    const chapterId = options.chapterId;
     container.innerHTML = '';
     let rows = flattenStringFields(bundle);
     if (slug === 'context') {
@@ -105,7 +129,10 @@ export function fillStudioContentPlainFields(container, bundle, slug, hooks) {
         translateEnToJa: (text) => studioTranslateEnToJa(text),
     };
 
-    const partitions = partitionGroupedContentRowsByChapters(grouped, slug);
+    let partitions = partitionGroupedContentRowsByChapters(grouped, slug);
+    if (chapterId) {
+        partitions = partitions.filter((part) => part.chapter?.id === chapterId);
+    }
 
     for (const part of partitions) {
         const target =
@@ -200,19 +227,106 @@ export function fillStudioContentPlainFields(container, bundle, slug, hooks) {
 }
 
 /**
- * @param {HTMLElement} mainEl
+ * Load bundle from storage/testData and fill the editor (shared by Content tab and embedded Studio panels).
+ *
+ * @param {HTMLElement} fieldsEl
+ * @param {string} slug
+ * @param {{ markDirty: () => void }} hooks
+ * @param {{ chapterId?: string }} [options]
+ * @returns {Promise<{ isLivePlaceholder: boolean }>}
  */
-export async function initContent(mainEl) {
-    const tbody = mainEl.querySelector('#studio-content-tbody');
-    const editor = mainEl.querySelector('#studio-content-editor');
-    const titleEl = mainEl.querySelector('#studio-content-editor-title');
-    const slugEl = mainEl.querySelector('#studio-content-editor-slug');
-    const fieldsEl = mainEl.querySelector('#studio-content-fields');
-    const msg = mainEl.querySelector('#studio-content-msg');
-    const unsavedEl = mainEl.querySelector('#studio-content-unsaved');
-    const savedAtEl = mainEl.querySelector('#studio-content-saved-at');
-    const placeholderEl = mainEl.querySelector('#studio-content-live-placeholder');
-    const adoptBtn = mainEl.querySelector('#studio-content-adopt');
+export async function loadStudioContentEditorPayload(fieldsEl, slug, hooks, options = {}) {
+    const loaded = await getContentBundleForStudio(slug, { forStudio: true, returnMeta: true });
+    const bundle =
+        loaded && typeof loaded === 'object' && 'bundle' in loaded
+            ? /** @type {{ bundle: unknown }} */ (loaded).bundle
+            : loaded;
+    const isLivePlaceholder =
+        loaded && typeof loaded === 'object' && 'isLivePlaceholder' in loaded
+            ? /** @type {{ isLivePlaceholder: boolean }} */ (loaded).isLivePlaceholder
+            : false;
+    fillStudioContentPlainFields(fieldsEl, bundle, slug || '', hooks, { chapterId: options.chapterId });
+    return { isLivePlaceholder };
+}
+
+/**
+ * Persist fields from a Studio content editor into the same slug (merges string/scalar patches into the stored bundle).
+ *
+ * @param {string} slug
+ * @param {HTMLElement} fieldsEl
+ */
+export async function persistStudioContentPage(slug, fieldsEl) {
+    const map = collectContentStringValues(fieldsEl);
+    /** @type {Record<string, string>} */
+    const scalarMap = {};
+    fieldsEl.querySelectorAll('input[data-scalar-path]').forEach((el) => {
+        const p = el.getAttribute('data-scalar-path');
+        if (!p) return;
+        if (el instanceof HTMLInputElement && el.type === 'checkbox') {
+            scalarMap[p] = el.checked ? 'true' : 'false';
+        } else if (el instanceof HTMLInputElement) {
+            scalarMap[p] = el.value;
+        }
+    });
+    const bundle = await getContentBundleForStudio(slug, { forStudio: true });
+    let next = applyStringPatches(bundle, map);
+    next = applyScalarPatches(bundle, next, scalarMap);
+    if (slug === 'context') {
+        next = syncContextJaMediaFromEn(next);
+    }
+    await upsertContentPageStudio(slug, next);
+}
+
+/**
+ * S3 upload for content field file inputs (same behavior as Content tab).
+ *
+ * @param {HTMLElement} fieldsEl
+ * @param {{ markDirty: () => void, showMsg: (kind: string, text: string) => void, uploadArea?: string }} opts
+ */
+export function attachStudioContentFileUpload(fieldsEl, opts) {
+    const area = opts.uploadArea || 'studio/content';
+    fieldsEl.addEventListener('change', async (ev) => {
+        const t = ev.target;
+        if (!(t instanceof HTMLInputElement) || t.type !== 'file') return;
+        const path = t.dataset.uploadFor;
+        if (!path) return;
+        const f = t.files?.[0];
+        if (!f) return;
+        const el = fieldsEl.querySelector(`.studio-content-str-value[data-path="${CSS.escape(path)}"]`);
+        if (!(el instanceof HTMLTextAreaElement) && !(el instanceof HTMLInputElement)) return;
+        try {
+            await uploadBlobToS3(f, el, { area });
+            opts.markDirty();
+            opts.showMsg('ok', 'Uploaded — URL inserted. Save to persist.');
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+        } catch (err) {
+            const m = err instanceof Error ? err.message : String(err);
+            const hint =
+                /presign|fetch|network|failed/i.test(m) && !/S3 upload failed/.test(m)
+                    ? `${m} — configure Services (integration API + S3) via the Services tab.`
+                    : m;
+            opts.showMsg('error', hint);
+        }
+        t.value = '';
+    });
+}
+
+/**
+ * @param {HTMLElement} mainEl
+ * @param {{ prefix: string, getSummary: () => Promise<Awaited<ReturnType<typeof getContentSummary>>>, uploadArea: string }} cfg
+ */
+async function initContentPanel(mainEl, cfg) {
+    const p = cfg.prefix;
+    const tbody = mainEl.querySelector(`#${p}-tbody`);
+    const editor = mainEl.querySelector(`#${p}-editor`);
+    const titleEl = mainEl.querySelector(`#${p}-editor-title`);
+    const slugEl = mainEl.querySelector(`#${p}-editor-slug`);
+    const fieldsEl = mainEl.querySelector(`#${p}-fields`);
+    const msg = mainEl.querySelector(`#${p}-msg`);
+    const unsavedEl = mainEl.querySelector(`#${p}-unsaved`);
+    const savedAtEl = mainEl.querySelector(`#${p}-saved-at`);
+    const placeholderEl = mainEl.querySelector(`#${p}-live-placeholder`);
+    const adoptBtn = mainEl.querySelector(`#${p}-adopt`);
     /** @type {string | null} */
     let activeSlug = null;
     /** @type {boolean} */
@@ -235,7 +349,7 @@ export async function initContent(mainEl) {
         if (unsavedEl) {
             unsavedEl.style.display = dirty ? 'block' : 'none';
         }
-        const saveBtn = mainEl.querySelector('#studio-content-save');
+        const saveBtn = mainEl.querySelector(`#${p}-save`);
         if (saveBtn instanceof HTMLButtonElement) {
             saveBtn.setAttribute('aria-busy', 'false');
         }
@@ -252,7 +366,7 @@ export async function initContent(mainEl) {
     };
     window.addEventListener('beforeunload', onBeforeUnload);
 
-    const summary = await getContentSummary();
+    const summary = await cfg.getSummary();
     if (!tbody) return;
     const previewText = (s) => {
         const t = [s.title, s.snippet].filter(Boolean).join(' — ');
@@ -281,21 +395,10 @@ export async function initContent(mainEl) {
         showMsg('info', '');
         setDirty(false);
         if (savedAtEl) savedAtEl.style.display = 'none';
-        const loaded = await getContentBundleForStudio(slug, { forStudio: true, returnMeta: true });
-        const bundle =
-            loaded && typeof loaded === 'object' && 'bundle' in loaded
-                ? /** @type {{ bundle: unknown }} */ (loaded).bundle
-                : loaded;
-        const isLivePlaceholder =
-            loaded && typeof loaded === 'object' && 'isLivePlaceholder' in loaded
-                ? /** @type {{ isLivePlaceholder: boolean }} */ (loaded).isLivePlaceholder
-                : false;
+        const { isLivePlaceholder } = fieldsEl
+            ? await loadStudioContentEditorPayload(fieldsEl, slug, { markDirty: () => setDirty(true) }, {})
+            : { isLivePlaceholder: false };
         setPlaceholderUi(isLivePlaceholder);
-        if (fieldsEl) {
-            fillStudioContentPlainFields(fieldsEl, bundle, slug || '', {
-                markDirty: () => setDirty(true),
-            });
-        }
         setStudioWorkspaceTrail(entry?.label || slug || '');
         titleEl?.focus();
         editor?.scrollIntoView({ behavior: 'smooth' });
@@ -305,32 +408,15 @@ export async function initContent(mainEl) {
         btn.addEventListener('click', () => openEditor(btn.getAttribute('data-slug') || ''));
     });
 
-    fieldsEl?.addEventListener('change', async (ev) => {
-        const t = ev.target;
-        if (!(t instanceof HTMLInputElement) || t.type !== 'file') return;
-        const path = t.dataset.uploadFor;
-        if (!path || !fieldsEl) return;
-        const f = t.files?.[0];
-        if (!f) return;
-        const el = fieldsEl.querySelector(`.studio-content-str-value[data-path="${CSS.escape(path)}"]`);
-        if (!(el instanceof HTMLTextAreaElement) && !(el instanceof HTMLInputElement)) return;
-        try {
-            await uploadBlobToS3(f, el, { area: 'studio/content' });
-            setDirty(true);
-            showMsg('ok', 'Uploaded — URL inserted. Save to persist.');
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-        } catch (err) {
-            const m = err instanceof Error ? err.message : String(err);
-            const hint =
-                /presign|fetch|network|failed/i.test(m) && !/S3 upload failed/.test(m)
-                    ? `${m} — configure Services (integration API + S3) via the Services tab.`
-                    : m;
-            showMsg('error', hint);
-        }
-        t.value = '';
-    });
+    if (fieldsEl) {
+        attachStudioContentFileUpload(fieldsEl, {
+            markDirty: () => setDirty(true),
+            showMsg,
+            uploadArea: cfg.uploadArea,
+        });
+    }
 
-    mainEl.querySelector('#studio-content-cancel')?.addEventListener('click', () => {
+    mainEl.querySelector(`#${p}-cancel`)?.addEventListener('click', () => {
         if (editor) editor.style.display = 'none';
         activeSlug = null;
         setDirty(false);
@@ -341,25 +427,7 @@ export async function initContent(mainEl) {
 
     const persistContent = async () => {
         if (!activeSlug || !fieldsEl) return;
-        const map = collectContentStringValues(fieldsEl);
-        /** @type {Record<string, string>} */
-        const scalarMap = {};
-        fieldsEl.querySelectorAll('input[data-scalar-path]').forEach((el) => {
-            const p = el.getAttribute('data-scalar-path');
-            if (!p) return;
-            if (el instanceof HTMLInputElement && el.type === 'checkbox') {
-                scalarMap[p] = el.checked ? 'true' : 'false';
-            } else if (el instanceof HTMLInputElement) {
-                scalarMap[p] = el.value;
-            }
-        });
-        const bundle = await getContentBundleForStudio(activeSlug, { forStudio: true });
-        let next = applyStringPatches(bundle, map);
-        next = applyScalarPatches(bundle, next, scalarMap);
-        if (activeSlug === 'context') {
-            next = syncContextJaMediaFromEn(next);
-        }
-        await upsertContentPageStudio(activeSlug, next);
+        await persistStudioContentPage(activeSlug, fieldsEl);
         const ts = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
         if (savedAtEl) {
             savedAtEl.textContent = `Last saved ${ts}`;
@@ -370,7 +438,7 @@ export async function initContent(mainEl) {
         showMsg('ok', 'Saved.');
     };
 
-    mainEl.querySelector('#studio-content-save')?.addEventListener('click', async () => {
+    mainEl.querySelector(`#${p}-save`)?.addEventListener('click', async () => {
         try {
             await persistContent();
         } catch (e) {
@@ -386,8 +454,8 @@ export async function initContent(mainEl) {
         }
     });
 
-    const filterInput = mainEl.querySelector('#studio-content-filter');
-    const countEl = mainEl.querySelector('#studio-content-count');
+    const filterInput = mainEl.querySelector(`#${p}-filter`);
+    const countEl = mainEl.querySelector(`#${p}-count`);
     const total = summary.length;
     const applyContentFilter = () => {
         const q = (filterInput instanceof HTMLInputElement ? filterInput.value : '').trim().toLowerCase();
@@ -402,4 +470,26 @@ export async function initContent(mainEl) {
     };
     applyContentFilter();
     filterInput?.addEventListener('input', applyContentFilter);
+}
+
+/**
+ * @param {HTMLElement} mainEl
+ */
+export async function initContent(mainEl) {
+    await initContentPanel(mainEl, {
+        prefix: 'studio-content',
+        getSummary: () => getContentSummary(),
+        uploadArea: 'studio/content',
+    });
+}
+
+/**
+ * @param {HTMLElement} mainEl
+ */
+export async function initHome(mainEl) {
+    await initContentPanel(mainEl, {
+        prefix: 'studio-home',
+        getSummary: () => getContentSummaryForSurface('home'),
+        uploadArea: 'studio/home-content',
+    });
 }

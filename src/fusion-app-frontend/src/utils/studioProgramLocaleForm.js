@@ -3,6 +3,8 @@
  * (replaces raw JSON textareas).
  */
 
+import { withSeoImageAlt } from './mediaAltSeo.js';
+
 /**
  * @param {unknown} v
  * @returns {Record<string, unknown>}
@@ -267,7 +269,7 @@ export function renderProgramLocaleFormHtml(escapeHtml, enRaw, jaRaw) {
     for (let i = 0; i < FADE_GALLERY_MAX_IMAGES; i++) {
         html += `<div class="studio-prog-fade-row" style="display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;margin-bottom:0.45rem">
       <span class="studio-prog-grid-label" style="min-width:6rem">Image ${i + 1}</span>
-      <span class="studio-prog-url-preview-wrap" hidden><img class="studio-prog-url-preview" alt="" loading="lazy" decoding="async" /></span>
+      <span class="studio-prog-url-preview-wrap" hidden><img class="studio-prog-url-preview" alt="${esc(escapeHtml, withSeoImageAlt('Fade gallery URL preview'))}" loading="lazy" decoding="async" /></span>
       <input type="text" class="studio-input studio-prog-fade-url" data-fade-slot="${i}" value="${esc(escapeHtml, fadeSeed[i] || '')}" placeholder="Image URL" style="flex:1;min-width:14rem" autocomplete="off" />
       <label class="studio-file-label studio-btn-ghost studio-field--shrink"><input type="file" class="studio-file-input studio-prog-fade-file" data-fade-slot="${i}" accept="image/*" />Upload</label>
     </div>`;
@@ -282,7 +284,7 @@ export function renderProgramLocaleFormHtml(escapeHtml, enRaw, jaRaw) {
     for (let i = 0; i < STRIP_GALLERY_MAX_IMAGES; i++) {
         html += `<div class="studio-prog-strip-row" style="display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;margin-bottom:0.45rem">
       <span class="studio-prog-grid-label" style="min-width:6rem">Image ${i + 1}</span>
-      <span class="studio-prog-url-preview-wrap" hidden><img class="studio-prog-url-preview" alt="" loading="lazy" decoding="async" /></span>
+      <span class="studio-prog-url-preview-wrap" hidden><img class="studio-prog-url-preview" alt="${esc(escapeHtml, withSeoImageAlt('Strip gallery URL preview'))}" loading="lazy" decoding="async" /></span>
       <input type="text" class="studio-input studio-prog-strip-url" data-strip-slot="${i}" value="${esc(escapeHtml, stripSeed[i] || '')}" placeholder="Image URL" style="flex:1;min-width:14rem" autocomplete="off" />
       <label class="studio-file-label studio-btn-ghost studio-field--shrink"><input type="file" class="studio-file-input studio-prog-strip-file" data-strip-slot="${i}" accept="image/*" />Upload</label>
     </div>`;

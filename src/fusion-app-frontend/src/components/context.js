@@ -1,4 +1,5 @@
 import { getContentBundleForStudio, subscribeDataSource } from '../utils/database.js';
+import { SEO_MEDIA_DEFAULT, withSeoImageAlt } from '../utils/mediaAltSeo.js';
 import { mergeLocaleDeep } from '../utils/localeFallback.js';
 
 export function render() {
@@ -11,7 +12,7 @@ export function render() {
                     <div id="contextSubHeadlineSection">
                         <div id="contextSubHeadlineText"></div>
                         <div id="contextSubHeadlineImage">
-                            <img id="contextSubImage" src="" alt="Japan Artist Residency">
+                            <img id="contextSubImage" src="" alt="${SEO_MEDIA_DEFAULT}">
                         </div>
                     </div>
                     <app-features-row data-area="context" active="true"></app-features-row>
@@ -58,7 +59,7 @@ function clearContextCopy() {
     const img = document.getElementById('contextSubImage');
     if (img) {
         img.removeAttribute('src');
-        img.alt = '';
+        img.alt = SEO_MEDIA_DEFAULT;
     }
     setTextEl('contextEcosystemPartnersHeadline', '');
     setTextEl('contextEcosystemPartnersDescription', '');
@@ -123,7 +124,7 @@ function applyContextFromBundle(bundle) {
             if (imgSrc) {
                 const im = document.createElement('img');
                 im.src = imgSrc;
-                im.alt = '';
+                im.alt = withSeoImageAlt(label);
                 im.loading = 'lazy';
                 wrap.appendChild(im);
             }

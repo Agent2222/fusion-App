@@ -3,6 +3,7 @@ import { getEventsList, subscribeDataSource } from '../../utils/database.js';
 import { isJournalListingPage } from '../../utils/journalListingPage.js';
 import { mergeLocaleDeep } from '../../utils/localeFallback.js';
 import { navigate } from '../../router.js';
+import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
 
 function escapeHtml(s) {
     return String(s)
@@ -330,7 +331,7 @@ class EventRowComponent extends HTMLElement {
                     : `<div class="event-row" part="event-row" role="button" tabindex="0" aria-label="${escapeHtml(title)}">
                 <div class="event-row-category">${escapeHtml(category)}</div>
                 <div class="event-row-image">
-                    <img src="${imageSrc}" alt="${escapeHtml(title)}">
+                    <img src="${imageSrc}" alt="${escapeHtml(withSeoImageAlt(title))}">
                 </div>
                 <div class="event-row-details">
                     <div class="eventDate">${escapeHtml(date)}</div>

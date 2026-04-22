@@ -31,11 +31,17 @@ persistent actor {
   /// Stripe + membership flags (parallel to `accountsStable`).
   stable var membershipByPrincipalStable : [(Principal, Types.MembershipFields)] = [];
 
+  /// ISO 8601 renewal end from Stripe (`current_period_end`) — separate map so `MembershipFields` stays upgrade-compatible.
+  stable var membershipStripePeriodEndStable : [(Principal, Text)] = [];
+
   /// Integration API caller (PEM identity) — set via admin. Required for `integrationRecordStripeSubscription`.
   stable var integrationServicePrincipal : ?Principal = null;
 
   /// Artist id -> full record. Flushed in preupgrade.
   stable var artistsStable : [(Text, Types.ArtistRecord)] = [];
+
+  /// Feed cohort years — separate from `ArtistFilterStored` so `artistsStable` stays upgrade-compatible.
+  stable var artistFilterCohortYearsStable : [(Text, [Nat])] = [];
 
   stable var programsStable : [(Text, Types.ProgramRecord)] = [];
   stable var journalsStable : [(Text, Types.JournalRecord)] = [];
@@ -79,9 +85,23 @@ persistent actor {
       Principal.hash
     );
 
+  transient var membershipStripePeriodEndByPrincipal : _HashMap.HashMap<Principal, Text> =
+    _HashMap.HashMap<Principal, Text>(
+      membershipStripePeriodEndStable.size(),
+      Principal.equal,
+      Principal.hash
+    );
+
   transient var artistsById : _HashMap.HashMap<Text, Types.ArtistRecord> =
     _HashMap.HashMap<Text, Types.ArtistRecord>(
       artistsStable.size(),
+      Text.equal,
+      Text.hash
+    );
+
+  transient var artistFilterCohortYearsById : _HashMap.HashMap<Text, [Nat]> =
+    _HashMap.HashMap<Text, [Nat]>(
+      artistFilterCohortYearsStable.size(),
       Text.equal,
       Text.hash
     );
@@ -138,11 +158,19 @@ persistent actor {
     membershipByPrincipal.put(entry.0, entry.1);
   };
 
+  for (entry in membershipStripePeriodEndStable.vals()) {
+    membershipStripePeriodEndByPrincipal.put(entry.0, entry.1);
+  };
+
   for (entry in artistsStable.vals()) {
     let id = entry.0;
     let rec = entry.1;
     artistsById.put(id, rec);
     artistSlugToId.put(rec.profile.slug, id);
+  };
+
+  for (entry in artistFilterCohortYearsStable.vals()) {
+    artistFilterCohortYearsById.put(entry.0, entry.1);
   };
 
   for (entry in programsStable.vals()) {
@@ -296,6 +324,10 @@ persistent actor {
           case null { defaultMembership() };
           case (?x) { x };
         };
+        let periodEnd = switch (membershipStripePeriodEndByPrincipal.get(p)) {
+          case null { null };
+          case (?t) { ?t };
+        };
         ?{
           role = core.role;
           status = core.status;
@@ -305,6 +337,7 @@ persistent actor {
           stripeCustomerId = m.stripeCustomerId;
           stripeSubscriptionId = m.stripeSubscriptionId;
           stripeSubscriptionStatus = m.stripeSubscriptionStatus;
+          stripeCurrentPeriodEnd = periodEnd;
           membershipExemptManual = m.membershipExemptManual;
         };
       };
@@ -314,6 +347,13 @@ persistent actor {
   private func putUserAccountParts(core : Types.UserAccountCore, m : Types.MembershipFields, p : Principal) {
     accountsByPrincipal.put(p, core);
     membershipByPrincipal.put(p, m);
+  };
+
+  private func putStripePeriodEndForPrincipal(p : Principal, t : ?Text) {
+    switch (t) {
+      case null { ignore membershipStripePeriodEndByPrincipal.remove(p) };
+      case (?s) { membershipStripePeriodEndByPrincipal.put(p, s) };
+    };
   };
 
   private func putUserAccountFull(p : Principal, u : Types.UserAccount) {
@@ -331,6 +371,7 @@ persistent actor {
       membershipExemptManual = u.membershipExemptManual;
     };
     putUserAccountParts(core, m, p);
+    putStripePeriodEndForPrincipal(p, u.stripeCurrentPeriodEnd);
   };
 
   /// Program application exists for this artist and program `studioStatus` is active or completed.
@@ -455,6 +496,7 @@ persistent actor {
     subscribersStable := _Iter.toArray(subscribersByEmail.entries());
     accountsStable := _Iter.toArray(accountsByPrincipal.entries());
     membershipByPrincipalStable := _Iter.toArray(membershipByPrincipal.entries());
+    membershipStripePeriodEndStable := _Iter.toArray(membershipStripePeriodEndByPrincipal.entries());
     artistsStable := _Iter.toArray(artistsById.entries());
     programsStable := _Iter.toArray(programsById.entries());
     journalsStable := _Iter.toArray(journalsById.entries());
@@ -464,6 +506,7 @@ persistent actor {
     siteSettingsStable := _Iter.toArray(siteSettingsByKey.entries());
     applicationByArtistProgramStable := _Iter.toArray(applicationByArtistProgram.entries());
     artistMostRecentProgramStable := _Iter.toArray(mostRecentProgramByArtistId.entries());
+    artistFilterCohortYearsStable := _Iter.toArray(artistFilterCohortYearsById.entries());
     artistFeaturedFeaturableIdsStable := featurableIdsSorted();
     artistFeaturedManualIdsStable := Buffer.toArray(manualFeaturedArtistIds);
   };
@@ -501,6 +544,16 @@ persistent actor {
     };
     membershipByPrincipalStable := [];
 
+    membershipStripePeriodEndByPrincipal := _HashMap.HashMap<Principal, Text>(
+      membershipStripePeriodEndStable.size(),
+      Principal.equal,
+      Principal.hash
+    );
+    for (entry in membershipStripePeriodEndStable.vals()) {
+      membershipStripePeriodEndByPrincipal.put(entry.0, entry.1);
+    };
+    membershipStripePeriodEndStable := [];
+
     artistsById := _HashMap.HashMap<Text, Types.ArtistRecord>(
       artistsStable.size(),
       Text.equal,
@@ -514,6 +567,16 @@ persistent actor {
       artistSlugToId.put(rec.profile.slug, id);
     };
     artistsStable := [];
+
+    artistFilterCohortYearsById := _HashMap.HashMap<Text, [Nat]>(
+      artistFilterCohortYearsStable.size(),
+      Text.equal,
+      Text.hash
+    );
+    for (entry in artistFilterCohortYearsStable.vals()) {
+      artistFilterCohortYearsById.put(entry.0, entry.1);
+    };
+    artistFilterCohortYearsStable := [];
 
     programsById := _HashMap.HashMap<Text, Types.ProgramRecord>(0, Text.equal, Text.hash);
     for (entry in programsStable.vals()) {
@@ -586,6 +649,176 @@ persistent actor {
     };
   };
 
+  /// Rebuild in-memory maps from stable arrays after `adminImportFullDatabase` assigns them (no default-admin merge).
+  private func rebuildTransientFromImportedStableArrays() {
+    subscribersByEmail := _HashMap.HashMap<Text, Types.Subscriber>(
+      subscribersStable.size(),
+      Text.equal,
+      Text.hash
+    );
+    for (entry in subscribersStable.vals()) {
+      subscribersByEmail.put(entry.0, entry.1);
+    };
+
+    accountsByPrincipal := _HashMap.HashMap<Principal, Types.UserAccountCore>(
+      accountsStable.size(),
+      Principal.equal,
+      Principal.hash
+    );
+    for (entry in accountsStable.vals()) {
+      accountsByPrincipal.put(entry.0, entry.1);
+    };
+
+    membershipByPrincipal := _HashMap.HashMap<Principal, Types.MembershipFields>(
+      membershipByPrincipalStable.size(),
+      Principal.equal,
+      Principal.hash
+    );
+    for (entry in membershipByPrincipalStable.vals()) {
+      membershipByPrincipal.put(entry.0, entry.1);
+    };
+
+    membershipStripePeriodEndByPrincipal := _HashMap.HashMap<Principal, Text>(
+      membershipStripePeriodEndStable.size(),
+      Principal.equal,
+      Principal.hash
+    );
+    for (entry in membershipStripePeriodEndStable.vals()) {
+      membershipStripePeriodEndByPrincipal.put(entry.0, entry.1);
+    };
+
+    artistsById := _HashMap.HashMap<Text, Types.ArtistRecord>(
+      artistsStable.size(),
+      Text.equal,
+      Text.hash
+    );
+    artistSlugToId := _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
+    for (entry in artistsStable.vals()) {
+      let id = entry.0;
+      let rec = entry.1;
+      artistsById.put(id, rec);
+      artistSlugToId.put(rec.profile.slug, id);
+    };
+
+    artistFilterCohortYearsById := _HashMap.HashMap<Text, [Nat]>(
+      artistFilterCohortYearsStable.size(),
+      Text.equal,
+      Text.hash
+    );
+    for (entry in artistFilterCohortYearsStable.vals()) {
+      artistFilterCohortYearsById.put(entry.0, entry.1);
+    };
+
+    programsById := _HashMap.HashMap<Text, Types.ProgramRecord>(0, Text.equal, Text.hash);
+    for (entry in programsStable.vals()) {
+      programsById.put(entry.0, entry.1);
+    };
+
+    journalsById := _HashMap.HashMap<Text, Types.JournalRecord>(0, Text.equal, Text.hash);
+    for (entry in journalsStable.vals()) {
+      journalsById.put(entry.0, entry.1);
+    };
+
+    editionsById := _HashMap.HashMap<Text, Types.EditionRecord>(0, Text.equal, Text.hash);
+    for (entry in editionsStable.vals()) {
+      editionsById.put(entry.0, entry.1);
+    };
+
+    contentBySlug := _HashMap.HashMap<Text, Types.ContentPageRecord>(0, Text.equal, Text.hash);
+    for (entry in contentPagesStable.vals()) {
+      contentBySlug.put(entry.0, entry.1);
+    };
+
+    applicantsById := _HashMap.HashMap<Text, Types.ApplicantRecord>(0, Text.equal, Text.hash);
+    for (entry in applicantsStable.vals()) {
+      applicantsById.put(entry.0, entry.1);
+    };
+
+    siteSettingsByKey := _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
+    for (entry in siteSettingsStable.vals()) {
+      siteSettingsByKey.put(entry.0, entry.1);
+    };
+
+    applicationByArtistProgram := _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
+    for (entry in applicationByArtistProgramStable.vals()) {
+      applicationByArtistProgram.put(entry.0, entry.1);
+    };
+
+    mostRecentProgramByArtistId := _HashMap.HashMap<Text, Text>(
+      artistMostRecentProgramStable.size(),
+      Text.equal,
+      Text.hash
+    );
+    for (entry in artistMostRecentProgramStable.vals()) {
+      mostRecentProgramByArtistId.put(entry.0, entry.1);
+    };
+
+    artistFeaturedFeaturableById := _HashMap.HashMap<Text, Bool>(0, Text.equal, Text.hash);
+    for (id in artistFeaturedFeaturableIdsStable.vals()) {
+      artistFeaturedFeaturableById.put(id, true);
+    };
+
+    manualFeaturedArtistIds := Buffer.Buffer<Text>(0);
+    for (id in artistFeaturedManualIdsStable.vals()) {
+      manualFeaturedArtistIds.add(id);
+    };
+  };
+
+  /// Admin-only: full backup of persisted application state (for JSON download in Studio).
+  public shared (msg) func adminExportFullDatabase() : async Types.DatabaseSnapshotV1 {
+    assertAdmin(msg.caller);
+    {
+      version = 1;
+      adminPrincipals = adminPrincipals;
+      integrationServicePrincipal = integrationServicePrincipal;
+      artistFeaturedRandomMode = artistFeaturedRandomModeStable;
+      subscribersStable = _Iter.toArray(subscribersByEmail.entries());
+      accountsStable = _Iter.toArray(accountsByPrincipal.entries());
+      membershipByPrincipalStable = _Iter.toArray(membershipByPrincipal.entries());
+      membershipStripePeriodEndStable = _Iter.toArray(membershipStripePeriodEndByPrincipal.entries());
+      artistFilterCohortYearsStable = _Iter.toArray(artistFilterCohortYearsById.entries());
+      artistsStable = _Iter.toArray(artistsById.entries());
+      programsStable = _Iter.toArray(programsById.entries());
+      journalsStable = _Iter.toArray(journalsById.entries());
+      editionsStable = _Iter.toArray(editionsById.entries());
+      contentPagesStable = _Iter.toArray(contentBySlug.entries());
+      applicantsStable = _Iter.toArray(applicantsById.entries());
+      siteSettingsStable = _Iter.toArray(siteSettingsByKey.entries());
+      applicationByArtistProgramStable = _Iter.toArray(applicationByArtistProgram.entries());
+      artistMostRecentProgramStable = _Iter.toArray(mostRecentProgramByArtistId.entries());
+      artistFeaturedFeaturableIdsStable = featurableIdsSorted();
+      artistFeaturedManualIdsStable = Buffer.toArray(manualFeaturedArtistIds);
+    };
+  };
+
+  /// Admin-only: replace canister state from a snapshot (dangerous; locks out if admins list is wrong).
+  public shared (msg) func adminImportFullDatabase(snapshot : Types.DatabaseSnapshotV1) : async () {
+    assertAdmin(msg.caller);
+    if (snapshot.version != 1) {
+      Debug.trap("Unsupported database snapshot version");
+    };
+    adminPrincipals := snapshot.adminPrincipals;
+    integrationServicePrincipal := snapshot.integrationServicePrincipal;
+    artistFeaturedRandomModeStable := snapshot.artistFeaturedRandomMode;
+    subscribersStable := snapshot.subscribersStable;
+    accountsStable := snapshot.accountsStable;
+    membershipByPrincipalStable := snapshot.membershipByPrincipalStable;
+    membershipStripePeriodEndStable := snapshot.membershipStripePeriodEndStable;
+    artistFilterCohortYearsStable := snapshot.artistFilterCohortYearsStable;
+    artistsStable := snapshot.artistsStable;
+    programsStable := snapshot.programsStable;
+    journalsStable := snapshot.journalsStable;
+    editionsStable := snapshot.editionsStable;
+    contentPagesStable := snapshot.contentPagesStable;
+    applicantsStable := snapshot.applicantsStable;
+    siteSettingsStable := snapshot.siteSettingsStable;
+    applicationByArtistProgramStable := snapshot.applicationByArtistProgramStable;
+    artistMostRecentProgramStable := snapshot.artistMostRecentProgramStable;
+    artistFeaturedFeaturableIdsStable := snapshot.artistFeaturedFeaturableIdsStable;
+    artistFeaturedManualIdsStable := snapshot.artistFeaturedManualIdsStable;
+    rebuildTransientFromImportedStableArrays();
+  };
+
   // ===== Accounts =====
 
   public shared query (msg) func getAccountForCaller() : async ?Types.UserAccount {
@@ -643,6 +876,7 @@ persistent actor {
     stripeCustomerId : ?Text,
     stripeSubscriptionId : ?Text,
     stripeSubscriptionStatus : ?Text,
+    stripeCurrentPeriodEnd : ?Text,
   ) : async () {
     assertIntegrationCaller(msg.caller);
     switch (accountsByPrincipal.get(memberPrincipal)) {
@@ -669,6 +903,10 @@ persistent actor {
       membershipExemptManual = m0.membershipExemptManual;
     };
     membershipByPrincipal.put(memberPrincipal, m1);
+    switch (stripeCurrentPeriodEnd) {
+      case null { };
+      case (?pe) { putStripePeriodEndForPrincipal(memberPrincipal, ?pe) };
+    };
   };
 
   /// Caller registers or updates a non-privileged role; stored as #pending until admin activates.
@@ -763,6 +1001,10 @@ persistent actor {
       case (?t) { t };
       case null { "" };
     };
+    let cohortOpt : ?[Nat] = switch (artistFilterCohortYearsById.get(id)) {
+      case null { null };
+      case (?ys) { ?ys };
+    };
     {
       id = core.id;
       slug = core.slug;
@@ -770,7 +1012,7 @@ persistent actor {
       featuredOrder = core.featuredOrder;
       visibility = core.visibility;
       updatedAt = core.updatedAt;
-      filter = core.filter;
+      filter = Types.mergeArtistFilterForPublic(core.filter, cohortOpt);
       galleryFilter = core.galleryFilter;
       mostRecentProgram = mrp;
     };
@@ -790,8 +1032,14 @@ persistent actor {
         };
       },
     );
-    Array.map<Types.ArtistRecord, Types.Artist>(
+    let filtered = Array.filter<Types.ArtistRecord>(
       sorted,
+      func(r : Types.ArtistRecord) : Bool {
+        artistIncludedInPublicFeeds(r.profile);
+      },
+    );
+    Array.map<Types.ArtistRecord, Types.Artist>(
+      filtered,
       func(r : Types.ArtistRecord) : Types.Artist {
         artistPublicFromCore(r.profile, r.profile.id);
       },
@@ -819,6 +1067,11 @@ persistent actor {
     { rec with accessCode = "" };
   };
 
+  /// Private profiles stay out of feed pools; direct `/profile/:slug` reads still use `getArtistRecordBySlug`.
+  private func artistIncludedInPublicFeeds(profile : Types.ArtistCore) : Bool {
+    profile.visibility != "private";
+  };
+
   /// Public roster with `localesJson` for feeds/cards (name, discipline). Strips `accessCode`.
   public query func listArtistRecordsPublic() : async [Types.ArtistRecord] {
     let vals = _Iter.toArray(artistsById.vals());
@@ -834,8 +1087,14 @@ persistent actor {
         };
       },
     );
-    Array.map<Types.ArtistRecord, Types.ArtistRecord>(
+    let filtered = Array.filter<Types.ArtistRecord>(
       sorted,
+      func(r : Types.ArtistRecord) : Bool {
+        artistIncludedInPublicFeeds(r.profile);
+      },
+    );
+    Array.map<Types.ArtistRecord, Types.ArtistRecord>(
+      filtered,
       sanitizeArtistRecordForPublic,
     );
   };
@@ -949,6 +1208,15 @@ persistent actor {
         };
       };
     };
+  };
+
+  /// Staff/admin: same JSON shape as `getMyArtistApplicationsJson` for any roster `artistId` (Studio artist modal Programs tab).
+  public shared query (msg) func staffGetArtistApplicationsJson(artistId : Text) : async ?Text {
+    assertStaffOrAdmin(msg.caller);
+    if (artistId.size() == 0) {
+      return null;
+    };
+    buildAppliedJsonForArtist(artistId);
   };
 
   private func extractJsonStringField(json : Text, key : Text) : Text {
@@ -1069,6 +1337,42 @@ persistent actor {
                   profile = newProfile;
                   localesJson = ?localesJson;
                 });
+              };
+            };
+          };
+        };
+      };
+    };
+  };
+
+  /// Authenticated artist: set `profile.visibility` (`public` | `private`). Private rows are omitted from public feed lists.
+  public shared (msg) func updateMyArtistVisibility(visibility : Text, updatedAt : Text) : async () {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      Debug.trap("Anonymous caller");
+    };
+    if (visibility != "public" and visibility != "private") {
+      Debug.trap("visibility must be public or private");
+    };
+    switch (accountsByPrincipal.get(msg.caller)) {
+      case null { Debug.trap("No account for caller") };
+      case (?acc) {
+        switch (acc.linkedArtistId) {
+          case null { Debug.trap("No linked artist on account") };
+          case (?aid) {
+            switch (artistsById.get(aid)) {
+              case null { Debug.trap("Linked artist not found") };
+              case (?rec) {
+                let newUpdated : Text = if (updatedAt.size() > 0) {
+                  updatedAt;
+                } else {
+                  rec.profile.updatedAt;
+                };
+                let newProfile : Types.ArtistCore = {
+                  rec.profile with
+                  visibility = visibility;
+                  updatedAt = newUpdated;
+                };
+                putArtistRecord({ rec with profile = newProfile });
               };
             };
           };
@@ -1271,6 +1575,24 @@ persistent actor {
     };
   };
 
+  /// Staff/admin: cohort years for feed filters — stored separately from `ArtistFilterStored` for stable upgrades.
+  public shared (msg) func bulkPutArtistFilterCohortYears(rows : [(Text, [Nat])]) : async () {
+    assertStaffOrAdmin(msg.caller);
+    for (entry in rows.vals()) {
+      let id = entry.0;
+      let ys = entry.1;
+      if (ys.size() == 0) {
+        ignore artistFilterCohortYearsById.remove(id);
+      } else {
+        artistFilterCohortYearsById.put(id, ys);
+      };
+    };
+  };
+
+  public query func listArtistFilterCohortYearsPublic() : async [(Text, [Nat])] {
+    _Iter.toArray(artistFilterCohortYearsById.entries());
+  };
+
   public shared (msg) func deleteArtistById(artistId : Text) : async Bool {
     assertStaffOrAdmin(msg.caller);
     switch (artistsById.get(artistId)) {
@@ -1281,6 +1603,7 @@ persistent actor {
         ignore artistsById.remove(artistId);
         ignore artistSlugToId.remove(rec.profile.slug);
         ignore mostRecentProgramByArtistId.remove(artistId);
+        ignore artistFilterCohortYearsById.remove(artistId);
         true;
       };
     };
@@ -1438,6 +1761,48 @@ persistent actor {
   /// Staff/admin: rewrite `sourceText` using `prompt`; `localeTag` is e.g. en or ja for model context.
   public shared (msg) func studioReinterpretWithPrompt(prompt : Text, sourceText : Text, localeTag : Text) : async Text {
     assertStaffOrAdmin(msg.caller);
+    assertStudioLlmField(prompt);
+    assertStudioLlmField(sourceText);
+    if (Text.size(localeTag) > 32) {
+      Debug.trap("localeTag too long");
+    };
+    let header = "Rewrite the source text according to the user instruction. Output only the rewritten text, with no preamble or quotes.\n\nInstruction:\n";
+    let mid = "\n\nLocale: ";
+    let tail = "\n\nSource:\n";
+    await Llm.prompt(#Llama3_1_8B, header # prompt # mid # localeTag # tail # sourceText);
+  };
+
+  /// Linked member with active or exempt membership: same LLM as `studioTranslateEnToJa`.
+  private func assertCallerCanUseMemberWorldLlm(caller : Principal) {
+    if (Principal.equal(caller, anonPrincipal)) {
+      Debug.trap("Anonymous caller");
+    };
+    switch (membershipAccessForPrincipal(caller)) {
+      case (#ok) {};
+      case (#exempt) {};
+      case (#noAccount) { Debug.trap("No account for caller") };
+      case (#needsSubscription) { Debug.trap("Active membership required for world generation") };
+    };
+    switch (accountsByPrincipal.get(caller)) {
+      case null { Debug.trap("No account for caller") };
+      case (?acc) {
+        switch (acc.linkedArtistId) {
+          case null { Debug.trap("No linked artist on account") };
+          case (?_) {};
+        };
+      };
+    };
+  };
+
+  public shared (msg) func memberTranslateEnToJa(englishText : Text) : async Text {
+    assertCallerCanUseMemberWorldLlm(msg.caller);
+    assertStudioLlmField(englishText);
+    let instruction = "Translate the following English to Japanese. Output only the Japanese translation, with no surrounding quotes or commentary.\n\n";
+    await Llm.prompt(#Llama3_1_8B, instruction # englishText);
+  };
+
+  public shared (msg) func memberReinterpretWithPrompt(prompt : Text, sourceText : Text, localeTag : Text) : async Text {
+    assertCallerCanUseMemberWorldLlm(msg.caller);
     assertStudioLlmField(prompt);
     assertStudioLlmField(sourceText);
     if (Text.size(localeTag) > 32) {

@@ -6,6 +6,15 @@ import {
     artistSlugFromName,
 } from '../../utils/artistSlug.js';
 import { applyArtistCardImage } from '../../utils/artistCardPlaceholder.js';
+import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
+
+function escapeHtml(s) {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
 
 const MAX_ARTISTS = 30;
 const MAX_PAGES = 3;
@@ -91,7 +100,7 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
 
         card.innerHTML = `
             <div class="artist-card-image">
-                <img alt="${artistName}" loading="lazy" decoding="async">
+                <img alt="${escapeHtml(withSeoImageAlt(artistName))}" loading="lazy" decoding="async">
             </div>
             <div class="artist-card-content">
                 <div class="artist-card-title">${artistName}</div>

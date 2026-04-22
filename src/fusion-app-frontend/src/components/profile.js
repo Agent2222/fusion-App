@@ -1,11 +1,12 @@
 import {
   artistLocaleBlock,
-  artistMostRecentProgramId,
+  artistProgramIds,
   artistResidencyCardYear,
 } from "../utils/artistSlug.js";
 import { getPublicSiteOrigin } from "../config.js";
 import { getArtistBySlug } from "../utils/database.js";
 import { applyDocumentSeo } from "../utils/documentSeo.js";
+import { SEO_MEDIA_DEFAULT, withSeoImageAlt } from "../utils/mediaAltSeo.js";
 import { worldTextParts } from "../utils/worldNormalize.js";
 import posthog from "posthog-js";
 
@@ -72,7 +73,7 @@ function populateIntroGallery(container, items) {
     wrap.className = "profile-intro-gallery-img-wrap";
     const img = document.createElement("img");
     img.src = src;
-    img.alt = alt;
+    img.alt = withSeoImageAlt(alt);
     /* At most 3 intro slots — load all so none stay blank below the fold on mobile */
     img.loading = "eager";
     img.decoding = "async";
@@ -240,7 +241,7 @@ export function generateProfileContent() {
                         <app-veteran-banner id="profileVeteranBanner" class="profile-veteran-banner"></app-veteran-banner>
                         <article class="artist-profile" id="artistProfile" hidden>
                             <div class="artist-profile-hero">
-                                <img id="artistProfileImage" src="" alt=""/>
+                                <img id="artistProfileImage" src="" alt="${SEO_MEDIA_DEFAULT}"/>
                             </div>
                             <div class="artist-profile-body">
                                 <div id="leftColumn">
@@ -341,6 +342,7 @@ export default function initProfile() {
     if (veteranBannerEl) {
       veteranBannerEl.setAttribute("hidden", "");
       veteranBannerEl.removeAttribute("data-program-id");
+      veteranBannerEl.removeAttribute("data-program-ids");
       veteranBannerEl.removeAttribute("data-residency-year");
     }
     populateIntroGallery(imagesContainer, null);
@@ -363,6 +365,7 @@ export default function initProfile() {
       if (veteranBannerEl) {
         veteranBannerEl.setAttribute("hidden", "");
         veteranBannerEl.removeAttribute("data-program-id");
+        veteranBannerEl.removeAttribute("data-program-ids");
         veteranBannerEl.removeAttribute("data-residency-year");
       }
       populateIntroGallery(imagesContainer, null);
@@ -430,7 +433,7 @@ export default function initProfile() {
     );
     if (img) {
       img.src = artist.image || "";
-      img.alt = displayName || "";
+      img.alt = withSeoImageAlt(displayName);
     }
     if (nameEl) nameEl.textContent = displayName || "";
     const practiceRaw = pickWorldOrWorldNew(loc, "practice");
@@ -562,20 +565,24 @@ export default function initProfile() {
       /** @type {unknown} */ (pickWorldOrWorldNew(loc, "introGallery")),
     );
 
-    const mostRecentProgramId = artistMostRecentProgramId(artist);
+    const programIdsForBanner = artistProgramIds(artist);
     const residencyCardYear = artistResidencyCardYear(artist);
     if (veteranBannerEl) {
-      if (mostRecentProgramId) {
-        veteranBannerEl.setAttribute("data-program-id", mostRecentProgramId);
+      if (programIdsForBanner.length) {
+        veteranBannerEl.setAttribute(
+          "data-program-ids",
+          JSON.stringify(programIdsForBanner),
+        );
       } else {
-        veteranBannerEl.removeAttribute("data-program-id");
+        veteranBannerEl.removeAttribute("data-program-ids");
       }
+      veteranBannerEl.removeAttribute("data-program-id");
       if (residencyCardYear) {
         veteranBannerEl.setAttribute("data-residency-year", residencyCardYear);
       } else {
         veteranBannerEl.removeAttribute("data-residency-year");
       }
-      if (mostRecentProgramId || residencyCardYear) {
+      if (programIdsForBanner.length || residencyCardYear) {
         veteranBannerEl.removeAttribute("hidden");
       } else {
         veteranBannerEl.setAttribute("hidden", "");

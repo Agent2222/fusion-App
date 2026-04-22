@@ -1,6 +1,7 @@
 import { html, render } from 'lit-html';
 import logo from './logo2.svg';
 import { createICActor, resolveFusionBackendCanisterId } from './config.js';
+import { withSeoImageAlt } from './utils/mediaAltSeo.js';
 
 class App {
   greeting = '';
@@ -24,7 +25,7 @@ class App {
   #render() {
     let body = html`
       <main>
-        <img src="${logo}" alt="DFINITY logo" />
+        <img src="${logo}" alt="${withSeoImageAlt('DFINITY logo')}" />
         <br />
         <br />
         <form action="#">

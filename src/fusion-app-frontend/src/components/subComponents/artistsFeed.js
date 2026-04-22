@@ -10,6 +10,7 @@ import {
 } from '../../utils/artistSlug.js';
 import { applyArtistCardImage } from '../../utils/artistCardPlaceholder.js';
 import { getCurrentProgramSeason } from '../../utils/database.js';
+import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
 
 /** 20 cards per page, 5 columns × 4 rows */
 const PAGE_SIZE = 20;
@@ -83,6 +84,8 @@ class ArtistsFeedElement extends HTMLElement {
         this.pool = [];
         this.currentPage = 0;
         this._shellReady = false;
+        /** @type {number} */
+        this._pageUpdateSeq = 0;
     }
 
     getArtists() {
@@ -386,8 +389,8 @@ class ArtistsFeedElement extends HTMLElement {
     async updatePage() {
         if (!this._shellReady) return;
 
-        const grid = this.gridEl;
-        grid.innerHTML = '';
+        this._pageUpdateSeq += 1;
+        const seq = this._pageUpdateSeq;
 
         const total = this.pool.length;
         const totalPages = total === 0 ? 1 : Math.ceil(total / PAGE_SIZE);
@@ -400,7 +403,11 @@ class ArtistsFeedElement extends HTMLElement {
         } catch {
             currentSeason = '';
         }
-        /* After await, another setArtists/updatePage may have run — clear again so we never append twice. */
+        /* A newer updatePage or setArtists may have run while awaiting — skip stale paint. */
+        if (seq !== this._pageUpdateSeq) return;
+
+        const grid = this.gridEl;
+        /* Clear only after season resolves so the previous page’s cards stay visible during the gap (avoids footer jump on mobile). */
         grid.innerHTML = '';
 
         const useSeasonCompare = currentSeason !== '';
@@ -424,7 +431,7 @@ class ArtistsFeedElement extends HTMLElement {
             card.innerHTML = `
                 <div class="artist-card-image">
                     <div class="residency-badge" hidden></div>
-                    <img alt="${escapeHtml(artistName)}" loading="lazy" decoding="async">
+                    <img alt="${escapeHtml(withSeoImageAlt(artistName))}" loading="lazy" decoding="async">
                 </div>
                 <div class="artist-card-content">
                     <div class="artist-card-title">${escapeHtml(artistName)}</div>

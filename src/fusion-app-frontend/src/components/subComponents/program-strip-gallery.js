@@ -1,3 +1,5 @@
+import { SEO_MEDIA_DEFAULT, withSeoImageAlt } from '../../utils/mediaAltSeo.js';
+
 /**
  * Program detail: main image 5:4 + left vertical thumbnail strip (~200px).
  * Data: `programPage.stripGalleryImages` (max 20 URLs). Click a thumb to change the main image.
@@ -30,6 +32,8 @@ class ProgramStripGalleryElement extends HTMLElement {
         this.attachShadow({ mode: 'open' });
         /** @type {string[]} */
         this._urls = [];
+        /** @type {string} */
+        this._altBase = '';
         /** @type {number} */
         this._selected = 0;
         /** @type {HTMLElement | null} */
@@ -54,12 +58,28 @@ class ProgramStripGalleryElement extends HTMLElement {
 
     /**
      * @param {unknown[]} urls
+     * @param {{ altBase?: unknown }} [opts]
      */
-    setImages(urls) {
+    setImages(urls, opts = {}) {
         this._urls = Array.isArray(urls)
             ? urls.map((u) => String(u ?? '').trim()).filter(Boolean).slice(0, MAX_IMAGES)
             : [];
+        this._altBase = String(opts?.altBase ?? '').trim();
         void this._render();
+    }
+
+    /**
+     * @param {'main' | 'thumb'} kind
+     * @param {number} index
+     * @returns {string}
+     */
+    _altForSlot(kind, index) {
+        const base = this._altBase || 'Program';
+        const label =
+            kind === 'thumb'
+                ? `${base} gallery thumbnail ${index + 1}`
+                : `${base} gallery image ${index + 1}`;
+        return withSeoImageAlt(label);
     }
 
     connectedCallback() {
@@ -164,6 +184,7 @@ class ProgramStripGalleryElement extends HTMLElement {
         const url = this._urls[idx];
         try {
             await assignImageWhenLoaded(main, url);
+            main.alt = this._altForSlot('main', idx);
         } catch {
             /* keep previous */
         }
@@ -360,7 +381,7 @@ class ProgramStripGalleryElement extends HTMLElement {
                     <button type="button" class="psg-nav psg-nav--down" part="nav-down" aria-label="Scroll thumbnails down">▼</button>
                 </div>
                 <div class="psg-main" part="main">
-                    <img class="psg-main-img" alt="" decoding="async" loading="eager" />
+                    <img class="psg-main-img" alt="${SEO_MEDIA_DEFAULT}" decoding="async" loading="eager" />
                 </div>
             </div>
         `;
@@ -403,7 +424,7 @@ class ProgramStripGalleryElement extends HTMLElement {
                 btn.setAttribute('aria-label', `Show image ${i + 1}`);
                 const im = document.createElement('img');
                 im.src = u;
-                im.alt = '';
+                im.alt = this._altForSlot('thumb', i);
                 btn.appendChild(im);
                 btn.addEventListener('click', () => void this._selectIndex(i));
                 scrollEl.appendChild(btn);
@@ -416,6 +437,7 @@ class ProgramStripGalleryElement extends HTMLElement {
         if (main instanceof HTMLImageElement) {
             try {
                 await assignImageWhenLoaded(main, this._urls[this._selected]);
+                main.alt = this._altForSlot('main', this._selected);
             } catch {
                 this.setAttribute('hidden', '');
                 this.shadowRoot.innerHTML = '';

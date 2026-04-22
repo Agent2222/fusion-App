@@ -72,6 +72,32 @@ export function render() {
                 <main id="studioMainContent" class="studio-main" data-studio-section="${initial}">
                     ${renderStudioMain(initial)}
                 </main>
+                <div
+                    id="studioAccountOverlay"
+                    class="studio-account-overlay"
+                    hidden
+                    aria-hidden="true"
+                >
+                    <div
+                        class="studio-account-overlay__scrim"
+                        id="studioAccountOverlayScrim"
+                        aria-hidden="true"
+                    ></div>
+                    <div
+                        class="studio-account-overlay__panel"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="studioAccountOverlayTitle"
+                    >
+                        <div class="studio-account-overlay__toolbar">
+                            <h2 id="studioAccountOverlayTitle" class="studio-account-overlay__title">Account</h2>
+                            <button type="button" class="studio-btn-primary" id="studioAccountOverlayClose">
+                                Close
+                            </button>
+                        </div>
+                        <div id="studioAccountOverlayBody" class="studio-account-overlay__body"></div>
+                    </div>
+                </div>
             </div>
         </div>
     `;
@@ -92,6 +118,11 @@ function isStudioMobileNav() {
 
 /** Prevent stacking `hashchange` listeners when `initStudio` re-runs (e.g. `fusion-localechange` → `handleRoute`). */
 let _studioHashChangeHandler = /** @type {(() => void) | null} */ (null);
+
+/** Account overlay: lazy-embed settings profile (single init per Studio mount). */
+let _studioAccountOverlayInited = false;
+/** @type {((e: KeyboardEvent) => void) | null} */
+let _studioAccountOverlayKeydown = null;
 
 export default function initStudio() {
     const root = document.getElementById('studioRoot');
@@ -180,9 +211,54 @@ export default function initStudio() {
         });
     });
 
+    const overlay = document.getElementById('studioAccountOverlay');
+    const overlayBody = document.getElementById('studioAccountOverlayBody');
+    const overlayScrim = document.getElementById('studioAccountOverlayScrim');
+    const overlayClose = document.getElementById('studioAccountOverlayClose');
+
+    if (overlayBody && !String(overlayBody.innerHTML || '').trim()) {
+        _studioAccountOverlayInited = false;
+    }
+
+    const closeStudioAccountOverlay = () => {
+        if (!overlay) return;
+        overlay.hidden = true;
+        overlay.setAttribute('aria-hidden', 'true');
+        document.body.style.overflow = '';
+        accountBtn?.focus();
+    };
+
+    const openStudioAccountOverlay = async () => {
+        if (!overlay || !overlayBody) return;
+        if (!_studioAccountOverlayInited) {
+            const mod = await import('./settingsProfile.js');
+            overlayBody.innerHTML = mod.generateSettingsProfileContent();
+            mod.default();
+            _studioAccountOverlayInited = true;
+        }
+        overlay.hidden = false;
+        overlay.setAttribute('aria-hidden', 'false');
+        document.body.style.overflow = 'hidden';
+        overlayClose?.focus();
+    };
+
     accountBtn?.addEventListener('click', () => {
-        navigate('/settings/profile');
+        void openStudioAccountOverlay();
     });
+
+    overlayClose?.addEventListener('click', () => closeStudioAccountOverlay());
+    overlayScrim?.addEventListener('click', () => closeStudioAccountOverlay());
+
+    if (_studioAccountOverlayKeydown) {
+        window.removeEventListener('keydown', _studioAccountOverlayKeydown);
+    }
+    _studioAccountOverlayKeydown = (e) => {
+        if (e.key !== 'Escape') return;
+        if (!overlay || overlay.hidden) return;
+        e.preventDefault();
+        closeStudioAccountOverlay();
+    };
+    window.addEventListener('keydown', _studioAccountOverlayKeydown);
 
     settingsBtn?.addEventListener('click', () => {
         setHash('settings');

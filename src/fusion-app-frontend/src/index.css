@@ -320,6 +320,10 @@ body {
   overflow: visible;
 }
 
+.page.settings-profile-page {
+  margin-top: 2rem;
+}
+
 .settings-profile-page .feed-container {
   width: 100%;
   max-width: none;
@@ -2084,6 +2088,12 @@ button:hover {
   aspect-ratio: 5 / 4;
   height: auto;
   overflow: hidden;
+}
+
+@media (min-width: 1025px) {
+  .program-detail-hero {
+    aspect-ratio: 16 / 9;
+  }
 }
 
 .program-detail-hero .program-detail-hero-media {

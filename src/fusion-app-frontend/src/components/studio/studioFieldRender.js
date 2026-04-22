@@ -8,6 +8,7 @@ import {
     getStudioUploadAccept,
     shouldShowUploadButton,
 } from '../../utils/studioFieldRegistry.js';
+import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
 
 /**
  * @param {HTMLElement} fieldsEl
@@ -51,7 +52,7 @@ function updateMediaPreview(previewEl, url, kind) {
     }
     const img = document.createElement('img');
     img.className = 'studio-content-preview-img';
-    img.alt = '';
+    img.alt = withSeoImageAlt('Content image preview');
     img.referrerPolicy = 'no-referrer';
     img.loading = 'lazy';
     img.src = u;

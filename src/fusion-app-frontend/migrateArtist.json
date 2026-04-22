@@ -9,7 +9,7 @@
       "updatedAt": "2026-04-12T07:41:43.989Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2017,
+        "cohortYears": [2017],
         "disciplineKey": "visual-arts",
         "locationKey": "usa"
       },
@@ -56,7 +56,7 @@
       "updatedAt": "2026-04-12T07:41:43.990Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2017,
+        "cohortYears": [2017],
         "disciplineKey": "performance-arts",
         "locationKey": "usa"
       },
@@ -103,7 +103,7 @@
       "updatedAt": "2026-04-12T07:41:43.990Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2017,
+        "cohortYears": [2017],
         "disciplineKey": "fine-jewelry",
         "locationKey": "usa"
       },
@@ -150,7 +150,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2017,
+        "cohortYears": [2017],
         "disciplineKey": "visual-arts",
         "locationKey": "usa"
       },
@@ -197,7 +197,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2019,
+        "cohortYears": [2019],
         "disciplineKey": "performance-arts",
         "locationKey": "usa"
       },
@@ -244,7 +244,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2018,
+        "cohortYears": [2018],
         "disciplineKey": "performance-arts",
         "locationKey": "usa"
       },
@@ -285,7 +285,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2017,
+        "cohortYears": [2017],
         "disciplineKey": "visual-arts",
         "locationKey": "usa"
       },
@@ -332,7 +332,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2017,
+        "cohortYears": [2017],
         "disciplineKey": "visual-arts",
         "locationKey": "usa"
       },
@@ -379,7 +379,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2017,
+        "cohortYears": [2017],
         "disciplineKey": "visual-arts",
         "locationKey": "brazil"
       },
@@ -426,7 +426,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2017,
+        "cohortYears": [2017],
         "disciplineKey": "visual-arts",
         "locationKey": "usa"
       },
@@ -473,7 +473,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2017,
+        "cohortYears": [2017],
         "disciplineKey": "visual-arts",
         "locationKey": "usa"
       },
@@ -520,7 +520,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2017,
+        "cohortYears": [2017],
         "disciplineKey": "visual-arts",
         "locationKey": "brazil"
       },
@@ -567,7 +567,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2017,
+        "cohortYears": [2017],
         "disciplineKey": "visual-arts",
         "locationKey": "poland"
       },
@@ -614,7 +614,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2017,
+        "cohortYears": [2017],
         "disciplineKey": "visual-arts",
         "locationKey": "usa"
       },
@@ -661,7 +661,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2019,
+        "cohortYears": [2019],
         "disciplineKey": "visual-arts",
         "locationKey": "usa"
       },
@@ -708,7 +708,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2018,
+        "cohortYears": [2018],
         "disciplineKey": "performance-arts",
         "locationKey": "berlin"
       },
@@ -755,7 +755,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2018,
+        "cohortYears": [2018],
         "disciplineKey": "visual-arts",
         "locationKey": "usa"
       },
@@ -802,7 +802,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2018,
+        "cohortYears": [2018],
         "disciplineKey": "performance-arts",
         "locationKey": "usa"
       },
@@ -849,7 +849,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2018,
+        "cohortYears": [2018],
         "disciplineKey": "performance-arts",
         "locationKey": "usa"
       },
@@ -896,7 +896,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2019,
+        "cohortYears": [2019],
         "disciplineKey": "performance-arts",
         "locationKey": "usa"
       },
@@ -943,7 +943,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2019,
+        "cohortYears": [2019],
         "disciplineKey": "performance-arts",
         "locationKey": "usa"
       },
@@ -990,7 +990,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2019,
+        "cohortYears": [2019],
         "disciplineKey": "visual-arts",
         "locationKey": "sweden"
       },
@@ -1037,7 +1037,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2019,
+        "cohortYears": [2019],
         "disciplineKey": "visual-arts",
         "locationKey": "usa"
       },
@@ -1084,7 +1084,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2019,
+        "cohortYears": [2019],
         "disciplineKey": "visual-arts",
         "locationKey": "south-africa"
       },
@@ -1131,7 +1131,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2019,
+        "cohortYears": [2019],
         "disciplineKey": "visual-arts",
         "locationKey": "usa"
       },
@@ -1178,7 +1178,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2019,
+        "cohortYears": [2019],
         "disciplineKey": "performance-arts",
         "locationKey": "usa"
       },
@@ -1225,7 +1225,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2019,
+        "cohortYears": [2019],
         "disciplineKey": "visual-arts",
         "locationKey": "usa"
       },
@@ -1272,7 +1272,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2019,
+        "cohortYears": [2019],
         "disciplineKey": "visual-arts",
         "locationKey": "usa"
       },
@@ -1313,7 +1313,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2019,
+        "cohortYears": [2019],
         "disciplineKey": "visual-arts",
         "locationKey": "usa"
       },
@@ -1360,7 +1360,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2019,
+        "cohortYears": [2019],
         "disciplineKey": "visual-arts",
         "locationKey": "usa"
       },
@@ -1401,7 +1401,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2019,
+        "cohortYears": [2019],
         "disciplineKey": "visual-arts",
         "locationKey": "usa"
       },
@@ -1448,7 +1448,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2019,
+        "cohortYears": [2019],
         "disciplineKey": "performance-arts",
         "locationKey": "usa"
       },
@@ -1495,7 +1495,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2019,
+        "cohortYears": [2019],
         "disciplineKey": "performance-arts",
         "locationKey": "usa"
       },
@@ -1536,7 +1536,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2019,
+        "cohortYears": [2019],
         "disciplineKey": "visual-arts",
         "locationKey": "usa"
       },
@@ -1583,7 +1583,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2024,
+        "cohortYears": [2024],
         "disciplineKey": "digital-arts",
         "locationKey": "usa"
       },
@@ -1630,7 +1630,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2024,
+        "cohortYears": [2024],
         "disciplineKey": "murals-installation",
         "locationKey": "usa"
       },
@@ -1677,7 +1677,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2024,
+        "cohortYears": [2024],
         "disciplineKey": "mixed-media",
         "locationKey": "usa"
       },
@@ -1718,7 +1718,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2024,
+        "cohortYears": [2024],
         "disciplineKey": "illustration-design",
         "locationKey": "usa"
       },
@@ -1759,7 +1759,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2024,
+        "cohortYears": [2024],
         "disciplineKey": "fine-art-visual-art",
         "locationKey": "usa"
       },
@@ -1806,7 +1806,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2024,
+        "cohortYears": [2024],
         "disciplineKey": "painting-and-ceramics",
         "locationKey": "usa"
       },
@@ -1853,7 +1853,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2024,
+        "cohortYears": [2024],
         "disciplineKey": "artist-guest",
         "locationKey": "usa"
       },
@@ -1894,7 +1894,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2024,
+        "cohortYears": [2024],
         "disciplineKey": "musician",
         "locationKey": "usa"
       },
@@ -1941,7 +1941,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2024,
+        "cohortYears": [2024],
         "disciplineKey": "writing-illustration-and-macrame-jewelry",
         "locationKey": "dominican-republic"
       },
@@ -1988,7 +1988,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2024,
+        "cohortYears": [2024],
         "disciplineKey": "visual-arts",
         "locationKey": "usa"
       },
@@ -2029,7 +2029,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2024,
+        "cohortYears": [2024],
         "disciplineKey": "digital-art-design",
         "locationKey": "usa"
       },
@@ -2070,7 +2070,7 @@
       "updatedAt": "2026-04-12T07:41:43.991Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2024,
+        "cohortYears": [2024],
         "disciplineKey": "visual-arts",
         "locationKey": "usa"
       },
@@ -2117,7 +2117,7 @@
       "updatedAt": "2025-10-27T01:14:53.893Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2026,
+        "cohortYears": [2026],
         "disciplineKey": "painting",
         "locationKey": "usa"
       },
@@ -2164,7 +2164,7 @@
       "updatedAt": "2025-10-20T23:22:57.167Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2025,
+        "cohortYears": [2025],
         "disciplineKey": "painting",
         "locationKey": "united-states"
       },
@@ -2227,7 +2227,7 @@
       "updatedAt": "2025-09-03T16:41:42.941Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2025,
+        "cohortYears": [2025],
         "disciplineKey": "mixed-media",
         "locationKey": "artist"
       },
@@ -2290,7 +2290,7 @@
       "updatedAt": "2025-09-03T18:15:45.764Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2026,
+        "cohortYears": [2026],
         "disciplineKey": "other",
         "locationKey": "united-states"
       },
@@ -2353,7 +2353,7 @@
       "updatedAt": "2026-01-09T19:39:50.531Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2026,
+        "cohortYears": [2026],
         "disciplineKey": "photography",
         "locationKey": "united-states"
       },
@@ -2416,7 +2416,7 @@
       "updatedAt": "2025-12-20T15:47:18.162Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2026,
+        "cohortYears": [2026],
         "disciplineKey": "other",
         "locationKey": "usa"
       },
@@ -2471,7 +2471,7 @@
       "updatedAt": "2025-09-04T15:34:26.827Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2026,
+        "cohortYears": [2026],
         "disciplineKey": "artist",
         "locationKey": "usa"
       },
@@ -2518,7 +2518,7 @@
       "updatedAt": "2025-09-01T20:52:41.821Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2025,
+        "cohortYears": [2025],
         "disciplineKey": "painting",
         "locationKey": "artist"
       },
@@ -2581,7 +2581,7 @@
       "updatedAt": "2025-08-12T03:45:44.449Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2025,
+        "cohortYears": [2025],
         "disciplineKey": "visual-arts",
         "locationKey": "artist"
       },
@@ -2622,7 +2622,7 @@
       "updatedAt": "2026-01-08T23:02:32.519Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2026,
+        "cohortYears": [2026],
         "disciplineKey": "music",
         "locationKey": "usa"
       },
@@ -2677,7 +2677,7 @@
       "updatedAt": "2026-01-05T20:51:44.197Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2026,
+        "cohortYears": [2026],
         "disciplineKey": "artist",
         "locationKey": "costa-rica"
       },
@@ -2740,7 +2740,7 @@
       "updatedAt": "2025-08-27T17:33:33.958Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2025,
+        "cohortYears": [2025],
         "disciplineKey": "artist",
         "locationKey": "artist"
       },
@@ -2787,7 +2787,7 @@
       "updatedAt": "2025-10-21T22:10:20.362Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2025,
+        "cohortYears": [2025],
         "disciplineKey": "mixed-media",
         "locationKey": "us"
       },
@@ -2850,7 +2850,7 @@
       "updatedAt": "2026-01-03T19:27:50.218Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2026,
+        "cohortYears": [2026],
         "disciplineKey": "mixed-media",
         "locationKey": "united-states"
       },
@@ -2913,7 +2913,7 @@
       "updatedAt": "2025-08-14T15:52:06.630Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2025,
+        "cohortYears": [2025],
         "disciplineKey": "painting",
         "locationKey": "united-states"
       },
@@ -2976,7 +2976,7 @@
       "updatedAt": "2025-09-05T12:12:37.364Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2025,
+        "cohortYears": [2025],
         "disciplineKey": "dance",
         "locationKey": "united-states"
       },
@@ -3035,7 +3035,7 @@
       "updatedAt": "2026-01-07T02:20:06.361Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2026,
+        "cohortYears": [2026],
         "disciplineKey": "mixed-media",
         "locationKey": "u-s-a"
       },
@@ -3098,7 +3098,7 @@
       "updatedAt": "2025-09-04T15:26:07.873Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2025,
+        "cohortYears": [2025],
         "disciplineKey": "music",
         "locationKey": "peru"
       },
@@ -3161,7 +3161,7 @@
       "updatedAt": "2025-10-16T02:17:43.961Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2026,
+        "cohortYears": [2026],
         "disciplineKey": "painting",
         "locationKey": "united-states"
       },
@@ -3218,7 +3218,7 @@
       "updatedAt": "2025-09-02T13:44:39.794Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2025,
+        "cohortYears": [2025],
         "disciplineKey": "painting",
         "locationKey": "usa"
       },
@@ -3281,7 +3281,7 @@
       "updatedAt": "2025-09-02T19:55:29.594Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2025,
+        "cohortYears": [2025],
         "disciplineKey": "sculpture",
         "locationKey": "usa"
       },
@@ -3344,7 +3344,7 @@
       "updatedAt": "2025-09-10T16:32:43.245Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2025,
+        "cohortYears": [2025],
         "disciplineKey": "artist",
         "locationKey": "united-states"
       },
@@ -3407,7 +3407,7 @@
       "updatedAt": "2025-08-31T15:55:58.353Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2025,
+        "cohortYears": [2025],
         "disciplineKey": "dance",
         "locationKey": "tilburg"
       },
@@ -3454,7 +3454,7 @@
       "updatedAt": "2025-09-03T02:46:42.769Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2025,
+        "cohortYears": [2025],
         "disciplineKey": "ceramics",
         "locationKey": "artist"
       },
@@ -3509,7 +3509,7 @@
       "updatedAt": "2025-12-11T23:18:29.142Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2026,
+        "cohortYears": [2026],
         "disciplineKey": "painting",
         "locationKey": "united-states"
       },
@@ -3572,7 +3572,7 @@
       "updatedAt": "2025-09-07T03:07:10.107Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2025,
+        "cohortYears": [2025],
         "disciplineKey": "mixed-media",
         "locationKey": "artist"
       },
@@ -3635,7 +3635,7 @@
       "updatedAt": "2025-08-12T03:21:03.280Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2025,
+        "cohortYears": [2025],
         "disciplineKey": "illustrator",
         "locationKey": "usa"
       },
@@ -3682,7 +3682,7 @@
       "updatedAt": "2025-09-03T17:31:58.467Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2025,
+        "cohortYears": [2025],
         "disciplineKey": "digital",
         "locationKey": "artist"
       },
@@ -3745,7 +3745,7 @@
       "updatedAt": "2025-12-12T18:57:04.909Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2026,
+        "cohortYears": [2026],
         "disciplineKey": "mixed-media",
         "locationKey": "usa"
       },
@@ -3808,7 +3808,7 @@
       "updatedAt": "2025-09-09T00:52:19.553Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2025,
+        "cohortYears": [2025],
         "disciplineKey": "artist",
         "locationKey": "united-states"
       },
@@ -3871,7 +3871,7 @@
       "updatedAt": "2026-01-06T09:11:00.375Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2026,
+        "cohortYears": [2026],
         "disciplineKey": "mixed-media",
         "locationKey": "india-uk"
       },
@@ -3934,7 +3934,7 @@
       "updatedAt": "2025-12-17T22:21:59.659Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2026,
+        "cohortYears": [2026],
         "disciplineKey": "sculpture",
         "locationKey": "united-kingdom"
       },
@@ -3997,7 +3997,7 @@
       "updatedAt": "2025-11-25T20:05:03.228Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2026,
+        "cohortYears": [2026],
         "disciplineKey": "other",
         "locationKey": "united-states"
       },
@@ -4044,7 +4044,7 @@
       "updatedAt": "2025-08-12T16:59:09.030Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2025,
+        "cohortYears": [2025],
         "disciplineKey": "painting",
         "locationKey": "united-states"
       },
@@ -4107,7 +4107,7 @@
       "updatedAt": "2025-08-31T22:00:57.723Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2025,
+        "cohortYears": [2025],
         "disciplineKey": "other",
         "locationKey": "usa"
       },
@@ -4154,7 +4154,7 @@
       "updatedAt": "2025-09-19T16:42:36.368Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2026,
+        "cohortYears": [2026],
         "disciplineKey": "other",
         "locationKey": "united-states"
       },
@@ -4217,7 +4217,7 @@
       "updatedAt": "2026-01-23T00:17:42.004Z",
       "filter": {
         "connection": "artist",
-        "cohortYear": 2026,
+        "cohortYears": [2026],
         "disciplineKey": "mixed-media",
         "locationKey": "colombia"
       },

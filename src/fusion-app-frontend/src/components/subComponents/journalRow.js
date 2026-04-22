@@ -7,6 +7,7 @@ import { isJournalListingPage } from '../../utils/journalListingPage.js';
 import { navigate } from '../../router.js';
 import { mergeLocaleDeep, firstNonEmptyString } from '../../utils/localeFallback.js';
 import { escapeHtml, previewPlainText } from '../../utils/textPreview.js';
+import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
 
 class JournalRowComponent extends HTMLElement {
     constructor() {
@@ -363,7 +364,7 @@ class JournalRowComponent extends HTMLElement {
                         </div>
                     </div>
                     <div class="right-content">
-                        <img class="journal-card-image" src="${journalImage}" alt="${escapeHtml(imageAlt)}">
+                        <img class="journal-card-image" src="${journalImage}" alt="${escapeHtml(withSeoImageAlt(imageAlt))}">
                     </div>
                 </div>
             </div>

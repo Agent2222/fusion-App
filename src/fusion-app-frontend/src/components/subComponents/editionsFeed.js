@@ -1,6 +1,7 @@
 // Editions feed: rows of 1, 2, 3, 4, then 5 tiles (15 items per page); paginated.
 import { navigate } from '../../router.js';
 import { mergeLocaleDeep } from '../../utils/localeFallback.js';
+import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
 
 /** 1 + 2 + 3 + 4 + 5 = 15 items per page */
 const PAGE_SIZE = 15;
@@ -331,7 +332,7 @@ class EditionsFeedComponent extends HTMLElement {
 
         a.innerHTML = `
             <div class="edition-card-image">
-                <img src="${item.imageSrc}" alt="${escapeHtml(alt)}">
+                <img src="${item.imageSrc}" alt="${escapeHtml(withSeoImageAlt(alt))}">
             </div>
             <div class="edition-card-caption">${escapeHtml(title)}</div>
         `;

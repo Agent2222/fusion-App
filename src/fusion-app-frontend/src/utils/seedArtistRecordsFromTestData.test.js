@@ -11,7 +11,7 @@ const minimalArtist = {
     updatedAt: '2026-01-01T00:00:00.000Z',
     filter: {
         connection: 'artist',
-        cohortYear: 2025,
+        cohortYears: [2025],
         disciplineKey: 'sound',
         locationKey: 'us',
     },
