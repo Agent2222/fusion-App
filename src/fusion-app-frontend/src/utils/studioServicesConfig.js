@@ -119,7 +119,8 @@ export function buildServerEnvSnippet(skTest, skLive, extra = {}) {
         '# STRIPE_PRICE_ID=price_...',
         '# STRIPE_WEBHOOK_SECRET=whsec_...',
         '# FUSION_BACKEND_CANISTER_ID=...',
-        '# INTEGRATION_IC_IDENTITY_JSON=[...]',
+        '# INTEGRATION_IC_IDENTITY_PEM=  # paste full PEM from: dfx identity export <name>',
+        '# (optional legacy) INTEGRATION_IC_IDENTITY_JSON=["hex","hex"]',
         '# IC_HOST=http://127.0.0.1:4943',
         '# RESEND_FROM="Fusion <onboarding@resend.dev>"',
         String(extra.awsRegion || '').trim()

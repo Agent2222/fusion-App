@@ -18,6 +18,7 @@ import {
     createSubscription,
     FUSION_PENDING_APPLICATION_SUB_KEY,
     getIntegrationBaseUrl,
+    linkSubscriptionToPrincipal,
     mapIntegrationUserMessage,
     setPendingPaymentEmailLocal,
     setStoredBillingEmailForPrincipal,
@@ -471,6 +472,8 @@ class ApplicationFormComponent extends HTMLElement {
                 paymentLoadingForm: 'カード入力フォームを読み込み中…',
                 paymentConfigureServices: 'Studio → Services で Integration API と Stripe の公開鍵を設定してください。',
                 paymentFailed: 'お支払いを完了できませんでした。もう一度お試しください。',
+                payFirstSessionExpired:
+                    'お支払い中にサインインの有効期限が切れた可能性があります。Internet Identity で再度サインインしてから「支払って送信」をもう一度試すか、サポートへご連絡ください。',
                 required: '必須',
                 feeInfoTrigger: '応募料に含まれるもの',
                 feeInfoP1:
@@ -579,6 +582,8 @@ class ApplicationFormComponent extends HTMLElement {
             paymentConfigureServices:
                 'Configure Integration API URL and Stripe publishable key under Studio → Services.',
             paymentFailed: 'Payment could not be completed. Please try again.',
+            payFirstSessionExpired:
+                'Your sign-in session may have expired during payment. Sign in again with Internet Identity, then retry Pay and submit, or contact support.',
             required: 'required',
             feeInfoTrigger: "What's included in the application fee?",
             feeInfoP1:
@@ -975,33 +980,97 @@ class ApplicationFormComponent extends HTMLElement {
                 w.stripeError = error;
                 throw wrapped;
             }
-            try {
-                const email = String(root?.querySelector('#app-email')?.value ?? '').trim();
-                const programId = this.getAttribute('data-program-id') || '';
-                if (
-                    (this._fusionPendingId || this._fusionSubscriptionId) &&
-                    email.includes('@')
-                ) {
-                    sessionStorage.setItem(
-                        FUSION_PENDING_APPLICATION_SUB_KEY,
-                        JSON.stringify({
-                            fusionPendingId: this._fusionPendingId,
-                            subscriptionId: this._fusionSubscriptionId,
-                            email,
-                            programId,
-                        })
-                    );
+            const email = String(root?.querySelector('#app-email')?.value ?? '').trim();
+            const programId = this.getAttribute('data-program-id') || '';
+
+            if (this._fusionPendingId && email.includes('@')) {
+                const snap = await getAuthSnapshot();
+                if (!snap.authenticated) {
+                    this._setPaySubmittingState(false, '');
+                    if (statusEl) {
+                        statusEl.textContent = L.payFirstSessionExpired;
+                        statusEl.classList.add('is-error');
+                    }
+                    return;
                 }
-                setPendingPaymentEmailLocal({
-                    email,
-                    source: 'application',
-                    fusionPendingId: this._fusionPendingId || '',
-                    subscriptionId: this._fusionSubscriptionId || '',
-                    programId,
-                });
-            } catch {
-                /* ignore */
+                const principal = snap.principal.toText();
+                try {
+                    await linkSubscriptionToPrincipal({
+                        fusionPendingId: this._fusionPendingId,
+                        email,
+                        principal,
+                        subscriptionId: this._fusionSubscriptionId || undefined,
+                    });
+                } catch (linkErr) {
+                    const raw = linkErr instanceof Error ? linkErr.message : String(linkErr);
+                    const line = mapIntegrationUserMessage(raw, 0);
+                    try {
+                        posthog.capture('program_application_link_failed', {
+                            ...this._posthogApplicationBaseProps(),
+                            payment_plan: this._paymentPlan || 'unknown',
+                        });
+                    } catch {
+                        /* ignore */
+                    }
+                    this._setPaySubmittingState(false, '');
+                    if (statusEl) {
+                        statusEl.textContent = line;
+                        statusEl.classList.add('is-error');
+                    }
+                    return;
+                }
+                try {
+                    if (this._fusionPendingId || this._fusionSubscriptionId) {
+                        sessionStorage.setItem(
+                            FUSION_PENDING_APPLICATION_SUB_KEY,
+                            JSON.stringify({
+                                fusionPendingId: this._fusionPendingId,
+                                subscriptionId: this._fusionSubscriptionId,
+                                email,
+                                programId,
+                            })
+                        );
+                    }
+                    setPendingPaymentEmailLocal({
+                        email,
+                        source: 'application',
+                        fusionPendingId: this._fusionPendingId || '',
+                        subscriptionId: this._fusionSubscriptionId || '',
+                        programId,
+                    });
+                } catch {
+                    /* ignore */
+                }
+            } else {
+                try {
+                    if (
+                        (this._fusionPendingId || this._fusionSubscriptionId) &&
+                        email.includes('@')
+                    ) {
+                        sessionStorage.setItem(
+                            FUSION_PENDING_APPLICATION_SUB_KEY,
+                            JSON.stringify({
+                                fusionPendingId: this._fusionPendingId,
+                                subscriptionId: this._fusionSubscriptionId,
+                                email,
+                                programId,
+                            })
+                        );
+                    }
+                    if (email.includes('@')) {
+                        setPendingPaymentEmailLocal({
+                            email,
+                            source: 'application',
+                            fusionPendingId: this._fusionPendingId || '',
+                            subscriptionId: this._fusionSubscriptionId || '',
+                            programId,
+                        });
+                    }
+                } catch {
+                    /* ignore */
+                }
             }
+
             await this._submitApplication();
         } catch (err) {
             const stripeErr =

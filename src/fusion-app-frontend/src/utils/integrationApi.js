@@ -78,7 +78,11 @@ export const FUSION_PENDING_MEMBERSHIP_LINK_KEY = 'fusion-pending-membership-lin
 /** Pay-first: persisted until II link succeeds or a new checkout replaces it (`sessionStorage`). */
 export const FUSION_PENDING_MEMBERSHIP_PAYLOAD_KEY = 'fusion-pending-membership-payload';
 
-/** Pay-first program application: subscription ids + email for linking after II signup (JSON). */
+/**
+ * Program application pay-first: debug/support snapshot in `sessionStorage` after card success
+ * (`fusionPendingId`, `subscriptionId`, `email`, `programId`). The app does not read this key;
+ * recovery if linking fails is via `readPendingPaymentEmailLocal('application')` / Studio sync-by-email.
+ */
 export const FUSION_PENDING_APPLICATION_SUB_KEY = 'fusion-pending-application-subscription';
 
 /**

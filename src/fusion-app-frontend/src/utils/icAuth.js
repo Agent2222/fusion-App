@@ -181,7 +181,16 @@ export async function runPostLoginPipeline() {
         const { principal } = await getAuthSnapshot();
         const pText = principal.toText();
         const { syncSubscriptionFromStripe } = await import('./integrationApi.js');
-        await syncSubscriptionFromStripe(pText);
+        const syncResult = await syncSubscriptionFromStripe(pText);
+        if (
+            DEV_MODE &&
+            syncResult &&
+            syncResult.synced === false &&
+            typeof syncResult.reason === 'string' &&
+            syncResult.reason
+        ) {
+            console.warn('[Fusion] post-login sync-subscription:', syncResult.reason);
+        }
         const { ensureMyLinkedArtistProfile } = await import('./database.js');
         await ensureMyLinkedArtistProfile();
         const { maybeSeedLocalesFromProfileSetupDraftIfEmpty } = await import(
