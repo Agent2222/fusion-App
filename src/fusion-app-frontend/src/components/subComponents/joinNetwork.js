@@ -23,6 +23,7 @@ import {
 } from "../../utils/earlyAccessSubscribe.js";
 import {
   clearPendingMembershipPayload,
+  clearPendingPaymentEmailLocal,
   createSubscription,
   FUSION_PENDING_MEMBERSHIP_LINK_KEY,
   getIntegrationBaseUrl,
@@ -30,8 +31,10 @@ import {
   mapIntegrationUserMessage,
   markPendingMembershipPaymentCompleted,
   readPendingMembershipPayload,
+  readPendingPaymentEmailLocal,
   savePendingMembershipPayload,
   sendEmail,
+  setStoredBillingEmailForPrincipal,
 } from "../../utils/integrationApi.js";
 import { getStripePublishableKeyResolved } from "../../utils/studioServicesConfig.js";
 import { saveProfileSetupDraft } from "../../utils/profileSetupDraft.js";
@@ -769,6 +772,8 @@ class JoinNetworkComponent extends HTMLElement {
         principal,
         subscriptionId: this._fusionSubscriptionId || undefined,
       });
+      setStoredBillingEmailForPrincipal(principal, email);
+      clearPendingPaymentEmailLocal("join");
       const cat = this._getSelectedCategoryNormalized();
       const { getAuthenticatedFusionBackendActor } =
         await import("../../utils/earlyAccessSubscribe.js");
@@ -1796,7 +1801,12 @@ class JoinNetworkComponent extends HTMLElement {
     if (resumeLink) {
       this._fusionPendingId = pendingRestore.fusionPendingId;
       this._fusionSubscriptionId = pendingRestore.subscriptionId;
-      if (pendingRestore.email) this._formEmail = pendingRestore.email;
+      if (pendingRestore.email) {
+        this._formEmail = pendingRestore.email;
+      } else {
+        const lsJoin = readPendingPaymentEmailLocal("join");
+        if (lsJoin?.email) this._formEmail = lsJoin.email;
+      }
       this._joinMode = "full";
       this._stage = "linkAccount";
       this._preStripeCanisterSyncDone = true;
@@ -2025,6 +2035,20 @@ class JoinNetworkComponent extends HTMLElement {
             markPendingMembershipPaymentCompleted();
             this._showStage("linkAccount");
             return;
+          }
+          try {
+            const { getIdentityIfAuthenticated } =
+              await import("../../utils/icAuth.js");
+            const id = await getIdentityIfAuthenticated();
+            const em = this._getEmailForSubscription();
+            if (id && em.includes("@")) {
+              setStoredBillingEmailForPrincipal(
+                id.getPrincipal().toText(),
+                em,
+              );
+            }
+          } catch {
+            /* ignore */
           }
           await afterJoinSaved();
         } catch (e) {

@@ -77,7 +77,9 @@ import {
     fetchStripeSubscriptionStatusByEmail,
     sendEmail,
     getIntegrationBaseUrl,
+    studioStripeCheckEmailStorageKey,
     syncSubscriptionFromStripe,
+    syncSubscriptionFromStripeByEmail,
 } from '../../utils/integrationApi.js';
 import { uploadBlobToS3 } from '../../utils/studioS3Upload.js';
 import {
@@ -3601,13 +3603,16 @@ function formatStudioAccountCardHtml(u) {
 /**
  * @param {import('../../utils/database.js').StudioAccountRow} row
  * @param {() => void | Promise<void>} onSaved
+ * @param {() => void | Promise<void>} [onRefreshUsersList] — reload Users table + `allPairs` (e.g. after Stripe sync)
  */
-function openStudioUserManageModal(row, onSaved) {
+function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
     const raw = row.rawAccount;
     if (!raw || typeof raw !== 'object') {
         openStudioModal('<p class="studio-muted">No account payload for this row.</p>', { title: 'Manage account', compact: true });
         return;
     }
+    /** Latest canister account payload for Save (updated after Stripe check + sync). */
+    let workingRaw = /** @type {Record<string, unknown>} */ (raw);
     const principal = row.principal;
     const curStatus = row.status || 'pending';
     const exempt = !!row.membershipExemptManual;
@@ -3638,10 +3643,10 @@ function openStudioUserManageModal(row, onSaved) {
         <section class="studio-user-manage-section">
           <h3 class="studio-user-manage-section-title">Membership (canister)</h3>
           <p class="studio-muted studio-user-manage-hint">Stored on-chain. Use <strong>Live Stripe</strong> below to verify billing in Stripe.</p>
-          <dl class="studio-user-manage-dl">
-            <dt>Cached subscription</dt><dd>${escapeHtml(String(stripeSt))}</dd>
-            <dt>Period end</dt><dd>${escapeHtml(String(renews))}</dd>
-            <dt>Summary</dt><dd>${escapeHtml(canisterMembershipLabel)}</dd>
+          <dl class="studio-user-manage-dl" id="studio-user-manage-membership-dl">
+            <dt>Cached subscription</dt><dd id="studio-user-cache-sub">${escapeHtml(String(stripeSt))}</dd>
+            <dt>Period end</dt><dd id="studio-user-cache-renew">${escapeHtml(String(renews))}</dd>
+            <dt>Summary</dt><dd id="studio-user-cache-summary">${escapeHtml(canisterMembershipLabel)}</dd>
           </dl>
           <div class="studio-user-manage-control-row">
             <label class="studio-user-manage-label" for="studio-user-edit-membership">Billing override</label>
@@ -3678,6 +3683,46 @@ function openStudioUserManageModal(row, onSaved) {
     const emailInput = root.querySelector('#studio-user-stripe-email');
     const stripeResultEl = root.querySelector('#studio-user-stripe-result');
     const CHECK_LABEL = 'Check Stripe';
+    const stripeCheckEmailLsKey = studioStripeCheckEmailStorageKey(principal);
+    if (emailInput instanceof HTMLInputElement) {
+        try {
+            const saved = localStorage.getItem(stripeCheckEmailLsKey);
+            if (saved && saved.includes('@')) emailInput.value = saved.trim();
+        } catch {
+            /* ignore */
+        }
+        emailInput.addEventListener('blur', () => {
+            const v = emailInput.value.trim();
+            if (!v.includes('@')) return;
+            try {
+                localStorage.setItem(stripeCheckEmailLsKey, v);
+            } catch {
+                /* ignore */
+            }
+        });
+    }
+
+    const applyMembershipFromStudioRow = (upRow) => {
+        if (!upRow) return;
+        const stripeStatus = upRow.stripeSubscriptionStatus || '—';
+        const renewIso = upRow.stripeCurrentPeriodEnd || '';
+        const renewLabel = renewIso ? formatSubscriptionPeriodEnd(renewIso) : '—';
+        const ex = !!upRow.membershipExemptManual;
+        const summ = ex ? 'Manual exempt' : String(stripeStatus);
+        const ddSub = root.querySelector('#studio-user-cache-sub');
+        const ddRenew = root.querySelector('#studio-user-cache-renew');
+        const ddSumm = root.querySelector('#studio-user-cache-summary');
+        if (ddSub) ddSub.textContent = String(stripeStatus);
+        if (ddRenew) ddRenew.textContent = renewLabel;
+        if (ddSumm) ddSumm.textContent = summ;
+        const memSel = root.querySelector('#studio-user-edit-membership');
+        if (memSel instanceof HTMLSelectElement) {
+            memSel.value = ex ? 'manual_exempt' : 'standard';
+        }
+        if (upRow.rawAccount && typeof upRow.rawAccount === 'object') {
+            workingRaw = /** @type {Record<string, unknown>} */ (upRow.rawAccount);
+        }
+    };
 
     const showStripeErr = (msg) => {
         if (!stripeResultEl) return;
@@ -3698,6 +3743,11 @@ function openStudioUserManageModal(row, onSaved) {
         if (stripeResultEl) stripeResultEl.hidden = true;
         try {
             const r = await fetchStripeSubscriptionStatusByEmail(email);
+            try {
+                localStorage.setItem(stripeCheckEmailLsKey, email);
+            } catch {
+                /* ignore */
+            }
             if (
                 !r ||
                 typeof r !== 'object' ||
@@ -3728,6 +3778,36 @@ function openStudioUserManageModal(row, onSaved) {
                   <p class="studio-muted studio-stripe-live-footnote">Live Stripe — independent of table / canister cache.</p>
                 `;
             }
+
+            if (getIntegrationBaseUrl()) {
+                let synced = false;
+                try {
+                    const byEmail = await syncSubscriptionFromStripeByEmail(email, principal);
+                    synced = Boolean(byEmail && /** @type {{ synced?: unknown }} */ (byEmail).synced === true);
+                } catch {
+                    /* ignore */
+                }
+                if (!synced) {
+                    try {
+                        const byPrincipal = await syncSubscriptionFromStripe(principal);
+                        synced = Boolean(
+                            byPrincipal && /** @type {{ synced?: unknown }} */ (byPrincipal).synced === true
+                        );
+                    } catch {
+                        /* Stripe customer may lack metadata.principal */
+                    }
+                }
+            }
+            try {
+                const rows = await getAccountsForStudio();
+                const up = rows.find((x) => x.principal === principal);
+                applyMembershipFromStudioRow(up);
+                if (typeof onRefreshUsersList === 'function') {
+                    await onRefreshUsersList();
+                }
+            } catch {
+                /* ignore */
+            }
         } catch (e) {
             showStripeErr(e instanceof Error ? e.message : String(e));
         } finally {
@@ -3745,7 +3825,7 @@ function openStudioUserManageModal(row, onSaved) {
         const mem = memSel instanceof HTMLSelectElement ? memSel.value : 'standard';
         const ex = mem === 'manual_exempt';
         const patched = {
-            ...raw,
+            ...workingRaw,
             status: { [statusKey]: null },
             membershipExemptManual: ex,
             updatedAt: new Date().toISOString(),
@@ -3869,17 +3949,28 @@ async function initUsers(mainEl) {
                 if (!p) return;
                 const row = allPairs.find((x) => x.principal === p);
                 if (!row) return;
-                openStudioUserManageModal(row, async () => {
-                    try {
-                        allPairs = await getAccountsForStudio();
-                        renderTable();
-                        if (syncMsg) syncMsg.textContent = 'Account updated.';
-                    } catch (err) {
-                        if (syncMsg) {
-                            syncMsg.textContent = err instanceof Error ? err.message : String(err);
+                openStudioUserManageModal(
+                    row,
+                    async () => {
+                        try {
+                            allPairs = await getAccountsForStudio();
+                            renderTable();
+                            if (syncMsg) syncMsg.textContent = 'Account updated.';
+                        } catch (err) {
+                            if (syncMsg) {
+                                syncMsg.textContent = err instanceof Error ? err.message : String(err);
+                            }
+                        }
+                    },
+                    async () => {
+                        try {
+                            allPairs = await getAccountsForStudio();
+                            renderTable();
+                        } catch {
+                            /* ignore */
                         }
                     }
-                });
+                );
             });
         }
 

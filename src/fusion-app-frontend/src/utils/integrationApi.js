@@ -82,6 +82,139 @@ export const FUSION_PENDING_MEMBERSHIP_PAYLOAD_KEY = 'fusion-pending-membership-
 export const FUSION_PENDING_APPLICATION_SUB_KEY = 'fusion-pending-application-subscription';
 
 /**
+ * Pay-first join: billing email mirror in `localStorage` (survives new tabs; same device).
+ * Cleared when membership link completes (`clearPendingPaymentEmailLocal('join')`).
+ */
+export const FUSION_LS_PENDING_PAYMENT_EMAIL_JOIN = 'fusion-pending-payment-email-join';
+
+/** Program application payment email (separate key so join session clears do not wipe it). */
+export const FUSION_LS_PENDING_PAYMENT_EMAIL_APPLICATION = 'fusion-pending-payment-email-application';
+
+/**
+ * @param {string} principalText
+ * @returns {string}
+ */
+export function billingEmailStorageKeyForPrincipal(principalText) {
+    return `fusion-billing-email:${String(principalText || '').trim()}`;
+}
+
+/**
+ * Last Stripe customer email used in Studio → Users → Manage (per principal).
+ * @param {string} principalText
+ * @returns {string}
+ */
+export function studioStripeCheckEmailStorageKey(principalText) {
+    return `fusion-studio-stripe-check-email:${String(principalText || '').trim()}`;
+}
+
+/**
+ * @param {{ email: string, source?: 'join' | 'application', fusionPendingId?: string, subscriptionId?: string, programId?: string }} payload
+ */
+export function setPendingPaymentEmailLocal(payload) {
+    try {
+        const email = String(payload.email || '').trim();
+        if (!email.includes('@')) return;
+        const source = payload.source === 'application' ? 'application' : 'join';
+        const key =
+            source === 'application'
+                ? FUSION_LS_PENDING_PAYMENT_EMAIL_APPLICATION
+                : FUSION_LS_PENDING_PAYMENT_EMAIL_JOIN;
+        localStorage.setItem(
+            key,
+            JSON.stringify({
+                email,
+                source,
+                fusionPendingId: payload.fusionPendingId ? String(payload.fusionPendingId) : '',
+                subscriptionId: payload.subscriptionId ? String(payload.subscriptionId) : '',
+                programId: payload.programId ? String(payload.programId) : '',
+                updatedAt: new Date().toISOString(),
+            })
+        );
+    } catch {
+        /* quota / private mode */
+    }
+}
+
+/**
+ * @param {'join' | 'application'} [source]
+ * @returns {{ email: string, source: 'join' | 'application', fusionPendingId: string, subscriptionId: string, programId: string, updatedAt: string } | null}
+ */
+export function readPendingPaymentEmailLocal(source) {
+    const keys =
+        source === 'application'
+            ? [FUSION_LS_PENDING_PAYMENT_EMAIL_APPLICATION]
+            : source === 'join'
+              ? [FUSION_LS_PENDING_PAYMENT_EMAIL_JOIN]
+              : [FUSION_LS_PENDING_PAYMENT_EMAIL_JOIN, FUSION_LS_PENDING_PAYMENT_EMAIL_APPLICATION];
+    for (const key of keys) {
+        try {
+            const raw = localStorage.getItem(key);
+            if (!raw) continue;
+            const o = JSON.parse(raw);
+            if (!o || typeof o.email !== 'string' || !o.email.includes('@')) continue;
+            return {
+                email: o.email.trim(),
+                source: o.source === 'application' ? 'application' : 'join',
+                fusionPendingId: typeof o.fusionPendingId === 'string' ? o.fusionPendingId : '',
+                subscriptionId: typeof o.subscriptionId === 'string' ? o.subscriptionId : '',
+                programId: typeof o.programId === 'string' ? o.programId : '',
+                updatedAt: typeof o.updatedAt === 'string' ? o.updatedAt : '',
+            };
+        } catch {
+            /* next */
+        }
+    }
+    return null;
+}
+
+/**
+ * @param {'join' | 'application' | 'all'} which
+ */
+export function clearPendingPaymentEmailLocal(which) {
+    try {
+        if (which === 'application') {
+            localStorage.removeItem(FUSION_LS_PENDING_PAYMENT_EMAIL_APPLICATION);
+        } else if (which === 'join') {
+            localStorage.removeItem(FUSION_LS_PENDING_PAYMENT_EMAIL_JOIN);
+        } else {
+            localStorage.removeItem(FUSION_LS_PENDING_PAYMENT_EMAIL_JOIN);
+            localStorage.removeItem(FUSION_LS_PENDING_PAYMENT_EMAIL_APPLICATION);
+        }
+    } catch {
+        /* ignore */
+    }
+}
+
+/**
+ * Billing email used at Stripe checkout for this Internet Identity principal (client hint; same browser).
+ * @param {string} principalText
+ * @param {string} email
+ */
+export function setStoredBillingEmailForPrincipal(principalText, email) {
+    const p = String(principalText || '').trim();
+    const em = String(email || '').trim();
+    if (!p || !em.includes('@')) return;
+    try {
+        localStorage.setItem(billingEmailStorageKeyForPrincipal(p), em);
+    } catch {
+        /* ignore */
+    }
+}
+
+/**
+ * @param {string} principalText
+ * @returns {string}
+ */
+export function getStoredBillingEmailForPrincipal(principalText) {
+    try {
+        const v = localStorage.getItem(billingEmailStorageKeyForPrincipal(principalText));
+        return typeof v === 'string' && v.includes('@') ? v.trim() : '';
+    } catch {
+        return '';
+    }
+}
+
+/**
  * Persist pay-first link ids so refresh before Internet Identity does not strand the user.
  *
  * @param {{ fusionPendingId: string, email: string, subscriptionId?: string | null, paymentCompleted?: boolean }} p
@@ -96,6 +229,14 @@ export function savePendingMembershipPayload(p) {
         };
         if (!o.fusionPendingId) return;
         sessionStorage.setItem(FUSION_PENDING_MEMBERSHIP_PAYLOAD_KEY, JSON.stringify(o));
+        if (o.email.includes('@')) {
+            setPendingPaymentEmailLocal({
+                email: o.email,
+                source: 'join',
+                fusionPendingId: o.fusionPendingId,
+                subscriptionId: o.subscriptionId || '',
+            });
+        }
     } catch {
         /* quota / private mode */
     }
@@ -261,6 +402,42 @@ export async function syncSubscriptionFromStripe(principalText) {
         return await res.json();
     } catch (e) {
         console.warn('[Fusion] sync-subscription failed:', e);
+        return undefined;
+    }
+}
+
+/**
+ * Push subscription for the Stripe customer at `email` to the canister with `metadata.principal`.
+ * Use when the customer was found by email but not by `metadata['principal']`.
+ * @param {string} email
+ * @param {string} principalText
+ * @returns {Promise<{ synced?: boolean; reason?: string; status?: string } | undefined>}
+ */
+export async function syncSubscriptionFromStripeByEmail(email, principalText) {
+    const em = String(email ?? '').trim();
+    const pr = String(principalText ?? '').trim();
+    if (!em.includes('@') || !pr) {
+        return undefined;
+    }
+    const base = getIntegrationBaseUrl();
+    if (!base) {
+        return undefined;
+    }
+    try {
+        const res = await fetch(`${base}/stripe/sync-subscription-by-email`, {
+            method: 'POST',
+            headers: integrationHeadersJson(),
+            body: JSON.stringify({ email: em, principal: pr }),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            const detail = typeof err.error === 'string' ? err.error : `HTTP ${res.status}`;
+            console.warn('[Fusion] sync-subscription-by-email:', detail);
+            return undefined;
+        }
+        return await res.json();
+    } catch (e) {
+        console.warn('[Fusion] sync-subscription-by-email failed:', e);
         return undefined;
     }
 }

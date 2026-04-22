@@ -557,28 +557,22 @@ async function getStripeCustomerAndBestSubscription(stripeClient, principalText)
 }
 
 /**
- * Live Stripe subscription status for a customer email (Studio admin lookup).
- * Uses the same “best subscription” ranking as {@link getStripeCustomerAndBestSubscription}.
+ * Customer by email + best subscription (same ranking as principal lookup).
  * @param {import('stripe').Stripe} stripeClient
  * @param {string} email
  * @returns {Promise<
- *   | { ok: true; membershipActive: boolean; reason?: string; customerId?: string; subscriptionId?: string; subscriptionStatus: string | null; cancelAtPeriodEnd?: boolean }
- *   | { ok: false; error: string }
+ *   | { ok: true; customer: import('stripe').Stripe.Customer; subscription: import('stripe').Stripe.Subscription; membershipActive: boolean }
+ *   | { ok: false; error?: string; reason?: string; customerId?: string }
  * >}
  */
-async function getStripeSubscriptionStatusByEmail(stripeClient, email) {
+async function getStripeCustomerAndBestSubscriptionByEmail(stripeClient, email) {
     const trimmed = String(email ?? '').trim();
     if (!trimmed.includes('@')) {
         return { ok: false, error: 'valid email required' };
     }
     const list = await stripeClient.customers.list({ email: trimmed, limit: 1 });
     if (!list.data.length) {
-        return {
-            ok: true,
-            membershipActive: false,
-            reason: 'no_customer',
-            subscriptionStatus: null,
-        };
+        return { ok: false, reason: 'no_customer' };
     }
     const customer = list.data[0];
     const subs = await stripeClient.subscriptions.list({
@@ -587,13 +581,7 @@ async function getStripeSubscriptionStatusByEmail(stripeClient, email) {
         limit: 100,
     });
     if (!subs.data.length) {
-        return {
-            ok: true,
-            membershipActive: false,
-            reason: 'no_subscription',
-            customerId: customer.id,
-            subscriptionStatus: null,
-        };
+        return { ok: false, reason: 'no_subscription', customerId: customer.id };
     }
     const sorted = [...subs.data].sort((a, b) => {
         const d = rankStripeSubscription(a) - rankStripeSubscription(b);
@@ -602,6 +590,49 @@ async function getStripeSubscriptionStatusByEmail(stripeClient, email) {
     });
     const best = sorted[0];
     const membershipActive = best.status === 'active' || best.status === 'trialing';
+    return { ok: true, customer, subscription: best, membershipActive };
+}
+
+/**
+ * Live Stripe subscription status for a customer email (Studio admin lookup).
+ * @param {import('stripe').Stripe} stripeClient
+ * @param {string} email
+ * @returns {Promise<
+ *   | { ok: true; membershipActive: boolean; reason?: string; customerId?: string; subscriptionId?: string; subscriptionStatus: string | null; cancelAtPeriodEnd?: boolean }
+ *   | { ok: false; error: string }
+ * >}
+ */
+async function getStripeSubscriptionStatusByEmail(stripeClient, email) {
+    const picked = await getStripeCustomerAndBestSubscriptionByEmail(stripeClient, email);
+    if (!picked.ok) {
+        if (picked.error) {
+            return { ok: false, error: picked.error };
+        }
+        if (picked.reason === 'no_customer') {
+            return {
+                ok: true,
+                membershipActive: false,
+                reason: 'no_customer',
+                subscriptionStatus: null,
+            };
+        }
+        if (picked.reason === 'no_subscription') {
+            return {
+                ok: true,
+                membershipActive: false,
+                reason: 'no_subscription',
+                customerId: picked.customerId,
+                subscriptionStatus: null,
+            };
+        }
+        return {
+            ok: true,
+            membershipActive: false,
+            reason: picked.reason || 'unknown',
+            subscriptionStatus: null,
+        };
+    }
+    const { customer, subscription: best, membershipActive } = picked;
     return {
         ok: true,
         membershipActive,
@@ -609,6 +640,42 @@ async function getStripeSubscriptionStatusByEmail(stripeClient, email) {
         subscriptionId: best.id,
         subscriptionStatus: best.status,
         cancelAtPeriodEnd: Boolean(best.cancel_at_period_end),
+    };
+}
+
+/**
+ * Push best subscription for Stripe customer (found by email) to the canister with `metadata.principal`.
+ * @param {import('stripe').Stripe} stripeClient
+ * @param {string} email
+ * @param {string} principalText
+ */
+async function syncStripeSubscriptionByEmailAndPrincipal(stripeClient, email, principalText) {
+    const picked = await getStripeCustomerAndBestSubscriptionByEmail(stripeClient, email);
+    if (!picked.ok) {
+        return { synced: false, reason: picked.reason || picked.error || 'unknown' };
+    }
+    const trimmed = String(principalText ?? '').trim();
+    if (!trimmed) {
+        return { synced: false, reason: 'invalid_principal' };
+    }
+    const { customer, subscription: best } = picked;
+    const meta =
+        best.metadata && typeof best.metadata === 'object'
+            ? /** @type {Record<string, string>} */ ({ ...best.metadata })
+            : {};
+    meta.principal = trimmed;
+    const subForPush = {
+        id: best.id,
+        status: best.status,
+        customer: customer.id,
+        metadata: meta,
+    };
+    await pushSubscriptionToCanister(subForPush, customer.id);
+    return {
+        synced: true,
+        status: best.status,
+        subscriptionId: best.id,
+        customerId: customer.id,
     };
 }
 
@@ -709,6 +776,32 @@ app.post('/stripe/sync-subscription', requireApiKey, async (req, res) => {
             return res.status(503).json({ error: 'Canister integration not configured' });
         }
         const result = await syncStripeSubscriptionForPrincipal(stripe, principal);
+        return res.json(result);
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return res.status(500).json({ error: msg });
+    }
+});
+
+/** Studio: push subscription found by customer email to canister (sets metadata.principal). */
+app.post('/stripe/sync-subscription-by-email', requireApiKey, async (req, res) => {
+    try {
+        if (!stripe) {
+            return res.status(503).json({ error: 'Stripe not configured' });
+        }
+        const email = req.body?.email;
+        const principal = req.body?.principal;
+        if (typeof email !== 'string' || !email.trim().includes('@')) {
+            return res.status(400).json({ error: 'valid email required' });
+        }
+        if (typeof principal !== 'string' || !principal.trim()) {
+            return res.status(400).json({ error: 'principal required' });
+        }
+        const actor = await getIntegrationActor();
+        if (!actor) {
+            return res.status(503).json({ error: 'Canister integration not configured' });
+        }
+        const result = await syncStripeSubscriptionByEmailAndPrincipal(stripe, email, principal);
         return res.json(result);
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);

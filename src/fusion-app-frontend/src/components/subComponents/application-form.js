@@ -13,11 +13,14 @@ import {
 import { getAuthSnapshot } from '../../utils/icAuth.js';
 import { emptyApplicationPaymentOptions } from '../../utils/programApplicationFormContext.js';
 import {
+    clearPendingPaymentEmailLocal,
     createPaymentIntent,
     createSubscription,
     FUSION_PENDING_APPLICATION_SUB_KEY,
     getIntegrationBaseUrl,
     mapIntegrationUserMessage,
+    setPendingPaymentEmailLocal,
+    setStoredBillingEmailForPrincipal,
 } from '../../utils/integrationApi.js';
 import { getProfileSetupDraft } from '../../utils/profileSetupDraft.js';
 import { getStripePublishableKeyResolved } from '../../utils/studioServicesConfig.js';
@@ -855,6 +858,13 @@ class ApplicationFormComponent extends HTMLElement {
                 clientSecret = subRes.clientSecret;
                 this._fusionPendingId = subRes.fusionPendingId || null;
                 this._fusionSubscriptionId = subRes.subscriptionId || null;
+                setPendingPaymentEmailLocal({
+                    email,
+                    source: 'application',
+                    fusionPendingId: this._fusionPendingId || '',
+                    subscriptionId: this._fusionSubscriptionId || '',
+                    programId,
+                });
             } catch (e) {
                 if (myGen !== this._stripePrepareGen) return;
                 this._teardownStripePayment();
@@ -982,6 +992,13 @@ class ApplicationFormComponent extends HTMLElement {
                         })
                     );
                 }
+                setPendingPaymentEmailLocal({
+                    email,
+                    source: 'application',
+                    fusionPendingId: this._fusionPendingId || '',
+                    subscriptionId: this._fusionSubscriptionId || '',
+                    programId,
+                });
             } catch {
                 /* ignore */
             }
@@ -1367,6 +1384,16 @@ class ApplicationFormComponent extends HTMLElement {
                 ...this._posthogApplicationBaseProps(),
                 ...(this._paymentPlan ? { payment_plan: this._paymentPlan } : {}),
             });
+            try {
+                const snap = await getAuthSnapshot();
+                const em = String(payload.email || '').trim();
+                if (snap.authenticated && em.includes('@')) {
+                    setStoredBillingEmailForPrincipal(snap.principal.toText(), em);
+                }
+                clearPendingPaymentEmailLocal('application');
+            } catch {
+                /* ignore */
+            }
             if (statusEl) statusEl.classList.add('is-success');
             this._clearDirtyState();
             this._showSubmitSuccess(programId);
