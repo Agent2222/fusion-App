@@ -95,5 +95,17 @@ export function normalizeDatabaseSnapshotV1(snapshot) {
     if (!Array.isArray(s.membershipStripePeriodEndStable)) {
         s.membershipStripePeriodEndStable = [];
     }
+    if (!Array.isArray(s.studioPermissionDefaultsStable)) {
+        s.studioPermissionDefaultsStable = [];
+    }
+    if (!Array.isArray(s.studioPermissionOverridesStable)) {
+        s.studioPermissionOverridesStable = [];
+    }
+    if (!Array.isArray(s.superStaffPrincipalsStable)) {
+        s.superStaffPrincipalsStable = [];
+    }
+    if (!Array.isArray(s.accountContactStable)) {
+        s.accountContactStable = [];
+    }
     return snapshot;
 }

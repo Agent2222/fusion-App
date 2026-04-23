@@ -3,6 +3,8 @@ import { router } from "./router.js";
 import { DEV_MODE } from "./config.js";
 import "./index.css";
 import posthog from "posthog-js";
+import { registerFusionAttributionFromUrl } from "./utils/attribution.js";
+import { metaTrackPageView } from "./utils/metaPixel.js";
 
 /** Set `VITE_PUBLIC_POSTHOG_KEY` (and optionally `VITE_PUBLIC_POSTHOG_HOST`) in the build env for production analytics. */
 const POSTHOG_KEY = import.meta.env.VITE_PUBLIC_POSTHOG_KEY;
@@ -96,9 +98,27 @@ window.setLocale = (locale) => {
 window.getLocale = () => window.locale;
 applyLocaleToDocument(window.locale);
 
+// Register before async `handleRoute` continuations so the first `onRouteChange` is not missed
+// (listener was previously only on DOMContentLoaded, which can run after the first route).
+if (typeof window !== "undefined") {
+  window.addEventListener("routeChange", (event) => {
+    if (DEV_MODE) console.log("Route changed to:", event.detail.path);
+    metaTrackPageView();
+    if (POSTHOG_KEY) {
+      posthog.capture("$pageview", { $current_url: window.location.href });
+    }
+  });
+  window.addEventListener("fusion-localechange", () => {
+    if (router && typeof router.handleRoute === "function") {
+      router.handleRoute();
+    }
+  });
+}
+
 // Initialize the application
 document.addEventListener("DOMContentLoaded", () => {
   if (DEV_MODE) console.log("Application initialized");
+  registerFusionAttributionFromUrl();
 
   // Fonts: Typekit + document.fonts.ready, then set `fonts-ready` (diagnostics / future use).
   // Capped wait so a hung Typekit never blocks this flag forever; enter is not gated on fonts (loadscreen.js).
@@ -130,22 +150,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const ls = document.querySelector("app-loadscreen");
     if (ls) ls.setAttribute("fonts-ready", "true");
   })();
-
-  // Listen for route changes
-  window.addEventListener("routeChange", (event) => {
-    if (DEV_MODE) console.log("Route changed to:", event.detail.path);
-    // Add any global route change logic here
-    if (POSTHOG_KEY) {
-      posthog.capture("$pageview", { $current_url: window.location.href });
-    }
-  });
-
-  window.addEventListener("fusion-localechange", () => {
-    // Re-run current route so page-level copy reflects the new locale immediately.
-    if (router && typeof router.handleRoute === "function") {
-      router.handleRoute();
-    }
-  });
 });
 
 // Export for use in other modules

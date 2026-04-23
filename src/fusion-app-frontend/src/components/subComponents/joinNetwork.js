@@ -1,5 +1,6 @@
 import { ERROR_USER_INTERRUPT } from "@dfinity/auth-client";
 import posthog from "posthog-js";
+import { metaTrack } from "../../utils/metaPixel.js";
 
 /**
  * Join FUSION — band + multi-stage modal (`data-modal-type`: membership | access | apply).
@@ -506,20 +507,37 @@ class JoinNetworkComponent extends HTMLElement {
       const inpEmail = this.shadowRoot?.querySelector("#jnEmail");
       const acLab = this.shadowRoot?.querySelector("#jnAccessCodeLabel");
       const inpAc = this.shadowRoot?.querySelector("#jnAccessCode");
+      const labFn = this.shadowRoot?.querySelector("#jnFirstNameLabel");
+      const labLn = this.shadowRoot?.querySelector("#jnLastNameLabel");
+      const labEm = this.shadowRoot?.querySelector("#jnEmailLabel");
+      if (labFn) {
+        labFn.textContent =
+          String(entry.firstNameLabel ?? "").trim() ||
+          (loc === "ja" ? "名" : "First name");
+      }
+      if (labLn) {
+        labLn.textContent =
+          String(entry.lastNameLabel ?? "").trim() ||
+          (loc === "ja" ? "姓" : "Last name");
+      }
+      if (labEm) {
+        labEm.textContent =
+          String(entry.emailLabel ?? "").trim() ||
+          (loc === "ja" ? "メール" : "Email");
+      }
       if (inpFn) inpFn.placeholder = entry.firstNamePlaceholder || "";
       if (inpLn) inpLn.placeholder = entry.lastNamePlaceholder || "";
       if (inpEmail) inpEmail.placeholder = entry.emailPlaceholder || "";
-      const acl = String(entry.accessCodeLabel ?? "").trim();
+      const accessLabelText =
+        String(entry.accessCodeLabel ?? "").trim() ||
+        (loc === "ja" ? "アクセスコード（任意）" : "Access code (optional)");
       if (acLab instanceof HTMLElement) {
-        acLab.textContent = acl;
-        acLab.hidden = !acl;
+        acLab.textContent = accessLabelText;
+        acLab.hidden = false;
       }
       if (inpAc instanceof HTMLInputElement) {
         inpAc.placeholder = entry.accessCodePlaceholder || "";
-        inpAc.setAttribute(
-          "aria-label",
-          acl || "Access code (optional)",
-        );
+        inpAc.setAttribute("aria-label", accessLabelText);
       }
       set("#jnRoleLabel", entry.roleLabel);
       const ec = this.shadowRoot?.querySelector("#jnEntryContinue");
@@ -953,6 +971,9 @@ class JoinNetworkComponent extends HTMLElement {
       const outcome = await registerWithJoinAccessCodeForCaller(
         categoryToUserRole(cat),
         code,
+        '',
+        '',
+        '',
       );
       if (outcome !== "ok") {
         const map = {
@@ -1042,7 +1063,9 @@ class JoinNetworkComponent extends HTMLElement {
     posthog.capture("join_access_code_redeemed", {
       modal_type:
         this._modalType || this.getAttribute("data-modal-type") || "membership",
+      ads_conversion: "CompleteRegistration",
     });
+    metaTrack("CompleteRegistration", { content_name: "access_code_exempt" });
     this._joinFlowCompleted = true;
     this._showStage("confirmation");
   }
@@ -1072,6 +1095,11 @@ class JoinNetworkComponent extends HTMLElement {
         posthog.capture("early_access_submitted", {
           category: cat,
           modal_type: this._modalType,
+          ads_conversion: "Lead",
+        });
+        metaTrack("Lead", {
+          content_name: "early_access",
+          source: "join_network",
         });
       } catch (err) {
         if (DEV_MODE) {
@@ -1506,6 +1534,25 @@ class JoinNetworkComponent extends HTMLElement {
                     line-height: 1.45;
                 }
                 .jn-field { width: 100%; margin-bottom: 0.75rem; }
+                .jn-name-row-outer { margin-bottom: 0.75rem; }
+                .jn-name-row {
+                    display: flex;
+                    flex-direction: row;
+                    flex-wrap: nowrap;
+                    gap: 0.75rem;
+                    width: 100%;
+                    align-items: stretch;
+                }
+                @media (max-width: 380px) {
+                    .jn-name-row { flex-wrap: wrap; }
+                    .jn-name-row .jn-field-col { flex-basis: 100%; }
+                }
+                .jn-field-col {
+                    flex: 1 1 0;
+                    min-width: 0;
+                    display: flex;
+                    flex-direction: column;
+                }
                 .jn-field-label {
                     display: block;
                     font-size: 0.88rem;
@@ -1513,7 +1560,9 @@ class JoinNetworkComponent extends HTMLElement {
                     font-variation-settings: var(--fv-label-strong);
                     color: var(--jn-c2);
                 }
+                /* Name row uses .jn-field-col, not .jn-field — must share the same input rules */
                 .jn-field input,
+                .jn-field-col input,
                 .jn-pay-fields input {
                     width: 100%;
                     box-sizing: border-box;
@@ -1527,6 +1576,7 @@ class JoinNetworkComponent extends HTMLElement {
                     color: var(--jn-c2);
                 }
                 .jn-field input::placeholder,
+                .jn-field-col input::placeholder,
                 .jn-pay-fields input::placeholder {
                     color: color-mix(in srgb, var(--jn-c2) 45%, transparent);
                 }
@@ -1886,17 +1936,24 @@ class JoinNetworkComponent extends HTMLElement {
                                 <h2 id="jnEntryTitle"></h2>
                                 <p id="jnEntrySubtitle"></p>
                         </div>
-                            <div class="jn-field">
-                                <input type="text" id="jnFirstName" name="jn-first-name" autocomplete="given-name" placeholder="First name" />
+                            <div class="jn-name-row-outer">
+                                <div class="jn-name-row">
+                                    <div class="jn-field-col">
+                                        <label id="jnFirstNameLabel" class="jn-field-label" for="jnFirstName">First name</label>
+                                        <input type="text" id="jnFirstName" name="jn-first-name" autocomplete="given-name" placeholder="First name" />
+                                    </div>
+                                    <div class="jn-field-col">
+                                        <label id="jnLastNameLabel" class="jn-field-label" for="jnLastName">Last name</label>
+                                        <input type="text" id="jnLastName" name="jn-last-name" autocomplete="family-name" placeholder="Last name" />
+                                    </div>
+                                </div>
                             </div>
                             <div class="jn-field">
-                                <input type="text" id="jnLastName" name="jn-last-name" autocomplete="family-name" placeholder="Last name" />
-                            </div>
-                            <div class="jn-field">
+                                <label id="jnEmailLabel" class="jn-field-label" for="jnEmail">Email</label>
                                 <input type="email" id="jnEmail" name="jn-email" autocomplete="email" placeholder="Email" />
                             </div>
                             <div class="jn-field">
-                                <label id="jnAccessCodeLabel" class="jn-field-label" for="jnAccessCode"></label>
+                                <label id="jnAccessCodeLabel" class="jn-field-label" for="jnAccessCode">Access code (optional)</label>
                                 <input type="text" id="jnAccessCode" name="jn-access-code" inputmode="numeric" autocomplete="one-time-code" placeholder="" />
                             </div>
                             <p class="jn-role-label" id="jnRoleLabel">I'm joining as:</p>
@@ -2334,13 +2391,18 @@ class JoinNetworkComponent extends HTMLElement {
             if (errEl) errEl.textContent = error.message || "Payment failed.";
             return;
           }
+          const purchaseValue = this._paymentAmountCents / 100;
           posthog.capture("membership_payment_completed", {
             modal_type:
               this._modalType ||
               this.getAttribute("data-modal-type") ||
               "membership",
             join_mode: this._joinMode || "full",
+            value: purchaseValue,
+            currency: "USD",
+            ads_conversion: "Purchase",
           });
+          metaTrack("Purchase", { value: purchaseValue, currency: "USD" });
           if (this._joinMode === "full" && this._fusionPendingId) {
             try {
               sessionStorage.setItem(FUSION_PENDING_MEMBERSHIP_LINK_KEY, "1");

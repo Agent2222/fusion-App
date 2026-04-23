@@ -26,6 +26,7 @@ import {
 import { getProfileSetupDraft } from '../../utils/profileSetupDraft.js';
 import { getStripePublishableKeyResolved } from '../../utils/studioServicesConfig.js';
 import posthog from 'posthog-js';
+import { metaTrack } from '../../utils/metaPixel.js';
 
 const DEFAULT_PROGRAM_FORM_CTX = {
     applicationFeeLine: '',
@@ -1452,7 +1453,16 @@ class ApplicationFormComponent extends HTMLElement {
             posthog.capture('program_application_submitted', {
                 ...this._posthogApplicationBaseProps(),
                 ...(this._paymentPlan ? { payment_plan: this._paymentPlan } : {}),
+                ads_conversion: 'SubmitApplication',
             });
+            {
+                const pid = String(programId || '').trim();
+                if (pid) {
+                    metaTrack('SubmitApplication', { content_ids: [pid] });
+                } else {
+                    metaTrack('SubmitApplication');
+                }
+            }
             try {
                 const snap = await getAuthSnapshot();
                 const em = String(payload.email || '').trim();

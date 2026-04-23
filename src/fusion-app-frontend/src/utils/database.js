@@ -1701,7 +1701,15 @@ export async function adminCreateJoinInviteCodeStudio(role) {
  * @param {string} codeRaw
  * @returns {Promise<ReturnType<typeof interpretRegisterWithJoinAccessCodeResult>>}
  */
-export async function registerWithJoinAccessCodeForCaller(role, codeRaw) {
+/**
+ * @param {Record<string, null>} role
+ * @param {string} codeRaw
+ * @param {string} [firstName]
+ * @param {string} [lastName]
+ * @param {string} [email]
+ * @returns {Promise<ReturnType<typeof interpretRegisterWithJoinAccessCodeResult>>}
+ */
+export async function registerWithJoinAccessCodeForCaller(role, codeRaw, firstName, lastName, email) {
     const code = String(codeRaw || '').replace(/\D/g, '');
     if (getDataSource() === 'test') {
         return code.length === 8 ? 'ok' : 'invalidCode';
@@ -1711,8 +1719,50 @@ export async function registerWithJoinAccessCodeForCaller(role, codeRaw) {
     if (!actor || typeof actor.registerWithJoinAccessCode !== 'function') {
         throw new Error('registerWithJoinAccessCode unavailable — sign in and run dfx generate fusion-app-backend.');
     }
-    const raw = await actor.registerWithJoinAccessCode(role, code);
+    const fn = /** @type {(r: unknown, c: string, a: string, b: string, d: string) => Promise<unknown>} */ (
+        actor.registerWithJoinAccessCode
+    );
+    const raw = await fn(role, code, String(firstName || ''), String(lastName || ''), String(email || ''));
     return interpretRegisterWithJoinAccessCodeResult(raw);
+}
+
+/**
+ * @returns {Promise<import('@dfinity/principal').Principal[]>}
+ */
+export async function listAdminsForStudio() {
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.listAdmins !== 'function') {
+        throw new Error('listAdmins unavailable — run dfx generate fusion-app-backend from the project root.');
+    }
+    return await actor.listAdmins();
+}
+
+/**
+ * @returns {Promise<Array<[import('@dfinity/principal').Principal, { firstName: string, lastName: string, email: string }]>>}
+ */
+export async function adminListAccountContactsForStudio() {
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminListAccountContacts !== 'function') {
+        throw new Error('adminListAccountContacts unavailable — run dfx generate fusion-app-backend from the project root.');
+    }
+    return await actor.adminListAccountContacts();
+}
+
+/**
+ * @param {string} principalText
+ * @param {{ firstName: string, lastName: string, email: string }} contact
+ */
+export async function adminSetAccountContactForStudio(principalText, contact) {
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminSetAccountContact !== 'function') {
+        throw new Error('adminSetAccountContact unavailable — run dfx generate fusion-app-backend from the project root.');
+    }
+    const { Principal } = await import('@dfinity/principal');
+    await actor.adminSetAccountContact(Principal.fromText(String(principalText || '').trim()), {
+        firstName: String(contact.firstName || ''),
+        lastName: String(contact.lastName || ''),
+        email: String(contact.email || ''),
+    });
 }
 
 export async function ensureMyLinkedArtistProfile() {
@@ -3686,4 +3736,190 @@ export async function adminUpsertUserAccountStudio(principalText, userAccount) {
     }
     const { Principal } = await import('@dfinity/principal');
     await actor.adminUpsertUserAccount(Principal.fromText(String(principalText || '').trim()), userAccount);
+}
+
+/**
+ * @param {unknown} opt
+ * @returns {unknown}
+ */
+function candidOptUnwrap(opt) {
+    if (opt == null) return null;
+    if (Array.isArray(opt)) {
+        if (opt.length === 0) return null;
+        return opt[0];
+    }
+    return opt;
+}
+
+/**
+ * @param {unknown} tuples
+ * @returns {Map<string, { visible: boolean, canEdit: boolean }>}
+ */
+function studioPermissionTuplesToMap(tuples) {
+    const map = new Map();
+    if (!Array.isArray(tuples)) return map;
+    for (const row of tuples) {
+        if (!Array.isArray(row) || row.length < 2) continue;
+        const k = String(row[0]);
+        const v = row[1];
+        if (!v || typeof v !== 'object') continue;
+        const o = /** @type {Record<string, unknown>} */ (v);
+        map.set(k, {
+            visible: Boolean(o.visible ?? o.Visible),
+            canEdit: Boolean(o.canEdit ?? o.can_edit ?? o.CanEdit),
+        });
+    }
+    return map;
+}
+
+/**
+ * @returns {Promise<Map<string, { visible: boolean, canEdit: boolean }> | null>}
+ */
+export async function getStudioPermissionsMatrixForCaller() {
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.getStudioPermissionsForCaller !== 'function') return null;
+    const raw = await actor.getStudioPermissionsForCaller();
+    const inner = candidOptUnwrap(raw);
+    if (inner == null) return null;
+    return studioPermissionTuplesToMap(inner);
+}
+
+export async function isCallerAdminStudio() {
+    try {
+        const actor = await getStudioAuthenticatedActor();
+        if (!actor || typeof actor.isCallerAdmin !== 'function') return false;
+        return Boolean(await actor.isCallerAdmin());
+    } catch {
+        return false;
+    }
+}
+
+export async function isCallerSuperStaffStudio() {
+    try {
+        const actor = await getStudioAuthenticatedActor();
+        if (!actor || typeof actor.isCallerSuperStaff !== 'function') return false;
+        return Boolean(await actor.isCallerSuperStaff());
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * @returns {Promise<{ isAdmin: boolean, isSuperStaff: boolean, permissionsNavAllowed: boolean, teamNavAllowed: boolean, effectiveMatrix: Map<string, { visible: boolean, canEdit: boolean }> | null }>}
+ */
+export async function refreshStudioShellAccessState() {
+    const [isAdmin, isSuperStaff, effectiveMatrix] = await Promise.all([
+        isCallerAdminStudio(),
+        isCallerSuperStaffStudio(),
+        getStudioPermissionsMatrixForCaller(),
+    ]);
+    return {
+        isAdmin,
+        isSuperStaff,
+        permissionsNavAllowed: isAdmin || isSuperStaff,
+        teamNavAllowed: isAdmin,
+        effectiveMatrix,
+    };
+}
+
+/**
+ * @param {string} category
+ * @returns {Promise<Array<[string, { visible: boolean, canEdit: boolean }]>>}
+ */
+export async function adminGetStudioPermissionDefaultsStudio(category) {
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminGetStudioPermissionDefaults !== 'function') {
+        throw new Error('adminGetStudioPermissionDefaults missing — run dfx generate fusion-app-backend from the project root.');
+    }
+    const raw = await actor.adminGetStudioPermissionDefaults(String(category || '').trim());
+    if (!Array.isArray(raw)) return [];
+    return /** @type {Array<[string, { visible: boolean, canEdit: boolean }]>} */ (raw);
+}
+
+/**
+ * @param {string} category
+ * @param {Array<[string, { visible: boolean, canEdit: boolean }]>} matrix
+ */
+export async function adminSetStudioPermissionDefaultsStudio(category, matrix) {
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminSetStudioPermissionDefaults !== 'function') {
+        throw new Error('adminSetStudioPermissionDefaults missing — run dfx generate fusion-app-backend from the project root.');
+    }
+    await actor.adminSetStudioPermissionDefaults(String(category || '').trim(), matrix);
+}
+
+/**
+ * @param {string} principalText
+ * @returns {Promise<Array<[string, { visible: boolean, canEdit: boolean }]> | null>}
+ */
+export async function adminGetStudioPermissionOverrideStudio(principalText) {
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminGetStudioPermissionOverride !== 'function') {
+        throw new Error('adminGetStudioPermissionOverride missing — run dfx generate fusion-app-backend from the project root.');
+    }
+    const { Principal } = await import('@dfinity/principal');
+    const raw = await actor.adminGetStudioPermissionOverride(Principal.fromText(String(principalText || '').trim()));
+    const inner = candidOptUnwrap(raw);
+    if (inner == null) return null;
+    return Array.isArray(inner) ? /** @type {Array<[string, { visible: boolean, canEdit: boolean }]>} */ (inner) : null;
+}
+
+/**
+ * @param {string} principalText
+ * @param {Array<[string, { visible: boolean, canEdit: boolean }]>} matrix
+ */
+export async function adminSetStudioPermissionOverrideStudio(principalText, matrix) {
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminSetStudioPermissionOverride !== 'function') {
+        throw new Error('adminSetStudioPermissionOverride missing — run dfx generate fusion-app-backend from the project root.');
+    }
+    const { Principal } = await import('@dfinity/principal');
+    await actor.adminSetStudioPermissionOverride(Principal.fromText(String(principalText || '').trim()), matrix);
+}
+
+/**
+ * @param {string} principalText
+ */
+export async function adminClearStudioPermissionOverrideStudio(principalText) {
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminClearStudioPermissionOverride !== 'function') {
+        throw new Error('adminClearStudioPermissionOverride missing — run dfx generate fusion-app-backend from the project root.');
+    }
+    const { Principal } = await import('@dfinity/principal');
+    await actor.adminClearStudioPermissionOverride(Principal.fromText(String(principalText || '').trim()));
+}
+
+/**
+ * @returns {Promise<import('@dfinity/principal').Principal[]>}
+ */
+export async function adminListSuperStaffStudio() {
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminListSuperStaff !== 'function') {
+        throw new Error('adminListSuperStaff missing — run dfx generate fusion-app-backend from the project root.');
+    }
+    return await actor.adminListSuperStaff();
+}
+
+/**
+ * @param {string} principalText
+ */
+export async function adminAddSuperStaffStudio(principalText) {
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminAddSuperStaff !== 'function') {
+        throw new Error('adminAddSuperStaff missing — run dfx generate fusion-app-backend from the project root.');
+    }
+    const { Principal } = await import('@dfinity/principal');
+    await actor.adminAddSuperStaff(Principal.fromText(String(principalText || '').trim()));
+}
+
+/**
+ * @param {string} principalText
+ */
+export async function adminRemoveSuperStaffStudio(principalText) {
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminRemoveSuperStaff !== 'function') {
+        throw new Error('adminRemoveSuperStaff missing — run dfx generate fusion-app-backend from the project root.');
+    }
+    const { Principal } = await import('@dfinity/principal');
+    await actor.adminRemoveSuperStaff(Principal.fromText(String(principalText || '').trim()));
 }

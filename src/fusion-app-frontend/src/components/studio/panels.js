@@ -1,6 +1,8 @@
 /**
  * Studio section panels: dashboard + all sidebar tabs (data via database.js).
  */
+import { studioFeatureAccess } from '../../utils/studioShellState.js';
+import { renderPermissions, initPermissions } from './permissionsSection.js';
 import { DEV_MODE, getPublicSiteOrigin } from '../../config.js';
 import { getFusionBackendActor, normalizeEarlyAccessCategory } from '../../utils/earlyAccessSubscribe.js';
 import {
@@ -55,6 +57,7 @@ import {
     upsertContentPageStudio,
     generateAndUpsertArtistWorldFromBio,
 } from '../../utils/database.js';
+import { renderTeamSection, initTeamSection } from './teamSection.js';
 import { STUDIO_WORLD_BATCH_MAX } from '../../utils/studioArtistWorldLlm.js';
 import { parseSubscriberCsv } from '../../utils/csvParse.js';
 import {
@@ -133,33 +136,61 @@ import {
 } from '../../utils/studioCategoryLayout.js';
 
 /**
- * Sidebar sections (excluding `#dashboard`). Default landing `#dashboard`.
+ * Grouped sidebar model (excludes `#dashboard` and admin-only `team` / `permissions`).
+ * @type {{ label: string, items: { id: string, label: string }[] }[]}
+ */
+export const STUDIO_NAV_GROUPS = [
+    {
+        label: 'Overview',
+        items: [
+            { id: 'home', label: 'Home' },
+            { id: 'subscribers', label: 'Subscribers' },
+            { id: 'applicants', label: 'Applicants' },
+        ],
+    },
+    {
+        label: 'Content',
+        items: [
+            { id: 'programs', label: 'Programs' },
+            { id: 'products', label: 'Products' },
+            { id: 'journal', label: 'Journal' },
+            { id: 'content', label: 'Content' },
+            { id: 'email', label: 'Email' },
+            { id: 'ai', label: 'Ai' },
+        ],
+    },
+    {
+        label: 'Accounts',
+        items: [
+            { id: 'artists', label: 'Artists' },
+            { id: 'curators', label: 'Curators' },
+            { id: 'collectors', label: 'Collectors' },
+            { id: 'galleries', label: 'Galleries' },
+        ],
+    },
+    {
+        label: 'Operations',
+        items: [
+            { id: 'gallery-access', label: 'Gallery Access' },
+            { id: 'users', label: 'Users' },
+            { id: 'services', label: 'Services' },
+            { id: 'settings', label: 'Settings' },
+        ],
+    },
+];
+
+/**
+ * Flat list for quick links, permission keys, and legacy code paths.
  * @type {{ id: string, label: string }[]}
  */
-export const STUDIO_NAV = [
-    { id: 'home', label: 'Home' },
-    { id: 'subscribers', label: 'Subscribers' },
-    { id: 'applicants', label: 'Applicants' },
-    { id: 'artists', label: 'Artists' },
-    { id: 'programs', label: 'Programs' },
-    { id: 'products', label: 'Products' },
-    { id: 'gallery-access', label: 'Gallery Access' },
-    { id: 'journal', label: 'Journal' },
-    { id: 'content', label: 'Content' },
-    { id: 'email', label: 'Email' },
-    { id: 'ai', label: 'Ai' },
-    { id: 'galleries', label: 'Galleries' },
-    { id: 'collectors', label: 'Collectors' },
-    { id: 'curators', label: 'Curators' },
-    { id: 'users', label: 'Users' },
-    { id: 'services', label: 'Services' },
-    { id: 'settings', label: 'Settings' },
-];
+export const STUDIO_NAV = STUDIO_NAV_GROUPS.flatMap((g) => g.items);
 
 export const STUDIO_DASHBOARD_ID = 'dashboard';
 
 const TITLE_MAP = {
     [STUDIO_DASHBOARD_ID]: 'Dashboard',
+    team: 'Team',
+    permissions: 'Permissions',
     ...Object.fromEntries(STUDIO_NAV.map((n) => [n.id, n.label])),
 };
 
@@ -211,6 +242,10 @@ export function renderStudioMain(sectionId) {
             return renderServices();
         case 'settings':
             return renderSettings();
+        case 'permissions':
+            return renderPermissions();
+        case 'team':
+            return renderTeamSection();
         default:
             return renderFallback(sectionId);
     }
@@ -239,10 +274,12 @@ function renderDashboard() {
                     <h2>Quick links</h2>
                 </div>
                 <ul class="studio-quick-links">
-                    ${STUDIO_NAV.map(
-                        (n) =>
-                            `<li><a href="#${n.id}" class="studio-quick-link" data-studio-hash="${n.id}">${escapeHtml(n.label)}</a></li>`
-                    ).join('')}
+                    ${STUDIO_NAV.filter((n) => studioFeatureAccess(n.id).visible)
+                        .map(
+                            (n) =>
+                                `<li><a href="#${n.id}" class="studio-quick-link" data-studio-hash="${n.id}">${escapeHtml(n.label)}</a></li>`
+                        )
+                        .join('')}
                 </ul>
             </div>
         </div>
@@ -693,6 +730,7 @@ function renderUsers() {
                         <option value="curator">curator</option>
                         <option value="collector">collector</option>
                         <option value="staff">staff</option>
+                        <option value="collaborator">collaborator</option>
                         <option value="admin">admin</option>
                     </select>
                 </label>
@@ -1428,6 +1466,8 @@ const STUDIO_INIT = {
     users: initUsers,
     services: initServices,
     settings: initSettings,
+    permissions: initPermissions,
+    team: initTeamSection,
 };
 
 /**
@@ -1495,6 +1535,9 @@ async function initSubscribers(mainEl) {
     const searchInput = mainEl.querySelector('#studio-subscribers-search');
     const countEl = mainEl.querySelector('#studio-subscribers-header-count');
 
+    const subPerm = studioFeatureAccess('subscribers');
+    const subCols = subPerm.canEdit ? 6 : 5;
+
     /** @type {object[]} */
     let allSubscriberRows = [];
 
@@ -1539,7 +1582,7 @@ async function initSubscribers(mainEl) {
             return hay.includes(q);
         });
         if (!rows.length) {
-            tbody.innerHTML = `<tr><td colspan="6">${allSubscriberRows.length ? 'No rows match search.' : 'No subscribers yet.'}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="${subCols}">${allSubscriberRows.length ? 'No rows match search.' : 'No subscribers yet.'}</td></tr>`;
         } else {
             tbody.innerHTML = rows
                 .map(
@@ -1550,12 +1593,12 @@ async function initSubscribers(mainEl) {
                     <td>${escapeHtml(row.fullName ?? '')}</td>
                     <td>${escapeHtml(row.intent ?? '')}</td>
                     <td>${escapeHtml(row.timestamp)}</td>
-                    <td class="studio-td-actions"><button type="button" class="studio-btn-ghost studio-sub-delete" data-email="${escapeHtml(row.email)}">DELETE</button></td>
+                    ${subPerm.canEdit ? `<td class="studio-td-actions"><button type="button" class="studio-btn-ghost studio-sub-delete" data-email="${escapeHtml(row.email)}">DELETE</button></td>` : ''}
                 </tr>
             `
                 )
                 .join('');
-            wireDelete();
+            if (subPerm.canEdit) wireDelete();
         }
         if (countEl) {
             countEl.textContent = q ? String(rows.length) : String(allSubscriberRows.length);
@@ -1564,7 +1607,7 @@ async function initSubscribers(mainEl) {
 
     const loadRows = async () => {
         if (!tbody) return;
-        tbody.innerHTML = '<tr><td colspan="6">Loading…</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="${subCols}">Loading…</td></tr>`;
         showBanner('info', '');
         showCsv('info', '');
         try {
@@ -1572,8 +1615,7 @@ async function initSubscribers(mainEl) {
             try {
                 rows = await loadSubscribersFromDataSource();
             } catch (genErr) {
-                tbody.innerHTML =
-                    '<tr><td colspan="6">Bindings out of date — run <code>dfx generate fusion-app-backend</code> after pulling backend changes.</td></tr>';
+                tbody.innerHTML = `<tr><td colspan="${subCols}">Bindings out of date — run <code>dfx generate fusion-app-backend</code> after pulling backend changes.</td></tr>`;
                 if (DEV_MODE) console.error(genErr);
                 return;
             }
@@ -1589,7 +1631,7 @@ async function initSubscribers(mainEl) {
             applySubscriberFilter();
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
-            tbody.innerHTML = `<tr><td colspan="6">Could not load subscribers. ${escapeHtml(msg)}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="${subCols}">Could not load subscribers. ${escapeHtml(msg)}</td></tr>`;
             allSubscriberRows = [];
             if (countEl) countEl.textContent = '0';
             showBanner(
@@ -1599,6 +1641,12 @@ async function initSubscribers(mainEl) {
             if (DEV_MODE) console.error(e);
         }
     };
+
+    if (!subPerm.canEdit) {
+        addBtn?.setAttribute('hidden', '');
+        csvInput?.closest('label')?.setAttribute('hidden', '');
+        mainEl.querySelector('.studio-table--dense thead .studio-td-actions')?.setAttribute('hidden', '');
+    }
 
     addBtn?.addEventListener('click', () => {
         const body = `
@@ -4740,6 +4788,11 @@ async function initSettings(mainEl) {
     if (!adminWrap) return;
 
     if (getDataSource() !== 'live') {
+        adminWrap.hidden = true;
+        return;
+    }
+
+    if (!studioFeatureAccess('settings').canEdit) {
         adminWrap.hidden = true;
         return;
     }

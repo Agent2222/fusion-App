@@ -20,6 +20,7 @@ let headerAndFooterActive = false;
 /** @param {string} path */
 function robotsForPath(path) {
     if (path === '/studio') return 'noindex, nofollow';
+    if (path === '/join-fusion') return 'noindex, nofollow';
     if (path.startsWith('/settings') || path === '/sign-in' || path === '/register') {
         return 'noindex, nofollow';
     }
@@ -31,6 +32,7 @@ function robotsForPath(path) {
  * @param {string} path
  */
 function shouldDeferSeoToPage(path) {
+    if (path === '/join-fusion') return true;
     if (path.startsWith('/profile')) return true;
     if (path.startsWith('/settings')) return true;
     const isEditionDetail =
@@ -154,6 +156,12 @@ const routes = {
         title: 'Contact Fusion',
         description: 'Contact the Fusion team — partnerships, programs, and general inquiries.',
         contentGenerator: 'generateContactContent',
+    },
+    '/join-fusion': {
+        loader: () => import('./components/joinFusion.js'),
+        title: 'Join Fusion team',
+        description: 'Onboard to Fusion with a staff or collaborator invite code.',
+        contentGenerator: 'generateJoinFusionContent',
     },
     '/profile': {
         loader: () => import('./components/profile.js'),

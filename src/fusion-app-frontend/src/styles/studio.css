@@ -2757,3 +2757,125 @@ button.studio-wordmark-btn:hover {
 .studio-art-programs-status.studio-banner--error {
   margin-top: 0.35rem;
 }
+
+/* Permissions + segment control */
+.studio-perm-role-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.studio-perm-role-tab.is-active {
+  border-color: var(--studio-sidebar-border, #2a2a2a);
+  background: var(--studio-workspace-bg, #faf3f4);
+}
+
+.studio-segment {
+  display: inline-flex;
+  border: 1px solid var(--studio-sidebar-border, #ddd);
+  border-radius: var(--studio-card-radius, 8px);
+  overflow: hidden;
+}
+
+.studio-segment__btn {
+  border: 0;
+  background: #fff;
+  padding: 0.45rem 0.85rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+.studio-segment__btn.is-active {
+  background: #111;
+  color: #fff;
+}
+
+.studio-perm-mode-row {
+  margin: 0.75rem 0;
+}
+
+.studio-perm-principal-row {
+  margin-bottom: 1rem;
+}
+
+.studio-perm-principal-manual {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.35rem;
+}
+
+.studio-perm-matrix__cell .studio-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.studio-perm-super-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0;
+}
+
+.studio-perm-super-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.studio-perm-super-add {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+
+/* Grouped sidebar + Team */
+.studio-nav .studio-nav-group {
+  margin-top: 0.75rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--studio-sidebar-border, rgba(0, 0, 0, 0.1));
+}
+
+.studio-nav .studio-nav-group:first-of-type {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.studio-nav-group__label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #888;
+  margin: 0 0 0.4rem 0.1rem;
+}
+
+.studio-nav-group__items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.studio-inline-link {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.studio-team-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+}
+
+.studio-td-clip {
+  max-width: 16rem;
+}
+
+.studio-td-wrap {
+  white-space: normal;
+  vertical-align: top;
+}

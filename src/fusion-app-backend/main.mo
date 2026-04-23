@@ -69,6 +69,13 @@ persistent actor {
   /// When true, public clients pick up to 8 from the featurable pool (shuffled client-side).
   stable var artistFeaturedRandomModeStable : Bool = false;
 
+  /// Studio → Permissions: role-tab defaults (`staff`, …), per-principal overrides, super-staff principals.
+  stable var studioPermissionDefaultsStable : [(Text, Types.StudioPermissionMatrix)] = [];
+  stable var studioPermissionOverridesStable : [(Principal, Types.StudioPermissionMatrix)] = [];
+  stable var superStaffPrincipalsStable : [Principal] = [];
+  /// Join Fusion / Team tab: name + email per principal (exempt from `UserAccount` core layout).
+  stable var accountContactStable : [(Principal, Types.AccountContact)] = [];
+
   // In-memory hashmap for fast lookups/updates.
   transient var subscribersByEmail : _HashMap.HashMap<Text, Types.Subscriber> =
     _HashMap.HashMap<Text, Types.Subscriber>(
@@ -147,6 +154,18 @@ persistent actor {
 
   transient var joinInvitesByCode : _HashMap.HashMap<Text, Types.JoinInviteRecord> =
     _HashMap.HashMap<Text, Types.JoinInviteRecord>(0, Text.equal, Text.hash);
+
+  transient var studioPermissionDefaultsByCategory : _HashMap.HashMap<Text, Types.StudioPermissionMatrix> =
+    _HashMap.HashMap<Text, Types.StudioPermissionMatrix>(0, Text.equal, Text.hash);
+
+  transient var studioPermissionOverridesByPrincipal : _HashMap.HashMap<Principal, Types.StudioPermissionMatrix> =
+    _HashMap.HashMap<Principal, Types.StudioPermissionMatrix>(0, Principal.equal, Principal.hash);
+
+  transient var superStaffPrincipals : _HashMap.HashMap<Principal, Bool> =
+    _HashMap.HashMap<Principal, Bool>(0, Principal.equal, Principal.hash);
+
+  transient var accountContactByPrincipal : _HashMap.HashMap<Principal, Types.AccountContact> =
+    _HashMap.HashMap<Principal, Types.AccountContact>(0, Principal.equal, Principal.hash);
 
   /// 8-digit access code → artist id (derived from `ArtistRecord.accessCode`; rebuilt on upgrade).
   transient var accessCodeToArtistId : _HashMap.HashMap<Text, Text> =
@@ -243,8 +262,6 @@ persistent actor {
     joinInvitesByCode.put(entry.0, entry.1);
   };
 
-  rebuildAccessCodeToArtistIdIndex();
-
   /// Keep in sync with `adminPrincipals` defaults above — `postupgrade` appends any of these not already stored.
   private func defaultAdminPrincipals() : [Principal] {
     [
@@ -279,6 +296,7 @@ persistent actor {
         if (acc.status == #active) {
           switch (acc.role) {
             case (#staff) { return true };
+            case (#collaborator) { return true };
             case (#admin) { return true };
             case _ { false };
           };
@@ -295,6 +313,178 @@ persistent actor {
       Debug.trap("Unauthorized: staff or admin only");
     };
   };
+
+  /// Sidebar / section ids aligned with Studio frontend (`STUDIO_NAV` + `dashboard`).
+  private let studioFeatureKeys : [Text] = [
+    "dashboard",
+    "home",
+    "subscribers",
+    "applicants",
+    "artists",
+    "programs",
+    "products",
+    "gallery-access",
+    "journal",
+    "content",
+    "email",
+    "ai",
+    "galleries",
+    "collectors",
+    "curators",
+    "users",
+    "services",
+    "settings",
+    "team",
+  ];
+
+  private func defaultOpenStudioAccess() : Types.StudioFeatureAccess {
+    { visible = true; canEdit = true };
+  };
+
+  private func isKnownStudioFeatureKey(k : Text) : Bool {
+    for (x in studioFeatureKeys.vals()) {
+      if (x == k) {
+        return true;
+      };
+    };
+    false;
+  };
+
+  private func isKnownPermissionCategory(c : Text) : Bool {
+    c == "staff" or c == "curator" or c == "collector" or c == "artist" or c == "gallery" or c == "collaborator";
+  };
+
+  private func validateStudioPermissionMatrix(m : Types.StudioPermissionMatrix) {
+    for (e in m.vals()) {
+      if (not isKnownStudioFeatureKey(e.0)) {
+        Debug.trap("Unknown studio feature key: " # e.0);
+      };
+    };
+  };
+
+  private func fullOpenPermissionMatrix() : Types.StudioPermissionMatrix {
+    Array.map<Text, (Text, Types.StudioFeatureAccess)>(
+      studioFeatureKeys,
+      func(k : Text) : (Text, Types.StudioFeatureAccess) {
+        (k, defaultOpenStudioAccess());
+      },
+    );
+  };
+
+  private func allClosedPermissionMatrix() : Types.StudioPermissionMatrix {
+    Array.map<Text, (Text, Types.StudioFeatureAccess)>(
+      studioFeatureKeys,
+      func(k : Text) : (Text, Types.StudioFeatureAccess) {
+        (k, { visible = false; canEdit = false });
+      },
+    );
+  };
+
+  private func matrixAccess(m : Types.StudioPermissionMatrix, key : Text) : Types.StudioFeatureAccess {
+    for (e in m.vals()) {
+      if (e.0 == key) {
+        return e.1;
+      };
+    };
+    defaultOpenStudioAccess();
+  };
+
+  private func roleToPermissionCategory(role : Types.UserRole) : Text {
+    switch (role) {
+      case (#staff) { "staff" };
+      case (#admin) { "staff" };
+      case (#curator) { "curator" };
+      case (#collector) { "collector" };
+      case (#artist) { "artist" };
+      case (#gallery) { "gallery" };
+      case (#collaborator) { "collaborator" };
+    };
+  };
+
+  private func seedStudioPermissionDefaultsIfEmpty() {
+    if (studioPermissionDefaultsByCategory.size() > 0) {
+      return;
+    };
+    let m = fullOpenPermissionMatrix();
+    let tabs = ["staff", "curator", "collector", "artist", "gallery", "collaborator"];
+    for (t in tabs.vals()) {
+      studioPermissionDefaultsByCategory.put(t, m);
+    };
+  };
+
+  private func isSuperStaffPrincipal(p : Principal) : Bool {
+    switch (superStaffPrincipals.get(p)) {
+      case (?true) { true };
+      case (_) { false };
+    };
+  };
+
+  private func superStaffPrincipalsAsArray() : [Principal] {
+    let pairs = _Iter.toArray(superStaffPrincipals.entries());
+    Array.map<(Principal, Bool), Principal>(
+      pairs,
+      func((p, _) : (Principal, Bool)) : Principal { p },
+    );
+  };
+
+  private func assertAdminOrSuperStaffConfigure(caller : Principal) {
+    if (isAdminPrincipal(caller)) {
+      return;
+    };
+    if (isSuperStaffPrincipal(caller)) {
+      return;
+    };
+    Debug.trap("Unauthorized: admin or super staff only");
+  };
+
+  /// Rebuild permission-related transient maps from their stable snapshots (install / upgrade / import).
+  private func reloadStudioPermissionTransientFromStable() {
+    studioPermissionDefaultsByCategory := _HashMap.HashMap<Text, Types.StudioPermissionMatrix>(
+      studioPermissionDefaultsStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (e in studioPermissionDefaultsStable.vals()) {
+      studioPermissionDefaultsByCategory.put(e.0, e.1);
+    };
+    studioPermissionOverridesByPrincipal := _HashMap.HashMap<Principal, Types.StudioPermissionMatrix>(
+      studioPermissionOverridesStable.size(),
+      Principal.equal,
+      Principal.hash,
+    );
+    for (e in studioPermissionOverridesStable.vals()) {
+      studioPermissionOverridesByPrincipal.put(e.0, e.1);
+    };
+    superStaffPrincipals := _HashMap.HashMap<Principal, Bool>(
+      superStaffPrincipalsStable.size(),
+      Principal.equal,
+      Principal.hash,
+    );
+    for (p in superStaffPrincipalsStable.vals()) {
+      superStaffPrincipals.put(p, true);
+    };
+  };
+
+  private func reloadAccountContactTransientFromStable() {
+    accountContactByPrincipal := _HashMap.HashMap<Principal, Types.AccountContact>(
+      accountContactStable.size(),
+      Principal.equal,
+      Principal.hash,
+    );
+    for (e in accountContactStable.vals()) {
+      accountContactByPrincipal.put(e.0, e.1);
+    };
+  };
+
+  /// On **install** only, after the stable→transient for-loops: reload permission/contact maps, seed defaults, index access codes.
+  private func runInstallTransientReloadAndIndex() {
+    reloadAccountContactTransientFromStable();
+    reloadStudioPermissionTransientFromStable();
+    seedStudioPermissionDefaultsIfEmpty();
+    rebuildAccessCodeToArtistIdIndex();
+  };
+
+  runInstallTransientReloadAndIndex();
 
   private func assertIntegrationCaller(caller : Principal) {
     switch (integrationServicePrincipal) {
@@ -459,7 +649,8 @@ persistent actor {
       case (#gallery) { true };
       case (#curator) { true };
       case (#collector) { true };
-      case (#staff) { false };
+      case (#staff) { true };
+      case (#collaborator) { true };
       case (#admin) { false };
     };
   };
@@ -515,6 +706,69 @@ persistent actor {
 
   private let anonPrincipal : Principal = Principal.fromText("2vxsx-fae");
 
+  /// `null` = unrestricted (canister admin or super staff).
+  private func effectiveStudioMatrixForCaller(caller : Principal) : ?Types.StudioPermissionMatrix {
+    if (isAdminPrincipal(caller)) {
+      return null;
+    };
+    if (isSuperStaffPrincipal(caller)) {
+      return null;
+    };
+    if (Principal.equal(caller, anonPrincipal)) {
+      return ?fullOpenPermissionMatrix();
+    };
+    switch (accountsByPrincipal.get(caller)) {
+      case null { ?fullOpenPermissionMatrix() };
+      case (?acc) {
+        if (acc.status != #active) {
+          return ?allClosedPermissionMatrix();
+        };
+        if (not isStaffOrAdminCaller(caller)) {
+          return ?allClosedPermissionMatrix();
+        };
+        let cat = roleToPermissionCategory(acc.role);
+        let base = switch (studioPermissionDefaultsByCategory.get(cat)) {
+          case (?m) { m };
+          case null { fullOpenPermissionMatrix() };
+        };
+        switch (studioPermissionOverridesByPrincipal.get(caller)) {
+          case (?o) { ?o };
+          case null { ?base };
+        };
+      };
+    };
+  };
+
+  private func assertStudioFeatureVisible(caller : Principal, featureKey : Text) {
+    if (isAdminPrincipal(caller) or isSuperStaffPrincipal(caller)) {
+      return;
+    };
+    switch (effectiveStudioMatrixForCaller(caller)) {
+      case null { return };
+      case (?m) {
+        let a = matrixAccess(m, featureKey);
+        if (not a.visible) {
+          Debug.trap("Studio feature not visible: " # featureKey);
+        };
+      };
+    };
+  };
+
+  private func assertStudioFeatureEdit(caller : Principal, featureKey : Text) {
+    if (isAdminPrincipal(caller) or isSuperStaffPrincipal(caller)) {
+      return;
+    };
+    switch (effectiveStudioMatrixForCaller(caller)) {
+      case null { return };
+      case (?m) {
+        let a = matrixAccess(m, featureKey);
+        if (not a.canEdit) {
+          Debug.trap("Studio feature not editable: " # featureKey);
+        };
+      };
+    };
+  };
+
   /// Same rules as `getMembershipAccessForCaller` (billing gate + veteran exemptions).
   private func membershipAccessForPrincipal(p : Principal) : Types.MembershipAccessResult {
     if (isAdminPrincipal(p)) {
@@ -526,6 +780,7 @@ persistent actor {
         switch (core.role) {
           case (#admin) { return #exempt };
           case (#staff) { return #exempt };
+          case (#collaborator) { return #exempt };
           case _ {};
         };
         let m = switch (membershipByPrincipal.get(p)) {
@@ -559,6 +814,7 @@ persistent actor {
     switch (r) {
       case (#staff) { true };
       case (#admin) { true };
+      case (#collaborator) { true };
       case _ { false };
     };
   };
@@ -587,6 +843,66 @@ persistent actor {
 
   public shared query (msg) func isCallerAdmin() : async Bool {
     isAdminPrincipal(msg.caller);
+  };
+
+  public shared query (msg) func isCallerSuperStaff() : async Bool {
+    isSuperStaffPrincipal(msg.caller);
+  };
+
+  /// `null` = full access (canister admin or super staff). Otherwise effective matrix for Studio shell + asserts.
+  public shared query (msg) func getStudioPermissionsForCaller() : async ?Types.StudioPermissionMatrix {
+    effectiveStudioMatrixForCaller(msg.caller);
+  };
+
+  public shared query (msg) func adminGetStudioPermissionDefaults(category : Text) : async Types.StudioPermissionMatrix {
+    assertAdminOrSuperStaffConfigure(msg.caller);
+    if (not isKnownPermissionCategory(category)) {
+      Debug.trap("Unknown permission category");
+    };
+    switch (studioPermissionDefaultsByCategory.get(category)) {
+      case (?m) { m };
+      case null { fullOpenPermissionMatrix() };
+    };
+  };
+
+  public shared (msg) func adminSetStudioPermissionDefaults(category : Text, matrix : Types.StudioPermissionMatrix) : async () {
+    assertAdminOrSuperStaffConfigure(msg.caller);
+    if (not isKnownPermissionCategory(category)) {
+      Debug.trap("Unknown permission category");
+    };
+    validateStudioPermissionMatrix(matrix);
+    studioPermissionDefaultsByCategory.put(category, matrix);
+  };
+
+  public shared query (msg) func adminGetStudioPermissionOverride(p : Principal) : async ?Types.StudioPermissionMatrix {
+    assertAdminOrSuperStaffConfigure(msg.caller);
+    studioPermissionOverridesByPrincipal.get(p);
+  };
+
+  public shared (msg) func adminSetStudioPermissionOverride(p : Principal, matrix : Types.StudioPermissionMatrix) : async () {
+    assertAdminOrSuperStaffConfigure(msg.caller);
+    validateStudioPermissionMatrix(matrix);
+    studioPermissionOverridesByPrincipal.put(p, matrix);
+  };
+
+  public shared (msg) func adminClearStudioPermissionOverride(p : Principal) : async () {
+    assertAdminOrSuperStaffConfigure(msg.caller);
+    ignore studioPermissionOverridesByPrincipal.remove(p);
+  };
+
+  public shared query (msg) func adminListSuperStaff() : async [Principal] {
+    assertAdmin(msg.caller);
+    superStaffPrincipalsAsArray();
+  };
+
+  public shared (msg) func adminAddSuperStaff(p : Principal) : async () {
+    assertAdmin(msg.caller);
+    superStaffPrincipals.put(p, true);
+  };
+
+  public shared (msg) func adminRemoveSuperStaff(p : Principal) : async () {
+    assertAdmin(msg.caller);
+    ignore superStaffPrincipals.remove(p);
   };
 
   public shared (msg) func addAdmin(newAdmin : Principal) : async () {
@@ -625,6 +941,10 @@ persistent actor {
     artistFeaturedFeaturableIdsStable := featurableIdsSorted();
     artistFeaturedManualIdsStable := Buffer.toArray(manualFeaturedArtistIds);
     joinInvitesStable := _Iter.toArray(joinInvitesByCode.entries());
+    studioPermissionDefaultsStable := _Iter.toArray(studioPermissionDefaultsByCategory.entries());
+    studioPermissionOverridesStable := _Iter.toArray(studioPermissionOverridesByPrincipal.entries());
+    superStaffPrincipalsStable := superStaffPrincipalsAsArray();
+    accountContactStable := _Iter.toArray(accountContactByPrincipal.entries());
   };
 
   system func postupgrade() {
@@ -770,6 +1090,15 @@ persistent actor {
     };
     artistFeaturedManualIdsStable := [];
 
+    reloadStudioPermissionTransientFromStable();
+    studioPermissionDefaultsStable := [];
+    studioPermissionOverridesStable := [];
+    superStaffPrincipalsStable := [];
+    seedStudioPermissionDefaultsIfEmpty();
+
+    reloadAccountContactTransientFromStable();
+    accountContactStable := [];
+
     for (d in defaultAdminPrincipals().vals()) {
       if (not isAdminPrincipal(d)) {
         adminPrincipals := Array.append(adminPrincipals, [d]);
@@ -900,6 +1229,11 @@ persistent actor {
       joinInvitesByCode.put(entry.0, entry.1);
     };
 
+    reloadStudioPermissionTransientFromStable();
+    seedStudioPermissionDefaultsIfEmpty();
+
+    reloadAccountContactTransientFromStable();
+
     rebuildAccessCodeToArtistIdIndex();
   };
 
@@ -928,6 +1262,10 @@ persistent actor {
       artistFeaturedFeaturableIdsStable = featurableIdsSorted();
       artistFeaturedManualIdsStable = Buffer.toArray(manualFeaturedArtistIds);
       joinInvitesStable = _Iter.toArray(joinInvitesByCode.entries());
+      studioPermissionDefaultsStable = _Iter.toArray(studioPermissionDefaultsByCategory.entries());
+      studioPermissionOverridesStable = _Iter.toArray(studioPermissionOverridesByPrincipal.entries());
+      superStaffPrincipalsStable = superStaffPrincipalsAsArray();
+      accountContactStable = ?_Iter.toArray(accountContactByPrincipal.entries());
     };
   };
 
@@ -957,6 +1295,13 @@ persistent actor {
     artistFeaturedFeaturableIdsStable := snapshot.artistFeaturedFeaturableIdsStable;
     artistFeaturedManualIdsStable := snapshot.artistFeaturedManualIdsStable;
     joinInvitesStable := snapshot.joinInvitesStable;
+    studioPermissionDefaultsStable := snapshot.studioPermissionDefaultsStable;
+    studioPermissionOverridesStable := snapshot.studioPermissionOverridesStable;
+    superStaffPrincipalsStable := snapshot.superStaffPrincipalsStable;
+    accountContactStable := switch (snapshot.accountContactStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
     rebuildTransientFromImportedStableArrays();
   };
 
@@ -1094,14 +1439,27 @@ persistent actor {
     Debug.trap("Could not allocate join code");
   };
 
+  private func assertContactFieldLen(t : Text) {
+    if (Text.size(t) > 256) {
+      Debug.trap("Contact field too long (max 256 characters)");
+    };
+  };
+
   /// Register with an 8-digit invite or artist roster access code — creates an **active** exempt account.
   public shared (msg) func registerWithJoinAccessCode(
     role : Types.UserRole,
     codeRaw : Text,
+    firstName : Text,
+    lastName : Text,
+    email : Text,
   ) : async Types.RegisterWithJoinAccessCodeResult {
-    if (roleIsPrivileged(role)) {
-      return #wrongRole;
+    switch (role) {
+      case (#admin) { return #wrongRole };
+      case (_) {};
     };
+    assertContactFieldLen(firstName);
+    assertContactFieldLen(lastName);
+    assertContactFieldLen(email);
     switch (accountsByPrincipal.get(msg.caller)) {
       case (?_) { return #accountExists };
       case null {};
@@ -1109,6 +1467,11 @@ persistent actor {
     let code = normalizeJoinAccessCode(codeRaw);
     if (not isEightDigitAccessCode(code)) {
       return #invalidCode;
+    };
+    let contact : Types.AccountContact = {
+      firstName = firstName;
+      lastName = lastName;
+      email = email;
     };
 
     switch (joinInvitesByCode.get(code)) {
@@ -1132,6 +1495,7 @@ persistent actor {
           dm with membershipExemptManual = true;
         };
         putUserAccountParts(core, m, msg.caller);
+        accountContactByPrincipal.put(msg.caller, contact);
         let invDone : Types.JoinInviteRecord = {
           inv with active = false;
         };
@@ -1169,6 +1533,7 @@ persistent actor {
               dm with membershipExemptManual = true;
             };
             putUserAccountParts(core, m, msg.caller);
+            accountContactByPrincipal.put(msg.caller, contact);
             let cleared : Types.ArtistRecord = {
               rec with accessCode = "";
             };
@@ -1362,6 +1727,7 @@ persistent actor {
   /// Staff/admin: mark whether an artist may appear in random featured selection.
   public shared (msg) func staffSetArtistFeaturedFeaturable(artistId : Text, featurable : Bool) : async () {
     assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "home");
     switch (artistsById.get(artistId)) {
       case null { Debug.trap("Unknown artist id") };
       case (?_) {
@@ -1377,6 +1743,7 @@ persistent actor {
   /// Staff/admin: add/remove artist from the manual featured list (max 8). Returns 1-based slot or 0 if not featured.
   public shared (msg) func staffSetManualFeaturedForArtist(artistId : Text, featured : Bool) : async Nat {
     assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "home");
     switch (artistsById.get(artistId)) {
       case null { Debug.trap("Unknown artist id") };
       case (?_) {
@@ -1403,6 +1770,7 @@ persistent actor {
   /// Staff/admin: when true, clients pick randomly from the featurable pool for the strip.
   public shared (msg) func staffSetArtistFeaturedRandomMode(on : Bool) : async () {
     assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "home");
     artistFeaturedRandomModeStable := on;
   };
 
@@ -1464,6 +1832,7 @@ persistent actor {
   /// Staff/admin: same JSON shape as `getMyArtistApplicationsJson` for any roster `artistId` (Studio artist modal Programs tab).
   public shared query (msg) func staffGetArtistApplicationsJson(artistId : Text) : async ?Text {
     assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "artists");
     if (artistId.size() == 0) {
       return null;
     };
@@ -1770,6 +2139,7 @@ persistent actor {
   /// Staff/admin: full records including `imported` and `accessCode` (for Studio roster).
   public shared (msg) func listArtistRecordsForStudio() : async [Types.ArtistRecord] {
     assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "artists");
     _Iter.toArray(artistsById.vals());
   };
 
@@ -1829,11 +2199,13 @@ persistent actor {
 
   public shared (msg) func upsertArtist(record : Types.ArtistRecord) : async () {
     assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "artists");
     putArtistRecord(record);
   };
 
   public shared (msg) func bulkUpsertArtists(records : [Types.ArtistRecord]) : async () {
     assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "artists");
     for (r in records.vals()) {
       putArtistRecord(r);
     };
@@ -1842,6 +2214,7 @@ persistent actor {
   /// Staff/admin: cohort years for feed filters — stored separately from `ArtistFilterStored` for stable upgrades.
   public shared (msg) func bulkPutArtistFilterCohortYears(rows : [(Text, [Nat])]) : async () {
     assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "artists");
     for (entry in rows.vals()) {
       let id = entry.0;
       let ys = entry.1;
@@ -1859,6 +2232,7 @@ persistent actor {
 
   public shared (msg) func deleteArtistById(artistId : Text) : async Bool {
     assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "artists");
     switch (artistsById.get(artistId)) {
       case null { false };
       case (?rec) {
@@ -1885,6 +2259,7 @@ persistent actor {
 
   public shared (msg) func setArtistMostRecentProgram(artistId : Text, programKey : Text) : async () {
     assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "artists");
     switch (artistsById.get(artistId)) {
       case null { Debug.trap("Unknown artist id") };
       case (?_) { mostRecentProgramByArtistId.put(artistId, programKey) };
@@ -1893,6 +2268,7 @@ persistent actor {
 
   public shared (msg) func setCurrentProgramSeason(value : Text) : async () {
     assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "programs");
     siteSettingsByKey.put("currentProgramSeason", value);
   };
 
@@ -1914,11 +2290,13 @@ persistent actor {
 
   public shared (msg) func upsertProgram(rec : Types.ProgramRecord) : async () {
     assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "programs");
     programsById.put(rec.id, rec);
   };
 
   public shared (msg) func bulkUpsertPrograms(records : [Types.ProgramRecord]) : async () {
     assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "programs");
     for (r in records.vals()) {
       programsById.put(r.id, r);
     };
@@ -1950,6 +2328,7 @@ persistent actor {
 
   public shared (msg) func upsertJournalEntry(rec : Types.JournalRecord) : async () {
     assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "journal");
     journalsById.put(rec.id, rec);
   };
 
@@ -1975,6 +2354,7 @@ persistent actor {
 
   public shared (msg) func upsertEdition(rec : Types.EditionRecord) : async () {
     assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "products");
     editionsById.put(rec.id, rec);
   };
 
@@ -2004,6 +2384,7 @@ persistent actor {
 
   public shared (msg) func upsertContentPage(rec : Types.ContentPageRecord) : async () {
     assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "content");
     contentBySlug.put(rec.slug, rec);
   };
 
@@ -2027,6 +2408,7 @@ persistent actor {
   /// Staff/admin: translate English copy to Japanese via IC LLM canister (mops `llm` → `Llm.prompt`).
   public shared (msg) func studioTranslateEnToJa(englishText : Text) : async Text {
     assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "ai");
     assertStudioLlmField(englishText);
     let instruction = "Translate the following English to Japanese. Output only the Japanese translation, with no surrounding quotes or commentary.\n\n";
     await Llm.prompt(#Llama3_1_8B, instruction # englishText);
@@ -2035,6 +2417,7 @@ persistent actor {
   /// Staff/admin: rewrite `sourceText` using `prompt`; `localeTag` is e.g. en or ja for model context.
   public shared (msg) func studioReinterpretWithPrompt(prompt : Text, sourceText : Text, localeTag : Text) : async Text {
     assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "ai");
     assertStudioLlmField(prompt);
     assertStudioLlmField(sourceText);
     if (Text.size(localeTag) > 32) {
@@ -2092,6 +2475,7 @@ persistent actor {
 
   public shared query (msg) func listApplicants() : async [Types.ApplicantRecord] {
     assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "applicants");
     let out = Buffer.Buffer<Types.ApplicantRecord>(applicantsById.size());
     for (row in applicantsById.vals()) {
       out.add(row);
@@ -2116,6 +2500,7 @@ persistent actor {
 
   public shared (msg) func upsertApplicant(rec : Types.ApplicantRecord) : async () {
     assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "applicants");
     applicantsById.put(rec.id, rec);
   };
 
@@ -2151,6 +2536,20 @@ persistent actor {
         };
       },
     );
+  };
+
+  /// Admin-only: name + email for Team tab (Join Fusion registration).
+  public shared query (msg) func adminListAccountContacts() : async [(Principal, Types.AccountContact)] {
+    assertAdmin(msg.caller);
+    _Iter.toArray(accountContactByPrincipal.entries());
+  };
+
+  public shared (msg) func adminSetAccountContact(p : Principal, contact : Types.AccountContact) : async () {
+    assertAdmin(msg.caller);
+    assertContactFieldLen(contact.firstName);
+    assertContactFieldLen(contact.lastName);
+    assertContactFieldLen(contact.email);
+    accountContactByPrincipal.put(p, contact);
   };
 
   // ===== Queries: subscribers =====

@@ -27,9 +27,24 @@
   <!-- Preconnect to Typekit for faster font loading -->
   <link rel="preconnect" href="https://use.typekit.net" crossorigin>
   <link rel="dns-prefetch" href="https://use.typekit.net">
+  <!-- Meta Pixel: init only; PageView is sent on SPA routeChange in main.js. -->
+  <script>
+    !function (f, b, e, v, n, t, s) {
+      if (f.fbq) return; n = f.fbq = function () {
+        n.callMethod ? n.callMethod.apply(n, arguments) : n.queue.push(arguments);
+      };
+      if (!f._fbq) f._fbq = n; n.push = n; n.loaded = !0; n.version = "2.0";
+      n.queue = []; t = b.createElement(e); t.async = !0;
+      t.src = v; s = b.getElementsByTagName(e)[0];
+      s.parentNode.insertBefore(t, s);
+    }(window, document, "script", "https://connect.facebook.net/en_US/fbevents.js");
+    fbq("init", "1281327974121956");
+  </script>
 </head>
 
 <body>
+  <noscript><img height="1" width="1" style="display: none" alt=""
+      src="https://www.facebook.com/tr?id=1281327974121956&amp;ev=PageView&amp;noscript=1" /></noscript>
   <app-loadscreen visible="true" fonts-ready="false" message=""></app-loadscreen>
   <!-- Hidden by default (index.css); SPA requires JS — kept for optional noscript / future detection. -->
   <div class="browser-warning" aria-hidden="true" hidden>

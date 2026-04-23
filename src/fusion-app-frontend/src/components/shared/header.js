@@ -672,6 +672,11 @@ class HeaderComponent extends HTMLElement {
                     this._fillAuthPair();
                     return;
                 }
+                if ('collaborator' in role) {
+                    this._authUi = { kind: 'staff' };
+                    this._fillAuthPair();
+                    return;
+                }
             }
             const st = acc.status;
             const pending = Boolean(st && typeof st === 'object' && 'pending' in st);

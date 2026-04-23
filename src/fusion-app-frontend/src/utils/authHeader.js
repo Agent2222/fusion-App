@@ -35,7 +35,7 @@ export async function resolveProfilePathForAccount(account) {
     if (!account || typeof account !== 'object') return '/settings/profile';
     const role = /** @type {Record<string, unknown>} */ (account.role);
     if (role && typeof role === 'object') {
-        if ('admin' in role || 'staff' in role) return '/studio';
+        if ('admin' in role || 'staff' in role || 'collaborator' in role) return '/studio';
     }
     const linked = unwrapOpt(account.linkedArtistId ?? account.linked_artist_id);
     const linkedId = linked != null ? String(linked) : '';

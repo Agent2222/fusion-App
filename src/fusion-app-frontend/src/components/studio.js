@@ -5,28 +5,80 @@ import '../styles/studio.css';
 import { navigate } from '../router.js';
 import {
     STUDIO_NAV,
+    STUDIO_NAV_GROUPS,
     STUDIO_DASHBOARD_ID,
     sectionTitle,
     renderStudioMain,
     initStudioMain,
 } from './studio/panels.js';
+import { escapeHtml } from '../utils/textPreview.js';
 import {
     resetStudioWorkspaceTrail,
     setStudioWorkspaceSectionTitle,
 } from './studio/studioWorkspaceChrome.js';
+import { refreshStudioShellAccessState } from '../utils/database.js';
+import {
+    getStudioShellGate,
+    isStudioSectionNavAllowed,
+    setStudioShellGate,
+    studioFeatureAccess,
+} from '../utils/studioShellState.js';
 
 function normalizeHash() {
     const raw = (window.location.hash || '').replace(/^#/, '').trim().toLowerCase();
-    const valid = new Set([STUDIO_DASHBOARD_ID, ...STUDIO_NAV.map((n) => n.id)]);
-    if (raw && valid.has(raw)) return raw;
-    return STUDIO_DASHBOARD_ID;
+    const gate = getStudioShellGate();
+    const valid = new Set([
+        STUDIO_DASHBOARD_ID,
+        ...STUDIO_NAV.map((n) => n.id),
+        ...(gate.permissionsNavAllowed ? ['permissions'] : []),
+        ...(gate.teamNavAllowed ? ['team'] : []),
+    ]);
+    if (!raw || !valid.has(raw)) return STUDIO_DASHBOARD_ID;
+    if (!isStudioSectionNavAllowed(raw)) return STUDIO_DASHBOARD_ID;
+    return raw;
+}
+
+/**
+ * @param {string} activeId
+ */
+function buildStudioNavButtonsHtml(activeId) {
+    const gate = getStudioShellGate();
+    /** @type {{ label: string, items: { id: string, label: string }[] }[]} */
+    const adminItems = [];
+    if (gate.teamNavAllowed) {
+        adminItems.push({ id: 'team', label: 'Team' });
+    }
+    if (gate.permissionsNavAllowed) {
+        adminItems.push({ id: 'permissions', label: 'Permissions' });
+    }
+    const withAdmin = adminItems.length
+        ? [...STUDIO_NAV_GROUPS, { label: 'Admin', items: adminItems }]
+        : STUDIO_NAV_GROUPS;
+    const chunks = [];
+    for (const g of withAdmin) {
+        const items = g.items.filter((n) => isStudioSectionNavAllowed(n.id));
+        if (!items.length) {
+            continue;
+        }
+        const groupLabel = escapeHtml(g.label);
+        const groupInner = items
+            .map((item) => {
+                const active = item.id === activeId ? ' is-active' : '';
+                const idHtml = escapeHtml(item.id);
+                return `<button type="button" class="studio-nav-item${active}" data-studio-section="${idHtml}">${escapeHtml(
+                    item.label
+                )}</button>`;
+            })
+            .join('');
+        chunks.push(
+            `<div class="studio-nav-group" role="group" aria-label="${groupLabel}"><div class="studio-nav-group__label">${groupLabel}</div><div class="studio-nav-group__items">${groupInner}</div></div>`
+        );
+    }
+    return chunks.join('');
 }
 
 function renderNavButtons(activeId) {
-    return STUDIO_NAV.map((item) => {
-        const active = item.id === activeId ? ' is-active' : '';
-        return `<button type="button" class="studio-nav-item${active}" data-studio-section="${item.id}">${item.label}</button>`;
-    }).join('');
+    return buildStudioNavButtonsHtml(activeId);
 }
 
 export function render() {
@@ -118,6 +170,8 @@ function isStudioMobileNav() {
 
 /** Prevent stacking `hashchange` listeners when `initStudio` re-runs (e.g. `fusion-localechange` → `handleRoute`). */
 let _studioHashChangeHandler = /** @type {(() => void) | null} */ (null);
+/** @type {(() => void) | null} */
+let _studioShellRefreshHandler = null;
 
 /** Account overlay: lazy-embed settings profile (single init per Studio mount). */
 let _studioAccountOverlayInited = false;
@@ -181,7 +235,13 @@ export default function initStudio() {
     });
 
     const applySection = async (sectionId) => {
-        const id = sectionId || normalizeHash();
+        let id = String(sectionId || normalizeHash() || STUDIO_DASHBOARD_ID)
+            .trim()
+            .toLowerCase();
+        if (!isStudioSectionNavAllowed(id)) {
+            id = STUDIO_DASHBOARD_ID;
+            setHash(id);
+        }
         // Always resolve live nodes — `fusion-localechange` / full route re-render replaces `#app` but
         // a previous `window` hash listener may still run; captured `main`/`nav` would point at detached DOM.
         const mainEl = document.getElementById('studioMainContent');
@@ -201,15 +261,46 @@ export default function initStudio() {
         await initStudioMain(id, mainEl);
     };
 
-    nav.querySelectorAll('.studio-nav-item').forEach((btn) => {
-        btn.addEventListener('click', () => {
-            const id = btn.getAttribute('data-studio-section');
-            if (!id) return;
-            setHash(id);
-            applySection(id);
-            closeNavIfMobile();
+    const attachStudioNavClickHandlers = (navEl) => {
+        navEl.querySelectorAll('.studio-nav-item').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const sid = btn.getAttribute('data-studio-section');
+                if (!sid) return;
+                setHash(sid);
+                void applySection(sid);
+                closeNavIfMobile();
+            });
         });
-    });
+    };
+
+    const refreshShellAndNav = async () => {
+        const shell = await refreshStudioShellAccessState();
+        setStudioShellGate(shell);
+        const navEl = document.getElementById('studioNav');
+        if (navEl) {
+            navEl.innerHTML = buildStudioNavButtonsHtml(normalizeHash());
+            attachStudioNavClickHandlers(navEl);
+        }
+        if (settingsBtn) {
+            settingsBtn.hidden = !studioFeatureAccess('settings').visible;
+        }
+        const raw = (window.location.hash || '').replace(/^#/, '').trim().toLowerCase();
+        if (raw === 'permissions' && !shell.permissionsNavAllowed) {
+            setHash(STUDIO_DASHBOARD_ID);
+        }
+        if (raw === 'team' && !shell.teamNavAllowed) {
+            setHash(STUDIO_DASHBOARD_ID);
+        }
+        await applySection(normalizeHash());
+    };
+
+    if (_studioShellRefreshHandler) {
+        window.removeEventListener('fusion-studio-shell-refresh', _studioShellRefreshHandler);
+    }
+    _studioShellRefreshHandler = () => {
+        void refreshShellAndNav();
+    };
+    window.addEventListener('fusion-studio-shell-refresh', _studioShellRefreshHandler);
 
     const overlay = document.getElementById('studioAccountOverlay');
     const overlayBody = document.getElementById('studioAccountOverlayBody');
@@ -261,8 +352,9 @@ export default function initStudio() {
     window.addEventListener('keydown', _studioAccountOverlayKeydown);
 
     settingsBtn?.addEventListener('click', () => {
+        if (!studioFeatureAccess('settings').visible) return;
         setHash('settings');
-        applySection('settings');
+        void applySection('settings');
         closeNavIfMobile();
     });
 
@@ -286,8 +378,7 @@ export default function initStudio() {
     };
     window.addEventListener('hashchange', _studioHashChangeHandler);
 
-    const start = normalizeHash();
-    applySection(start);
+    void refreshShellAndNav();
 
     const publicLink = document.querySelector('.studio-back');
     publicLink?.addEventListener('click', (e) => {

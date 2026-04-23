@@ -109,7 +109,15 @@ module {
         #curator;
         #collector;
         #staff;
+        #collaborator;
         #admin;
+    };
+
+    /// Optional directory fields for team join and Studio Team tab (separate from `UserAccount` core for upgrade safety).
+    public type AccountContact = {
+        firstName : Text;
+        lastName : Text;
+        email : Text;
     };
 
     public type AccountStatus = {
@@ -278,6 +286,20 @@ module {
         localesJson : ?Text;
     };
 
+    /// One Studio sidebar / workspace feature (id aligns with frontend section ids, e.g. `artists`, `settings`).
+    public type StudioFeatureAccess = {
+        visible : Bool;
+        canEdit : Bool;
+    };
+
+    /// Matrix: feature id → access (bounded keys enforced in actor).
+    public type StudioPermissionMatrix = [(Text, StudioFeatureAccess)];
+
+    /// Tab key: `staff` | `curator` | `collector` | `artist` | `gallery` (lowercase Text).
+    public type StudioPermissionDefaultsEntry = (Text, StudioPermissionMatrix);
+
+    public type StudioPermissionOverrideEntry = (Principal, StudioPermissionMatrix);
+
     /// Admin-only full canister backup / restore (`adminExportFullDatabase` / `adminImportFullDatabase`).
     public type DatabaseSnapshotV1 = {
         version : Nat;
@@ -302,5 +324,12 @@ module {
         artistFeaturedFeaturableIdsStable : [Text];
         artistFeaturedManualIdsStable : [Text];
         joinInvitesStable : [(Text, JoinInviteRecord)];
+        /// Studio → Permissions UI: role-tab defaults (`staff`, …) and per-principal overrides.
+        studioPermissionDefaultsStable : [StudioPermissionDefaultsEntry];
+        studioPermissionOverridesStable : [StudioPermissionOverrideEntry];
+        /// Principals that may open the Permissions section (with admins); managed by admin.
+        superStaffPrincipalsStable : [Principal];
+        /// Join Fusion / team directory: principal → name + email (`null` in backups from before this field existed).
+        accountContactStable : ?[(Principal, AccountContact)];
     };
 };

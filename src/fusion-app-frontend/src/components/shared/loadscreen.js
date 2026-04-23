@@ -5,6 +5,7 @@ import { activateDeactivate, navigate } from '../../router.js';
 import { submitEarlyAccessToCanister } from '../../utils/earlyAccessSubscribe.js';
 import { withSeoVideoLabel } from '../../utils/mediaAltSeo.js';
 import posthog from 'posthog-js';
+import { metaTrack } from '../../utils/metaPixel.js';
 
 // Load Screen Custom Element Component
 class LoadScreenComponent extends HTMLElement {
@@ -1138,7 +1139,9 @@ class LoadScreenComponent extends HTMLElement {
                 posthog.capture('early_access_submitted', {
                     source: 'loadscreen',
                     category: category || 'unknown',
+                    ads_conversion: 'Lead',
                 });
+                metaTrack('Lead', { content_name: 'early_access', source: 'loadscreen' });
 
                 // Hide the transient status and show the stored-email confirmation.
                 this.hideCTAStatus();
