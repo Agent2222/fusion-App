@@ -233,6 +233,11 @@ function wireProgramApplicationSection(programId, applicationsOpen = true) {
     el.setAttribute("tabindex", "0");
   }
 
+  /** Drop stale `inert` when applications reopen (e.g. after visiting a closed program in the same SPA session). */
+  if (wrap) {
+    wrap.removeAttribute("inert");
+  }
+
   const onPrimaryCta = () => {
     const locale =
       typeof window.getLocale === "function" && window.getLocale() === "ja"
@@ -316,8 +321,8 @@ export function generateProgramViewContent() {
                         <div id="programApplicationWrap" class="program-application-wrap" hidden inert>
                             <app-application-form id="programApplicationSection" active="false" data-program-id=""></app-application-form>
                         </div>
-                        <app-program-strip-gallery id="programStripGallery"></app-program-strip-gallery>
                         <app-confirmed-artists-feed id="confirmedArtistsFeed" active="true"></app-confirmed-artists-feed>
+                        <app-program-strip-gallery id="programStripGallery"></app-program-strip-gallery>
                         <div class="shoutHeadline">
                             This is not for every artist.<br><br>It is for those willing to work<br>within unfamiliar environments,<br>alongside others,<br> in close proximity to place and process.
                         </div>
@@ -418,6 +423,12 @@ async function applyProgramToDom(programPair) {
       applicationsOpen = true;
     }
   }
+
+  const availableSlots =
+    typeof current?.availableSlots === "number" ? current.availableSlots : null;
+  const totalSlots =
+    typeof current?.totalSlots === "number" ? current.totalSlots : null;
+
   const formEl = document.getElementById("programApplicationSection");
   if (formEl && programId) {
     formEl.setAttribute("data-program-id", programId);
@@ -431,6 +442,8 @@ async function applyProgramToDom(programPair) {
     /** @type {{ setProgramFormContext: (c: object) => void }} */ (formEl).setProgramFormContext(
       buildProgramApplicationFormContext(programPage, {
         programYear: current?.year != null ? String(current.year) : "",
+        availableSlots,
+        totalSlots,
       }),
     );
   }
@@ -469,12 +482,6 @@ async function applyProgramToDom(programPair) {
         },
       };
     });
-    const availableSlots =
-      typeof current?.availableSlots === "number"
-        ? current.availableSlots
-        : null;
-    const totalSlots =
-      typeof current?.totalSlots === "number" ? current.totalSlots : null;
     confirmedArtistsFeed.setConfirmedArtistsFeed({
       headline,
       availableSlots,
@@ -570,6 +577,8 @@ async function applyProgramToDom(programPair) {
       ),
       costText: formatCostText(details?.costs),
       applicationFeeLine,
+      availableSlots,
+      totalSlots,
       residences,
       included,
       notIncluded,

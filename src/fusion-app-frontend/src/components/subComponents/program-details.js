@@ -8,12 +8,12 @@ class ProgramDetailsComponent extends HTMLElement {
     constructor() {
         super();
         this.shadow = this.attachShadow({ mode: 'open' });
-        /** @type {null | { programId?: string, applicationsOpen?: boolean, headline: string, keyDates: Array<{ date?: string, description?: string }>, locations?: string[], facilities?: string[], costText: string, applicationFeeLine?: string, residences?: Array<{ name?: string, href?: string }>, included?: string[], notIncluded?: string[], platform?: string, additionalInfo?: object | null }} */
+        /** @type {null | { programId?: string, applicationsOpen?: boolean, headline: string, keyDates: Array<{ date?: string, description?: string }>, locations?: string[], facilities?: string[], costText: string, applicationFeeLine?: string, availableSlots?: number | null, totalSlots?: number | null, residences?: Array<{ name?: string, href?: string }>, included?: string[], notIncluded?: string[], platform?: string, additionalInfo?: object | null }} */
         this._data = null;
     }
 
     /**
-     * @param {{ programId?: string, applicationsOpen?: boolean, headline: string, keyDates: Array<{ date?: string, description?: string }>, locations?: string[], facilities?: string[], costText: string, applicationFeeLine?: string, residences?: Array<{ name?: string, href?: string }>, included?: string[], notIncluded?: string[], platform?: string, additionalInfo?: { applicationFee?: string, aboutProgram?: string, faq?: object[], programNotes?: object[], refundPolicy?: object[] } | null }} payload
+     * @param {{ programId?: string, applicationsOpen?: boolean, headline: string, keyDates: Array<{ date?: string, description?: string }>, locations?: string[], facilities?: string[], costText: string, applicationFeeLine?: string, availableSlots?: number | null, totalSlots?: number | null, residences?: Array<{ name?: string, href?: string }>, included?: string[], notIncluded?: string[], platform?: string, additionalInfo?: { applicationFee?: string, aboutProgram?: string, faq?: object[], programNotes?: object[], refundPolicy?: object[] } | null }} payload
      */
     setProgramDetails(payload) {
         this._data = payload;
@@ -59,12 +59,16 @@ class ProgramDetailsComponent extends HTMLElement {
                 refundPolicy: '返金ポリシー',
                 applicationFee: '応募料',
                 aboutProgram: 'プログラムについて',
+                cohortCapacity: '定員・空き枠',
+                slotsRemainingValue: '残り <strong>{{a}}</strong> / 全 <strong>{{b}}</strong> 枠',
             };
         }
         return {
             locations: 'LOCATIONS',
             facilities: 'FACILITIES',
             cost: 'COST',
+            cohortCapacity: 'COHORT',
+            slotsRemainingValue: '<strong>{{a}}</strong> of <strong>{{b}}</strong> Slots Remaining',
             residence: 'RESIDENCE',
             included: 'INCLUDED',
             notIncluded: 'NOT INCLUDED',
@@ -80,7 +84,19 @@ class ProgramDetailsComponent extends HTMLElement {
 
     _hasMainDetails() {
         if (!this._data) return false;
-        const { keyDates, locations, facilities, costText, applicationFeeLine, residences, included, notIncluded, platform } = this._data;
+        const {
+            keyDates,
+            locations,
+            facilities,
+            costText,
+            applicationFeeLine,
+            availableSlots: asideAvail,
+            totalSlots: asideTotal,
+            residences,
+            included,
+            notIncluded,
+            platform,
+        } = this._data;
         const hasDates = Array.isArray(keyDates) && keyDates.some((d) => (d?.date || d?.description || '').trim());
         const resList = Array.isArray(residences) ? residences : [];
         const hasResidence = resList.some((r) => {
@@ -91,6 +107,11 @@ class ProgramDetailsComponent extends HTMLElement {
         });
         const inc = Array.isArray(included) ? included : [];
         const ninc = Array.isArray(notIncluded) ? notIncluded : [];
+        const hasCohortSlots =
+            typeof asideAvail === 'number' &&
+            Number.isFinite(asideAvail) &&
+            typeof asideTotal === 'number' &&
+            Number.isFinite(asideTotal);
         const hasSidebar = Boolean(
             (Array.isArray(locations) && locations.some((x) => String(x || '').trim())) ||
                 (Array.isArray(facilities) && facilities.some((x) => String(x || '').trim())) ||
@@ -99,7 +120,8 @@ class ProgramDetailsComponent extends HTMLElement {
                 hasResidence ||
                 inc.some((x) => String(x || '').trim()) ||
                 ninc.some((x) => String(x || '').trim()) ||
-                (platform && String(platform).trim()),
+                (platform && String(platform).trim()) ||
+                hasCohortSlots,
         );
         return hasDates || hasSidebar;
     }
@@ -260,6 +282,8 @@ class ProgramDetailsComponent extends HTMLElement {
             facilities,
             costText,
             applicationFeeLine,
+            availableSlots,
+            totalSlots,
             residences,
             included,
             notIncluded,
@@ -337,19 +361,52 @@ class ProgramDetailsComponent extends HTMLElement {
                 ? notIncluded.map((x) => String(x || '').trim()).filter(Boolean).slice(0, 5)
                 : [];
             const plat = String(platform || '').trim();
+            const slotA = availableSlots;
+            const slotB = totalSlots;
+            const showCohortSlots =
+                typeof slotA === 'number' &&
+                Number.isFinite(slotA) &&
+                typeof slotB === 'number' &&
+                Number.isFinite(slotB);
 
             sidebarEl.innerHTML = '';
-            /** @type {Array<[string, 'list' | 'text' | 'residences', unknown]>} */
+            /** @type {Array<[string, 'list' | 'text' | 'residences' | 'cost_pair' | 'slots', unknown]>} */
             const blocks = [
                 [L.locations, 'list', loc],
                 [L.facilities, 'list', fac],
                 [L.cost, 'cost_pair', { main: cost, extra: appFeeSidebar }],
+                [L.cohortCapacity, 'slots', { available: slotA, total: slotB, show: showCohortSlots }],
                 [L.residence, 'residences', residenceRows],
                 [L.included, 'list', incList],
                 [L.notIncluded, 'list', excList],
                 [L.platform, 'text', plat],
             ];
             blocks.forEach(([label, kind, val]) => {
+                if (kind === 'slots') {
+                    const o = /** @type {{ available?: unknown, total?: unknown, show?: boolean }} */ (val);
+                    if (!o || !o.show) return;
+                    const av = o.available;
+                    const tot = o.total;
+                    if (typeof av !== 'number' || typeof tot !== 'number' || !Number.isFinite(av) || !Number.isFinite(tot)) {
+                        return;
+                    }
+                    const a = Math.max(0, Math.floor(av));
+                    const t = Math.max(0, Math.floor(tot));
+                    const block = document.createElement('div');
+                    block.className = 'sidebar-block';
+                    const lab = document.createElement('div');
+                    lab.className = 'sidebar-label';
+                    lab.textContent = label;
+                    const p = document.createElement('p');
+                    p.className = 'sidebar-value sidebar-slots-value';
+                    p.innerHTML = String(L.slotsRemainingValue || '')
+                        .replace('{{a}}', String(a))
+                        .replace('{{b}}', String(t));
+                    block.appendChild(lab);
+                    block.appendChild(p);
+                    sidebarEl.appendChild(block);
+                    return;
+                }
                 if (kind === 'list') {
                     const arr = /** @type {string[]} */ (val);
                     if (!Array.isArray(arr) || !arr.length) return;
@@ -839,6 +896,10 @@ class ProgramDetailsComponent extends HTMLElement {
 
                 .sidebar-value--addon {
                     margin-top: 0.4rem;
+                }
+
+                .sidebar-slots-value strong {
+                    font-weight: 600;
                 }
 
                 .sidebar-value-list {

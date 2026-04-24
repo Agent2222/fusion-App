@@ -71,7 +71,7 @@ module {
     };
 
     /// Stored roster profile (stable `ArtistRecord.profile`) — no derived/joined fields.
-    public type ArtistCore = {
+    public type ArtistCoreV0 = {
         id : Text;
         slug : Text;
         image : Text;
@@ -80,6 +80,30 @@ module {
         updatedAt : Text;
         filter : ?ArtistFilterStored;
         galleryFilter : ?ArtistGalleryFilter;
+    };
+
+    /// Current `ArtistCore` (includes `contactEmail` for Studio; added after `ArtistCoreV0` — use `main.mo` migration on upgrade).
+    /// `contactEmail` is Studio / blast only; cleared in `sanitizeArtistRecordForPublic` (not in public `Artist`).
+    public type ArtistCore = {
+        id : Text;
+        slug : Text;
+        image : Text;
+        featuredOrder : Nat;
+        visibility : Text;
+        updatedAt : Text;
+        /// Roster contact for staff email; empty when unknown. Not exposed on public `Artist` or public profile reads.
+        contactEmail : Text;
+        filter : ?ArtistFilterStored;
+        galleryFilter : ?ArtistGalleryFilter;
+    };
+
+    /// Pre–`contactEmail` `ArtistRecord` (stable `artistsStable` before the roster-email upgrade).
+    public type ArtistRecordV0 = {
+        profile : ArtistCoreV0;
+        localesJson : ?Text;
+        notesEncrypted : ?EncryptedBlob;
+        imported : Bool;
+        accessCode : Text;
     };
 
     /// Public API (`listArtists`, `getArtistBySlug`): includes `mostRecentProgram` from the canister map.

@@ -44,6 +44,54 @@ const stripe = stripeSecret ? new Stripe(stripeSecret) : null;
 const resendApiKey = process.env.RESEND_API_KEY || '';
 const resend = resendApiKey ? new Resend(resendApiKey) : null;
 const resendFrom = process.env.RESEND_FROM || '';
+/** Optional absolute URL to replace the default site logo in HTML (staff can also paste full URLs in the Studio modal). */
+const fusionSignatureLogoUrl = (process.env.FUSION_SIGNATURE_LOGO_URL || '').trim();
+const RESEND_API_BASE = 'https://api.resend.com';
+const MAX_RESEND_JSON_BYTES = 120_000;
+const BATCH_CHUNK = 100;
+const BATCH_CHUNK_DELAY_MS = 500;
+
+/**
+ * @param {string} [html]
+ */
+function maybeApplyFusionLogoUrl(html) {
+    if (typeof html !== 'string' || !fusionSignatureLogoUrl) {
+        return html;
+    }
+    return html.replace(
+        /https?:\/\/[^"'\s>]*\/email\/Fusion-Logo-Sig-1\.png/gi,
+        fusionSignatureLogoUrl,
+    );
+}
+
+/**
+ * @param {string} path
+ * @param {{ method?: string, body?: unknown }} [init]
+ */
+async function resendRestJson(path, init = {}) {
+    if (!resendApiKey) {
+        return { ok: false, status: 503, json: { error: 'Resend not configured' } };
+    }
+    const method = init.method || 'GET';
+    const body = init.body;
+    const r = await fetch(`${RESEND_API_BASE}${path}`, {
+        method,
+        headers: {
+            Authorization: `Bearer ${resendApiKey}`,
+            ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+        return {
+            ok: false,
+            status: r.status,
+            json: { error: typeof j.message === 'string' ? j.message : r.statusText },
+        };
+    }
+    return { ok: true, status: r.status, json: j };
+}
 
 const awsRegion = process.env.AWS_REGION || process.env.S3_REGION || '';
 const s3Bucket = process.env.S3_BUCKET || '';
@@ -997,7 +1045,7 @@ app.post('/email/send', requireApiKey, async (req, res) => {
             subject: subject.slice(0, 998),
         };
         if (typeof html === 'string' && html.length) {
-            payload.html = html;
+            payload.html = maybeApplyFusionLogoUrl(html);
         } else if (typeof text === 'string' && text.length) {
             payload.text = text;
         } else {
@@ -1012,6 +1060,271 @@ app.post('/email/send', requireApiKey, async (req, res) => {
             return res.status(502).json({ error: error.message || 'Resend error' });
         }
         return res.json({ ok: true, id: data?.id });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return res.status(500).json({ error: msg });
+    }
+});
+
+/** Transactional batch (Resend batch send, ≤100 per request; chunks with small delay). */
+app.post('/email/batch', requireApiKey, async (req, res) => {
+    try {
+        if (!resend) {
+            return res.status(503).json({ error: 'Resend not configured' });
+        }
+        const messages = req.body?.messages;
+        if (!Array.isArray(messages) || messages.length === 0) {
+            return res.status(400).json({ error: 'messages must be a non-empty array' });
+        }
+        const fromOverride =
+            typeof req.body?.from === 'string' ? req.body.from.trim().slice(0, 998) : '';
+        if (fromOverride && !fromOverride.includes('@')) {
+            return res.status(400).json({ error: 'Invalid from' });
+        }
+        const fromAddr = fromOverride || resendFrom;
+        if (!fromAddr) {
+            return res.status(503).json({ error: 'Set RESEND_FROM on server or pass from in body' });
+        }
+        const replyTo =
+            typeof req.body?.replyTo === 'string' && req.body.replyTo.includes('@')
+                ? req.body.replyTo.trim()
+                : undefined;
+
+        /** @type {Array<{ to: string, subject: string, html?: string, text?: string }>} */
+        const normalized = [];
+        for (const m of messages) {
+            if (!m || typeof m !== 'object') {
+                return res.status(400).json({ error: 'Invalid message entry' });
+            }
+            const to = typeof m.to === 'string' ? m.to.trim() : '';
+            const subject = typeof m.subject === 'string' ? m.subject.trim() : '';
+            if (!to.includes('@')) {
+                return res.status(400).json({ error: 'Each message needs valid to' });
+            }
+            if (!subject) {
+                return res.status(400).json({ error: 'Each message needs subject' });
+            }
+            const html = typeof m.html === 'string' && m.html.length ? maybeApplyFusionLogoUrl(m.html) : undefined;
+            const text = typeof m.text === 'string' && m.text.length ? m.text : undefined;
+            if (!html && !text) {
+                return res.status(400).json({ error: 'Each message needs html or text' });
+            }
+            normalized.push({ to, subject: subject.slice(0, 998), html, text });
+        }
+
+        const strLen = JSON.stringify(normalized).length;
+        if (strLen > 900_000) {
+            return res.status(413).json({ error: 'Batch payload too large' });
+        }
+
+        /** @type {Array<{ to: string, ok: boolean, id?: string, error?: string }>} */
+        const results = [];
+        let okCount = 0;
+        let failCount = 0;
+
+        for (let i = 0; i < normalized.length; i += BATCH_CHUNK) {
+            const chunk = normalized.slice(i, i + BATCH_CHUNK);
+            const payloads = chunk.map((m) => {
+                const p = {
+                    from: fromAddr,
+                    to: [m.to],
+                    subject: m.subject,
+                };
+                if (m.html) p.html = m.html;
+                else if (m.text) p.text = m.text;
+                if (replyTo) p.reply_to = replyTo;
+                return p;
+            });
+
+            if (resend.batch && typeof resend.batch.send === 'function') {
+                const { data, error } = await resend.batch.send(/** @type {unknown} */ (payloads));
+                if (error) {
+                    for (const m of chunk) {
+                        results.push({ to: m.to, ok: false, error: error.message || 'Resend batch error' });
+                        failCount += 1;
+                    }
+                } else {
+                    const dataArr = Array.isArray(data) ? data : data != null ? [data] : [];
+                    chunk.forEach((m, j) => {
+                        const one = dataArr[j];
+                        const id = one && typeof one === 'object' && 'id' in one ? String(/** @type {any} */ (one).id) : undefined;
+                        if (id) {
+                            results.push({ to: m.to, ok: true, id });
+                            okCount += 1;
+                        } else {
+                            results.push({ to: m.to, ok: true });
+                            okCount += 1;
+                        }
+                    });
+                }
+            } else {
+                for (let j = 0; j < chunk.length; j++) {
+                    const m = chunk[j];
+                    const p = { ...payloads[j] };
+                    const { data, error } = await resend.emails.send(p);
+                    if (error) {
+                        results.push({ to: m.to, ok: false, error: error.message || 'Resend error' });
+                        failCount += 1;
+                    } else {
+                        results.push({ to: m.to, ok: true, id: data?.id });
+                        okCount += 1;
+                    }
+                }
+            }
+
+            if (i + BATCH_CHUNK < normalized.length) {
+                await new Promise((r) => {
+                    setTimeout(r, BATCH_CHUNK_DELAY_MS);
+                });
+            }
+        }
+
+        return res.json({ ok: true, okCount, failCount, results });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return res.status(500).json({ error: msg });
+    }
+});
+
+/** @param {import('express').Request} req @param {import('express').Response} res @param {unknown} body */
+function guardResendJsonBody(req, res, body) {
+    try {
+        const s = JSON.stringify(body ?? {});
+        if (s.length > MAX_RESEND_JSON_BYTES) {
+            res.status(413).json({ error: 'Body too large' });
+            return false;
+        }
+    } catch {
+        res.status(400).json({ error: 'Invalid JSON body' });
+        return false;
+    }
+    return true;
+}
+
+app.get('/resend/templates', requireApiKey, async (_req, res) => {
+    const out = await resendRestJson('/templates', { method: 'GET' });
+    if (!out.ok) return res.status(out.status).json(out.json);
+    return res.json(out.json);
+});
+
+app.post('/resend/templates', requireApiKey, async (req, res) => {
+    if (!guardResendJsonBody(req, res, req.body)) return;
+    const out = await resendRestJson('/templates', { method: 'POST', body: req.body });
+    if (!out.ok) return res.status(out.status).json(out.json);
+    return res.json(out.json);
+});
+
+app.get('/resend/templates/:id', requireApiKey, async (req, res) => {
+    const id = encodeURIComponent(req.params.id);
+    const out = await resendRestJson(`/templates/${id}`, { method: 'GET' });
+    if (!out.ok) return res.status(out.status).json(out.json);
+    return res.json(out.json);
+});
+
+app.get('/resend/segments', requireApiKey, async (_req, res) => {
+    const out = await resendRestJson('/segments', { method: 'GET' });
+    if (!out.ok) return res.status(out.status).json(out.json);
+    return res.json(out.json);
+});
+
+app.post('/resend/segments', requireApiKey, async (req, res) => {
+    if (!guardResendJsonBody(req, res, req.body)) return;
+    const out = await resendRestJson('/segments', { method: 'POST', body: req.body });
+    if (!out.ok) return res.status(out.status).json(out.json);
+    return res.json(out.json);
+});
+
+app.post('/resend/contacts', requireApiKey, async (req, res) => {
+    if (!guardResendJsonBody(req, res, req.body)) return;
+    const out = await resendRestJson('/contacts', { method: 'POST', body: req.body });
+    if (!out.ok) return res.status(out.status).json(out.json);
+    return res.json(out.json);
+});
+
+app.post('/resend/contacts/segment', requireApiKey, async (req, res) => {
+    if (!guardResendJsonBody(req, res, req.body)) return;
+    const segmentId = req.body?.segmentId ?? req.body?.segment_id;
+    if (!segmentId) {
+        return res.status(400).json({ error: 'segmentId or segment_id required' });
+    }
+    const out = await resendRestJson(
+        `/segments/${encodeURIComponent(String(segmentId))}/contacts`,
+        { method: 'POST', body: req.body },
+    );
+    if (!out.ok) return res.status(out.status).json(out.json);
+    return res.json(out.json);
+});
+
+app.post('/resend/broadcasts', requireApiKey, async (req, res) => {
+    try {
+        if (!resend) {
+            return res.status(503).json({ error: 'Resend not configured' });
+        }
+        const b = req.body;
+        if (!b || typeof b !== 'object') {
+            return res.status(400).json({ error: 'JSON body required' });
+        }
+        if (!guardResendJsonBody(req, res, b)) return;
+        if (resend.broadcasts && typeof resend.broadcasts.create === 'function') {
+            const fromOverride = typeof b.from === 'string' ? b.from.trim() : '';
+            const fromAddr = (fromOverride && fromOverride.includes('@') ? fromOverride : resendFrom) || resendFrom;
+            if (!fromAddr) {
+                return res.status(503).json({ error: 'Set RESEND_FROM on server or pass from' });
+            }
+            const segmentId = String(
+                b.segmentId ?? b.segment_id ?? b.audienceId ?? b.audience_id ?? '',
+            ).trim();
+            if (!segmentId) {
+                return res.status(400).json({ error: 'segmentId (or audienceId) required' });
+            }
+            const subject = String(b.subject ?? '').trim();
+            if (!subject) {
+                return res.status(400).json({ error: 'subject required' });
+            }
+            const html = typeof b.html === 'string' ? maybeApplyFusionLogoUrl(b.html) : String(b.html ?? '');
+            if (!html) {
+                return res.status(400).json({ error: 'html required' });
+            }
+            const text = typeof b.text === 'string' ? b.text : undefined;
+            const name = typeof b.name === 'string' ? b.name : undefined;
+            const sendNow = b.send === true;
+            const payload = {
+                segmentId,
+                from: fromAddr,
+                subject: subject.slice(0, 998),
+                html,
+                ...(name ? { name: name.slice(0, 200) } : {}),
+                ...(text ? { text } : {}),
+                ...(sendNow ? { send: true } : {}),
+            };
+            if (b.scheduledAt) payload.scheduledAt = String(b.scheduledAt);
+            const { data, error } = await resend.broadcasts.create(/** @type {any} */ (payload));
+            if (error) {
+                return res.status(502).json({ error: error.message || 'Resend broadcast error' });
+            }
+            return res.json({ ok: true, id: data?.id, data });
+        }
+        return res.status(501).json({ error: 'Resend Node SDK has no broadcasts.create — upgrade resend' });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return res.status(500).json({ error: msg });
+    }
+});
+
+app.post('/resend/broadcasts/:id/send', requireApiKey, async (req, res) => {
+    try {
+        if (!resend?.broadcasts?.send) {
+            return res.status(501).json({ error: 'Resend SDK has no broadcasts.send' });
+        }
+        const id = String(req.params.id || '').trim();
+        if (!id) {
+            return res.status(400).json({ error: 'id required' });
+        }
+        const { data, error } = await resend.broadcasts.send(id, req.body && typeof req.body === 'object' ? req.body : {});
+        if (error) {
+            return res.status(502).json({ error: error.message || 'Resend send error' });
+        }
+        return res.json({ ok: true, data });
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         return res.status(500).json({ error: msg });

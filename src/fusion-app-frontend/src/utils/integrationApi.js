@@ -622,6 +622,162 @@ export async function sendEmail(opts) {
 }
 
 /**
+ * @param {Array<{ to: string, subject: string, html?: string, text?: string }>} messages
+ * @param {{ from?: string, replyTo?: string }} [opts]
+ * @returns {Promise<{ ok?: boolean, okCount?: number, failCount?: number, results?: unknown }>}
+ */
+export async function sendEmailBatch(messages, opts = {}) {
+    const base = getIntegrationBaseUrl();
+    if (!base) {
+        throw new Error('Integration API URL not configured.');
+    }
+    const res = await fetch(`${base}/email/batch`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify({
+            messages,
+            ...(opts.from ? { from: opts.from } : {}),
+            ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
+        }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        const detail = typeof err.error === 'string' ? err.error : '';
+        throw new Error(
+            detail || `Email batch failed (HTTP ${res.status}). Check Integration API and Resend.`,
+        );
+    }
+    return res.json();
+}
+
+/**
+ * @returns {Promise<unknown>}
+ */
+export async function resendListTemplates() {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const res = await fetch(`${base}/resend/templates`, { method: 'GET', headers: integrationHeadersJson() });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(typeof err.error === 'string' ? err.error : `HTTP ${res.status}`);
+    }
+    return res.json();
+}
+
+/**
+ * @param {Record<string, unknown>} body
+ */
+export async function resendCreateTemplate(body) {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const res = await fetch(`${base}/resend/templates`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(typeof err.error === 'string' ? err.error : `HTTP ${res.status}`);
+    }
+    return res.json();
+}
+
+/**
+ * @param {Record<string, unknown>} body
+ */
+export async function resendCreateSegment(body) {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const res = await fetch(`${base}/resend/segments`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(typeof err.error === 'string' ? err.error : `HTTP ${res.status}`);
+    }
+    return res.json();
+}
+
+/**
+ * @param {Record<string, unknown>} body
+ */
+export async function resendAddContact(body) {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const res = await fetch(`${base}/resend/contacts`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(typeof err.error === 'string' ? err.error : `HTTP ${res.status}`);
+    }
+    return res.json();
+}
+
+/**
+ * @param {Record<string, unknown>} body
+ */
+export async function resendAddContactToSegment(body) {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const res = await fetch(`${base}/resend/contacts/segment`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(typeof err.error === 'string' ? err.error : `HTTP ${res.status}`);
+    }
+    return res.json();
+}
+
+/**
+ * @param {Record<string, unknown>} body — segmentId, subject, html, name, from?, text?, send?
+ * @returns {Promise<Record<string, unknown>>}
+ */
+export async function resendCreateBroadcast(body) {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const res = await fetch(`${base}/resend/broadcasts`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(typeof err.error === 'string' ? err.error : `HTTP ${res.status}`);
+    }
+    return res.json();
+}
+
+/**
+ * @param {string} id
+ * @param {Record<string, unknown>} [body]
+ */
+export async function resendSendBroadcast(id, body = {}) {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const res = await fetch(
+        `${base}/resend/broadcasts/${encodeURIComponent(String(id).trim())}/send`,
+        {
+            method: 'POST',
+            headers: integrationHeadersJson(),
+            body: JSON.stringify(body),
+        },
+    );
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(typeof err.error === 'string' ? err.error : `HTTP ${res.status}`);
+    }
+    return res.json();
+}
+
+/**
  * @param {string} key
  * @param {string} contentType
  */

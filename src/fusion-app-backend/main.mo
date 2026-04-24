@@ -12,9 +12,11 @@ import Time "mo:base/Time";
 import Buffer "mo:base/Buffer";
 import Debug "mo:base/Debug";
 import Order "mo:base/Order";
+import { migration } "RosterEmailMigration";
 
+// `migration` upgrades on-chain `artistsStable` from `ArtistRecordV0` to `ArtistRecord` (adds `profile.contactEmail`).
 // One-time mainnet migration from minimal subscriber-only wasm used `Migration.mo` (removed after upgrade).
-persistent actor {
+(with migration) persistent actor {
   /// Internet Identity / admin principals allowed to list/delete subscribers and manage admins.
   /// Initial value is used on **first install only**; upgrades keep stable state. New defaults must also be
   /// listed in `defaultAdminPrincipals()` so `postupgrade` merges them into existing canisters.
@@ -1587,6 +1589,7 @@ persistent actor {
           featuredOrder = fo;
           visibility = "public";
           updatedAt = now;
+          contactEmail = "";
           filter = null;
           galleryFilter = null;
         };
@@ -1680,7 +1683,11 @@ persistent actor {
   };
 
   private func sanitizeArtistRecordForPublic(rec : Types.ArtistRecord) : Types.ArtistRecord {
-    { rec with accessCode = "" };
+    {
+      rec with
+      accessCode = "";
+      profile = { rec.profile with contactEmail = "" };
+    };
   };
 
   /// Private profiles stay out of feed pools; direct `/profile/:slug` reads still use `getArtistRecordBySlug`.

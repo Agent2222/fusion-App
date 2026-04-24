@@ -348,7 +348,7 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
 
                 .confirmed-wrap {
                     width: 100%;
-                    margin-top: 3%;
+                    margin-bottom: 5%;
                 }
 
                 .header-band {

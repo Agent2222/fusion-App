@@ -30,6 +30,7 @@ describe('studioArtistForm', () => {
         expect(html).toContain('id="studio-art-panel-advanced"');
         expect(html).toContain('id="studio-art-panel-new-world"');
         expect(html).toContain('Translate to New World');
+        expect(html).toContain('name="art-contact-email"');
     });
 
     it('normalizeArtistImportRow accepts flat collect-shaped payload', () => {

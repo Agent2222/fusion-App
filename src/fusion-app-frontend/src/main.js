@@ -1,3 +1,4 @@
+import "./utils/metaPixelBootstrap.js";
 import "./components/subComponents/page-transition.js";
 import { router } from "./router.js";
 import { DEV_MODE } from "./config.js";

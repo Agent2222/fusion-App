@@ -45,6 +45,7 @@ stripe listen --forward-to localhost:8787/webhooks/stripe
 | `AWS_SESSION_TOKEN` | optional | Only if using temporary credentials (STS) |
 | `S3_PUBLIC_BASE_URL` | no | Public base for object URLs (default: virtual-hosted–style S3 URL) |
 | `S3_KEY_PREFIX` | no | Prefix for keys (default `uploads/`) |
+| `FUSION_SIGNATURE_LOGO_URL` | no | If set, integration server rewrites `https://…/email/Fusion-Logo-Sig-1.png` in HTML email bodies to this URL (e.g. CDN) for test/batch send |
 
 ## Scripts
 
@@ -60,4 +61,14 @@ stripe listen --forward-to localhost:8787/webhooks/stripe
 - `POST /stripe/create-payment-intent` — body `{ amount, currency?, metadata? }` (Studio tests / legacy)
 - `POST /webhooks/stripe` — **raw** JSON body; Stripe signature via `STRIPE_WEBHOOK_SECRET`
 - `POST /email/send` — body `{ to, subject, html | text, replyTo?, from? }` — optional `from` overrides `RESEND_FROM` when set (must be a verified sender in Resend)
+- `POST /email/batch` — body `{ messages: [{ to, subject, html? | text? }], from?, replyTo? }` — Resend batch send, chunked to ≤100 per call with a short delay between chunks. Returns `{ ok, okCount, failCount, results }`.
+- `GET /resend/templates` — list templates (Resend REST, API key on server)
+- `POST /resend/templates` — create template
+- `GET /resend/templates/:id` — get template
+- `GET /resend/segments` — list segments
+- `POST /resend/segments` — create segment
+- `POST /resend/contacts` — create contact
+- `POST /resend/contacts/segment` — add contact to segment (body must include `segmentId` or `segment_id`, forwarded to `POST /segments/{id}/contacts` on Resend; path may require adjustment for your Resend API version)
+- `POST /resend/broadcasts` — body `{ segmentId, subject, html, name?, text?, from?, send? }` — uses Node Resend SDK `broadcasts.create` when available
+- `POST /resend/broadcasts/:id/send` — send a draft broadcast
 - `POST /storage/presign` — body `{ key, contentType }`

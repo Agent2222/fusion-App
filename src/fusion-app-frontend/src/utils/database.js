@@ -604,6 +604,7 @@ function mapCanisterArtistRow(a, cohortByArtistId) {
         featuredOrder: Number(a.featured_order ?? a.featuredOrder ?? 0),
         visibility: String(a.visibility ?? ''),
         updatedAt: String(a.updated_at ?? a.updatedAt ?? ''),
+        contactEmail: String(a.contact_email ?? a.contactEmail ?? '').trim(),
         mostRecentProgram: String(a.most_recent_program ?? a.mostRecentProgram ?? ''),
         filter: filterRaw
             ? (() => {
@@ -660,6 +661,7 @@ function normalizeArtistDefaults(a) {
         ...a,
         imported: Boolean(a.imported),
         accessCode: String(a.accessCode ?? a.access_code ?? ''),
+        contactEmail: String(/** @type {Record<string, unknown>} */ (a).contactEmail ?? '').trim(),
         mostRecentProgram: String(a.mostRecentProgram ?? a.most_recent_program ?? ''),
     };
 }
@@ -1114,6 +1116,9 @@ export async function loadArtistForStudioEdit(slug, tableRow = null) {
             ...fromCanister,
             imported: Boolean(tr.imported ?? fromCanister.imported),
             accessCode: String(tr.accessCode ?? fromCanister.accessCode ?? ''),
+            contactEmail: String(
+                tr.contactEmail ?? tr.contact_email ?? fromCanister.contactEmail ?? '',
+            ).trim(),
         }),
         meta
     );
@@ -1238,6 +1243,7 @@ export async function syncStudioArtistsLegacyIntroGalleries() {
                     featuredOrder: row.featuredOrder,
                     visibility: row.visibility,
                     updatedAt: new Date().toISOString(),
+                    contactEmail: row.contactEmail,
                     filter: row.filter,
                     galleryFilter: row.galleryFilter,
                     locales: normalized,
@@ -1458,6 +1464,7 @@ function fakeArtistRecordFromTestArtist(a) {
             featuredOrder: Math.max(0, Math.floor(Number(p.featuredOrder ?? 0))),
             visibility: String(p.visibility ?? 'public'),
             updatedAt: String(p.updatedAt ?? ''),
+            contactEmail: String(p.contactEmail ?? '').trim(),
             filter: p.filter ? [p.filter] : [],
             galleryFilter: p.galleryFilter ? [p.galleryFilter] : [],
         },

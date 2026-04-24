@@ -75,6 +75,7 @@ import {
 import { MAX_MANUAL_FEATURED, readArtistFeaturedMeta } from '../../utils/artistFeaturedExtension.js';
 import { LEGACY_PROFILE_BASE } from '../../utils/studioLegacyProfileUrls.js';
 import { openStudioModal } from '../../utils/studioModal.js';
+import { openSendBlastModal } from './sendBlastModal.js';
 import {
     createPaymentIntent,
     fetchIntegrationHealth,
@@ -458,6 +459,9 @@ function renderArtists() {
                 </p>
                 <button type="button" class="studio-btn-secondary" id="studio-artists-world-batch-open">Generate world from bio (batch)…</button>
             </div>
+            <div class="studio-artists-send-blast" style="margin:0 0 1rem">
+                <button type="button" class="studio-btn-secondary" id="studio-artists-send-blast-open">Send blast…</button>
+            </div>
             <div id="studio-artists-banner" class="studio-banner studio-banner--info"></div>
             <div class="studio-table-wrap studio-table-wrap--sticky-head">
                 <table class="studio-table studio-table--dense">
@@ -465,6 +469,7 @@ function renderArtists() {
                         <tr>
                             <th>Slug</th>
                             <th>ID</th>
+                            <th>Email</th>
                             <th>Imported</th>
                             <th>Access code</th>
                             <th>Visibility</th>
@@ -475,7 +480,7 @@ function renderArtists() {
                             <th class="studio-td-actions">Manage</th>
                         </tr>
                     </thead>
-                    <tbody id="studio-artists-tbody"><tr><td colspan="10">Loading…</td></tr></tbody>
+                    <tbody id="studio-artists-tbody"><tr><td colspan="11">Loading…</td></tr></tbody>
                 </table>
             </div>
         </div>
@@ -2299,18 +2304,23 @@ async function initArtists(mainEl) {
             if (quickFilter === 'featurable' && !a.featurable) return false;
             if (quickFilter === 'featured' && !a.featured) return false;
             if (!q) return true;
-            const hay = `${a.slug} ${a.id} ${a.visibility} ${a.featuredOrder} ${a.mostRecentProgram ?? ''}`.toLowerCase();
+            const hay = `${a.slug} ${a.id} ${a.contactEmail ?? ''} ${a.visibility} ${a.featuredOrder} ${a.mostRecentProgram ?? ''}`.toLowerCase();
             return hay.includes(q);
         });
         if (countEl) countEl.textContent = String(q || quickFilter !== 'all' ? artists.length : allArtists.length);
         if (!artists.length) {
-            tbody.innerHTML = `<tr><td colspan="10">${allArtists.length ? 'No rows match filters.' : 'No artists.'}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="11">${allArtists.length ? 'No rows match filters.' : 'No artists.'}</td></tr>`;
             return;
         }
         tbody.innerHTML = artists
             .map((a) => {
                 const slugRaw = String(a.slug || '');
                 const slug = escapeHtml(slugRaw);
+                const emRaw = String(a.contactEmail ?? '').trim();
+                const em =
+                    emRaw && emRaw.length > 28
+                        ? `${escapeHtml(emRaw.slice(0, 25))}…`
+                        : escapeHtml(emRaw || '—');
                 const imp = a.imported ? 'Yes' : '—';
                 const code = a.accessCode ? escapeHtml(String(a.accessCode)) : '—';
                 const idEsc = escapeHtml(String(a.id || ''));
@@ -2320,6 +2330,7 @@ async function initArtists(mainEl) {
                 return `<tr>
                 <td>${slug}</td>
                 <td>${idEsc}</td>
+                <td class="studio-td-ellipsis" title="${escapeHtml(emRaw)}">${em}</td>
                 <td>${imp}</td>
                 <td><code class="studio-code-inline">${code}</code></td>
                 <td>${escapeHtml(a.visibility || '')}</td>
@@ -2739,6 +2750,29 @@ ${urlHelp}
     });
 
     wireArtistWorldBatchUI(mainEl, load);
+
+    const sendBlastOpen = mainEl.querySelector('#studio-artists-send-blast-open');
+    if (sendBlastOpen instanceof HTMLButtonElement) {
+        const syncBlast = () => {
+            sendBlastOpen.disabled = getDataSource() !== 'live';
+            sendBlastOpen.title =
+                getDataSource() === 'live' ? '' : 'Requires live data and Integration API (set Studio → Services).';
+        };
+        syncBlast();
+        window.addEventListener('fusion-data-source-change', syncBlast);
+        sendBlastOpen.addEventListener('click', () => {
+            if (getDataSource() !== 'live') {
+                alert(
+                    'Send blast uses the Integration API (Resend) and canister roster data. Switch Studio data source to Live and set Integration API URL + key under Studio → Services, then try again.'
+                );
+                return;
+            }
+            openSendBlastModal({
+                getArtistsRows: getArtistsForStudio,
+                onRefresh: load,
+            });
+        });
+    }
 
     await load();
 }

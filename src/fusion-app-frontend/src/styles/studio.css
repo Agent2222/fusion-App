@@ -2608,6 +2608,75 @@ button.studio-wordmark-btn:hover {
   margin-top: 0.35rem;
 }
 
+/* Send blast modal */
+.studio-send-blast-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1rem;
+  align-items: flex-end;
+  margin-bottom: 0.5rem;
+}
+
+.studio-send-blast-cohort {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  align-items: center;
+  min-height: 2rem;
+}
+
+.studio-send-blast-cohort-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: var(--studio-muted, #475569);
+}
+
+.studio-send-blast-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  max-height: min(40vh, 16rem);
+  overflow: auto;
+  padding: 0.25rem 0;
+  border: 1px solid color-mix(in srgb, var(--c2, #000) 15%, transparent);
+  border-radius: var(--studio-card-radius, 8px);
+  background: #fff;
+}
+
+.studio-pill {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--c2, #000) 22%, transparent);
+  background: #f8fafc;
+  color: var(--c2, #0f172a);
+  cursor: pointer;
+  max-width: 100%;
+  text-align: left;
+}
+
+.studio-pill:hover,
+.studio-pill:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--c1, #c12525) 45%, transparent);
+  outline-offset: 1px;
+}
+
+.studio-pill--selected {
+  background: #fef9c3;
+  border-color: #eab308;
+  color: #713f12;
+}
+
+.studio-td-ellipsis {
+  max-width: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Account: modal overlay above Studio workspace (embeds member dashboard) */
 .studio-account-overlay {
   position: fixed;

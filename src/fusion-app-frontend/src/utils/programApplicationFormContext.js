@@ -54,7 +54,7 @@ export function findApplicationDeadlineDateFromKeyDates(keyDates) {
 
 /**
  * @param {Record<string, unknown> | null | undefined} programPage
- * @param {{ programYear?: string }} [opts]
+ * @param {{ programYear?: string, availableSlots?: number | null, totalSlots?: number | null }} [opts]
  * @returns {{
  *   applicationFeeLine: string,
  *   depositAmountDisplay: string,
@@ -65,6 +65,8 @@ export function findApplicationDeadlineDateFromKeyDates(keyDates) {
  *   detailsSectionId: string,
  *   applicationFeeAmountCents: number | null,
  *   applicationPaymentOptions: Record<'one_time' | 'bimonthly' | 'annual', ApplicationPaymentOptionSlice>,
+ *   availableSlots: number | null,
+ *   totalSlots: number | null,
  * }}
  */
 function parseApplicationFeeAmountCents(raw) {
@@ -111,6 +113,11 @@ export function buildProgramApplicationFormContext(programPage, opts = {}) {
         applicationPaymentOptions[k] = parseOnePaymentOption(/** @type {Record<string, unknown>} */ (apoRoot)[k]);
     }
 
+    const as =
+        typeof opts?.availableSlots === 'number' && Number.isFinite(opts.availableSlots) ? opts.availableSlots : null;
+    const ts =
+        typeof opts?.totalSlots === 'number' && Number.isFinite(opts.totalSlots) ? opts.totalSlots : null;
+
     return {
         applicationFeeLine: String(costs.applicationFee ?? '').trim(),
         depositAmountDisplay: deposit,
@@ -121,5 +128,7 @@ export function buildProgramApplicationFormContext(programPage, opts = {}) {
         detailsSectionId: 'programDetailsSection',
         applicationFeeAmountCents,
         applicationPaymentOptions,
+        availableSlots: as,
+        totalSlots: ts,
     };
 }

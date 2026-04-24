@@ -1349,6 +1349,22 @@ class JoinNetworkComponent extends HTMLElement {
       setHintBusy(false);
       if (hint) hint.textContent = "";
       if (payBtn) payBtn.disabled = false;
+      try {
+        posthog.capture("membership_payment_elements_ready", {
+          modal_type:
+            this._modalType ||
+            this.getAttribute("data-modal-type") ||
+            "membership",
+          join_mode: this._joinMode || "full",
+          ads_conversion: "AddPaymentInfo",
+        });
+        metaTrack("AddPaymentInfo", {
+          content_name: "signup_payment_modal",
+          source: "join_network",
+        });
+      } catch {
+        /* ignore */
+      }
     } catch (e) {
       if (myGen !== this._stripePrepareGen) return;
       this._teardownStripePayment();
@@ -2402,7 +2418,11 @@ class JoinNetworkComponent extends HTMLElement {
             currency: "USD",
             ads_conversion: "Purchase",
           });
-          metaTrack("Purchase", { value: purchaseValue, currency: "USD" });
+          metaTrack("Purchase", {
+            value: purchaseValue,
+            currency: "USD",
+            content_name: "membership_signup",
+          });
           if (this._joinMode === "full" && this._fusionPendingId) {
             try {
               sessionStorage.setItem(FUSION_PENDING_MEMBERSHIP_LINK_KEY, "1");

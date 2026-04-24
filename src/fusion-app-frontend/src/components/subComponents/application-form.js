@@ -39,6 +39,10 @@ const DEFAULT_PROGRAM_FORM_CTX = {
     /** @type {number | null} */
     applicationFeeAmountCents: null,
     applicationPaymentOptions: emptyApplicationPaymentOptions(),
+    /** @type {number | null} */
+    availableSlots: null,
+    /** @type {number | null} */
+    totalSlots: null,
 };
 
 /**
@@ -203,6 +207,41 @@ class ApplicationFormComponent extends HTMLElement {
 
         this._hydratePaymentPlanCards();
         this._hydrateWhatsIncludedForPlan();
+        this._syncCohortSlotsInDom(root);
+    }
+
+    /**
+     * Same numbers as the confirmed-artists strip + program details sidebar when `availableSlots` / `totalSlots` are set.
+     * @param {ShadowRoot} root
+     */
+    _syncCohortSlotsInDom(root) {
+        const L = this._labels();
+        const ctx = this._programFormContext;
+        const av = ctx?.availableSlots;
+        const tot = ctx?.totalSlots;
+        const show =
+            typeof av === 'number' &&
+            Number.isFinite(av) &&
+            typeof tot === 'number' &&
+            Number.isFinite(tot);
+        const top = root.querySelector('#app-cohort-slots-top');
+        const pay = root.querySelector('#app-cohort-slots-payment');
+        const tpl = String(L.slotsRemainingValue || '').trim();
+        const html = show
+            ? tpl
+                  .replace(/\{\{a\}\}/g, String(Math.max(0, Math.floor(av))))
+                  .replace(/\{\{b\}\}/g, String(Math.max(0, Math.floor(tot))))
+            : '';
+        for (const el of [top, pay]) {
+            if (!el) continue;
+            if (!show || !html) {
+                el.setAttribute('hidden', '');
+                el.innerHTML = '';
+            } else {
+                el.removeAttribute('hidden');
+                el.innerHTML = html;
+            }
+        }
     }
 
     /**
@@ -451,6 +490,28 @@ class ApplicationFormComponent extends HTMLElement {
                 websiteByline: '（ウェブサイト、ポートフォリオ、作品を置いている場所 — リンク可）',
                 discipline: 'いま、実践をどう定義していますか？',
                 disciplineByline: '（分野や、やり方の呼び方 — カテゴリに当てはまらなくても構いません）',
+                /** Suggestions only — free text is always allowed (`<datalist>`). */
+                disciplineDatalistOptions: [
+                    '絵画',
+                    'ドローイング',
+                    '版画',
+                    '彫刻',
+                    'インスタレーション',
+                    '写真',
+                    '映像 / フィルム',
+                    '音楽 / サウンド',
+                    'パフォーマンス',
+                    'ダンス',
+                    'テキスタイル / ファッション',
+                    'デザイン',
+                    'デジタル / メディアアート',
+                    '文学',
+                    '建築',
+                    '研究型の実践',
+                    '複合メディア',
+                    'その他（自由記述）',
+                ],
+                slotsRemainingValue: '残り <strong>{{a}}</strong> / 全 <strong>{{b}}</strong> 枠',
                 bioStatement: 'アーティストとして、ひとりの人として、あなたについて教えてください。',
                 bioStatementByline: '（短い経歴でも、もっと個人的なことでも — 正直に書ける方）',
                 exploration: 'いま探求・問いかけ・変化の途中にあることは何ですか？',
@@ -558,6 +619,28 @@ class ApplicationFormComponent extends HTMLElement {
             websiteByline: '(Website, portfolio, or any place your work lives — links welcome)',
             discipline: 'How do you define your practice right now?',
             disciplineByline: '(Your discipline, or however you choose to describe what you do — it doesn’t have to fit a category)',
+            /** Suggestions only — free text is always allowed (`<datalist>`). */
+            disciplineDatalistOptions: [
+                'Painting',
+                'Drawing',
+                'Printmaking',
+                'Sculpture',
+                'Installation',
+                'Photography',
+                'Film / video',
+                'Sound / music',
+                'Performance',
+                'Dance',
+                'Textile / fashion',
+                'Design',
+                'Digital / media art',
+                'Writing',
+                'Architecture',
+                'Research-based practice',
+                'Mixed media',
+                'Other (describe in your own words)',
+            ],
+            slotsRemainingValue: '<strong>{{a}}</strong> of <strong>{{b}}</strong> Slots Remaining',
             bioStatement: 'Tell us about yourself, as an artist and as a person.',
             bioStatementByline: '(A short bio, or something more personal — whichever feels more honest to you)',
             exploration: 'What are you currently exploring, questioning, or becoming?',
@@ -925,6 +1008,21 @@ class ApplicationFormComponent extends HTMLElement {
             if (payBtn) payBtn.disabled = false;
             const ph = root?.querySelector('#app-payment-placeholder');
             if (ph instanceof HTMLElement) ph.hidden = true;
+            try {
+                posthog.capture('program_application_payment_elements_ready', {
+                    ...this._posthogApplicationBaseProps(),
+                    payment_plan: this._paymentPlan || 'unknown',
+                    ads_conversion: 'AddPaymentInfo',
+                });
+                const pidReady = String(this.getAttribute('data-program-id') || '').trim();
+                metaTrack('AddPaymentInfo', {
+                    content_name: 'program_application_card_form',
+                    payment_plan: this._paymentPlan || undefined,
+                    ...(pidReady ? { content_ids: [pidReady] } : {}),
+                });
+            } catch {
+                /* ignore */
+            }
         } catch (e) {
             if (myGen !== this._stripePrepareGen) return;
             this._teardownStripePayment();
@@ -983,6 +1081,32 @@ class ApplicationFormComponent extends HTMLElement {
             }
             const email = String(root?.querySelector('#app-email')?.value ?? '').trim();
             const programId = this.getAttribute('data-program-id') || '';
+            try {
+                const feeCents = this._programFormContext?.applicationFeeAmountCents;
+                const payVal =
+                    this._paymentPlan === 'one_time' &&
+                    typeof feeCents === 'number' &&
+                    Number.isFinite(feeCents) &&
+                    feeCents >= 50
+                        ? feeCents / 100
+                        : undefined;
+                posthog.capture('program_application_payment_completed', {
+                    ...this._posthogApplicationBaseProps(),
+                    payment_plan: this._paymentPlan || 'unknown',
+                    ...(typeof payVal === 'number' ? { value: payVal, currency: 'USD' } : {}),
+                    ads_conversion: 'Purchase',
+                });
+                const purchaseParams = {
+                    currency: 'USD',
+                    content_name: 'program_application_fee',
+                };
+                if (typeof payVal === 'number') purchaseParams.value = payVal;
+                const pidTrim = String(programId || '').trim();
+                if (pidTrim) purchaseParams.content_ids = [pidTrim];
+                metaTrack('Purchase', purchaseParams);
+            } catch {
+                /* ignore */
+            }
 
             if (this._fusionPendingId && email.includes('@')) {
                 const snap = await getAuthSnapshot();
@@ -1374,6 +1498,14 @@ class ApplicationFormComponent extends HTMLElement {
             posthog.capture('program_application_payment_plan_selected', {
                 ...this._posthogApplicationBaseProps(),
                 payment_plan: plan,
+                funnel_step: 'payment_option_clicked',
+                ads_conversion: 'InitiateCheckout',
+            });
+            const pid = String(this.getAttribute('data-program-id') || '').trim();
+            metaTrack('InitiateCheckout', {
+                content_name: 'program_application',
+                payment_plan: plan,
+                ...(pid ? { content_ids: [pid] } : {}),
             });
         } catch {
             /* ignore */
@@ -1690,6 +1822,15 @@ class ApplicationFormComponent extends HTMLElement {
         this._hasCapturedProgramApplicationStarted = false;
         this._teardownStripePayment();
         const L = this._labels();
+        const escAttr = (s) =>
+            String(s)
+                .replace(/&/g, '&amp;')
+                .replace(/"/g, '&quot;')
+                .replace(/</g, '&lt;');
+        const disciplineOpts = Array.isArray(L.disciplineDatalistOptions) ? L.disciplineDatalistOptions : [];
+        const disciplineDatalistHtml = disciplineOpts
+            .map((v) => `<option value="${escAttr(v)}"></option>`)
+            .join('');
         this.shadow.innerHTML = `
             <style>
                 :host {
@@ -1718,6 +1859,32 @@ class ApplicationFormComponent extends HTMLElement {
 
                 #app-form-main[hidden] {
                     display: none !important;
+                }
+
+                .app-cohort-slots {
+                    max-width: 820px;
+                    margin: 0 auto clamp(0.75rem, 2vw, 1.1rem);
+                    padding: 0;
+                    box-sizing: border-box;
+                    text-align: center;
+                    font-size: clamp(0.88rem, 1.05vw, 0.98rem);
+                    font-variation-settings: var(--fv-body-wide);
+                    color: var(--c2);
+                    line-height: 1.45;
+                    letter-spacing: 0.02em;
+                }
+
+                .app-cohort-slots strong {
+                    font-weight: 600;
+                }
+
+                .app-cohort-slots[hidden] {
+                    display: none !important;
+                }
+
+                .app-cohort-slots--payment {
+                    text-align: left;
+                    margin: 0 0 0.85rem;
                 }
 
                 .app-selection-intro {
@@ -1757,7 +1924,7 @@ class ApplicationFormComponent extends HTMLElement {
                     box-sizing: border-box;
                     background: var(--c3);
                     border: 1px solid var(--c2);
-                    touch-action: pan-y;
+                    touch-action: manipulation;
                 }
 
                 .app-form-card--spaced {
@@ -1941,6 +2108,24 @@ class ApplicationFormComponent extends HTMLElement {
                 }
 
                 .app-field label {
+                    display: block;
+                    margin-bottom: 0.25rem;
+                    font-size: clamp(0.8rem, 1vw, 0.9rem);
+                    font-variation-settings: var(--fv-label);
+                    color: var(--c2);
+                    letter-spacing: 0.02em;
+                }
+
+                /* Implicit label: tap-to-focus works reliably in shadow DOM (discipline + datalist). */
+                .app-field-label-wrap {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: stretch;
+                    cursor: text;
+                    margin: 0;
+                }
+
+                .app-field-label-wrap .app-field-label-text {
                     display: block;
                     margin-bottom: 0.25rem;
                     font-size: clamp(0.8rem, 1vw, 0.9rem);
@@ -2278,6 +2463,7 @@ class ApplicationFormComponent extends HTMLElement {
             <div class="application-form-root">
                 <h2 class="app-form-title">${L.title}</h2>
                 <div id="app-form-main">
+                    <p id="app-cohort-slots-top" class="app-cohort-slots" hidden></p>
                     <div id="app-selection-intro" class="app-selection-intro"></div>
                     <form id="app-application-form-fields" novalidate>
                         <div class="app-form-card">
@@ -2319,10 +2505,13 @@ class ApplicationFormComponent extends HTMLElement {
                                 <p class="app-field-byline" id="app-website-byline">${L.websiteByline}</p>
                                 <input id="app-website" name="website" type="text" inputmode="url" autocomplete="url" placeholder="https://" aria-describedby="app-website-byline" />
                             </div>
-                            <div class="app-field">
-                                <label for="app-discipline">${L.discipline}</label>
-                                <p class="app-field-byline" id="app-discipline-byline">${L.disciplineByline}</p>
-                                <input id="app-discipline" name="discipline" type="text" autocomplete="off" aria-describedby="app-discipline-byline" />
+                            <div class="app-field app-field--discipline">
+                                <label class="app-field-label-wrap">
+                                    <span class="app-field-label-text">${L.discipline}</span>
+                                    <span class="app-field-byline" id="app-discipline-byline">${L.disciplineByline}</span>
+                                    <input id="app-discipline" name="discipline" type="text" autocomplete="off" list="app-discipline-datalist" aria-describedby="app-discipline-byline" />
+                                </label>
+                                <datalist id="app-discipline-datalist">${disciplineDatalistHtml}</datalist>
                             </div>
                             <div class="app-field">
                                 <label for="app-bio">${L.bioStatement}</label>
@@ -2363,6 +2552,7 @@ class ApplicationFormComponent extends HTMLElement {
                             </p>
                             <p id="app-fee-notice-italic" class="app-fee-notice-italic"></p>
                             <p class="app-payment-fee-lead">${L.paymentFeeLead}</p>
+                            <p id="app-cohort-slots-payment" class="app-cohort-slots app-cohort-slots--payment" hidden></p>
                             <div class="app-payment-plan-grid" role="radiogroup" aria-label="${L.paymentPlanGroupLabel}">
                                 <button type="button" class="app-payment-plan-card" role="radio" aria-checked="false" data-app-payment-plan="one_time" id="app-plan-one-time">
                                     <span class="app-payment-plan-radio" aria-hidden="true"></span>

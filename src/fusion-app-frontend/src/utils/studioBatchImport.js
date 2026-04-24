@@ -103,6 +103,9 @@ export function normalizeArtistImportRow(raw, codePool, opts = {}) {
         featuredOrder: Math.max(0, Math.floor(Number(prof.featuredOrder ?? prof.featured_order ?? 0))),
         visibility: String(prof.visibility ?? 'public'),
         updatedAt: String(prof.updatedAt ?? prof.updated_at ?? now),
+        contactEmail: String(
+            prof.contactEmail ?? prof.contact_email ?? row.contactEmail ?? row.contact_email ?? '',
+        ).trim(),
         filter: mapFilter(prof.filter),
         galleryFilter: mapGallery(prof.galleryFilter ?? prof.gallery_filter),
     };
@@ -229,6 +232,7 @@ export function toMotokoArtistRecord(rec) {
             featuredOrder: p.featuredOrder,
             visibility: p.visibility,
             updatedAt: p.updatedAt,
+            contactEmail: String(p.contactEmail ?? ''),
             filter: filterMotoko,
             galleryFilter: p.galleryFilter ? [p.galleryFilter] : [],
         },
@@ -252,6 +256,7 @@ export function artistRecordToTestOverlayShape(rec) {
         featuredOrder: p.featuredOrder,
         visibility: p.visibility,
         updatedAt: p.updatedAt,
+        contactEmail: String(p.contactEmail ?? ''),
         filter: p.filter,
         galleryFilter: p.galleryFilter,
         imported: Boolean(rec.imported),

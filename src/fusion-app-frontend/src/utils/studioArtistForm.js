@@ -232,6 +232,7 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
             <span>Featurable (random featured pool)</span>
           </label>
           <label class="studio-field"><span>imported</span><input name="art-imported" class="studio-input" readonly value="${esc(escapeHtml, a.imported ? 'yes' : 'no')}" /></label>
+          <label class="studio-field studio-field--grow"><span>Contact email (Studio / email blast)</span><input name="art-contact-email" type="email" class="studio-input" placeholder="artist@example.com" autocomplete="off" value="${esc(escapeHtml, String(a.contactEmail ?? ''))}" title="Roster contact — not shown on the public site" /></label>
           <label class="studio-field"><span>accessCode</span><input name="art-accessCode" class="studio-input" readonly value="${esc(escapeHtml, String(a.accessCode ?? ''))}" /></label>
         </div>
         <h4 class="studio-prog-subhead">Feed filter defaults</h4>
@@ -496,6 +497,7 @@ export function collectArtistRecordFromForm(root, baseArtist) {
         featuredOrder,
         visibility,
         updatedAt,
+        contactEmail: String(fd.get('art-contact-email') ?? '').trim(),
         filter,
         galleryFilter,
         locales: normalized,
