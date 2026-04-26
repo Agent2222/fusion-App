@@ -1,5 +1,5 @@
 import placeholderImg from "../assets/dev/program_hero-1.jpg";
-import { findArtistByEnglishName } from "../utils/artistSlug.js";
+import { findArtistForConfirmedListLabel } from "../utils/artistSlug.js";
 import {
   findProgramPairByPathname,
   getApplicationPaymentGlobal,
@@ -23,7 +23,39 @@ import { mergeLocaleDeep } from "../utils/localeFallback.js";
 import { getPublicSiteOrigin } from "../config.js";
 import { applyDocumentSeo } from "../utils/documentSeo.js";
 import { buildProgramApplicationFormContext } from "../utils/programApplicationFormContext.js";
+import {
+  countCalendarMonthsFromNowToDeadline,
+  resolveProgramApplicationDeadlineDate,
+} from "../utils/programDeadlineParse.js";
 import { withSeoImageAlt, withSeoVideoLabel } from "../utils/mediaAltSeo.js";
+import { buildProgramRunSidebarDateLines } from "../utils/programSidebarRunDates.js";
+
+/**
+ * Cohort slot counts are canonical on the English program card. For Japanese,
+ * `mergeLocaleDeep(en, ja)` can replace EN numbers with JA (both are non-empty),
+ * so do not read `availableSlots` / `totalSlots` from the merged `current`.
+ * Mirrors `en.totalSlots ?? programPage.totalSlots` in `programRowReservedState`.
+ * @param {unknown} enCard
+ * @returns {{ availableSlots: number | null, totalSlots: number | null }}
+ */
+function slotsFromEnglishProgramCard(enCard) {
+  if (!enCard || typeof enCard !== "object") {
+    return { availableSlots: null, totalSlots: null };
+  }
+  const en = /** @type {Record<string, unknown>} */ (enCard);
+  const pp =
+    en.programPage != null && typeof en.programPage === "object"
+      ? /** @type {Record<string, unknown>} */ (en.programPage)
+      : null;
+  const totalRaw = en.totalSlots ?? pp?.totalSlots;
+  const availRaw = en.availableSlots ?? pp?.availableSlots;
+  const n = (v) =>
+    typeof v === "number" && Number.isFinite(v) ? v : null;
+  return {
+    availableSlots: n(availRaw),
+    totalSlots: n(totalRaw),
+  };
+}
 
 function toTrimmedList(values) {
   if (!Array.isArray(values)) return [];
@@ -353,6 +385,20 @@ async function applyProgramToDom(programPair) {
     current?.programPage && typeof current.programPage === "object"
       ? /** @type {Record<string, unknown>} */ (current.programPage)
       : {};
+  const recordDeposit = String(
+    /** @type {Record<string, unknown>} */ (current)?.depositAmountDisplay ?? "",
+  ).trim();
+  const programPageForForm = (() => {
+    const baseAf =
+      programPage.applicationForm != null &&
+      typeof programPage.applicationForm === "object"
+        ? { .../** @type {Record<string, unknown>} */ (programPage.applicationForm) }
+        : {};
+    if (recordDeposit) {
+      baseAf.depositAmountDisplay = recordDeposit;
+    }
+    return { ...programPage, applicationForm: baseAf };
+  })();
 
   const hero = document.getElementById("programDetailHeroMedia");
   const introTitle = document.getElementById("programIntroTitle");
@@ -424,10 +470,9 @@ async function applyProgramToDom(programPair) {
     }
   }
 
-  const availableSlots =
-    typeof current?.availableSlots === "number" ? current.availableSlots : null;
-  const totalSlots =
-    typeof current?.totalSlots === "number" ? current.totalSlots : null;
+  const { availableSlots, totalSlots } = slotsFromEnglishProgramCard(
+    programPair.en,
+  );
 
   const formEl = document.getElementById("programApplicationSection");
   if (formEl && programId) {
@@ -440,7 +485,7 @@ async function applyProgramToDom(programPair) {
       .setProgramFormContext === "function"
   ) {
     /** @type {{ setProgramFormContext: (c: object) => void }} */ (formEl).setProgramFormContext(
-      buildProgramApplicationFormContext(programPage, {
+      buildProgramApplicationFormContext(programPageForForm, {
         programYear: current?.year != null ? String(current.year) : "",
         availableSlots,
         totalSlots,
@@ -472,10 +517,12 @@ async function applyProgramToDom(programPair) {
     const pool = (await getArtists()) || [];
     const resolved = artists.map((name) => {
       const label = typeof name === "string" ? name : name?.name || "";
-      const found = label ? findArtistByEnglishName(label, pool) : null;
+      const found = label ? findArtistForConfirmedListLabel(label, pool) : null;
       if (found) return found;
       return {
         image: placeholderImg,
+        slug: "",
+        __confirmedPlaceholder: true,
         locales: {
           en: { name: label || "Artist", discipline: "" },
           ja: { name: label || "Artist", discipline: "" },
@@ -564,6 +611,52 @@ async function applyProgramToDom(programPair) {
     const costs = details?.costs != null && typeof details.costs === "object" ? details.costs : {};
     const applicationFeeLine =
       typeof costs.applicationFee === "string" ? costs.applicationFee.trim() : "";
+    const applicationForm =
+      programPage?.applicationForm != null &&
+      typeof programPage.applicationForm === "object"
+        ? /** @type {Record<string, unknown>} */ (programPage.applicationForm)
+        : {};
+    const depositFromForm = String(
+      applicationForm.depositAmountDisplay ?? "",
+    ).trim();
+    const depositLine = recordDeposit || depositFromForm;
+    const remainingExplicit = String(
+      /** @type {Record<string, unknown>} */ (costs).remainingBalance ?? "",
+    ).trim();
+    const remainingBalanceLine =
+      remainingExplicit || formatCostText(details?.costs) || "";
+    const japanResidencyNotice = String(
+      /** @type {Record<string, unknown>} */ (costs).japanResidencyDiscountNotice ??
+        "",
+    ).trim();
+    const programYear = current?.year != null ? String(current.year) : "";
+    const deadlineDate = resolveProgramApplicationDeadlineDate(
+      /** @type {Record<string, unknown>} */ (programPage),
+      programYear,
+    );
+    const now = new Date();
+    const maxPlanMonths = deadlineDate
+      ? countCalendarMonthsFromNowToDeadline(now, deadlineDate)
+      : 0;
+    const totalProgramFeeLine = String(
+      /** @type {Record<string, unknown>} */ (costs).base ?? "",
+    ).trim();
+    const useStructuredCost = Boolean(
+      totalProgramFeeLine ||
+        applicationFeeLine ||
+        depositLine ||
+        remainingBalanceLine ||
+        (typeof window.getLocale === "function" &&
+          window.getLocale() === "ja" &&
+          japanResidencyNotice) ||
+        maxPlanMonths > 1,
+    );
+    const localeForSidebar =
+      typeof window.getLocale === "function" ? window.getLocale() : "en";
+    const sidebarRunDates = buildProgramRunSidebarDateLines(
+      /** @type {Record<string, unknown>} */ (current),
+      localeForSidebar,
+    );
 
     programDetailsSection.setProgramDetails({
       programId,
@@ -576,7 +669,13 @@ async function applyProgramToDom(programPair) {
         details?.facilityList,
       ),
       costText: formatCostText(details?.costs),
+      totalProgramFeeLine,
       applicationFeeLine,
+      useStructuredCost,
+      depositLine,
+      remainingBalanceLine,
+      maxPlanMonths,
+      japanResidencyNotice,
       availableSlots,
       totalSlots,
       residences,
@@ -584,6 +683,7 @@ async function applyProgramToDom(programPair) {
       notIncluded,
       platform,
       additionalInfo: programPage?.additionalInfo || null,
+      sidebarRunDates,
     });
   }
 

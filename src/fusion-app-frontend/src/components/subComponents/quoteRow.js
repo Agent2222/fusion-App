@@ -36,7 +36,7 @@ class QuoteRowComponent extends HTMLElement {
     }
 
     static get observedAttributes() {
-        return ['active', 'context'];
+        return ['active', 'context', 'data-quote-text', 'data-quote-attribution', 'data-quote-href'];
     }
 
     attributeChangedCallback(prop, oldVal, newVal) {
@@ -76,6 +76,17 @@ class QuoteRowComponent extends HTMLElement {
 
     render() {
         const locale = typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
+        const overrideQuote = String(this.getAttribute('data-quote-text') || '').trim();
+        const overrideAttribution = String(this.getAttribute('data-quote-attribution') || '').trim();
+        const overrideHref = String(this.getAttribute('data-quote-href') || '').trim();
+        if (overrideQuote) {
+            this._renderQuoteBlock(
+                overrideQuote,
+                overrideAttribution || 'Artist',
+                overrideHref || '#',
+            );
+            return;
+        }
         const slice = this._getSlice();
         const enR = slice?.en && typeof slice.en === 'object' ? slice.en : {};
         const jaR = slice?.ja && typeof slice.ja === 'object' ? slice.ja : {};
@@ -97,6 +108,10 @@ class QuoteRowComponent extends HTMLElement {
             return;
         }
 
+        this._renderQuoteBlock(String(quote), String(attribution), String(href));
+    }
+
+    _renderQuoteBlock(quote, attribution, href) {
         this.shadow.innerHTML = `
             <style>
                 :host {

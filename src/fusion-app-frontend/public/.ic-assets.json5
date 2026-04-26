@@ -1,5 +1,13 @@
 [
     {
+        "match": ".well-known/ii-alternative-origins",
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+        },
+        "ignore": false
+    },
+    {
         "match": "**/*",
 
         // Provides a base set of security headers that will work for most dapps.

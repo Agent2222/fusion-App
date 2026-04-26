@@ -845,6 +845,11 @@ class LoadScreenComponent extends HTMLElement {
             enterText.classList.add('hidden');
         }
         this._userHasEnteredSite = true;
+        try {
+            window.dispatchEvent(new CustomEvent('fusion-site-entered', { bubbles: true }));
+        } catch {
+            /* ignore */
+        }
     }
 
     async refreshLoadscreenAdminState() {

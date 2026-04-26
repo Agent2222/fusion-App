@@ -1,5 +1,6 @@
 import { programApplicationCtaLabelForAuth, programApplicationReviewLabel } from '../../utils/programApplicationCta.js';
 import { revealProgramApplicationOrOpenJoin } from '../../utils/scrollAnchorToViewportGap.js';
+import { formatMonthlyFromRemainingAndMonths, splitTextLinesForBullets } from '../../utils/programDeadlineParse.js';
 
 /**
  * Program residency details: timeline (key dates) + sidebar (location, facilities, cost).
@@ -7,13 +8,14 @@ import { revealProgramApplicationOrOpenJoin } from '../../utils/scrollAnchorToVi
 class ProgramDetailsComponent extends HTMLElement {
     constructor() {
         super();
+        this._costPlanDisclosureUid = 0;
         this.shadow = this.attachShadow({ mode: 'open' });
-        /** @type {null | { programId?: string, applicationsOpen?: boolean, headline: string, keyDates: Array<{ date?: string, description?: string }>, locations?: string[], facilities?: string[], costText: string, applicationFeeLine?: string, availableSlots?: number | null, totalSlots?: number | null, residences?: Array<{ name?: string, href?: string }>, included?: string[], notIncluded?: string[], platform?: string, additionalInfo?: object | null }} */
+        /** @type {null | { programId?: string, applicationsOpen?: boolean, headline: string, keyDates: Array<{ date?: string, description?: string }>, locations?: string[], facilities?: string[], costText: string, totalProgramFeeLine?: string, applicationFeeLine?: string, useStructuredCost?: boolean, depositLine?: string, remainingBalanceLine?: string, maxPlanMonths?: number, japanResidencyNotice?: string, availableSlots?: number | null, totalSlots?: number | null, residences?: Array<{ name?: string, href?: string }>, included?: string[], notIncluded?: string[], platform?: string, additionalInfo?: object | null, sidebarRunDates?: { start?: string, end?: string } | null }} */
         this._data = null;
     }
 
     /**
-     * @param {{ programId?: string, applicationsOpen?: boolean, headline: string, keyDates: Array<{ date?: string, description?: string }>, locations?: string[], facilities?: string[], costText: string, applicationFeeLine?: string, availableSlots?: number | null, totalSlots?: number | null, residences?: Array<{ name?: string, href?: string }>, included?: string[], notIncluded?: string[], platform?: string, additionalInfo?: { applicationFee?: string, aboutProgram?: string, faq?: object[], programNotes?: object[], refundPolicy?: object[] } | null }} payload
+     * @param {{ programId?: string, applicationsOpen?: boolean, headline: string, keyDates: Array<{ date?: string, description?: string }>, locations?: string[], facilities?: string[], costText: string, totalProgramFeeLine?: string, applicationFeeLine?: string, useStructuredCost?: boolean, depositLine?: string, remainingBalanceLine?: string, maxPlanMonths?: number, japanResidencyNotice?: string, availableSlots?: number | null, totalSlots?: number | null, residences?: Array<{ name?: string, href?: string }>, included?: string[], notIncluded?: string[], platform?: string, additionalInfo?: { applicationFee?: string, aboutProgram?: string, faq?: object[], programNotes?: object[], refundPolicy?: object[] } | null, sidebarRunDates?: { start?: string, end?: string } | null }} payload
      */
     setProgramDetails(payload) {
         this._data = payload;
@@ -46,9 +48,23 @@ class ProgramDetailsComponent extends HTMLElement {
         const locale = typeof window.getLocale === 'function' ? window.getLocale() : 'en';
         if (locale === 'ja') {
             return {
+                dates: '日程',
+                runDateStart: '開始',
+                runDateEnd: '終了',
                 locations: '開催地',
                 facilities: '施設',
                 cost: '費用',
+                costTotalProgramFee: 'プログラム料金（合計）',
+                costApplicationFee: '応募料（申込時必須）',
+                costIfAccepted: '採択された場合',
+                costDepositBullet: 'デポジット（参加枠の確定）',
+                costRemainingBullet: '残金（プログラム開始前まで）',
+                costPaymentPlan: '柔軟な支払い・分割払い',
+                costDeposit: 'デポジット',
+                costRemaining: '残金',
+                costMonthlyPayment: '月額支払い',
+                costPaymentPlanHelper: '支払いプランは、一部の候補者向けに利用できます。',
+                costJapanNotice: '日本居住者向け',
                 residence: 'レジデンス',
                 included: '含まれるもの',
                 notIncluded: '含まれないもの',
@@ -64,9 +80,23 @@ class ProgramDetailsComponent extends HTMLElement {
             };
         }
         return {
+            dates: 'DATES',
+            runDateStart: 'Start',
+            runDateEnd: 'End',
             locations: 'LOCATIONS',
             facilities: 'FACILITIES',
             cost: 'COST',
+            costTotalProgramFee: 'Total Program Fee',
+            costApplicationFee: 'Application fee (required to apply)',
+            costIfAccepted: 'If accepted:',
+            costDepositBullet: 'Deposit (to secure your spot)',
+            costRemainingBullet: 'Remaining balance (due before program start)',
+            costDeposit: 'Deposit',
+            costRemaining: 'Remaining balance',
+            costPaymentPlan: 'Pay over time with a flexible plan',
+            costMonthlyPayment: 'Monthly payment',
+            costPaymentPlanHelper: 'Payment plans are available to select applicants.',
+            costJapanNotice: 'Notice (Japan)',
             cohortCapacity: 'COHORT',
             slotsRemainingValue: '<strong>{{a}}</strong> of <strong>{{b}}</strong> Slots Remaining',
             residence: 'RESIDENCE',
@@ -89,14 +119,33 @@ class ProgramDetailsComponent extends HTMLElement {
             locations,
             facilities,
             costText,
+            totalProgramFeeLine,
             applicationFeeLine,
+            useStructuredCost,
+            depositLine,
+            remainingBalanceLine,
+            maxPlanMonths,
+            japanResidencyNotice,
             availableSlots: asideAvail,
             totalSlots: asideTotal,
             residences,
             included,
             notIncluded,
             platform,
+            sidebarRunDates,
         } = this._data;
+        const locale = typeof window.getLocale === 'function' ? window.getLocale() : 'en';
+        const jn = (japanResidencyNotice && String(japanResidencyNotice).trim()) || '';
+        const hasJapanLine = Boolean(locale === 'ja' && jn);
+        const tpf = (totalProgramFeeLine && String(totalProgramFeeLine).trim()) || '';
+        const hasStructured =
+            useStructuredCost &&
+            (Boolean(tpf) ||
+                Boolean((applicationFeeLine && String(applicationFeeLine).trim())) ||
+                Boolean((depositLine && String(depositLine).trim())) ||
+                Boolean((remainingBalanceLine && String(remainingBalanceLine).trim())) ||
+                (typeof maxPlanMonths === 'number' && maxPlanMonths > 1) ||
+                hasJapanLine);
         const hasDates = Array.isArray(keyDates) && keyDates.some((d) => (d?.date || d?.description || '').trim());
         const resList = Array.isArray(residences) ? residences : [];
         const hasResidence = resList.some((r) => {
@@ -112,16 +161,26 @@ class ProgramDetailsComponent extends HTMLElement {
             Number.isFinite(asideAvail) &&
             typeof asideTotal === 'number' &&
             Number.isFinite(asideTotal);
+        const rDates = sidebarRunDates;
+        const hasRunDateSidebar = Boolean(
+            rDates && typeof rDates === 'object' && (String(rDates.start || '').trim() || String(rDates.end || '').trim()),
+        );
+        const hasLegacyCostPair =
+            !useStructuredCost &&
+            Boolean(
+                (costText && String(costText).trim()) || (applicationFeeLine && String(applicationFeeLine).trim()),
+            );
         const hasSidebar = Boolean(
             (Array.isArray(locations) && locations.some((x) => String(x || '').trim())) ||
                 (Array.isArray(facilities) && facilities.some((x) => String(x || '').trim())) ||
-                (costText && String(costText).trim()) ||
-                (applicationFeeLine && String(applicationFeeLine).trim()) ||
+                hasStructured ||
+                hasLegacyCostPair ||
                 hasResidence ||
                 inc.some((x) => String(x || '').trim()) ||
                 ninc.some((x) => String(x || '').trim()) ||
                 (platform && String(platform).trim()) ||
-                hasCohortSlots,
+                hasCohortSlots ||
+                hasRunDateSidebar,
         );
         return hasDates || hasSidebar;
     }
@@ -168,6 +227,14 @@ class ProgramDetailsComponent extends HTMLElement {
             ul.appendChild(li);
         });
         if (ul.children.length) parent.appendChild(ul);
+    }
+
+    /**
+     * @param {HTMLElement} parent
+     * @param {string} text
+     */
+    _appendTextLinesAsBulletList(parent, text) {
+        this._appendBulletList(parent, splitTextLinesForBullets(text));
     }
 
     _closeAllAiPanels() {
@@ -281,7 +348,13 @@ class ProgramDetailsComponent extends HTMLElement {
             locations,
             facilities,
             costText,
+            totalProgramFeeLine,
             applicationFeeLine,
+            useStructuredCost,
+            depositLine,
+            remainingBalanceLine,
+            maxPlanMonths,
+            japanResidencyNotice,
             availableSlots,
             totalSlots,
             residences,
@@ -289,6 +362,7 @@ class ProgramDetailsComponent extends HTMLElement {
             notIncluded,
             platform,
             additionalInfo,
+            sidebarRunDates: sidebarRunDatesPayload,
         } = this._data;
         const L = this._labels();
         const head = (headline || '').trim();
@@ -342,7 +416,14 @@ class ProgramDetailsComponent extends HTMLElement {
                 ? facilities.map((x) => String(x || '').trim()).filter(Boolean)
                 : [];
             const cost = (costText || '').trim();
+            const totalProgramLine = (totalProgramFeeLine || '').trim();
             const appFeeSidebar = (applicationFeeLine || '').trim();
+            const depLine = (depositLine || '').trim();
+            const remLine = (remainingBalanceLine || '').trim();
+            const locale = typeof window.getLocale === 'function' ? window.getLocale() : 'en';
+            const jnLine = (japanResidencyNotice || '').trim();
+            const planM = typeof maxPlanMonths === 'number' && Number.isFinite(maxPlanMonths) ? Math.max(0, Math.floor(maxPlanMonths)) : 0;
+            const useStruct = useStructuredCost === true;
             const resRaw = Array.isArray(residences) ? residences : [];
             const residenceRows = resRaw
                 .map((r) => {
@@ -368,13 +449,27 @@ class ProgramDetailsComponent extends HTMLElement {
                 Number.isFinite(slotA) &&
                 typeof slotB === 'number' &&
                 Number.isFinite(slotB);
+            const runDt = sidebarRunDatesPayload && typeof sidebarRunDatesPayload === 'object' ? sidebarRunDatesPayload : null;
+            const runDateStart = String(runDt?.start || '').trim();
+            const runDateEnd = String(runDt?.end || '').trim();
 
             sidebarEl.innerHTML = '';
-            /** @type {Array<[string, 'list' | 'text' | 'residences' | 'cost_pair' | 'slots', unknown]>} */
+            /** @type {Array<[string, 'list' | 'text' | 'residences' | 'cost_pair' | 'cost_details' | 'slots' | 'date_range', unknown]>} */
+            const costPayload = useStruct
+                ? {
+                      totalProgram: totalProgramLine,
+                      appFee: appFeeSidebar,
+                      deposit: depLine,
+                      remaining: remLine,
+                      maxPlanMonths: planM,
+                      japanNotice: locale === 'ja' ? jnLine : '',
+                  }
+                : { main: cost, extra: appFeeSidebar };
             const blocks = [
+                [L.dates, 'date_range', { start: runDateStart, end: runDateEnd }],
                 [L.locations, 'list', loc],
                 [L.facilities, 'list', fac],
-                [L.cost, 'cost_pair', { main: cost, extra: appFeeSidebar }],
+                [L.cost, useStruct ? 'cost_details' : 'cost_pair', costPayload],
                 [L.cohortCapacity, 'slots', { available: slotA, total: slotB, show: showCohortSlots }],
                 [L.residence, 'residences', residenceRows],
                 [L.included, 'list', incList],
@@ -382,6 +477,45 @@ class ProgramDetailsComponent extends HTMLElement {
                 [L.platform, 'text', plat],
             ];
             blocks.forEach(([label, kind, val]) => {
+                if (kind === 'date_range') {
+                    const o = /** @type {{ start?: string, end?: string }} */ (val);
+                    const st = String(o?.start || '').trim();
+                    const en = String(o?.end || '').trim();
+                    if (!st && !en) return;
+                    const block = document.createElement('div');
+                    block.className = 'sidebar-block';
+                    const mainLab = document.createElement('div');
+                    mainLab.className = 'sidebar-label';
+                    mainLab.textContent = label;
+                    block.appendChild(mainLab);
+                    const row = document.createElement('div');
+                    row.className =
+                        st && en
+                            ? 'sidebar-dates-row sidebar-dates-row--pair'
+                            : 'sidebar-dates-row sidebar-dates-row--single';
+                    /**
+                     * @param {string} sublab
+                     * @param {string} value
+                     */
+                    const addCol = (sublab, value) => {
+                        const col = document.createElement('div');
+                        col.className = 'sidebar-dates-col';
+                        const sl = document.createElement('div');
+                        sl.className = 'sidebar-sublabel';
+                        sl.textContent = sublab;
+                        const p = document.createElement('p');
+                        p.className = 'sidebar-value';
+                        p.textContent = value;
+                        col.appendChild(sl);
+                        col.appendChild(p);
+                        row.appendChild(col);
+                    };
+                    if (st) addCol(L.runDateStart, st);
+                    if (en) addCol(L.runDateEnd, en);
+                    block.appendChild(row);
+                    sidebarEl.appendChild(block);
+                    return;
+                }
                 if (kind === 'slots') {
                     const o = /** @type {{ available?: unknown, total?: unknown, show?: boolean }} */ (val);
                     if (!o || !o.show) return;
@@ -458,6 +592,153 @@ class ProgramDetailsComponent extends HTMLElement {
                     sidebarEl.appendChild(block);
                     return;
                 }
+                if (kind === 'cost_details') {
+                    const o = /** @type {{ totalProgram?: string, appFee: string, deposit: string, remaining: string, maxPlanMonths: number, japanNotice: string }} */ (val);
+                    const totalP = String(o?.totalProgram || '').trim();
+                    const appFee = String(o?.appFee || '').trim();
+                    const dep = String(o?.deposit || '').trim();
+                    const rem = String(o?.remaining || '').trim();
+                    const maxM = typeof o?.maxPlanMonths === 'number' && o.maxPlanMonths > 0 ? Math.floor(o.maxPlanMonths) : 0;
+                    const jn = String(o?.japanNotice || '').trim();
+                    if (!totalP && !appFee && !dep && !rem && !jn && maxM < 2) return;
+                    const block = document.createElement('div');
+                    block.className = 'sidebar-block sidebar-cost-structured';
+                    const mainLab = document.createElement('div');
+                    mainLab.className = 'sidebar-label';
+                    mainLab.textContent = label;
+                    block.appendChild(mainLab);
+                    /**
+                     * @param {string} sublab
+                     * @param {string} value
+                     */
+                    const addTightStack = (sublab, value) => {
+                        if (!value) return;
+                        const stack = document.createElement('div');
+                        stack.className = 'sidebar-cost-stack';
+                        const sl = document.createElement('div');
+                        sl.className = 'sidebar-sublabel sidebar-cost-stack-label';
+                        sl.textContent = sublab;
+                        const p = document.createElement('p');
+                        p.className = 'sidebar-value sidebar-cost-stack-value';
+                        p.textContent = value;
+                        stack.appendChild(sl);
+                        stack.appendChild(p);
+                        block.appendChild(stack);
+                    };
+                    addTightStack(L.costTotalProgramFee, totalP);
+                    addTightStack(L.costApplicationFee, appFee);
+                    if (dep || rem) {
+                        const ifWrap = document.createElement('div');
+                        ifWrap.className = 'sidebar-cost-if-accepted';
+                        const h = document.createElement('div');
+                        h.className = 'sidebar-cost-if-accepted-heading';
+                        h.textContent = L.costIfAccepted;
+                        ifWrap.appendChild(h);
+                        /**
+                         * @param {string} bulletText
+                         * @param {string} amount
+                         */
+                        const addBullet = (bulletText, amount) => {
+                            if (!amount) return;
+                            const item = document.createElement('div');
+                            item.className = 'sidebar-cost-bullet';
+                            const line = document.createElement('div');
+                            line.className = 'sidebar-cost-bullet-line';
+                            line.textContent = `- ${bulletText}`;
+                            const am = document.createElement('p');
+                            am.className = 'sidebar-value sidebar-cost-bullet-amount';
+                            am.textContent = amount;
+                            item.appendChild(line);
+                            item.appendChild(am);
+                            ifWrap.appendChild(item);
+                        };
+                        addBullet(L.costDepositBullet, dep);
+                        addBullet(L.costRemainingBullet, rem);
+                        block.appendChild(ifWrap);
+                    }
+                    if (maxM >= 2) {
+                        this._costPlanDisclosureUid += 1;
+                        const panelId = `sidebar-cost-plan-${this._costPlanDisclosureUid}`;
+                        const planSection = document.createElement('div');
+                        planSection.className = 'sidebar-cost-plan-extras';
+                        const trig = document.createElement('button');
+                        trig.type = 'button';
+                        trig.className = 'sidebar-cost-plan-trigger';
+                        trig.setAttribute('aria-expanded', 'false');
+                        trig.setAttribute('aria-controls', panelId);
+                        const arr = document.createElement('span');
+                        arr.className = 'sidebar-cost-plan-arrow';
+                        arr.setAttribute('aria-hidden', 'true');
+                        arr.textContent = '→';
+                        const tlab = document.createElement('span');
+                        tlab.className = 'sidebar-cost-plan-trigger-label';
+                        tlab.textContent = L.costPaymentPlan;
+                        trig.appendChild(arr);
+                        trig.appendChild(tlab);
+                        const panel = document.createElement('div');
+                        panel.id = panelId;
+                        panel.className = 'sidebar-cost-plan-panel';
+                        panel.setAttribute('role', 'group');
+                        panel.setAttribute('aria-label', L.costPaymentPlan);
+                        panel.hidden = true;
+                        const sel = document.createElement('select');
+                        sel.className = 'sidebar-cost-select';
+                        sel.setAttribute('aria-label', L.costPaymentPlan);
+                        for (let m = 2; m <= maxM; m++) {
+                            const opt = document.createElement('option');
+                            opt.value = String(m);
+                            opt.textContent = String(m);
+                            if (m === maxM) opt.selected = true;
+                            sel.appendChild(opt);
+                        }
+                        const help = document.createElement('p');
+                        help.className = 'cost-plan-helper';
+                        help.textContent = L.costPaymentPlanHelper;
+                        const mRow = document.createElement('div');
+                        mRow.className = 'sidebar-cost-subrow';
+                        const mLab = document.createElement('div');
+                        mLab.className = 'sidebar-sublabel';
+                        mLab.textContent = L.costMonthlyPayment;
+                        const mVal = document.createElement('p');
+                        mVal.className = 'sidebar-value sidebar-cost-monthly';
+                        mRow.appendChild(mLab);
+                        mRow.appendChild(mVal);
+                        panel.appendChild(sel);
+                        panel.appendChild(help);
+                        panel.appendChild(mRow);
+                        planSection.appendChild(trig);
+                        planSection.appendChild(panel);
+                        block.appendChild(planSection);
+                        const updateM = () => {
+                            const raw = parseInt(String(sel.value), 10);
+                            const v = Number.isFinite(raw) && raw >= 2 ? raw : 2;
+                            mVal.textContent = formatMonthlyFromRemainingAndMonths(rem, v);
+                        };
+                        sel.addEventListener('change', updateM);
+                        updateM();
+                        trig.addEventListener('click', () => {
+                            const willOpen = panel.hidden;
+                            panel.hidden = !willOpen;
+                            trig.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+                            trig.classList.toggle('is-open', willOpen);
+                        });
+                    }
+                    if (jn) {
+                        const row = document.createElement('div');
+                        row.className = 'sidebar-cost-stack sidebar-cost-japan';
+                        const sl = document.createElement('div');
+                        sl.className = 'sidebar-sublabel sidebar-cost-stack-label';
+                        sl.textContent = L.costJapanNotice;
+                        const p = document.createElement('p');
+                        p.className = 'sidebar-value sidebar-cost-stack-value';
+                        p.textContent = jn;
+                        row.appendChild(sl);
+                        row.appendChild(p);
+                        block.appendChild(row);
+                    }
+                    sidebarEl.appendChild(block);
+                    return;
+                }
                 if (kind === 'cost_pair') {
                     const pair = /** @type {{ main: string, extra: string }} */ (val);
                     const main = String(pair?.main || '').trim();
@@ -525,7 +806,7 @@ class ProgramDetailsComponent extends HTMLElement {
             const rawFee = a?.applicationFee;
             const feeText = typeof rawFee === 'string' ? rawFee.trim() : '';
             if (feeText) {
-                this._appendTextBlocks(panelAppfee, feeText);
+                this._appendTextLinesAsBulletList(panelAppfee, feeText);
             }
         }
         if (triggerAppfee) {
@@ -597,7 +878,7 @@ class ProgramDetailsComponent extends HTMLElement {
                     panelNotes.appendChild(nh);
                 }
                 if (ni) {
-                    this._appendTextBlocks(panelNotes, ni);
+                    this._appendTextLinesAsBulletList(panelNotes, ni);
                 }
             });
         }
@@ -885,6 +1166,100 @@ class ProgramDetailsComponent extends HTMLElement {
                     margin-bottom: 0.45rem;
                 }
 
+                .sidebar-cost-structured .sidebar-label {
+                    margin-bottom: 0.35rem;
+                }
+                .sidebar-cost-structured .sidebar-label + .sidebar-cost-stack,
+                .sidebar-cost-structured .sidebar-label + .sidebar-cost-if-accepted,
+                .sidebar-cost-structured .sidebar-label + .sidebar-cost-japan {
+                    margin-top: 0.15rem;
+                }
+                .sidebar-cost-structured .sidebar-cost-stack + .sidebar-cost-stack {
+                    margin-top: 0.7rem;
+                }
+                .sidebar-cost-stack {
+                    min-width: 0;
+                }
+                .sidebar-cost-structured .sidebar-cost-stack-label {
+                    margin-bottom: 0.1rem;
+                    text-transform: none;
+                    letter-spacing: 0.04em;
+                    line-height: 1.3;
+                }
+                .sidebar-cost-structured .sidebar-cost-stack-value {
+                    margin: 0;
+                }
+                .sidebar-cost-if-accepted {
+                    margin-top: 0.7rem;
+                }
+                .sidebar-cost-stack + .sidebar-cost-if-accepted {
+                    margin-top: 0.75rem;
+                }
+                .sidebar-cost-if-accepted-heading {
+                    font-size: clamp(0.72rem, 0.92vw, 0.84rem);
+                    font-variation-settings: var(--fv-label-strong);
+                    color: var(--c2);
+                    line-height: 1.3;
+                    margin: 0 0 0.3rem 0;
+                    text-transform: none;
+                    letter-spacing: 0.04em;
+                }
+                .sidebar-cost-bullet {
+                    min-width: 0;
+                }
+                .sidebar-cost-bullet + .sidebar-cost-bullet {
+                    margin-top: 0.4rem;
+                }
+                .sidebar-cost-bullet-line {
+                    font-size: clamp(0.9rem, 1.1vw, 1.02rem);
+                    font-variation-settings: var(--fv-body-wide);
+                    line-height: 1.4;
+                    color: var(--c2);
+                }
+                .sidebar-cost-bullet-amount {
+                    padding-left: 1.15em;
+                    margin: 0.1rem 0 0 0;
+                }
+                .sidebar-cost-plan-extras {
+                    margin-top: 0.8rem;
+                }
+                .sidebar-cost-if-accepted + .sidebar-cost-plan-extras {
+                    margin-top: 0.75rem;
+                }
+                .sidebar-cost-structured
+                    .sidebar-cost-stack
+                    + .sidebar-cost-japan,
+                .sidebar-cost-structured
+                    .sidebar-cost-if-accepted
+                    + .sidebar-cost-japan,
+                .sidebar-cost-structured
+                    .sidebar-cost-plan-extras
+                    + .sidebar-cost-japan {
+                    margin-top: 0.65rem;
+                }
+                .sidebar-cost-stack + .sidebar-cost-plan-extras {
+                    margin-top: 0.75rem;
+                }
+
+                .sidebar-dates-row {
+                    display: grid;
+                    align-items: start;
+                    gap: 0.5rem 0.9rem;
+                    margin-top: 0.2rem;
+                }
+                .sidebar-dates-row--pair {
+                    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+                }
+                .sidebar-dates-row--single {
+                    grid-template-columns: minmax(0, 1fr);
+                }
+                .sidebar-dates-col {
+                    min-width: 0;
+                }
+                .sidebar-dates-col .sidebar-value {
+                    overflow-wrap: anywhere;
+                }
+
                 .sidebar-value {
                     margin: 0;
                     font-size: clamp(0.9rem, 1.15vw, 1.05rem);
@@ -896,6 +1271,98 @@ class ProgramDetailsComponent extends HTMLElement {
 
                 .sidebar-value--addon {
                     margin-top: 0.4rem;
+                }
+
+                .sidebar-cost-subrow {
+                    margin-top: 0.65rem;
+                }
+
+                .sidebar-cost-subrow:first-of-type {
+                    margin-top: 0.35rem;
+                }
+
+                .sidebar-sublabel {
+                    font-size: clamp(0.68rem, 0.85vw, 0.78rem);
+                    font-variation-settings: var(--fv-label-strong);
+                    letter-spacing: 0.06em;
+                    text-transform: none;
+                    color: var(--c2);
+                    opacity: 0.9;
+                    margin-bottom: 0.25rem;
+                }
+
+                .sidebar-cost-select {
+                    width: 100%;
+                    max-width: 100%;
+                    box-sizing: border-box;
+                    margin-top: 0.2rem;
+                    padding: 0.35rem 0.5rem;
+                    font: inherit;
+                    font-size: clamp(0.88rem, 1.05vw, 0.98rem);
+                    color: var(--c2);
+                    background: var(--c3);
+                    border: 1px solid var(--c2);
+                }
+
+                .cost-plan-helper {
+                    margin: 0.35rem 0 0;
+                    font-size: clamp(0.75rem, 0.9vw, 0.86rem);
+                    line-height: 1.45;
+                    font-variation-settings: var(--fv-body);
+                    color: var(--c2);
+                    opacity: 0.82;
+                }
+
+                .sidebar-cost-plan {
+                    margin-top: 0.65rem;
+                }
+
+                .sidebar-cost-plan-trigger {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.3rem;
+                    width: 100%;
+                    margin: 0;
+                    padding: 0.15rem 0;
+                    border: none;
+                    background: transparent;
+                    cursor: pointer;
+                    font-family: inherit;
+                    text-align: left;
+                    font-size: clamp(0.68rem, 0.85vw, 0.78rem);
+                    font-variation-settings: var(--fv-label-strong);
+                    letter-spacing: 0.06em;
+                    text-transform: none;
+                    color: var(--c2);
+                    opacity: 0.85;
+                    transition: opacity 0.2s ease;
+                }
+
+                .sidebar-cost-plan-trigger:hover {
+                    opacity: 0.98;
+                }
+
+                .sidebar-cost-plan-trigger .sidebar-cost-plan-arrow {
+                    display: inline-block;
+                    font-size: 0.85em;
+                    opacity: 0.55;
+                    font-variation-settings: var(--fv-body);
+                    transform: translateY(0.05em);
+                    transition: transform 0.2s ease, opacity 0.2s ease;
+                }
+
+                .sidebar-cost-plan-trigger.is-open .sidebar-cost-plan-arrow {
+                    opacity: 0.75;
+                    transform: translateY(0.05em) rotate(90deg);
+                }
+
+                .sidebar-cost-plan-panel {
+                    margin-top: 0.4rem;
+                    padding-left: 0.1rem;
+                }
+
+                .sidebar-cost-plan-panel[hidden] {
+                    display: none !important;
                 }
 
                 .sidebar-slots-value strong {

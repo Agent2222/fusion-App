@@ -20,6 +20,7 @@ import {
     getApplicants,
     getArtists,
     getArtistsForStudio,
+    normalizeArtistRosterVisibility,
     loadArtistForStudioEdit,
     getDashboardMetrics,
     getDataSource,
@@ -39,6 +40,12 @@ import {
     setFeaturableForArtistStudio,
     setRandomFeaturedModeStudio,
     adminCreateJoinInviteCodeStudio,
+    adminGetJournalLayoutStudio,
+    adminSetJournalLayoutStudio,
+    adminGetSoundEnvironmentStudio,
+    adminSetSoundEnvironmentStudio,
+    adminSetArtistMediaForStudio,
+    getEventsList,
     getSubscribers as loadSubscribersFromDataSource,
     getSubscribersCsv,
     setDataSource,
@@ -155,6 +162,7 @@ export const STUDIO_NAV_GROUPS = [
             { id: 'programs', label: 'Programs' },
             { id: 'products', label: 'Products' },
             { id: 'journal', label: 'Journal' },
+            { id: 'sound', label: 'Sound' },
             { id: 'content', label: 'Content' },
             { id: 'email', label: 'Email' },
             { id: 'ai', label: 'Ai' },
@@ -164,6 +172,7 @@ export const STUDIO_NAV_GROUPS = [
         label: 'Accounts',
         items: [
             { id: 'artists', label: 'Artists' },
+            { id: 'pending-approval', label: 'Pending Approval' },
             { id: 'curators', label: 'Curators' },
             { id: 'collectors', label: 'Collectors' },
             { id: 'galleries', label: 'Galleries' },
@@ -192,6 +201,7 @@ const TITLE_MAP = {
     [STUDIO_DASHBOARD_ID]: 'Dashboard',
     team: 'Team',
     permissions: 'Permissions',
+    'pending-approval': 'Pending Approval',
     ...Object.fromEntries(STUDIO_NAV.map((n) => [n.id, n.label])),
 };
 
@@ -215,6 +225,8 @@ export function renderStudioMain(sectionId) {
             return renderApplicants();
         case 'artists':
             return renderArtists();
+        case 'pending-approval':
+            return renderPendingApproval();
         case 'programs':
             return renderPrograms();
         case 'products':
@@ -223,6 +235,8 @@ export function renderStudioMain(sectionId) {
             return renderGalleryAccess();
         case 'journal':
             return renderJournal();
+        case 'sound':
+            return renderSound();
         case 'home':
             return renderHome();
         case 'content':
@@ -428,6 +442,15 @@ function renderArtists() {
                 <button type="button" class="studio-btn-ghost studio-artists-filter is-active" data-filter="all">All</button>
                 <button type="button" class="studio-btn-ghost studio-artists-filter" data-filter="featurable">Featurable</button>
                 <button type="button" class="studio-btn-ghost studio-artists-filter" data-filter="featured">Featured</button>
+                <label class="studio-field" style="margin:0 0 0 0.75rem"><span class="studio-muted">Visibility</span>
+                    <select id="studio-artists-filter-visibility" class="studio-select">
+                        <option value="">All</option>
+                        <option value="inactive">Inactive</option>
+                        <option value="pending">Pending</option>
+                        <option value="private">Private</option>
+                        <option value="public">Public</option>
+                    </select>
+                </label>
                 <label class="studio-muted" style="display:inline-flex;align-items:center;gap:0.35rem;margin-left:0.75rem;cursor:pointer">
                     <input type="checkbox" id="studio-artists-random-featured" />
                     Random featured (pick up to ${MAX_MANUAL_FEATURED} from featurable pool)
@@ -481,6 +504,39 @@ function renderArtists() {
                         </tr>
                     </thead>
                     <tbody id="studio-artists-tbody"><tr><td colspan="11">Loading…</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    `;
+}
+
+function renderPendingApproval() {
+    return `
+        <div class="studio-section-stack studio-category-page">
+            ${studioPageHeaderHtml({
+                title: 'Pending Approval',
+                subtitle: 'Artist roster profiles awaiting visibility review (state = pending)',
+                countId: 'studio-pending-approval-header-count',
+                countLabel: 'in queue',
+            })}
+            ${studioFilterBarHtml({
+                searchId: 'studio-pending-approval-search',
+                searchPlaceholder: 'Filter slug, id, email…',
+            })}
+            <p class="studio-muted">Set visibility to <strong>public</strong> when approved, or change state in <strong>Manage</strong> as needed.</p>
+            <div class="studio-table-wrap studio-table-wrap--sticky-head">
+                <table class="studio-table studio-table--dense">
+                    <thead>
+                        <tr>
+                            <th>Slug</th>
+                            <th>ID</th>
+                            <th>Email</th>
+                            <th>Visibility</th>
+                            <th>Public profile</th>
+                            <th class="studio-td-actions">Manage</th>
+                        </tr>
+                    </thead>
+                    <tbody id="studio-pending-approval-tbody"><tr><td colspan="6">Loading…</td></tr></tbody>
                 </table>
             </div>
         </div>
@@ -638,9 +694,9 @@ function renderJournal() {
         <div class="studio-section-stack studio-category-page">
             ${studioPageHeaderHtml({
                 title: 'Journal',
-                subtitle: 'Journal entries — structured home list below or Studio → Home',
+                subtitle: '/journal page layout — add rows, order, and featured; journal home list still in the section below',
                 countId: 'studio-journal-header-count',
-                countLabel: 'entries',
+                countLabel: 'rows',
             })}
             ${studioFilterBarHtml({
                 searchId: 'studio-journal-search',
@@ -664,8 +720,9 @@ function renderJournal() {
                     <p id="studio-journal-embed-msg" class="studio-banner studio-banner--info" style="display:none"></p>
                 </div>
             </details>
-            <div class="studio-subscribers-toolbar">
-                <button type="button" class="studio-btn-primary" id="studio-journal-add">ADD ENTRY</button>
+            <div class="studio-subscribers-toolbar" style="flex-wrap:wrap;gap:0.5rem;align-items:center">
+                <button type="button" class="studio-btn-primary" id="studio-journal-add">ADD COMPOSER ROW</button>
+                <button type="button" class="studio-btn-primary" id="studio-journal-save-layout">Save layout</button>
                 <button type="button" class="studio-btn-ghost" id="studio-journal-refresh">Refresh</button>
             </div>
             <div id="studio-journal-banner" class="studio-banner studio-banner--info" style="display:none"></div>
@@ -673,16 +730,95 @@ function renderJournal() {
                 <table class="studio-table studio-table--dense">
                     <thead>
                         <tr>
-                            <th>Title</th>
-                            <th>ID</th>
-                            <th>Status</th>
-                            <th>Link</th>
+                            <th>Order</th>
+                            <th>Feature</th>
+                            <th>Type</th>
+                            <th>Ref / details</th>
                             <th class="studio-td-actions">Actions</th>
                         </tr>
                     </thead>
                     <tbody id="studio-journal-tbody"><tr><td colspan="5">Loading…</td></tr></tbody>
                 </table>
             </div>
+        </div>
+    `;
+}
+
+function renderSound() {
+    return `
+        <div class="studio-section-stack studio-category-page">
+            ${studioPageHeaderHtml({
+                title: 'Sound',
+                subtitle: 'Atmosphere loop + voice overlays in the public site header (after “click to enter”)',
+                countId: 'studio-sound-header-count',
+                countLabel: '',
+            })}
+            <p class="studio-muted">Upload atmosphere audio to S3; choose random artist audio bites (from member profiles) or a manual file. Set timing for how often a voice plays over the bed.</p>
+            <form id="studio-sound-form" class="studio-section-stack" style="max-width:40rem">
+                <label class="studio-field studio-field--row">
+                    <input type="checkbox" id="studio-sound-enabled" name="enabled" />
+                    <span>Enable sound environment in the header</span>
+                </label>
+                <label class="studio-field">
+                    <span>Category label (header line: “{label} &amp; Artist Voices”)</span>
+                    <input type="text" id="studio-sound-category" class="studio-input" maxlength="200" placeholder="e.g. Nature" />
+                </label>
+                <label class="studio-field">
+                    <span>Atmosphere audio URL</span>
+                    <input type="text" id="studio-sound-atmo-url" class="studio-input" placeholder="https://…" />
+                </label>
+                <label class="studio-file-label studio-btn-ghost">
+                    <input type="file" id="studio-sound-atmo-file" accept="audio/*" class="studio-file-input" />
+                    Upload atmosphere
+                </label>
+                <label class="studio-field">
+                    <span>Voice selection</span>
+                    <select id="studio-sound-voice-mode" class="studio-select">
+                        <option value="random">Random (artists with audio)</option>
+                        <option value="manual">Manual artist or file</option>
+                    </select>
+                </label>
+                <label class="studio-field" id="studio-sound-artist-wrap">
+                    <span>Artist (with audio)</span>
+                    <select id="studio-sound-artist" class="studio-select"></select>
+                </label>
+                <label class="studio-field">
+                    <span>Manual voice URL (optional; overrides artist when mode is manual)</span>
+                    <input type="text" id="studio-sound-manual-voice-url" class="studio-input" placeholder="https://…" />
+                </label>
+                <label class="studio-file-label studio-btn-ghost">
+                    <input type="file" id="studio-sound-voice-file" accept="audio/*" class="studio-file-input" />
+                    Upload voice clip
+                </label>
+                <div class="studio-modal-fields-row">
+                    <label class="studio-field">
+                        <span>Min interval (sec)</span>
+                        <input type="number" id="studio-sound-min-int" class="studio-input" min="0" step="1" />
+                    </label>
+                    <label class="studio-field">
+                        <span>Max interval (sec)</span>
+                        <input type="number" id="studio-sound-max-int" class="studio-input" min="0" step="1" />
+                    </label>
+                </div>
+                <div class="studio-modal-fields-row">
+                    <label class="studio-field">
+                        <span>Default atmosphere %</span>
+                        <input type="number" id="studio-sound-vol-atmo" class="studio-input" min="0" max="100" step="1" />
+                    </label>
+                    <label class="studio-field">
+                        <span>Default voices %</span>
+                        <input type="number" id="studio-sound-vol-voice" class="studio-input" min="0" max="100" step="1" />
+                    </label>
+                </div>
+                <label class="studio-field">
+                    <span>Learn more — journal entry (internal id)</span>
+                    <select id="studio-sound-learn-journal" class="studio-select"></select>
+                </label>
+                <div class="studio-toolbar-actions" style="margin-top:0.5rem">
+                    <button type="submit" class="studio-btn-primary" id="studio-sound-save">Save</button>
+                </div>
+            </form>
+            <p id="studio-sound-msg" class="studio-banner" style="display:none;margin-top:8px" role="status"></p>
         </div>
     `;
 }
@@ -1036,6 +1172,255 @@ function escapeHtml(s) {
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
+}
+
+/**
+ * @param {unknown} vis
+ * @returns {string}
+ */
+function rosterVisibilityBadgeHtml(vis) {
+    const v = normalizeArtistRosterVisibility(vis);
+    const mod =
+        v === 'public'
+            ? 'studio-roster-vis--public'
+            : v === 'pending'
+              ? 'studio-roster-vis--pending'
+              : v === 'private'
+                ? 'studio-roster-vis--private'
+                : 'studio-roster-vis--inactive';
+    return `<span class="studio-roster-vis ${mod}">${escapeHtml(v)}</span>`;
+}
+
+/**
+ * @param {object} tableRow
+ * @param {() => void | Promise<void>} afterSave
+ */
+function openStudioArtistManageFromRow(tableRow, afterSave) {
+    const slug = String(tableRow.slug || '');
+    const title = `Artist — ${String(slug || tableRow.id || '')}`;
+    const { close, root } = openStudioModal(
+        `<div class="studio-modal-form" id="studio-art-load-placeholder"><p class="studio-muted">Loading…</p></div>`,
+        { title, wide: true }
+    );
+    const bodyEl = root.querySelector('.studio-modal-body');
+    void (async () => {
+        /** @type {object | null} */
+        let full = null;
+        try {
+            full = await loadArtistForStudioEdit(slug, tableRow);
+        } catch (e) {
+            alert(e instanceof Error ? e.message : String(e));
+            close();
+            return;
+        }
+        if (!full || !bodyEl) {
+            alert('Could not load artist.');
+            close();
+            return;
+        }
+        const profileLink = `/profile/${encodeURIComponent(String(full.slug || ''))}`;
+        bodyEl.innerHTML = `
+              <p><a class="studio-action-link" href="${escapeHtml(profileLink)}" target="_blank" rel="noopener">Open public profile</a></p>
+              ${renderArtistManageModalHtml(escapeHtml, full, { isTest: getDataSource() === 'test' })}
+            `;
+        initArtistManageTabs(root);
+        void initArtistProgramsTab(root, full);
+
+        root.querySelector('#studio-art-translate-to-new-world')?.addEventListener('click', async () => {
+            const promptEl = root.querySelector('#studio-art-new-world-prompt');
+            const promptText = promptEl instanceof HTMLTextAreaElement ? promptEl.value.trim() : '';
+            if (!promptText) {
+                alert('Add a prompt first.');
+                return;
+            }
+            const btn = root.querySelector('#studio-art-translate-to-new-world');
+            if (btn instanceof HTMLButtonElement) btn.disabled = true;
+            try {
+                for (const { path } of STUDIO_WORLD_TO_NEW_PATHS) {
+                    const targetPath = path.replace(/^world\./, 'worldNew.');
+                    for (const loc of ['en', 'ja']) {
+                        const srcEl = root.querySelector(
+                            `[data-art-locale="${loc}"][data-art-path="${path}"]`
+                        );
+                        const raw =
+                            srcEl && 'value' in srcEl
+                                ? String(/** @type {HTMLInputElement} */ (srcEl).value ?? '').trim()
+                                : '';
+                        if (!raw) continue;
+                        const out = await studioReinterpretWithPrompt(promptText, raw, loc);
+                        const dest = root.querySelector(
+                            `[data-art-locale="${loc}"][data-art-path="${targetPath}"]`
+                        );
+                        if (dest instanceof HTMLTextAreaElement) {
+                            dest.value = out.trim();
+                        }
+                    }
+                }
+                alert('New World fields updated. Open the New World tab to review, then save the artist.');
+            } catch (e) {
+                alert(e instanceof Error ? e.message : String(e));
+            } finally {
+                if (btn instanceof HTMLButtonElement) btn.disabled = false;
+            }
+        });
+
+        const heroFile = root.querySelector('#studio-art-hero-file');
+        if (heroFile instanceof HTMLInputElement) {
+            heroFile.addEventListener('change', async (ev) => {
+                const t = ev.target;
+                const f = t instanceof HTMLInputElement ? t.files?.[0] : null;
+                if (!f) return;
+                const targetInput = root.querySelector('#studio-art-hero-image');
+                try {
+                    await uploadBlobToS3(f, targetInput instanceof HTMLInputElement ? targetInput : null, {
+                        area: 'studio/artists',
+                        entityType: 'artist',
+                        entityId: String(full.id || ''),
+                        fieldKey: 'hero',
+                    });
+                } catch (err) {
+                    alert(
+                        `${err instanceof Error ? err.message : String(err)}\n\nConfigure S3 presign under Studio → Services.`
+                    );
+                }
+                t.value = '';
+            });
+        }
+
+        const heroProfileFile = root.querySelector('#studio-art-hero-profile-file');
+        if (heroProfileFile instanceof HTMLInputElement) {
+            heroProfileFile.addEventListener('change', async (ev) => {
+                const t = ev.target;
+                const f = t instanceof HTMLInputElement ? t.files?.[0] : null;
+                if (!f) return;
+                const targetInput = root.querySelector('#studio-art-hero-profile-image');
+                try {
+                    await uploadBlobToS3(f, targetInput instanceof HTMLInputElement ? targetInput : null, {
+                        area: 'studio/artists',
+                        entityType: 'artist',
+                        entityId: String(full.id || ''),
+                        fieldKey: 'heroProfile',
+                    });
+                } catch (err) {
+                    alert(
+                        `${err instanceof Error ? err.message : String(err)}\n\nConfigure S3 presign under Studio → Services.`
+                    );
+                }
+                t.value = '';
+            });
+        }
+
+        root.querySelectorAll('input.studio-art-intro-file').forEach((fileEl) => {
+            fileEl.addEventListener('change', async (ev) => {
+                const t = ev.target;
+                const f = t instanceof HTMLInputElement ? t.files?.[0] : null;
+                if (!f || !(t instanceof HTMLInputElement)) return;
+                const loc = t.getAttribute('data-art-upload-locale') || 'en';
+                const slot = t.getAttribute('data-art-upload-slot') || '0';
+                const path = `world.introGallery.${slot}.src`;
+                const targetInput = root.querySelector(
+                    `input[data-art-locale="${loc}"][data-art-path="${path}"]`
+                );
+                try {
+                    await uploadBlobToS3(f, targetInput instanceof HTMLInputElement ? targetInput : null, {
+                        area: 'studio/artists',
+                        entityType: 'artist',
+                        entityId: String(full.id || ''),
+                        fieldKey: `${loc}-intro-${slot}`,
+                    });
+                } catch (err) {
+                    alert(
+                        `${err instanceof Error ? err.message : String(err)}\n\nConfigure S3 presign under Studio → Services.`
+                    );
+                }
+                t.value = '';
+            });
+        });
+
+        const audioFile = root.querySelector('#studio-art-audio-file');
+        if (audioFile instanceof HTMLInputElement) {
+            audioFile.addEventListener('change', async (ev) => {
+                const t = ev.target;
+                const f = t instanceof HTMLInputElement ? t.files?.[0] : null;
+                if (!f) return;
+                const targetInput = root.querySelector('#studio-art-audio-url');
+                try {
+                    await uploadBlobToS3(f, targetInput instanceof HTMLInputElement ? targetInput : null, {
+                        area: 'studio/artists',
+                        entityType: 'artist',
+                        entityId: String(full.id || ''),
+                        fieldKey: 'audio',
+                    });
+                } catch (err) {
+                    alert(
+                        `${err instanceof Error ? err.message : String(err)}\n\nConfigure S3 presign under Studio → Services.`,
+                    );
+                }
+                t.value = '';
+            });
+        }
+
+        root.querySelector('#studio-art-manage-form')?.addEventListener('submit', async (ev) => {
+            ev.preventDefault();
+            try {
+                const raw = collectArtistRecordFromForm(root, full);
+                const flags = raw._featuredFlags;
+                delete raw._featuredFlags;
+                try {
+                    raw.featuredOrder = await applyFeaturedFlagsFromStudioSaveLive(String(full.id), {
+                        featured: Boolean(flags?.featured),
+                        featurable: Boolean(flags?.featurable),
+                    });
+                } catch (err) {
+                    alert(err instanceof Error ? err.message : String(err));
+                    return;
+                }
+                const pool = collectAccessCodesFromArtists(await getArtistsForStudio());
+                const rec = normalizeArtistImportRow(raw, pool, { forceImported: false });
+                await bulkUpsertArtistsStudio([rec]);
+                await adminSetArtistMediaForStudio(String(full.id || rec.profile?.id || ''), {
+                    quote: String(raw.quote ?? ''),
+                    audioUrl: String(raw.audioUrl ?? ''),
+                    audioTitle: String(raw.audioTitle ?? ''),
+                });
+                close();
+                await afterSave();
+            } catch (e) {
+                alert(e instanceof Error ? e.message : String(e));
+            }
+        });
+
+        root.querySelector('#studio-art-delete')?.addEventListener('click', async () => {
+            const id = String(full.id ?? '').trim();
+            if (!id) return;
+            const label = String(full.slug ?? id);
+            if (
+                !confirm(
+                    `Delete artist "${label}" permanently?\n\nLinked member accounts will be unlinked and set to pending. This cannot be undone.`
+                )
+            ) {
+                return;
+            }
+            try {
+                await deleteArtistByIdStudio(id);
+                close();
+                await afterSave();
+            } catch (e) {
+                alert(e instanceof Error ? e.message : String(e));
+            }
+        });
+
+        root.querySelector('#studio-art-adv-save')?.addEventListener('click', () => {
+            const raw = root.querySelector('#studio-art-adv-json')?.value ?? '';
+            try {
+                saveArtistTestOverlayJson(String(full.id), raw);
+                close();
+                void afterSave();
+            } catch (e) {
+                alert(e instanceof Error ? e.message : String(e));
+            }
+        });
+    })();
 }
 
 /**
@@ -1458,10 +1843,12 @@ const STUDIO_INIT = {
     subscribers: initSubscribers,
     applicants: initApplicants,
     artists: initArtists,
+    'pending-approval': initPendingApproval,
     programs: initPrograms,
     products: initProducts,
     'gallery-access': initGalleryAccess,
     journal: initJournal,
+    sound: initSound,
     content: initContent,
     email: initEmail,
     ai: initAi,
@@ -2230,6 +2617,16 @@ async function initArtists(mainEl) {
     const searchInput = mainEl.querySelector('#studio-artists-search');
     const countEl = mainEl.querySelector('#studio-artists-header-count');
 
+    /** Roster “Send blast…”: gated by **Edit** on the **Artists** row in Studio → Permissions (per role). */
+    const artistsPerm = studioFeatureAccess('artists');
+    const canSendRosterBlast = artistsPerm.canEdit;
+    const sendBlastWrap = mainEl.querySelector('.studio-artists-send-blast');
+    if (sendBlastWrap instanceof HTMLElement) {
+        if (!canSendRosterBlast) {
+            sendBlastWrap.hidden = true;
+        }
+    }
+
     /** @type {object[]} */
     let allArtists = [];
     /** @type {'all' | 'featurable' | 'featured'} */
@@ -2300,14 +2697,22 @@ async function initArtists(mainEl) {
     const applyArtistFilter = () => {
         if (!tbody) return;
         const q = (searchInput instanceof HTMLInputElement ? searchInput.value : '').trim().toLowerCase();
+        const visSel = mainEl.querySelector('#studio-artists-filter-visibility');
+        const visF = visSel instanceof HTMLSelectElement ? String(visSel.value || '').trim() : '';
         const artists = allArtists.filter((a) => {
             if (quickFilter === 'featurable' && !a.featurable) return false;
             if (quickFilter === 'featured' && !a.featured) return false;
+            if (visF && normalizeArtistRosterVisibility(a.visibility) !== visF) return false;
             if (!q) return true;
             const hay = `${a.slug} ${a.id} ${a.contactEmail ?? ''} ${a.visibility} ${a.featuredOrder} ${a.mostRecentProgram ?? ''}`.toLowerCase();
             return hay.includes(q);
         });
-        if (countEl) countEl.textContent = String(q || quickFilter !== 'all' ? artists.length : allArtists.length);
+        if (countEl) {
+            const visActive = Boolean(visF);
+            countEl.textContent = String(
+                q || quickFilter !== 'all' || visActive ? artists.length : allArtists.length
+            );
+        }
         if (!artists.length) {
             tbody.innerHTML = `<tr><td colspan="11">${allArtists.length ? 'No rows match filters.' : 'No artists.'}</td></tr>`;
             return;
@@ -2333,7 +2738,7 @@ async function initArtists(mainEl) {
                 <td class="studio-td-ellipsis" title="${escapeHtml(emRaw)}">${em}</td>
                 <td>${imp}</td>
                 <td><code class="studio-code-inline">${code}</code></td>
-                <td>${escapeHtml(a.visibility || '')}</td>
+                <td>${rosterVisibilityBadgeHtml(a.visibility)}</td>
                 <td class="studio-td-cb"><input type="checkbox" class="studio-art-featured-cb" data-id="${idEsc}" ${feat} aria-label="Featured" /></td>
                 <td class="studio-td-cb"><input type="checkbox" class="studio-art-featurable-cb" data-id="${idEsc}" ${featur} aria-label="Featurable for random" /></td>
                 <td><input type="text" class="studio-input studio-art-mrp" data-id="${idEsc}" value="${mrpVal}" placeholder="Program id" aria-label="Most recent program" /></td>
@@ -2346,172 +2751,7 @@ async function initArtists(mainEl) {
     };
 
     const openArtistManageModal = (tableRow) => {
-        const slug = String(tableRow.slug || '');
-        const title = `Artist — ${String(slug || tableRow.id || '')}`;
-        const { close, root } = openStudioModal(
-            `<div class="studio-modal-form" id="studio-art-load-placeholder"><p class="studio-muted">Loading…</p></div>`,
-            { title, wide: true }
-        );
-        const bodyEl = root.querySelector('.studio-modal-body');
-        (async () => {
-            /** @type {object | null} */
-            let full = null;
-            try {
-                full = await loadArtistForStudioEdit(slug, tableRow);
-            } catch (e) {
-                alert(e instanceof Error ? e.message : String(e));
-                close();
-                return;
-            }
-            if (!full || !bodyEl) {
-                alert('Could not load artist.');
-                close();
-                return;
-            }
-            const profileLink = `/profile/${encodeURIComponent(String(full.slug || ''))}`;
-            bodyEl.innerHTML = `
-              <p><a class="studio-action-link" href="${escapeHtml(profileLink)}" target="_blank" rel="noopener">Open public profile</a></p>
-              ${renderArtistManageModalHtml(escapeHtml, full, { isTest: getDataSource() === 'test' })}
-            `;
-            initArtistManageTabs(root);
-            void initArtistProgramsTab(root, full);
-
-            root.querySelector('#studio-art-translate-to-new-world')?.addEventListener('click', async () => {
-                const promptEl = root.querySelector('#studio-art-new-world-prompt');
-                const promptText = promptEl instanceof HTMLTextAreaElement ? promptEl.value.trim() : '';
-                if (!promptText) {
-                    alert('Add a prompt first.');
-                    return;
-                }
-                const btn = root.querySelector('#studio-art-translate-to-new-world');
-                if (btn instanceof HTMLButtonElement) btn.disabled = true;
-                try {
-                    for (const { path } of STUDIO_WORLD_TO_NEW_PATHS) {
-                        const targetPath = path.replace(/^world\./, 'worldNew.');
-                        for (const loc of ['en', 'ja']) {
-                            const srcEl = root.querySelector(
-                                `[data-art-locale="${loc}"][data-art-path="${path}"]`
-                            );
-                            const raw =
-                                srcEl && 'value' in srcEl ? String(/** @type {HTMLInputElement} */ (srcEl).value ?? '').trim() : '';
-                            if (!raw) continue;
-                            const out = await studioReinterpretWithPrompt(promptText, raw, loc);
-                            const dest = root.querySelector(
-                                `[data-art-locale="${loc}"][data-art-path="${targetPath}"]`
-                            );
-                            if (dest instanceof HTMLTextAreaElement) {
-                                dest.value = out.trim();
-                            }
-                        }
-                    }
-                    alert('New World fields updated. Open the New World tab to review, then save the artist.');
-                } catch (e) {
-                    alert(e instanceof Error ? e.message : String(e));
-                } finally {
-                    if (btn instanceof HTMLButtonElement) btn.disabled = false;
-                }
-            });
-
-            const heroFile = root.querySelector('#studio-art-hero-file');
-            if (heroFile instanceof HTMLInputElement) {
-                heroFile.addEventListener('change', async (ev) => {
-                    const t = ev.target;
-                    const f = t instanceof HTMLInputElement ? t.files?.[0] : null;
-                    if (!f) return;
-                    const targetInput = root.querySelector('#studio-art-hero-image');
-                    try {
-                        await uploadBlobToS3(f, targetInput instanceof HTMLInputElement ? targetInput : null, {
-                            area: 'studio/artists',
-                        });
-                    } catch (err) {
-                        alert(
-                            `${err instanceof Error ? err.message : String(err)}\n\nConfigure S3 presign under Studio → Services.`
-                        );
-                    }
-                    t.value = '';
-                });
-            }
-
-            root.querySelectorAll('input.studio-art-intro-file').forEach((fileEl) => {
-                fileEl.addEventListener('change', async (ev) => {
-                    const t = ev.target;
-                    const f = t instanceof HTMLInputElement ? t.files?.[0] : null;
-                    if (!f || !(t instanceof HTMLInputElement)) return;
-                    const loc = t.getAttribute('data-art-upload-locale') || 'en';
-                    const slot = t.getAttribute('data-art-upload-slot') || '0';
-                    const path = `world.introGallery.${slot}.src`;
-                    const targetInput = root.querySelector(
-                        `input[data-art-locale="${loc}"][data-art-path="${path}"]`
-                    );
-                    try {
-                        await uploadBlobToS3(f, targetInput instanceof HTMLInputElement ? targetInput : null, {
-                            area: 'studio/artists',
-                        });
-                    } catch (err) {
-                        alert(
-                            `${err instanceof Error ? err.message : String(err)}\n\nConfigure S3 presign under Studio → Services.`
-                        );
-                    }
-                    t.value = '';
-                });
-            });
-
-            root.querySelector('#studio-art-manage-form')?.addEventListener('submit', async (ev) => {
-                ev.preventDefault();
-                try {
-                    const raw = collectArtistRecordFromForm(root, full);
-                    const flags = raw._featuredFlags;
-                    delete raw._featuredFlags;
-                    try {
-                        raw.featuredOrder = await applyFeaturedFlagsFromStudioSaveLive(String(full.id), {
-                            featured: Boolean(flags?.featured),
-                            featurable: Boolean(flags?.featurable),
-                        });
-                    } catch (err) {
-                        alert(err instanceof Error ? err.message : String(err));
-                        return;
-                    }
-                    const pool = collectAccessCodesFromArtists(await getArtistsForStudio());
-                    const rec = normalizeArtistImportRow(raw, pool, { forceImported: false });
-                    await bulkUpsertArtistsStudio([rec]);
-                    close();
-                    await load();
-                } catch (e) {
-                    alert(e instanceof Error ? e.message : String(e));
-                }
-            });
-
-            root.querySelector('#studio-art-delete')?.addEventListener('click', async () => {
-                const id = String(full.id ?? '').trim();
-                if (!id) return;
-                const label = String(full.slug ?? id);
-                if (
-                    !confirm(
-                        `Delete artist "${label}" permanently?\n\nLinked member accounts will be unlinked and set to pending. This cannot be undone.`
-                    )
-                ) {
-                    return;
-                }
-                try {
-                    await deleteArtistByIdStudio(id);
-                    close();
-                    await load();
-                } catch (e) {
-                    alert(e instanceof Error ? e.message : String(e));
-                }
-            });
-
-            root.querySelector('#studio-art-adv-save')?.addEventListener('click', () => {
-                const raw = root.querySelector('#studio-art-adv-json')?.value ?? '';
-                try {
-                    saveArtistTestOverlayJson(String(full.id), raw);
-                    close();
-                    load();
-                } catch (e) {
-                    alert(e instanceof Error ? e.message : String(e));
-                }
-            });
-        })();
+        openStudioArtistManageFromRow(tableRow, load);
     };
 
     const load = async () => {
@@ -2716,6 +2956,7 @@ ${urlHelp}
     await loadArtistsShoutFields();
 
     searchInput?.addEventListener('input', () => applyArtistFilter());
+    mainEl.querySelector('#studio-artists-filter-visibility')?.addEventListener('change', () => applyArtistFilter());
 
     mainEl.querySelectorAll('.studio-artists-filter').forEach((btn) => {
         btn.addEventListener('click', () => {
@@ -2752,15 +2993,20 @@ ${urlHelp}
     wireArtistWorldBatchUI(mainEl, load);
 
     const sendBlastOpen = mainEl.querySelector('#studio-artists-send-blast-open');
-    if (sendBlastOpen instanceof HTMLButtonElement) {
+    if (sendBlastOpen instanceof HTMLButtonElement && canSendRosterBlast) {
         const syncBlast = () => {
-            sendBlastOpen.disabled = getDataSource() !== 'live';
-            sendBlastOpen.title =
-                getDataSource() === 'live' ? '' : 'Requires live data and Integration API (set Studio → Services).';
+            const live = getDataSource() === 'live';
+            sendBlastOpen.disabled = !live;
+            sendBlastOpen.title = live
+                ? ''
+                : 'Requires live data and Integration API (set Studio → Services).';
         };
         syncBlast();
         window.addEventListener('fusion-data-source-change', syncBlast);
         sendBlastOpen.addEventListener('click', () => {
+            if (!canSendRosterBlast) {
+                return;
+            }
             if (getDataSource() !== 'live') {
                 alert(
                     'Send blast uses the Integration API (Resend) and canister roster data. Switch Studio data source to Live and set Integration API URL + key under Studio → Services, then try again.'
@@ -2775,6 +3021,76 @@ ${urlHelp}
     }
 
     await load();
+}
+
+/**
+ * @param {HTMLElement} mainEl
+ */
+async function initPendingApproval(mainEl) {
+    const tbody = mainEl.querySelector('#studio-pending-approval-tbody');
+    const searchInput = mainEl.querySelector('#studio-pending-approval-search');
+    const countEl = mainEl.querySelector('#studio-pending-approval-header-count');
+    /** @type {object[]} */
+    let allPending = [];
+
+    const runLoad = async () => {
+        const all = await getArtistsForStudio();
+        allPending = all.filter(
+            (a) => normalizeArtistRosterVisibility(/** @type {unknown} */ (a).visibility) === 'pending'
+        );
+        applyPendingFilter();
+    };
+
+    const applyPendingFilter = () => {
+        if (!tbody) return;
+        const q = (searchInput instanceof HTMLInputElement ? searchInput.value : '').trim().toLowerCase();
+        const list = allPending.filter((a) => {
+            if (!q) return true;
+            const hay = `${a.slug} ${a.id} ${a.contactEmail ?? ''}`.toLowerCase();
+            return hay.includes(q);
+        });
+        if (countEl) countEl.textContent = String(list.length);
+        if (!list.length) {
+            tbody.innerHTML = `<tr><td colspan="6">${
+                allPending.length ? 'No rows match search.' : 'No artists in pending state.'
+            }</td></tr>`;
+            return;
+        }
+        tbody.innerHTML = list
+            .map((a) => {
+                const slugRaw = String(a.slug || '');
+                const slug = escapeHtml(slugRaw);
+                const emRaw = String(a.contactEmail ?? '').trim();
+                const em =
+                    emRaw && emRaw.length > 28
+                        ? `${escapeHtml(emRaw.slice(0, 25))}…`
+                        : escapeHtml(emRaw || '—');
+                const idEsc = escapeHtml(String(a.id || ''));
+                return `<tr>
+                <td>${slug}</td>
+                <td>${idEsc}</td>
+                <td class="studio-td-ellipsis" title="${escapeHtml(emRaw)}">${em}</td>
+                <td>${rosterVisibilityBadgeHtml(a.visibility)}</td>
+                <td><a class="studio-action-link" href="/profile/${encodeURIComponent(
+                    slugRaw
+                )}" target="_blank" rel="noopener">Open profile</a></td>
+                <td class="studio-td-actions"><button type="button" class="studio-btn-ghost studio-art-pending-manage" data-id="${idEsc}">MANAGE</button></td>
+            </tr>`;
+            })
+            .join('');
+        tbody.querySelectorAll('.studio-art-pending-manage').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const id = btn.getAttribute('data-id');
+                const row = allPending.find((x) => String(x.id) === String(id));
+                if (row) {
+                    openStudioArtistManageFromRow(row, runLoad);
+                }
+            });
+        });
+    };
+
+    searchInput?.addEventListener('input', () => applyPendingFilter());
+    await runLoad();
 }
 
 /**
@@ -3007,6 +3323,7 @@ async function initPrograms(mainEl) {
             featuredOrder: 0,
             visibility: 'public',
             studioStatus: 'open',
+            depositAmountDisplay: '',
             localesJson: '{"en":{},"ja":{}}',
         };
         let lj = p.localesJson;
@@ -3048,6 +3365,7 @@ async function initPrograms(mainEl) {
             <div class="studio-modal-fields-row">
             <label class="studio-field"><span>ID</span><input name="id" required class="studio-input" value="${escapeHtml(String(p.id))}" ${existing ? 'readonly' : ''} /></label>
             <label class="studio-field"><span>routeLink (record) <span class="studio-field-kind-badge studio-field-kind-badge--${routeLinkKind}">${escapeHtml(getFieldKindBadgeLabel(routeLinkKind))}</span></span><input name="routeLink" class="studio-input" value="${escapeHtml(String(p.routeLink || ''))}" /></label>
+            <label class="studio-field"><span>Deposit (display) — on-chain</span><input name="depositAmountDisplay" class="studio-input" value="${escapeHtml(String(p.depositAmountDisplay ?? ''))}" placeholder="e.g. $1,000 USD" autocomplete="off" /></label>
             <label class="studio-field"><span>featuredOrder</span><input name="featuredOrder" type="number" class="studio-input" value="${escapeHtml(String(p.featuredOrder ?? 0))}" /></label>
             <label class="studio-field"><span>visibility</span><select name="visibility" class="studio-select">${visOptions}</select></label>
             <label class="studio-field"><span>studioStatus</span>
@@ -3061,7 +3379,7 @@ async function initPrograms(mainEl) {
               </select>
             </label>
             </div>
-            <p class="studio-modal-hint">Each row is <strong>English</strong> and <strong>日本語</strong> side by side. Card <code>imageSrc</code> supports upload (below). For bulk gallery paths use Services → S3 or Content → <strong>all-programs</strong>.</p>
+            <p class="studio-modal-hint">Each row is <strong>English</strong> and <strong>日本語</strong> side by side. <strong>Deposit (on-chain)</strong> is stored in the <code>ProgramRecord</code> and mirrored into locale JSON for the application form. Card <code>imageSrc</code> supports upload (below). For bulk gallery paths use Services → S3 or Content → <strong>all-programs</strong>.</p>
             <div class="studio-modal-fields-row studio-prog-cover-uploads">
               <label class="studio-file-label studio-btn-ghost studio-field--shrink">
                 <input type="file" id="studio-prog-cover-file-en" accept="image/*,video/*,.pdf" class="studio-file-input studio-prog-cover-file" data-upload-target-locale="en" />
@@ -3096,6 +3414,9 @@ async function initPrograms(mainEl) {
                 try {
                     await uploadBlobToS3(f, targetInput instanceof HTMLInputElement ? targetInput : null, {
                         area: 'studio/programs',
+                        entityType: 'program',
+                        entityId: String(p.id || ''),
+                        fieldKey: `card-image-${loc}`,
                     });
                 } catch (err) {
                     const m = err instanceof Error ? err.message : String(err);
@@ -3116,6 +3437,9 @@ async function initPrograms(mainEl) {
                 try {
                     await uploadBlobToS3(f, targetInput instanceof HTMLInputElement ? targetInput : null, {
                         area: 'studio/programs',
+                        entityType: 'program',
+                        entityId: String(p.id || ''),
+                        fieldKey: `fade-gallery-${slot}`,
                     });
                     if (targetInput instanceof HTMLInputElement) {
                         targetInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -3139,6 +3463,9 @@ async function initPrograms(mainEl) {
                 try {
                     await uploadBlobToS3(f, targetInput instanceof HTMLInputElement ? targetInput : null, {
                         area: 'studio/programs',
+                        entityType: 'program',
+                        entityId: String(p.id || ''),
+                        fieldKey: `strip-gallery-${slot}`,
                     });
                     if (targetInput instanceof HTMLInputElement) {
                         targetInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -3154,6 +3481,7 @@ async function initPrograms(mainEl) {
             ev.preventDefault();
             const fd = new FormData(ev.target);
             if (!localeFormRoot) return;
+            const depositAmountDisplay = String(fd.get('depositAmountDisplay') || '').trim();
             let en;
             let ja;
             try {
@@ -3162,6 +3490,17 @@ async function initPrograms(mainEl) {
                 alert(err instanceof Error ? err.message : String(err));
                 return;
             }
+            const setDepositInLocale = (root) => {
+                if (!root || typeof root !== 'object' || !depositAmountDisplay) return;
+                const o = root;
+                if (!o.programPage) o.programPage = {};
+                const pp = o.programPage;
+                if (typeof pp !== 'object' || !pp) return;
+                if (!pp.applicationForm) pp.applicationForm = {};
+                /** @type {Record<string, unknown>} */ (pp).applicationForm.depositAmountDisplay = depositAmountDisplay;
+            };
+            setDepositInLocale(en);
+            setDepositInLocale(ja);
             const localesJson = JSON.stringify({ en, ja });
             try {
                 await upsertProgramStudio({
@@ -3170,6 +3509,7 @@ async function initPrograms(mainEl) {
                     featuredOrder: Number(fd.get('featuredOrder') || 0),
                     visibility: String(fd.get('visibility') || ''),
                     studioStatus: String(fd.get('studioStatus') || 'open'),
+                    depositAmountDisplay,
                     localesJson,
                 });
                 close();
@@ -3391,7 +3731,12 @@ async function initProducts(mainEl) {
             const f = t && 'files' in t ? t.files?.[0] : null;
             if (!f) return;
             try {
-                await uploadBlobToS3(f, root.querySelector('#studio-ed-img'), { area: 'studio/editions' });
+                await uploadBlobToS3(f, root.querySelector('#studio-ed-img'), {
+                    area: 'studio/editions',
+                    entityType: 'edition',
+                    entityId: String(e.id || ''),
+                    fieldKey: 'image',
+                });
             } catch (err) {
                 const m = err instanceof Error ? err.message : String(err);
                 alert(`${m}\n\nConfigure S3 presign under Studio → Services.`);
@@ -3488,14 +3833,181 @@ async function initGalleryAccess(mainEl) {
     }
 }
 
+async function initSound(mainEl) {
+    const form = mainEl.querySelector('#studio-sound-form');
+    const msg = mainEl.querySelector('#studio-sound-msg');
+    const showLocal = (kind, text) => {
+        if (!msg) return;
+        msg.style.display = text ? 'block' : 'none';
+        msg.className = `studio-banner studio-banner--${kind}`;
+        msg.textContent = text;
+    };
+
+    const fillLearnJournal = async () => {
+        const sel = mainEl.querySelector('#studio-sound-learn-journal');
+        if (!(sel instanceof HTMLSelectElement)) return;
+        const entries = await getJournalEntries().catch(() => []);
+        const opts = [
+            '<option value="">(none)</option>',
+            ...entries.map((j) => {
+                const id = String(j?.id ?? '');
+                const t = j?.en?.title ?? id;
+                return `<option value="${escapeHtml(id)}">${escapeHtml(String(t))} (${escapeHtml(id)})</option>`;
+            }),
+        ];
+        const cur = sel.value;
+        sel.innerHTML = opts.join('');
+        if (cur) sel.value = cur;
+    };
+
+    const applyForm = (c) => {
+        const en = mainEl.querySelector('#studio-sound-enabled');
+        if (en instanceof HTMLInputElement) en.checked = Boolean(c.enabled);
+        const cat = mainEl.querySelector('#studio-sound-category');
+        if (cat instanceof HTMLInputElement) cat.value = String(c.categoryLabel || '');
+        const aurl = mainEl.querySelector('#studio-sound-atmo-url');
+        if (aurl instanceof HTMLInputElement) aurl.value = String(c.atmosphereAudioUrl || '');
+        const vm = mainEl.querySelector('#studio-sound-voice-mode');
+        if (vm instanceof HTMLSelectElement) vm.value = c.voiceSelectionMode === 'manual' ? 'manual' : 'random';
+        const art = mainEl.querySelector('#studio-sound-artist');
+        const list = (Array.isArray(/** @type {any} */ (c)._artistsWithAudio) ? /** @type {any} */ (c)._artistsWithAudio : null) || [];
+        if (art instanceof HTMLSelectElement) {
+            const aid = c.voiceArtistId ? String(c.voiceArtistId) : '';
+            art.innerHTML = [
+                '<option value="">—</option>',
+                ...list.map((a) => {
+                    const id = String(a?.id ?? '');
+                    return `<option value="${escapeHtml(id)}" ${
+                        id === aid ? 'selected' : ''
+                    }>${escapeHtml(String(a?.locales?.en?.name ?? a?.slug ?? id))}</option>`;
+                }),
+            ].join('');
+        }
+        const mu = mainEl.querySelector('#studio-sound-manual-voice-url');
+        if (mu instanceof HTMLInputElement) mu.value = String(c.manualVoiceAudioUrl || '');
+        const minI = mainEl.querySelector('#studio-sound-min-int');
+        if (minI instanceof HTMLInputElement) minI.value = String(c.minIntervalSec ?? 0);
+        const maxI = mainEl.querySelector('#studio-sound-max-int');
+        if (maxI instanceof HTMLInputElement) maxI.value = String(c.maxIntervalSec ?? 0);
+        const va = mainEl.querySelector('#studio-sound-vol-atmo');
+        if (va instanceof HTMLInputElement) va.value = String(c.atmosphereVolumePercent ?? 0);
+        const vv = mainEl.querySelector('#studio-sound-vol-voice');
+        if (vv instanceof HTMLInputElement) vv.value = String(c.voicesVolumePercent ?? 0);
+        const lj = mainEl.querySelector('#studio-sound-learn-journal');
+        if (lj instanceof HTMLSelectElement) {
+            const lid = c.learnMoreJournalEntryId ? String(c.learnMoreJournalEntryId) : '';
+            if (lid) lj.value = lid;
+        }
+        const vmVal = c.voiceSelectionMode === 'manual' ? 'manual' : 'random';
+        const arw = mainEl.querySelector('#studio-sound-artist-wrap');
+        if (arw instanceof HTMLElement) {
+            arw.style.display = vmVal === 'manual' ? '' : 'none';
+        }
+    };
+
+    const load = async () => {
+        const raw = await adminGetSoundEnvironmentStudio();
+        const artistsWithAudio = (await getArtists().catch(() => [])).filter((a) => String(a?.audioUrl ?? '').trim());
+        const c = { ...raw, _artistsWithAudio: artistsWithAudio };
+        await fillLearnJournal();
+        const lj = mainEl.querySelector('#studio-sound-learn-journal');
+        if (lj instanceof HTMLSelectElement && raw.learnMoreJournalEntryId) {
+            lj.value = String(raw.learnMoreJournalEntryId);
+        }
+        applyForm(c);
+    };
+
+    mainEl.querySelector('#studio-sound-voice-mode')?.addEventListener('change', (ev) => {
+        const t = ev.target;
+        const v = t instanceof HTMLSelectElement ? t.value : 'random';
+        const arw = mainEl.querySelector('#studio-sound-artist-wrap');
+        if (arw instanceof HTMLElement) {
+            arw.style.display = v === 'manual' ? '' : 'none';
+        }
+    });
+
+    mainEl.querySelector('#studio-sound-atmo-file')?.addEventListener('change', async (ev) => {
+        const t = ev.target;
+        const f = t && 'files' in t ? t.files?.[0] : null;
+        if (!f) return;
+        try {
+            await uploadBlobToS3(f, mainEl.querySelector('#studio-sound-atmo-url'), {
+                area: 'studio/sound',
+                entityType: 'site',
+                entityId: 'sound-environment',
+                fieldKey: 'atmosphere',
+            });
+        } catch (err) {
+            alert(err instanceof Error ? err.message : String(err));
+        }
+        t.value = '';
+    });
+    mainEl.querySelector('#studio-sound-voice-file')?.addEventListener('change', async (ev) => {
+        const t = ev.target;
+        const f = t && 'files' in t ? t.files?.[0] : null;
+        if (!f) return;
+        try {
+            await uploadBlobToS3(f, mainEl.querySelector('#studio-sound-manual-voice-url'), {
+                area: 'studio/sound',
+                entityType: 'site',
+                entityId: 'sound-environment',
+                fieldKey: 'manual-voice',
+            });
+        } catch (err) {
+            alert(err instanceof Error ? err.message : String(err));
+        }
+        t.value = '';
+    });
+
+    form?.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const en = mainEl.querySelector('#studio-sound-enabled');
+        const cat = mainEl.querySelector('#studio-sound-category');
+        const aurl = mainEl.querySelector('#studio-sound-atmo-url');
+        const vm = mainEl.querySelector('#studio-sound-voice-mode');
+        const ar = mainEl.querySelector('#studio-sound-artist');
+        const mu = mainEl.querySelector('#studio-sound-manual-voice-url');
+        const minI = mainEl.querySelector('#studio-sound-min-int');
+        const maxI = mainEl.querySelector('#studio-sound-max-int');
+        const va = mainEl.querySelector('#studio-sound-vol-atmo');
+        const vv = mainEl.querySelector('#studio-sound-vol-voice');
+        const lj = mainEl.querySelector('#studio-sound-learn-journal');
+        const payload = {
+            enabled: en instanceof HTMLInputElement && en.checked,
+            categoryLabel: cat instanceof HTMLInputElement ? cat.value : '',
+            atmosphereAudioUrl: aurl instanceof HTMLInputElement ? aurl.value : '',
+            voiceSelectionMode: vm instanceof HTMLSelectElement ? vm.value : 'random',
+            voiceArtistId: ar instanceof HTMLSelectElement && ar.value ? ar.value : undefined,
+            manualVoiceAudioUrl: mu instanceof HTMLInputElement ? mu.value : '',
+            minIntervalSec: minI instanceof HTMLInputElement ? Number(minI.value) : 0,
+            maxIntervalSec: maxI instanceof HTMLInputElement ? Number(maxI.value) : 0,
+            atmosphereVolumePercent: va instanceof HTMLInputElement ? Number(va.value) : 0,
+            voicesVolumePercent: vv instanceof HTMLInputElement ? Number(vv.value) : 0,
+            learnMoreJournalEntryId:
+                lj instanceof HTMLSelectElement && lj.value ? lj.value : undefined,
+        };
+        try {
+            await adminSetSoundEnvironmentStudio(
+                /** @type {Record<string, unknown>} */ (payload)
+            );
+            showLocal('ok', 'Sound settings saved.');
+        } catch (e) {
+            showLocal('error', e instanceof Error ? e.message : String(e));
+        }
+    });
+
+    try {
+        await load();
+    } catch (e) {
+        showLocal('error', e instanceof Error ? e.message : String(e));
+    }
+}
+
 async function initJournal(mainEl) {
     const tbody = mainEl.querySelector('#studio-journal-tbody');
     const banner = mainEl.querySelector('#studio-journal-banner');
     const searchInput = mainEl.querySelector('#studio-journal-search');
     const countEl = mainEl.querySelector('#studio-journal-header-count');
-
-    /** @type {object[]} */
-    let allEntries = [];
 
     const show = (kind, text) => {
         if (!banner) return;
@@ -3504,48 +4016,378 @@ async function initJournal(mainEl) {
         banner.textContent = text;
     };
 
+    const normalizeLayoutRowsForSave = (rows) =>
+        (Array.isArray(rows) ? rows : [])
+            .map((r) => ({
+                rowType: String(r?.rowType || '').trim(),
+                refId: String(r?.refId || '').trim() || undefined,
+                selectionMode: String(r?.selectionMode || '').trim() || undefined,
+                artistId: String(r?.artistId || '').trim() || undefined,
+                sortOrder: Math.max(0, Math.floor(Number(r?.sortOrder ?? 0))),
+                featured: Boolean(r?.featured),
+            }))
+            .filter((r) => r.rowType);
+
+    /** @type {Array<Record<string, unknown>>} */
+    let layoutRows = [];
+    /** @type {Array<Record<string, unknown>>} */
+    let allEntries = [];
+    /** @type {Array<Record<string, unknown>>} */
+    let eventsList = [];
+    /** @type {Array<Record<string, unknown>>} */
+    let artists = [];
+
+    const nextSortOrder = () => {
+        const n = layoutRows.length;
+        let max = 0;
+        for (const r of layoutRows) {
+            const so = Math.floor(Number(/** @type {Record<string, unknown>} */ (r).sortOrder ?? 0));
+            if (so > max) max = so;
+        }
+        return max + 1;
+    };
+
+    const buildArtistOptions = (rowType, selected) => {
+        const pool = rowType === 'audio' ? artists.filter((a) => String(a?.audioUrl ?? '').trim()) : artists.filter((a) => String(a?.quote ?? '').trim());
+        const opts = pool
+            .map((a) => {
+                const id = String(a?.id ?? '');
+                const label = String(a?.locales?.en?.name ?? a?.slug ?? id);
+                return `<option value="${escapeHtml(id)}" ${id === selected ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+            })
+            .join('');
+        return `<option value="">—</option>${opts}`;
+    };
+
+    const rowSummaryCell = (row) => {
+        const t = String(row.rowType || '');
+        if (t === 'journal-entry') {
+            const id = String(row.refId || '');
+            const j = allEntries.find((e) => String(e?.id ?? '') === id);
+            const title = j?.en?.title ?? j?.en?.name ?? id;
+            return `entry: <code class="studio-code-inline">${escapeHtml(id)}</code> — ${escapeHtml(String(title || ''))}`;
+        }
+        if (t === 'event') {
+            const eid = String(row.refId || '');
+            const ev = eventsList.find((e) => String(e?.id ?? '') === eid);
+            const t2 = ev?.en?.title ?? ev?.title ?? eid;
+            return `event: <code class="studio-code-inline">${escapeHtml(eid)}</code> — ${escapeHtml(String(t2 || ''))}`;
+        }
+        if (t === 'quote' || t === 'audio') {
+            return `${String(row.selectionMode || 'random')} · artist <code class="studio-code-inline">${escapeHtml(String(row.artistId || '—'))}</code>`;
+        }
+        return '—';
+    };
+
+    async function saveLayoutFromState() {
+        const rows = normalizeLayoutRowsForSave(
+            layoutRows.map((r) => /** @type {Record<string, unknown>} */ (r))
+        );
+        await adminSetJournalLayoutStudio(rows);
+        show('ok', 'Layout saved.');
+        await load();
+    }
+
+    const openEventPickModal = (onPicked) => {
+        const opts = eventsList
+            .map((e) => {
+                const id = String(e?.id ?? '');
+                const lab = String(e?.en?.title ?? e?.title ?? id);
+                return `<option value="${escapeHtml(id)}">${escapeHtml(lab)} (${escapeHtml(id)})</option>`;
+            })
+            .join('');
+        const body = `<div class="studio-section-stack">
+          <p class="studio-muted">Add an event row to the <code>/journal</code> layout. Manage event content in Studio → Content (events) if needed.</p>
+          <label class="studio-field">
+            <span>Event</span>
+            <select id="studio-jp-ev-sel" class="studio-select">${opts || '<option value="">(no events)</option>'}</select>
+          </label>
+          <div class="studio-modal-actions">
+            <button type="button" class="studio-btn-primary" id="studio-jp-ev-ok">Add row</button>
+            <button type="button" class="studio-btn-ghost" data-studio-modal-close="1">Cancel</button>
+          </div>
+        </div>`;
+        const { root, close } = openStudioModal(body, { title: 'Add event to layout' });
+        root.querySelector('#studio-jp-ev-ok')?.addEventListener('click', () => {
+            const se = root.querySelector('#studio-jp-ev-sel');
+            const id = se instanceof HTMLSelectElement ? se.value : '';
+            if (!id) {
+                return;
+            }
+            close();
+            onPicked(id);
+        });
+    };
+
+    const openQuoteAudioAddModal = (rowType) => {
+        const artistsPool = rowType === 'audio' ? artists.filter((a) => String(a?.audioUrl ?? '').trim()) : artists.filter((a) => String(a?.quote ?? '').trim());
+        const body = `<div class="studio-section-stack">
+          <label class="studio-field">
+            <span>Mode</span>
+            <select id="studio-jp-qa-mode" class="studio-select">
+              <option value="random">random</option>
+              <option value="manual">manual</option>
+            </select>
+          </label>
+          <label class="studio-field" id="studio-jp-qa-artist-wrap">
+            <span>Artist (manual)</span>
+            <select id="studio-jp-qa-artist" class="studio-select" disabled>
+              ${artistsPool
+                  .map((a) => {
+                      const id = String(a?.id ?? '');
+                      return `<option value="${escapeHtml(id)}">${escapeHtml(
+                          String(a?.locales?.en?.name ?? a?.slug ?? id)
+                      )}</option>`;
+                  })
+                  .join('')}
+            </select>
+          </label>
+          <div class="studio-modal-actions">
+            <button type="button" class="studio-btn-primary" id="studio-jp-qa-ok">Add row</button>
+            <button type="button" class="studio-btn-ghost" data-studio-modal-close="1">Cancel</button>
+          </div>
+        </div>`;
+        const { root, close } = openStudioModal(body, { title: `Add ${rowType} row` });
+        const modeEl = root.querySelector('#studio-jp-qa-mode');
+        const artistEl = root.querySelector('#studio-jp-qa-artist');
+        const sync = () => {
+            const m = modeEl instanceof HTMLSelectElement ? modeEl.value : 'random';
+            if (artistEl instanceof HTMLSelectElement) {
+                artistEl.disabled = m !== 'manual';
+            }
+        };
+        modeEl?.addEventListener('change', sync);
+        sync();
+        root.querySelector('#studio-jp-qa-ok')?.addEventListener('click', () => {
+            const mode = modeEl instanceof HTMLSelectElement ? modeEl.value : 'random';
+            const aid = artistEl instanceof HTMLSelectElement ? artistEl.value : '';
+            close();
+            layoutRows.push({
+                rowType,
+                refId: undefined,
+                selectionMode: mode,
+                artistId: mode === 'manual' && aid ? aid : undefined,
+                sortOrder: nextSortOrder(),
+                featured: false,
+            });
+            void (async () => {
+                try {
+                    await saveLayoutFromState();
+                } catch (e) {
+                    show('error', e instanceof Error ? e.message : String(e));
+                }
+            })();
+        });
+    };
+
+    const openComposeMenuModal = () => {
+        const { root, close } = openStudioModal(
+            `<div class="studio-section-stack" style="gap:10px;max-width:24rem">
+              <p class="studio-muted">What are you adding?</p>
+              <button type="button" class="studio-btn-primary" id="jc-je">Journal entry (CMS) — new or edit, then add to layout</button>
+              <button type="button" class="studio-btn-ghost" id="jc-ev">Event (pick existing)</button>
+              <button type="button" class="studio-btn-ghost" id="jc-qu">Quote row</button>
+              <button type="button" class="studio-btn-ghost" id="jc-au">Audio row</button>
+            </div>`,
+            { title: 'Composer' }
+        );
+        root.querySelector('#jc-je')?.addEventListener('click', () => {
+            close();
+            openJournalModal(null, () => {}, {
+                afterJournalSave: (savedId) => {
+                    if (!savedId) return;
+                    layoutRows.push({
+                        rowType: 'journal-entry',
+                        refId: String(savedId),
+                        sortOrder: nextSortOrder(),
+                        featured: false,
+                    });
+                    void saveLayoutFromState();
+                },
+            });
+        });
+        root.querySelector('#jc-ev')?.addEventListener('click', () => {
+            close();
+            if (!eventsList.length) {
+                show('error', 'No events in the events content bundle. Add events via Studio → Content or test data.');
+                return;
+            }
+            openEventPickModal((eid) => {
+                layoutRows.push({
+                    rowType: 'event',
+                    refId: eid,
+                    sortOrder: nextSortOrder(),
+                    featured: false,
+                });
+                void saveLayoutFromState();
+            });
+        });
+        root.querySelector('#jc-qu')?.addEventListener('click', () => {
+            close();
+            openQuoteAudioAddModal('quote');
+        });
+        root.querySelector('#jc-au')?.addEventListener('click', () => {
+            close();
+            openQuoteAudioAddModal('audio');
+        });
+    };
+
     async function load() {
         if (!tbody) return;
         tbody.innerHTML = '<tr><td colspan="5">Loading…</td></tr>';
-        allEntries = await getJournalEntries();
+        [layoutRows, allEntries, eventsList, artists] = await Promise.all([
+            adminGetJournalLayoutStudio().catch(() => []),
+            getJournalEntries().catch(() => []),
+            getEventsList().catch(() => []),
+            getArtists().catch(() => []),
+        ]);
+        layoutRows = (Array.isArray(layoutRows) ? layoutRows : []).map((r) => ({ ...r }));
         applyJournalFilter();
+    }
+
+    function readRowsFromTableDom() {
+        if (!tbody) return;
+        tbody.querySelectorAll('tr[data-jl-idx]').forEach((tr) => {
+            const idx = Number(tr.getAttribute('data-jl-idx'));
+            if (!Number.isFinite(idx) || !layoutRows[idx]) return;
+            const tEl = tr.querySelector('[data-jl-type]');
+            const rEl = tr.querySelector('[data-jl-ref]');
+            const mEl = tr.querySelector('[data-jl-mode]');
+            const aEl = tr.querySelector('[data-jl-artist]');
+            const oi = tr.querySelector('[data-jl-order]');
+            const fe = tr.querySelector('[data-jl-featured]');
+            const o = { .../** @type {Record<string, unknown>} */ (layoutRows[idx]) };
+            if (tEl instanceof HTMLSelectElement) o.rowType = tEl.value;
+            if (oi instanceof HTMLInputElement) o.sortOrder = Math.max(0, Math.floor(Number(oi.value || 0)));
+            if (fe instanceof HTMLInputElement) o.featured = fe.checked;
+            if (rEl instanceof HTMLInputElement) o.refId = rEl.value || undefined;
+            if (mEl instanceof HTMLSelectElement) o.selectionMode = mEl.value || undefined;
+            if (aEl instanceof HTMLSelectElement) o.artistId = aEl.value || undefined;
+            layoutRows[idx] = o;
+        });
     }
 
     function applyJournalFilter() {
         if (!tbody) return;
         const q = (searchInput instanceof HTMLInputElement ? searchInput.value : '').trim().toLowerCase();
-        const entries = allEntries.filter((j) => {
+        const displayRows = (Array.isArray(layoutRows) ? layoutRows : []).map((r, i) => ({ r, i })).filter(({ r }) => {
             if (!q) return true;
-            const title = j.en?.title ?? '';
-            const id = j.id != null ? String(j.id) : '';
-            const link = j.link ?? '';
-            const hay = `${title} ${id} ${link} ${j.entryStatus ?? ''}`.toLowerCase();
-            return hay.includes(q);
+            const t = String(r?.rowType || '');
+            const hay = `${t} ${r?.refId || ''} ${r?.selectionMode || ''} ${r?.artistId || ''}`.toLowerCase();
+            if (hay.includes(q)) return true;
+            if (t === 'journal-entry' && r?.refId) {
+                const j = allEntries.find((e) => String(e?.id ?? '') === String(r.refId));
+                if (j) {
+                    const title = j.en?.title ?? '';
+                    const st = j.entryStatus ?? '';
+                    if (`${title} ${j.link ?? ''} ${st}`.toLowerCase().includes(q)) return true;
+                }
+            }
+            return false;
         });
-        if (countEl) countEl.textContent = String(q ? entries.length : allEntries.length);
-        if (!entries.length) {
-            tbody.innerHTML = `<tr><td colspan="5">${allEntries.length ? 'No rows match search.' : 'No journal entries.'}</td></tr>`;
+        if (countEl) countEl.textContent = String(q ? displayRows.length : layoutRows.length);
+        if (!displayRows.length) {
+            tbody.innerHTML = `<tr><td colspan="5">${layoutRows.length ? 'No layout rows match search.' : 'No layout rows. Use Add composer row.'}</td></tr>`;
             return;
         }
-        tbody.innerHTML = entries
-            .map((j) => {
-                const title = j.en?.title ?? '';
-                const id = j.id != null ? String(j.id) : '';
-                const link = j.link ?? '';
-                const st = j.entryStatus ?? '';
-                return `<tr>
-                <td>${escapeHtml(String(title || '(untitled)'))}</td>
-                <td><code class="studio-code-inline">${escapeHtml(id)}</code></td>
-                <td>${escapeHtml(String(st || '—'))}</td>
-                <td>${link ? `<a class="studio-action-link" href="${escapeHtml(link)}" target="_blank" rel="noopener">Open</a>` : '—'}</td>
+        tbody.innerHTML = displayRows
+            .map(({ r, i }) => {
+                const t = String(r?.rowType || 'journal-entry');
+                const so = Math.floor(Number(r?.sortOrder ?? 0));
+                const fe = Boolean(r?.featured);
+                const typeOpts = ['journal-entry', 'event', 'quote', 'audio']
+                    .map(
+                        (x) =>
+                            `<option value="${escapeHtml(x)}" ${x === t ? 'selected' : ''}>${escapeHtml(x)}</option>`
+                    )
+                    .join('');
+                const needRef = t === 'journal-entry' || t === 'event';
+                const needSel = t === 'quote' || t === 'audio';
+                const mode = String(r?.selectionMode || (needSel ? 'random' : ''));
+                return `<tr data-jl-idx="${i}">
+                <td><input type="number" class="studio-input" style="width:4rem" data-jl-order value="${so}" min="0" step="1" /></td>
+                <td><input type="checkbox" data-jl-featured ${fe ? 'checked' : ''} /></td>
+                <td><label class="studio-field"><span class="studio-muted">Type</span><select class="studio-select" data-jl-type>${typeOpts}</select></label></td>
+                <td>
+                  <div class="studio-modal-fields-row" style="flex-wrap:wrap;gap:6px;align-items:flex-end">
+                    ${needRef ? `<label class="studio-field"><span class="studio-muted">Ref</span><input class="studio-input" data-jl-ref value="${escapeHtml(String(r?.refId || ''))}" style="min-width:8rem" placeholder="id or index" /></label>` : ''}
+                    ${
+                        needSel
+                            ? `<label class="studio-field"><span class="studio-muted">Mode</span>
+                        <select class="studio-select" data-jl-mode>
+                          <option value="random" ${mode === 'random' ? 'selected' : ''}>random</option>
+                          <option value="manual" ${mode === 'manual' ? 'selected' : ''}>manual</option>
+                        </select></label>
+                        <label class="studio-field"><span class="studio-muted">Artist</span>
+                        <select class="studio-select" data-jl-artist ${mode === 'manual' ? '' : 'disabled'}>
+                          ${buildArtistOptions(t, String(r?.artistId || ''))}
+                        </select></label>`
+                            : ''
+                    }
+                    <p class="studio-muted" style="margin:0;font-size:0.8rem;flex:1 1 200px">${rowSummaryCell(r)}</p>
+                  </div>
+                </td>
                 <td class="studio-td-actions">
-                  <button type="button" class="studio-btn-ghost studio-je-view" data-id="${escapeHtml(id)}">PREVIEW</button>
-                  <button type="button" class="studio-btn-ghost studio-je-edit" data-id="${escapeHtml(id)}">MANAGE</button>
-                  <button type="button" class="studio-btn-ghost studio-je-del" data-id="${escapeHtml(id)}">DELETE</button>
+                  <button type="button" class="studio-btn-ghost studio-jl-apply" data-idx="${i}">Apply row</button>
+                  <button type="button" class="studio-btn-ghost studio-jl-rm" data-idx="${i}">Remove</button>
+              ${
+                  t === 'journal-entry' && r?.refId
+                      ? `<button type="button" class="studio-btn-ghost studio-je-view" data-id="${escapeHtml(String(r.refId))}">Preview</button>
+                  <button type="button" class="studio-btn-ghost studio-je-edit" data-id="${escapeHtml(String(r.refId))}">Edit entry</button>`
+                      : ''
+              }
                 </td>
             </tr>`;
             })
             .join('');
+
+        tbody.querySelectorAll('.studio-jl-apply').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+                const ix = Number(btn.getAttribute('data-idx'));
+                if (!Number.isFinite(ix) || !layoutRows[ix]) return;
+                readRowsFromTableDom();
+                try {
+                    await saveLayoutFromState();
+                } catch (e) {
+                    show('error', e instanceof Error ? e.message : String(e));
+                }
+            });
+        });
+        tbody.querySelectorAll('.studio-jl-rm').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+                const ix = Number(btn.getAttribute('data-idx'));
+                if (!Number.isFinite(ix) || !layoutRows[ix] || !confirm('Remove this row from the /journal layout?')) return;
+                readRowsFromTableDom();
+                layoutRows.splice(ix, 1);
+                try {
+                    await saveLayoutFromState();
+                } catch (e) {
+                    show('error', e instanceof Error ? e.message : String(e));
+                }
+            });
+        });
+        tbody.querySelectorAll('[data-jl-type], [data-jl-mode]').forEach((el) => {
+            el.addEventListener('change', (ev) => {
+                const tr = ev.target && /** @type {Element} */ (ev.target).closest('tr[data-jl-idx]');
+                if (!tr) return;
+                const tEl = tr.querySelector('[data-jl-type]');
+                const mEl = tr.querySelector('[data-jl-mode]');
+                const rEl = tr.querySelector('[data-jl-ref]');
+                const aEl = tr.querySelector('[data-jl-artist]');
+                const typ = tEl instanceof HTMLSelectElement ? tEl.value : 'journal-entry';
+                if (rEl instanceof HTMLInputElement) {
+                    rEl.disabled = !(typ === 'event' || typ === 'journal-entry');
+                }
+                if (mEl instanceof HTMLSelectElement) {
+                    mEl.disabled = !(typ === 'quote' || typ === 'audio');
+                }
+                if (aEl instanceof HTMLSelectElement) {
+                    const m = mEl instanceof HTMLSelectElement ? mEl.value : 'random';
+                    aEl.disabled = !(typ === 'quote' || typ === 'audio') || m !== 'manual';
+                    aEl.innerHTML = buildArtistOptions(typ, aEl.value);
+                }
+            });
+        });
         tbody.querySelectorAll('.studio-je-view').forEach((btn) => {
             btn.addEventListener('click', async () => {
                 const id = btn.getAttribute('data-id');
@@ -3589,25 +4431,12 @@ async function initJournal(mainEl) {
             btn.addEventListener('click', async () => {
                 const id = btn.getAttribute('data-id');
                 const row = await getJournalEntryForStudio(id || '');
-                openJournalModal(row, load);
-            });
-        });
-        tbody.querySelectorAll('.studio-je-del').forEach((btn) => {
-            btn.addEventListener('click', async () => {
-                const id = btn.getAttribute('data-id');
-                if (!id || !confirm('Delete this journal entry?')) return;
-                try {
-                    await deleteJournalStudio(id);
-                    show('ok', 'Deleted.');
-                    await load();
-                } catch (e) {
-                    show('error', e instanceof Error ? e.message : String(e));
-                }
+                openJournalModal(row, load, {});
             });
         });
     }
 
-    const openJournalModal = (existing, onDone) => {
+    const openJournalModal = (existing, onDone, opts = {}) => {
         const j = existing || {
             id: `j_${Date.now()}`,
             link: '',
@@ -3684,7 +4513,12 @@ async function initJournal(mainEl) {
             const f = t && 'files' in t ? t.files?.[0] : null;
             if (!f) return;
             try {
-                await uploadBlobToS3(f, root.querySelector('#studio-je-img'), { area: 'studio/journal' });
+                await uploadBlobToS3(f, root.querySelector('#studio-je-img'), {
+                    area: 'studio/journal',
+                    entityType: 'journal',
+                    entityId: String(j.id || ''),
+                    fieldKey: 'image',
+                });
             } catch (err) {
                 alert(err instanceof Error ? err.message : String(err));
             }
@@ -3712,7 +4546,11 @@ async function initJournal(mainEl) {
                     entryStatus: String(fd.get('entryStatus') || 'draft'),
                     localesJson,
                 });
+                const savedId = String(fd.get('id') || '');
                 close();
+                if (opts && typeof opts.afterJournalSave === 'function') {
+                    opts.afterJournalSave(savedId);
+                }
                 onDone();
             } catch (err) {
                 alert(err instanceof Error ? err.message : String(err));
@@ -3720,7 +4558,17 @@ async function initJournal(mainEl) {
         });
     };
 
-    mainEl.querySelector('#studio-journal-add')?.addEventListener('click', () => openJournalModal(null, load));
+    mainEl.querySelector('#studio-journal-add')?.addEventListener('click', () => {
+        openComposeMenuModal();
+    });
+    mainEl.querySelector('#studio-journal-save-layout')?.addEventListener('click', async () => {
+        readRowsFromTableDom();
+        try {
+            await saveLayoutFromState();
+        } catch (e) {
+            show('error', e instanceof Error ? e.message : String(e));
+        }
+    });
     mainEl.querySelector('#studio-journal-refresh')?.addEventListener('click', () => load());
     mainEl.querySelector('#studio-journal-search')?.addEventListener('input', () => applyJournalFilter());
 

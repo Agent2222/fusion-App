@@ -189,6 +189,9 @@ export async function updateProgramReservedArtist(args) {
         visibility,
         studioStatus,
         updatedAt,
+        depositAmountDisplay: String(
+            row.depositAmountDisplay != null ? row.depositAmountDisplay : '',
+        ),
         localesJson,
     });
 }

@@ -1,3 +1,4 @@
+import { shouldLogFusionIcAuthErrors } from '../../config.js';
 import { navigate, activateDeactivate } from '../../router.js';
 // Header Custom Element Component
 import gsap from 'gsap';
@@ -66,6 +67,8 @@ class HeaderComponent extends HTMLElement {
         this._onFusionPerspectiveBound = null;
         /** @type {((e: Event) => void) | null} */
         this._onProfileSetupPromptBound = null;
+        /** @type {(() => void) | null} */
+        this._onRosterVisBound = null;
         this._profileSetupPrompt = { open: false, fullName: '', email: '' };
     }
 
@@ -132,7 +135,7 @@ class HeaderComponent extends HTMLElement {
     }
 
     showHeader() {
-        const el = this._headerEl || this.shadow.querySelector('header');
+        const el = this._headerEl || this.shadow.querySelector('.header-surface');
         gsap.to(el, {
             opacity: 1,
             duration: 0.5,
@@ -143,7 +146,7 @@ class HeaderComponent extends HTMLElement {
     }
 
     hideHeader() {
-        const el = this._headerEl || this.shadow.querySelector('header');
+        const el = this._headerEl || this.shadow.querySelector('.header-surface');
         gsap.to(el, {
             opacity: 0,
             duration: 0.5,
@@ -383,7 +386,7 @@ class HeaderComponent extends HTMLElement {
 
     connectedCallback() {
         this.render();
-        this._headerEl = this.shadow.querySelector('header');
+        this._headerEl = this.shadow.querySelector('.header-surface');
         this._logoHeaderEl = this.shadow.querySelector('#logoHeader');
         this._menuToggle = this.shadow.querySelector('#headerMenuToggle');
         this._navCluster = this.shadow.querySelector('#headerNavCluster');
@@ -410,6 +413,10 @@ class HeaderComponent extends HTMLElement {
             this._openProfileSetupPrompt(detail);
         };
         window.addEventListener('fusion-open-profile-setup', this._onProfileSetupPromptBound);
+        this._onRosterVisBound = () => {
+            void this._syncRosterVisibilityBanner();
+        };
+        window.addEventListener('fusion-roster-visibility-updated', this._onRosterVisBound);
         void this._refreshHeaderAuthState();
         this._onRouteChangeForNavBound = () => {
             this._syncActiveNavLink();
@@ -442,6 +449,10 @@ class HeaderComponent extends HTMLElement {
         if (this._onProfileSetupPromptBound) {
             window.removeEventListener('fusion-open-profile-setup', this._onProfileSetupPromptBound);
             this._onProfileSetupPromptBound = null;
+        }
+        if (this._onRosterVisBound) {
+            window.removeEventListener('fusion-roster-visibility-updated', this._onRosterVisBound);
+            this._onRosterVisBound = null;
         }
     }
 
@@ -602,8 +613,10 @@ class HeaderComponent extends HTMLElement {
                 if (typeof actor.isCallerAdmin === 'function') {
                     isAdmin = await actor.isCallerAdmin();
                 }
-            } catch (_) {
-                /* ignore */
+            } catch (e) {
+                if (shouldLogFusionIcAuthErrors()) {
+                    console.warn('[Fusion] isCallerAdmin failed (header)', e);
+                }
             }
             if (isAdmin) {
                 this._realIsAdmin = true;
@@ -613,8 +626,10 @@ class HeaderComponent extends HTMLElement {
                         const raw = await actor.getAccountForCaller();
                         acc = Array.isArray(raw) ? (raw.length ? raw[0] : null) : raw;
                     }
-                } catch (_) {
-                    /* ignore */
+                } catch (e) {
+                    if (shouldLogFusionIcAuthErrors()) {
+                        console.warn('[Fusion] getAccountForCaller failed (header, admin path)', e);
+                    }
                 }
                 const perspective = getAdminPerspective();
                 const effectiveAcc = buildEffectiveAccountForPerspective(
@@ -652,8 +667,10 @@ class HeaderComponent extends HTMLElement {
                     const raw = await actor.getAccountForCaller();
                     acc = Array.isArray(raw) ? (raw.length ? raw[0] : null) : raw;
                 }
-            } catch (_) {
-                /* ignore */
+            } catch (e) {
+                if (shouldLogFusionIcAuthErrors()) {
+                    console.warn('[Fusion] getAccountForCaller failed (header)', e);
+                }
             }
             if (acc == null) {
                 this._authUi = { kind: 'needsRegistration' };
@@ -692,9 +709,66 @@ class HeaderComponent extends HTMLElement {
             const profileHref = await resolveProfilePathForAccount(acc);
             this._authUi = { kind: 'member', profileHref, pending, needsProfileCompletion: !linkedId };
             this._fillAuthPair();
-        } catch (_) {
+        } catch (e) {
+            if (shouldLogFusionIcAuthErrors()) {
+                console.warn('[Fusion] _refreshHeaderAuthState failed', e);
+            }
             this._authUi = { kind: 'guest' };
             this._fillAuthPair();
+        } finally {
+            void this._syncRosterVisibilityBanner();
+        }
+    }
+
+    /**
+     * Slim banner: linked artist visibility is not public (member accounts).
+     */
+    async _syncRosterVisibilityBanner() {
+        const host = this.shadowRoot && this.shadowRoot.querySelector('#headerRosterVisBanner');
+        if (!(host instanceof HTMLElement)) {
+            return;
+        }
+        const ui = this._authUi;
+        if (!ui || ui.kind !== 'member' || ui.needsProfileCompletion) {
+            host.hidden = true;
+            host.innerHTML = '';
+            return;
+        }
+        try {
+            const { getMyArtistRecord, normalizeArtistRosterVisibility } = await import('../../utils/database.js');
+            const rec = await getMyArtistRecord();
+            const p = rec && rec.profile;
+            if (!p || typeof p !== 'object') {
+                host.hidden = true;
+                host.innerHTML = '';
+                return;
+            }
+            const vis = normalizeArtistRosterVisibility(/** @type {Record<string, unknown>} */(p).visibility);
+            if (vis === 'public') {
+                host.hidden = true;
+                host.innerHTML = '';
+                return;
+            }
+            const en = this.getLocale() === 'en';
+            if (vis === 'inactive') {
+                host.innerHTML = `<div class="header-roster-vis-inner" role="status">
+                    <span class="header-roster-vis-text">${en ? 'Your profile is currently inactive.' : 'プロファイルは非アクティブです。'}</span>
+                    <button type="button" class="header-roster-vis-cta" data-action="roster-publish">${en ? 'Publish profile' : 'プロファイルを公開'}</button>
+                </div>`;
+            } else if (vis === 'pending') {
+                host.innerHTML = `<div class="header-roster-vis-inner" role="status">
+                    <span class="header-roster-vis-text">${en ? 'Your profile is under review.' : 'プロファイルは審査中です。'}</span>
+                </div>`;
+            } else {
+                host.innerHTML = `<div class="header-roster-vis-inner" role="status">
+                    <span class="header-roster-vis-text">${en ? 'Your profile is private.' : 'プロファイルは非公開です。'}</span>
+                    <button type="button" class="header-roster-vis-cta" data-action="roster-public">${en ? 'Make public' : '公開にする'}</button>
+                </div>`;
+            }
+            host.hidden = false;
+        } catch {
+            host.hidden = true;
+            host.innerHTML = '';
         }
     }
 
@@ -889,6 +963,28 @@ class HeaderComponent extends HTMLElement {
         const root = this.shadowRoot;
 
         root.addEventListener('click', (e) => {
+            const rosterCta = e.target.closest('.header-roster-vis-cta');
+            if (rosterCta) {
+                e.preventDefault();
+                const action = rosterCta.getAttribute('data-action');
+                if (action === 'roster-publish') {
+                    this.closeMobileMenu();
+                    activateDeactivate('/settings/profile');
+                    navigate('/settings/profile');
+                    return;
+                }
+                if (action === 'roster-public') {
+                    void import('../../utils/database.js').then(async (m) => {
+                        try {
+                            await m.updateMyArtistVisibility('public', new Date().toISOString());
+                            await this._syncRosterVisibilityBanner();
+                        } catch {
+                            /* ignore */
+                        }
+                    });
+                    return;
+                }
+            }
             if (e.target.closest('#headerMenuToggle')) {
                 e.preventDefault();
                 this.toggleMobileMenu();
@@ -1002,6 +1098,23 @@ class HeaderComponent extends HTMLElement {
                 overflow: visible;
                 /* --bg, --c* inherit from document (html data-theme); do not override here */
             }
+
+                .header-surface {
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    /* Above in-page stickies (e.g. #filterSystem z-index:10) so sound env / nav stay clickable. */
+                    z-index: 30;
+                    display: flex;
+                    flex-direction: column;
+                    width: 100%;
+                    align-items: stretch;
+                    will-change: transform, opacity;
+                    user-select: none;
+                    opacity: 0;
+                    pointer-events: none;
+                }
                 
                 header {
                     box-sizing: border-box;
@@ -1024,18 +1137,43 @@ class HeaderComponent extends HTMLElement {
                     column-gap: clamp(0.5rem, 2vw, 1.25rem);
                     font-family: 'momochidori-variable', sans-serif;
                     font-variation-settings: var(--fv-nav);
-                    opacity: 0;
-                    // transform: translateY(50%);
-                    position: absolute;
-                    top: 0;
-                    left: 0;
-                    right: 0;
-                    z-index: 10;
+                    position: relative;
+                    z-index: 1;
                     background-color: var(--bg);
                     box-shadow: 0 1px 0 rgba(0, 0, 0, 0.07);
-                    will-change: transform, opacity;
                     border-bottom: 1px solid var(--c2, #000);
-                    user-select: none;
+                    pointer-events: auto;
+                }
+
+                .header-sound-row {
+                    display: flex;
+                    flex-direction: row;
+                    flex-wrap: wrap;
+                    align-items: flex-start;
+                    justify-content: space-between;
+                    width: 100%;
+                    box-sizing: border-box;
+                    gap: 0.5rem 1rem;
+                    pointer-events: none;
+                }
+
+                .header-sound-row app-sound-environment {
+                    display: block;
+                    position: relative;
+                    z-index: 35;
+                    pointer-events: auto;
+                    width: max-content;
+                    max-width: calc(100% - 4%);
+                    align-self: flex-start;
+                    padding-left: 1rem;
+                    box-sizing: border-box;
+                }
+
+                :host-context(html[data-fusion-page="profile"]) .header-sound-row app-sound-environment {
+                    margin-left: auto;
+                    align-self: flex-end;
+                    padding-left: 0;
+                    padding-right: clamp(0.5rem, 2vw, 1.25rem);
                 }
 
                 a {
@@ -1349,6 +1487,53 @@ class HeaderComponent extends HTMLElement {
                     pointer-events: auto;
                 }
 
+                #headerRosterVisBanner {
+                    box-sizing: border-box;
+                    width: 100%;
+                    position: relative;
+                    z-index: 9;
+                    background: var(--c1, #f4f4f0);
+                    border-bottom: 1px solid var(--c2, #000);
+                    padding: 0.4rem 2% 0.5rem;
+                    font-size: clamp(0.72rem, 0.88vw, 0.86rem);
+                    color: var(--c2, #000);
+                    font-family: 'momochidori-variable', sans-serif;
+                    font-variation-settings: var(--fv-nav);
+                }
+
+                #headerRosterVisBanner[hidden] {
+                    display: none !important;
+                }
+
+                .header-roster-vis-inner {
+                    display: flex;
+                    flex-wrap: wrap;
+                    align-items: center;
+                    gap: 0.5rem 0.75rem;
+                    justify-content: center;
+                    max-width: 90rem;
+                    margin: 0 auto;
+                }
+
+                .header-roster-vis-text {
+                    flex: 1 1 12rem;
+                }
+
+                .header-roster-vis-cta {
+                    padding: 0.22rem 0.65rem;
+                    font: inherit;
+                    font-variation-settings: var(--fv-nav-active);
+                    border: 1.5px solid var(--c2, #000);
+                    background: transparent;
+                    color: var(--c2, #000);
+                    cursor: pointer;
+                    border-radius: 2px;
+                }
+
+                .header-roster-vis-cta:hover {
+                    opacity: 0.86;
+                }
+
                 @media (max-width: ${MOBILE_NAV_MAX_PX}px) {
                     :host([data-mobile-nav-open]) header {
                         z-index: 165;
@@ -1528,6 +1713,7 @@ class HeaderComponent extends HTMLElement {
                     }
                 }
             </style>
+            <div class="header-surface">
             <header>
                 <div id="logo">
                     <img id="headerLogo" class="header-logo-wide" src="${HeaderWideLogo}" alt="${withSeoImageAlt('Fusion logo')}">
@@ -1554,6 +1740,10 @@ class HeaderComponent extends HTMLElement {
                     </div>
                 </div>
             </header>
+            <div class="header-sound-row">
+            <app-sound-environment id="headerSoundEnv" aria-label="Site sound environment"></app-sound-environment>
+            </div>
+            <div id="headerRosterVisBanner" class="header-roster-vis-banner" hidden></div>
             <div id="headerDrawerBackdrop" class="header-drawer-backdrop" aria-hidden="true"></div>
             <div id="logoHeader">
                 <div id="logoHeaderInner">
@@ -1561,6 +1751,7 @@ class HeaderComponent extends HTMLElement {
                 </div>
             </div>
             <div id="headerProfileSetupPrompt" class="header-profile-setup-host" hidden></div>
+            </div>
         `;
     }
 }

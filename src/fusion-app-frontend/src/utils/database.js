@@ -45,6 +45,36 @@ import {
 import { sendEmail } from './integrationApi.js';
 import { getApplicationStaffNotificationEmails } from './studioServicesConfig.js';
 
+/**
+ * Roster `ArtistCore.visibility` values (on-chain, lowercase).
+ * @type {Readonly<['inactive', 'pending', 'private', 'public']>}
+ */
+export const ARTIST_ROSTER_VISIBILITIES = Object.freeze(
+    /** @type {const} */ (['inactive', 'pending', 'private', 'public'])
+);
+
+/**
+ * @param {unknown} raw
+ * @returns {'inactive' | 'pending' | 'private' | 'public'}
+ */
+export function normalizeArtistRosterVisibility(raw) {
+    const s = String(raw ?? '')
+        .trim()
+        .toLowerCase();
+    if (s === 'inactive' || s === 'pending' || s === 'private' || s === 'public') {
+        return s;
+    }
+    return 'public';
+}
+
+/**
+ * @param {unknown} vis
+ * @returns {boolean} True if the artist should appear on public marketing feeds and directory.
+ */
+export function artistRosterInPublicDirectory(vis) {
+    return normalizeArtistRosterVisibility(vis) === 'public';
+}
+
 const STORAGE_KEY = 'fusion-data-source';
 
 /** Site setting key: JSON for program application “what’s included” global bullets (EN/JA). */
@@ -589,18 +619,79 @@ async function fetchArtistCohortMap(actor) {
 }
 
 /**
+ * @param {import('@dfinity/agent').ActorSubclass} actor
+ * @returns {Promise<Map<string, { quote: string, audioUrl: string, audioTitle: string }>>}
+ */
+async function fetchArtistMediaMap(actor) {
+    const m = new Map();
+    if (!actor || typeof actor.listArtistMedia !== 'function') return m;
+    try {
+        const rows = await actor.listArtistMedia();
+        if (!Array.isArray(rows)) return m;
+        for (const row of rows) {
+            if (!Array.isArray(row) || row.length < 2) continue;
+            const id = String(row[0] ?? '');
+            const v = row[1];
+            if (!id || !v || typeof v !== 'object') continue;
+            m.set(id, {
+                quote: String(v.quote ?? ''),
+                audioUrl: String(v.audio_url ?? v.audioUrl ?? ''),
+                audioTitle: String(v.audio_title ?? v.audioTitle ?? ''),
+            });
+        }
+    } catch {
+        /* older canister */
+    }
+    return m;
+}
+
+/**
+ * @param {import('@dfinity/agent').ActorSubclass} actor
+ * @returns {Promise<Map<string, string>>}
+ */
+async function fetchArtistHeroProfileMap(actor) {
+    const m = new Map();
+    if (!actor || typeof actor.listArtistHeroProfileImagePublic !== 'function') return m;
+    try {
+        const rows = await actor.listArtistHeroProfileImagePublic();
+        if (!Array.isArray(rows)) return m;
+        for (const row of rows) {
+            if (!Array.isArray(row) || row.length < 2) continue;
+            const id = String(row[0] ?? '');
+            if (!id) continue;
+            m.set(id, String(row[1] ?? ''));
+        }
+    } catch {
+        /* older canister */
+    }
+    return m;
+}
+
+/**
  * Map canister `Artist` into frontend roster shape (aligned with testData artists).
  * @param {Record<string, unknown>} a
  * @param {Map<string, number[]>} [cohortByArtistId] — from `listArtistFilterCohortYearsPublic` when reading `ArtistRecord` profiles
  */
-function mapCanisterArtistRow(a, cohortByArtistId) {
+function mapCanisterArtistRow(a, cohortByArtistId, mediaByArtistId) {
     const id = String(a.id ?? '');
     const filterRaw = unwrapOpt(a.filter);
     const galleryRaw = unwrapOpt(a.gallery_filter ?? a.galleryFilter);
+    const media = mediaByArtistId instanceof Map ? mediaByArtistId.get(id) : null;
     return {
         id,
         slug: String(a.slug ?? ''),
         image: String(a.image ?? ''),
+        heroProfileImage: (() => {
+            const o = a.hero_profile_image ?? a.heroProfileImage;
+            if (Array.isArray(o)) {
+                return String(unwrapOpt(o) ?? '').trim();
+            }
+            if (o == null || o === undefined) return '';
+            return String(o).trim();
+        })(),
+        quote: String(media?.quote ?? ''),
+        audioUrl: String(media?.audioUrl ?? ''),
+        audioTitle: String(media?.audioTitle ?? ''),
         featuredOrder: Number(a.featured_order ?? a.featuredOrder ?? 0),
         visibility: String(a.visibility ?? ''),
         updatedAt: String(a.updated_at ?? a.updatedAt ?? ''),
@@ -659,10 +750,14 @@ function normalizeArtistDefaults(a) {
     if (!a || typeof a !== 'object') return a;
     return {
         ...a,
+        quote: String(/** @type {Record<string, unknown>} */ (a).quote ?? ''),
+        audioUrl: String(/** @type {Record<string, unknown>} */ (a).audioUrl ?? ''),
+        audioTitle: String(/** @type {Record<string, unknown>} */ (a).audioTitle ?? ''),
         imported: Boolean(a.imported),
         accessCode: String(a.accessCode ?? a.access_code ?? ''),
         contactEmail: String(/** @type {Record<string, unknown>} */ (a).contactEmail ?? '').trim(),
         mostRecentProgram: String(a.mostRecentProgram ?? a.most_recent_program ?? ''),
+        heroProfileImage: String(/** @type {Record<string, unknown>} */ (a).heroProfileImage ?? a.hero_profile_image ?? '').trim(),
     };
 }
 
@@ -670,13 +765,21 @@ function normalizeArtistDefaults(a) {
  * Merge `ArtistRecord` from canister into testData-like artist (adds `locales` from JSON).
  * @param {Record<string, unknown>} rec
  * @param {Map<string, number[]>} [cohortByArtistId]
+ * @param {Map<string, string>} [heroByArtistId] — from `listArtistHeroProfileImagePublic` (not on `ArtistCore`)
  */
-function artistFromRecord(rec, cohortByArtistId) {
+function artistFromRecord(rec, cohortByArtistId, mediaByArtistId, heroByArtistId) {
     if (!rec || typeof rec !== 'object') return null;
     const prof = rec.profile;
     if (!prof || typeof prof !== 'object') return null;
-    const profile = mapCanisterArtistRow(prof, cohortByArtistId);
+    const profile = mapCanisterArtistRow(prof, cohortByArtistId, mediaByArtistId);
     const out = { ...profile };
+    const id = String(out.id ?? '');
+    if (heroByArtistId instanceof Map && id) {
+        const h = heroByArtistId.get(id);
+        if (h != null && String(h).trim() !== '') {
+            out.heroProfileImage = String(h).trim();
+        }
+    }
     const ljRaw = rec.locales_json ?? rec.localesJson;
     const json = typeof ljRaw === 'string' ? ljRaw : unwrapOpt(ljRaw);
     if (json && typeof json === 'string') {
@@ -988,23 +1091,23 @@ function getMergedTestArtists() {
  */
 export async function getArtists() {
     if (getDataSource() === 'test') {
-        return getMergedTestArtists().filter(
-            (a) => String(a.visibility ?? '').toLowerCase() !== 'private'
-        );
+        return getMergedTestArtists().filter((a) => artistRosterInPublicDirectory(a.visibility));
     }
     try {
         const actor = await getFusionBackendActor();
         if (typeof actor.listArtistRecordsPublic === 'function') {
             const metaForMerge = await fetchFeaturedMergeMetaLive();
             _lastFeaturedMergeMeta = metaForMerge;
-            const [rows, cohortMap] = await Promise.all([
+            const [rows, cohortMap, mediaMap, heroMap] = await Promise.all([
                 actor.listArtistRecordsPublic(),
                 fetchArtistCohortMap(actor),
+                fetchArtistMediaMap(actor),
+                fetchArtistHeroProfileMap(actor),
             ]);
             if (!Array.isArray(rows)) return [];
             const out = [];
             for (const r of rows) {
-                const a = artistFromRecord(r, cohortMap);
+                const a = artistFromRecord(r, cohortMap, mediaMap, heroMap);
                 if (a) out.push(a);
             }
             await mergeMostRecentProgramsFromCanister(actor, out);
@@ -1019,23 +1122,31 @@ export async function getArtists() {
     }
     const metaForMerge = await fetchFeaturedMergeMetaLive();
     _lastFeaturedMergeMeta = metaForMerge;
-    const rows = await actor.listArtists();
+    const [rows, mediaMap] = await Promise.all([actor.listArtists(), fetchArtistMediaMap(actor)]);
     if (!Array.isArray(rows)) return [];
     return dedupePublicArtistRows(
-        rows.map((r) => mergeArtistFeaturedExtension(mapCanisterArtistRow(r), metaForMerge))
+        rows.map((r) => mergeArtistFeaturedExtension(mapCanisterArtistRow(r, undefined, mediaMap), metaForMerge))
     );
 }
 
 /**
  * Map full canister `ArtistRecord` (Studio) to roster row with `imported` + `accessCode`.
  * @param {Record<string, unknown>} rec
+ * @param {Map<string, string>} [heroByArtistId]
  */
-function mapStudioArtistFromFullRecord(rec, cohortByArtistId) {
+function mapStudioArtistFromFullRecord(rec, cohortByArtistId, mediaByArtistId, heroByArtistId) {
     const prof = rec.profile;
     if (!prof || typeof prof !== 'object') {
         return { id: '', slug: '', imported: false, accessCode: '' };
     }
-    const base = mapCanisterArtistRow(prof, cohortByArtistId);
+    let base = mapCanisterArtistRow(prof, cohortByArtistId, mediaByArtistId);
+    const bid = String(base.id ?? '');
+    if (heroByArtistId instanceof Map && bid) {
+        const h = heroByArtistId.get(bid);
+        if (h != null && String(h).trim() !== '') {
+            base = { ...base, heroProfileImage: String(h).trim() };
+        }
+    }
     /** @type {Record<string, unknown> | undefined} */
     let locales;
     const ljRaw = rec.locales_json ?? rec.localesJson;
@@ -1071,13 +1182,18 @@ export async function getArtistsForStudio() {
         if (typeof actor.listArtistRecordsForStudio === 'function') {
             const metaForMerge = await fetchFeaturedMergeMetaLive();
             _lastFeaturedMergeMeta = metaForMerge;
-            const [rows, cohortMap] = await Promise.all([
+            const [rows, cohortMap, mediaMap, heroMap] = await Promise.all([
                 actor.listArtistRecordsForStudio(),
                 fetchArtistCohortMap(actor),
+                fetchArtistMediaMap(actor),
+                fetchArtistHeroProfileMap(actor),
             ]);
             if (!Array.isArray(rows)) return [];
             const mapped = rows.map((r) =>
-                mergeArtistFeaturedExtension(mapStudioArtistFromFullRecord(r, cohortMap), metaForMerge)
+                mergeArtistFeaturedExtension(
+                    mapStudioArtistFromFullRecord(r, cohortMap, mediaMap, heroMap),
+                    metaForMerge
+                )
             );
             await mergeMostRecentProgramsFromCanister(actor, mapped);
             return mapped;
@@ -1164,6 +1280,7 @@ export async function syncStudioArtistsLegacyHeroImages() {
                 id: row.id,
                 slug: row.slug,
                 image,
+                heroProfileImage: String(/** @type {Record<string, unknown>} */ (row).heroProfileImage ?? row.hero_profile_image ?? ''),
                 featuredOrder: row.featuredOrder,
                 visibility: row.visibility,
                 updatedAt: new Date().toISOString(),
@@ -1240,6 +1357,7 @@ export async function syncStudioArtistsLegacyIntroGalleries() {
                     id: row.id,
                     slug: row.slug,
                     image: row.image,
+                    heroProfileImage: String(/** @type {Record<string, unknown>} */ (row).heroProfileImage ?? row.hero_profile_image ?? ''),
                     featuredOrder: row.featuredOrder,
                     visibility: row.visibility,
                     updatedAt: new Date().toISOString(),
@@ -1274,14 +1392,18 @@ export async function bulkUpsertArtistsStudio(records) {
     }
     const actor = await getStudioAuthenticatedActor();
     const motoko = records.map(toMotokoArtistRecord);
+    const heroUrls = records.map((rec) => {
+        const p = rec?.profile && typeof rec.profile === 'object' ? rec.profile : rec;
+        return String(/** @type {Record<string, unknown>} */ (p).heroProfileImage ?? p.hero_profile_image ?? '').trim();
+    });
     if (typeof actor.bulkUpsertArtists === 'function') {
-        await actor.bulkUpsertArtists(motoko);
+        await actor.bulkUpsertArtists(motoko, heroUrls);
     } else {
         if (typeof actor.upsertArtist !== 'function') {
             throw new Error('upsertArtist missing — run dfx generate fusion-app-backend.');
         }
-        for (const r of motoko) {
-            await actor.upsertArtist(r);
+        for (let i = 0; i < motoko.length; i += 1) {
+            await actor.upsertArtist(motoko[i], heroUrls[i] ?? '');
         }
     }
     if (typeof actor.bulkPutArtistFilterCohortYears === 'function') {
@@ -1385,8 +1507,12 @@ export async function getArtistBySlug(slug) {
             const recOpt = await actor.getArtistRecordBySlug(slug);
             const rec = unwrapOpt(recOpt);
             if (rec) {
-                const cohortMap = await fetchArtistCohortMap(actor);
-                const merged = artistFromRecord(rec, cohortMap);
+                const [cohortMap, mediaMap, heroMap] = await Promise.all([
+                    fetchArtistCohortMap(actor),
+                    fetchArtistMediaMap(actor),
+                    fetchArtistHeroProfileMap(actor),
+                ]);
+                const merged = artistFromRecord(rec, cohortMap, mediaMap, heroMap);
                 if (merged) {
                     if (typeof actor.getArtistBySlug === 'function') {
                         const profOpt = await actor.getArtistBySlug(slug);
@@ -1703,6 +1829,21 @@ export async function adminCreateJoinInviteCodeStudio(role) {
 }
 
 /**
+ * Admin: all join invite rows (including redeemed). Filter by `active` for pending codes.
+ * @returns {Promise<Array<[string, { role: Record<string, null>, active: boolean, createdAt: string }]>>}
+ */
+export async function adminListJoinInvitesStudio() {
+    if (getDataSource() === 'test') {
+        return [];
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminListJoinInvites !== 'function') {
+        return [];
+    }
+    return await actor.adminListJoinInvites();
+}
+
+/**
  * Authenticated caller: redeem join invite or artist roster access code.
  * @param {Record<string, null>} role
  * @param {string} codeRaw
@@ -1838,19 +1979,64 @@ export async function getMyArtistRecord() {
     const opt = await actor.getMyArtistRecord();
     const rec = unwrapOpt(opt);
     if (!rec || typeof rec !== 'object') return null;
+    let recWithMedia = rec;
+    if (typeof actor.getMyArtistMedia === 'function') {
+        try {
+            const mediaOpt = await actor.getMyArtistMedia();
+            const media = unwrapOpt(mediaOpt);
+            if (media && typeof media === 'object') {
+                const p = rec.profile && typeof rec.profile === 'object' ? rec.profile : {};
+                recWithMedia = {
+                    ...rec,
+                    profile: {
+                        ...p,
+                        quote: String(media.quote ?? ''),
+                        audioUrl: String(media.audio_url ?? media.audioUrl ?? ''),
+                        audioTitle: String(media.audio_title ?? media.audioTitle ?? ''),
+                    },
+                };
+            }
+        } catch {
+            /* older wasm */
+        }
+    }
+    if (recWithMedia.profile && typeof actor.listArtistHeroProfileImagePublic === 'function') {
+        try {
+            const tuples = await actor.listArtistHeroProfileImagePublic();
+            if (Array.isArray(tuples)) {
+                const m = new Map();
+                for (const row of tuples) {
+                    if (Array.isArray(row) && row.length >= 2) {
+                        m.set(String(row[0] ?? ''), String(row[1] ?? ''));
+                    }
+                }
+                const p0 = recWithMedia.profile;
+                if (p0 && typeof p0 === 'object') {
+                    const p = /** @type {Record<string, unknown>} */ (p0);
+                    const id = String(p.id ?? '');
+                    const h = m.get(id);
+                    if (h && String(h).trim()) {
+                        recWithMedia = { ...recWithMedia, profile: { ...p, heroProfileImage: String(h).trim() } };
+                    }
+                }
+            }
+        } catch {
+            /* older canister */
+        }
+    }
     /** Applications live in a separate canister map; merge for the same shape as test mode. */
     if (typeof actor.getMyArtistApplicationsJson === 'function') {
         try {
             const appsOpt = await actor.getMyArtistApplicationsJson();
             const aj = unwrapOpt(appsOpt);
             if (aj != null && String(aj).length > 0) {
-                return { ...rec, appliedJson: aj };
+                return { ...recWithMedia, appliedJson: aj };
             }
         } catch {
             /* older wasm without getMyArtistApplicationsJson */
         }
     }
-    return rec;
+    return recWithMedia;
 }
 
 /**
@@ -1930,15 +2116,84 @@ export async function updateMyArtistProfilePatch(imageUrl, updatedAt) {
 }
 
 /**
- * Set roster visibility for the caller's linked artist (`public` | `private`). Private artists are omitted from public feed lists.
+ * Update `profile.heroProfileImage` (card “Profile” image URL) for the caller's linked artist.
+ * @param {string} heroProfileImageUrl
+ * @param {string} [updatedAt] ISO timestamp
+ * @returns {Promise<void>}
+ */
+export async function updateMyArtistHeroProfileImagePatch(heroProfileImageUrl, updatedAt) {
+    const ts = updatedAt || new Date().toISOString();
+    const url = String(heroProfileImageUrl ?? '');
+    if (getDataSource() === 'test') {
+        const id = getProfileSettingsDevArtistId();
+        if (!id) {
+            throw new Error('Select which artist profile to edit (test mode).');
+        }
+        const artists = await getArtists();
+        const base = artists.find((x) => x.id === id);
+        if (!base) throw new Error('Artist not found');
+        const merged = normalizeArtistDefaults({ ...base, heroProfileImage: url, updatedAt: ts });
+        const overlay = readStudioLs(LS_ARTISTS_OVERLAY) || {};
+        overlay[id] = merged;
+        writeStudioLs(LS_ARTISTS_OVERLAY, overlay);
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('fusion-data-source-change', { detail: { source: 'test' } }));
+        }
+        return;
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.updateMyArtistHeroProfileImagePatch !== 'function') {
+        throw new Error('updateMyArtistHeroProfileImagePatch unavailable — sign in and run dfx generate fusion-app-backend.');
+    }
+    await actor.updateMyArtistHeroProfileImagePatch(url, ts);
+}
+
+/**
+ * Update shared quote/audio profile fields for caller's linked artist.
+ * @param {{ quote?: string, audioUrl?: string, audioTitle?: string }} patch
+ * @param {string} [updatedAt]
+ */
+export async function updateMyArtistQuoteAudioPatch(patch, updatedAt) {
+    const ts = updatedAt || new Date().toISOString();
+    const quote = String(patch?.quote ?? '');
+    const audioUrl = String(patch?.audioUrl ?? '');
+    const audioTitle = String(patch?.audioTitle ?? '');
+    if (getDataSource() === 'test') {
+        const id = getProfileSettingsDevArtistId();
+        if (!id) throw new Error('Select which artist profile to edit (test mode).');
+        const artists = await getArtists();
+        const base = artists.find((x) => x.id === id);
+        if (!base) throw new Error('Artist not found');
+        const merged = normalizeArtistDefaults({ ...base, quote, audioUrl, audioTitle, updatedAt: ts });
+        const overlay = readStudioLs(LS_ARTISTS_OVERLAY) || {};
+        overlay[id] = merged;
+        writeStudioLs(LS_ARTISTS_OVERLAY, overlay);
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('fusion-data-source-change', { detail: { source: 'test' } }));
+        }
+        return;
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.updateMyArtistQuoteAudioPatch !== 'function') {
+        throw new Error('updateMyArtistQuoteAudioPatch unavailable — sign in and run dfx generate fusion-app-backend.');
+    }
+    await actor.updateMyArtistQuoteAudioPatch(quote, audioUrl, audioTitle, ts);
+}
+
+/**
+ * Set roster `ArtistCore.visibility` for the caller's linked artist: `inactive` | `pending` | `private` | `public`.
  * @param {string} visibility
  * @param {string} [updatedAt] ISO timestamp
  * @returns {Promise<void>}
  */
 export async function updateMyArtistVisibility(visibility, updatedAt) {
-    const vis = String(visibility ?? '').trim().toLowerCase();
-    if (vis !== 'public' && vis !== 'private') {
-        throw new Error('Visibility must be public or private.');
+    const vis = String(visibility ?? '')
+        .trim()
+        .toLowerCase();
+    if (!['inactive', 'pending', 'private', 'public'].includes(vis)) {
+        throw new Error('Visibility must be inactive, pending, private, or public.');
     }
     const ts = updatedAt || new Date().toISOString();
     if (getDataSource() === 'test') {
@@ -2227,8 +2482,23 @@ export async function getAllProgramsBlock() {
         for (const r of rows) {
             const o = mapProgramRecordToJs(r);
             const vis = o.visibility ?? 'public';
-            if (o.enCard) en.push({ ...o.enCard, visibility: vis, studioStatus: o.studioStatus });
-            if (o.jaCard) ja.push({ ...o.jaCard, visibility: vis, studioStatus: o.studioStatus });
+            const dep = o.depositAmountDisplay != null ? String(o.depositAmountDisplay) : '';
+            if (o.enCard) {
+                en.push({
+                    ...o.enCard,
+                    visibility: vis,
+                    studioStatus: o.studioStatus,
+                    depositAmountDisplay: dep,
+                });
+            }
+            if (o.jaCard) {
+                ja.push({
+                    ...o.jaCard,
+                    visibility: vis,
+                    studioStatus: o.studioStatus,
+                    depositAmountDisplay: dep,
+                });
+            }
         }
         return { order: 2, programs: { en, ja } };
     } catch {
@@ -2251,6 +2521,9 @@ function mapProgramRecordToJs(r) {
     }
     const enCard = parsed.en ? { ...parsed.en, id, routeLink } : { id, routeLink, focus: id };
     const jaCard = parsed.ja ? { ...parsed.ja, id, routeLink } : null;
+    const depositAmountDisplay = String(
+        r.deposit_amount_display ?? r.depositAmountDisplay ?? '',
+    );
     return {
         id,
         routeLink,
@@ -2258,6 +2531,7 @@ function mapProgramRecordToJs(r) {
         visibility: String(r.visibility ?? ''),
         studioStatus: String(r.studio_status ?? r.studioStatus ?? ''),
         updatedAt: String(r.updated_at ?? r.updatedAt ?? ''),
+        depositAmountDisplay,
         enCard,
         jaCard,
         localesJson,
@@ -2283,6 +2557,254 @@ export async function getJournalEntries() {
     } catch {
         return [];
     }
+}
+
+/**
+ * Map a canister `JournalLayoutRow` to a plain JS object (sortOrder + featured from Motoko).
+ * @param {Record<string, unknown>} r
+ * @param {number} [idx]
+ */
+export function mapJournalLayoutRowFromCanister(r, idx = 0) {
+    const so = r.sortOrder ?? r.sort_order;
+    const sortOrder = so != null && so !== undefined ? Math.max(0, Math.floor(Number(so))) : idx;
+    return {
+        rowType: String(r.rowType ?? r.row_type ?? ''),
+        refId: unwrapOpt(r.refId ?? r.ref_id)?.toString?.() ?? undefined,
+        selectionMode: unwrapOpt(r.selectionMode ?? r.selection_mode)?.toString?.() ?? undefined,
+        artistId: unwrapOpt(r.artistId ?? r.artist_id)?.toString?.() ?? undefined,
+        sortOrder,
+        featured: Boolean(r.featured),
+    };
+}
+
+/**
+ * Ordered `/journal` composition rows from canister.
+ * @returns {Promise<Array<{ rowType: string, refId?: string, selectionMode?: string, artistId?: string, sortOrder: number, featured: boolean }>>}
+ */
+export async function getJournalLayoutPublic() {
+    if (getDataSource() === 'test') {
+        const ls = readStudioLs('fusion-journal-layout');
+        if (Array.isArray(ls) && ls.length) {
+            return ls.map((row, i) => ({
+                rowType: String(row?.rowType || ''),
+                refId: row?.refId,
+                selectionMode: row?.selectionMode,
+                artistId: row?.artistId,
+                sortOrder: Math.max(0, Math.floor(Number(row?.sortOrder ?? i))),
+                featured: Boolean(row?.featured),
+            }));
+        }
+        return [
+            { rowType: 'event', refId: '1', sortOrder: 0, featured: false },
+            { rowType: 'journal-entry', refId: '0', sortOrder: 1, featured: false },
+            { rowType: 'quote', selectionMode: 'random', sortOrder: 2, featured: false },
+            { rowType: 'journal-entry', refId: '1', sortOrder: 3, featured: false },
+            { rowType: 'event', refId: '2', sortOrder: 4, featured: false },
+            { rowType: 'journal-entry', refId: '2', sortOrder: 5, featured: false },
+            { rowType: 'audio', selectionMode: 'random', sortOrder: 6, featured: false },
+        ];
+    }
+    try {
+        const actor = await getFusionBackendActor();
+        if (!actor || typeof actor.getJournalLayout !== 'function') return [];
+        const rows = await actor.getJournalLayout();
+        if (!Array.isArray(rows)) return [];
+        return rows.map((r, i) => mapJournalLayoutRowFromCanister(/** @type {Record<string, unknown>} */ (r), i));
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Studio/admin: get persisted journal layout rows.
+ * @returns {Promise<Array<{ rowType: string, refId?: string, selectionMode?: string, artistId?: string }>>}
+ */
+export async function adminGetJournalLayoutStudio() {
+    if (getDataSource() === 'test') {
+        const ls = readStudioLs('fusion-journal-layout');
+        if (Array.isArray(ls)) return ls;
+        return getJournalLayoutPublic();
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminGetJournalLayout !== 'function') {
+        return [];
+    }
+    const rows = await actor.adminGetJournalLayout();
+    if (!Array.isArray(rows)) return [];
+    return rows.map((r, i) => mapJournalLayoutRowFromCanister(/** @type {Record<string, unknown>} */ (r), i));
+}
+
+/**
+ * Studio/admin: persist ordered journal layout rows.
+ * @param {Array<{ rowType: string, refId?: string, selectionMode?: string, artistId?: string, sortOrder?: number, featured?: boolean }>} rows
+ */
+export async function adminSetJournalLayoutStudio(rows) {
+    const safeRows = Array.isArray(rows) ? rows : [];
+    if (getDataSource() === 'test') {
+        writeStudioLs('fusion-journal-layout', safeRows);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminSetJournalLayout !== 'function') {
+        throw new Error('adminSetJournalLayout unavailable — run dfx generate fusion-app-backend from the project root.');
+    }
+    await actor.adminSetJournalLayout(
+        safeRows.map((r) => {
+            const sortOrder = Math.max(0, Math.floor(Number(r.sortOrder ?? 0)));
+            return {
+                rowType: String(r.rowType || ''),
+                refId: r.refId ? [String(r.refId)] : [],
+                selectionMode: r.selectionMode ? [String(r.selectionMode)] : [],
+                artistId: r.artistId ? [String(r.artistId)] : [],
+                sortOrder,
+                featured: Boolean(r.featured),
+            };
+        })
+    );
+}
+
+const LS_SOUND_ENV = 'fusion-sound-environment';
+
+/** @returns {Record<string, unknown>} */
+function defaultSoundEnvironmentJs() {
+    return {
+        categoryLabel: 'Nature',
+        atmosphereAudioUrl: '',
+        voiceSelectionMode: 'random',
+        voiceArtistId: undefined,
+        manualVoiceAudioUrl: '',
+        minIntervalSec: 45,
+        maxIntervalSec: 120,
+        atmosphereVolumePercent: 60,
+        voicesVolumePercent: 40,
+        learnMoreJournalEntryId: undefined,
+        enabled: false,
+    };
+}
+
+/**
+ * @param {Record<string, unknown>} c
+ */
+function mapSoundEnvironmentFromCanister(c) {
+    const base = defaultSoundEnvironmentJs();
+    if (!c || typeof c !== 'object') return base;
+    return {
+        categoryLabel: String(c.categoryLabel ?? c.category_label ?? base.categoryLabel),
+        atmosphereAudioUrl: String(c.atmosphereAudioUrl ?? c.atmosphere_audio_url ?? ''),
+        voiceSelectionMode: String(
+            c.voiceSelectionMode ?? c.voice_selection_mode ?? 'random',
+        ),
+        voiceArtistId: unwrapOpt(c.voiceArtistId ?? c.voice_artist_id)?.toString?.() ?? undefined,
+        manualVoiceAudioUrl: String(c.manualVoiceAudioUrl ?? c.manual_voice_audio_url ?? ''),
+        minIntervalSec: Math.max(0, Math.floor(Number(c.minIntervalSec ?? c.min_interval_sec ?? 45))),
+        maxIntervalSec: Math.max(0, Math.floor(Number(c.maxIntervalSec ?? c.max_interval_sec ?? 120))),
+        atmosphereVolumePercent: Math.min(
+            100,
+            Math.max(0, Math.floor(Number(c.atmosphereVolumePercent ?? c.atmosphere_volume_percent ?? 60))),
+        ),
+        voicesVolumePercent: Math.min(
+            100,
+            Math.max(0, Math.floor(Number(c.voicesVolumePercent ?? c.voices_volume_percent ?? 40))),
+        ),
+        learnMoreJournalEntryId:
+            unwrapOpt(c.learnMoreJournalEntryId ?? c.learn_more_journal_entry_id)?.toString?.() ?? undefined,
+        enabled: Boolean(c.enabled),
+    };
+}
+
+/**
+ * Public: header sound environment config.
+ * @returns {Promise<Record<string, unknown>>}
+ */
+export async function getSoundEnvironmentPublic() {
+    if (getDataSource() === 'test') {
+        const ls = readStudioLs(LS_SOUND_ENV);
+        if (ls && typeof ls === 'object' && !Array.isArray(ls)) {
+            return { ...defaultSoundEnvironmentJs(), ...ls };
+        }
+        return defaultSoundEnvironmentJs();
+    }
+    try {
+        const actor = await getFusionBackendActor();
+        if (!actor || typeof actor.getSoundEnvironment !== 'function') {
+            return defaultSoundEnvironmentJs();
+        }
+        const c = await actor.getSoundEnvironment();
+        return mapSoundEnvironmentFromCanister(/** @type {Record<string, unknown>} */ (c));
+    } catch {
+        return defaultSoundEnvironmentJs();
+    }
+}
+
+/**
+ * @returns {Promise<Record<string, unknown>>}
+ */
+export async function adminGetSoundEnvironmentStudio() {
+    if (getDataSource() === 'test') {
+        return getSoundEnvironmentPublic();
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminGetSoundEnvironment !== 'function') {
+        return defaultSoundEnvironmentJs();
+    }
+    const c = await actor.adminGetSoundEnvironment();
+    return mapSoundEnvironmentFromCanister(/** @type {Record<string, unknown>} */ (c));
+}
+
+/**
+ * @param {Record<string, unknown>} config
+ */
+export async function adminSetSoundEnvironmentStudio(config) {
+    const c = { ...defaultSoundEnvironmentJs(), ...config };
+    if (getDataSource() === 'test') {
+        writeStudioLs(LS_SOUND_ENV, c);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminSetSoundEnvironment !== 'function') {
+        throw new Error('adminSetSoundEnvironment unavailable — run dfx generate fusion-app-backend from the project root.');
+    }
+    await actor.adminSetSoundEnvironment({
+        categoryLabel: String(c.categoryLabel || ''),
+        atmosphereAudioUrl: String(c.atmosphereAudioUrl || ''),
+        voiceSelectionMode: String(c.voiceSelectionMode || 'random'),
+        voiceArtistId: c.voiceArtistId ? [String(c.voiceArtistId)] : [],
+        manualVoiceAudioUrl: String(c.manualVoiceAudioUrl || ''),
+        minIntervalSec: Math.max(0, Math.floor(Number(c.minIntervalSec ?? 0))),
+        maxIntervalSec: Math.max(0, Math.floor(Number(c.maxIntervalSec ?? 0))),
+        atmosphereVolumePercent: Math.min(100, Math.max(0, Math.floor(Number(c.atmosphereVolumePercent ?? 0)))),
+        voicesVolumePercent: Math.min(100, Math.max(0, Math.floor(Number(c.voicesVolumePercent ?? 0)))),
+        learnMoreJournalEntryId: c.learnMoreJournalEntryId ? [String(c.learnMoreJournalEntryId)] : [],
+        enabled: Boolean(c.enabled),
+    });
+}
+
+/**
+ * Studio/admin: set shared artist quote/audio metadata.
+ * @param {string} artistId
+ * @param {{ quote?: string, audioUrl?: string, audioTitle?: string }} media
+ */
+export async function adminSetArtistMediaForStudio(artistId, media) {
+    const id = String(artistId || '').trim();
+    if (!id) return;
+    const quote = String(media?.quote ?? '');
+    const audioUrl = String(media?.audioUrl ?? '');
+    const audioTitle = String(media?.audioTitle ?? '');
+    const ts = new Date().toISOString();
+    if (getDataSource() === 'test') {
+        const artists = await getArtistsForStudio();
+        const base = artists.find((x) => String(x?.id ?? '') === id);
+        if (!base) return;
+        const overlay = readStudioLs(LS_ARTISTS_OVERLAY) || {};
+        overlay[id] = normalizeArtistDefaults({ ...base, quote, audioUrl, audioTitle, updatedAt: ts });
+        writeStudioLs(LS_ARTISTS_OVERLAY, overlay);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminSetArtistMediaForStudio !== 'function') {
+        throw new Error('adminSetArtistMediaForStudio unavailable — run dfx generate fusion-app-backend from the project root.');
+    }
+    await actor.adminSetArtistMediaForStudio(id, quote, audioUrl, audioTitle, ts);
 }
 
 /**
@@ -3050,6 +3572,14 @@ export function artistRowFromMyArtistRecord(rec) {
         id: String(rec.id ?? ''),
         slug: String(prof.slug ?? ''),
         image: String(prof.image ?? ''),
+        heroProfileImage: (() => {
+            const o = prof.heroProfileImage ?? prof.hero_profile_image;
+            if (Array.isArray(o)) {
+                return String(unwrapOpt(o) ?? '').trim();
+            }
+            if (o == null || o === undefined) return '';
+            return String(o).trim();
+        })(),
         featuredOrder: Number(rec.featured_order ?? rec.featuredOrder ?? 0),
         visibility: String(prof.visibility ?? rec.visibility ?? 'public'),
         filter: rec.filter,
@@ -3082,6 +3612,7 @@ export async function generateAndUpsertArtistWorldFromBio(artistRow, mergeMode =
             id: artistRow.id,
             slug: artistRow.slug,
             image: String(artistRow.image ?? ''),
+            heroProfileImage: String(/** @type {Record<string, unknown>} */ (artistRow).heroProfileImage ?? '').trim(),
             featuredOrder: artistRow.featuredOrder ?? 0,
             visibility: String(artistRow.visibility ?? 'public'),
             updatedAt: new Date().toISOString(),
@@ -3267,6 +3798,7 @@ export async function upsertProgramStudio(p) {
     const visibility = String(p.visibility ?? '');
     const studioStatus = String(p.studioStatus ?? 'open');
     const updatedAt = String(p.updatedAt || new Date().toISOString());
+    const depositAmountDisplay = String(p.depositAmountDisplay ?? '');
     let localesJson = String(p.localesJson || '');
     if (!localesJson || localesJson === '{}') {
         const en = p.enCard || p.en || {};
@@ -3290,10 +3822,10 @@ export async function upsertProgramStudio(p) {
         } catch {
             parsedEn = {};
         }
-        const enCard = { ...parsedEn, id, routeLink, studioStatus, visibility };
+        const enCard = { ...parsedEn, id, routeLink, studioStatus, visibility, depositAmountDisplay };
         const jaCard =
             parsedJa && typeof parsedJa === 'object'
-                ? { ...parsedJa, id, routeLink, visibility }
+                ? { ...parsedJa, id, routeLink, visibility, depositAmountDisplay }
                 : null;
         const ei = enList.findIndex((x) => x.id === id);
         if (ei >= 0) enList[ei] = enCard;
@@ -3318,6 +3850,7 @@ export async function upsertProgramStudio(p) {
         visibility,
         studioStatus,
         updatedAt,
+        depositAmountDisplay,
         localesJson,
     });
 }

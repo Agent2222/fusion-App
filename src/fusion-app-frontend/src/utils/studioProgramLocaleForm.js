@@ -313,6 +313,16 @@ export function renderProgramLocaleFormHtml(escapeHtml, enRaw, jaRaw) {
         ja,
         'textarea'
     );
+    html += row2(escapeHtml, 'Cost — remaining balance (display)', 'programPage.programDetails.costs.remainingBalance', en, ja);
+    html += row2(
+        escapeHtml,
+        'Cost — Japan discount / residency notice (public site: Japanese locale only)',
+        'programPage.programDetails.costs.japanResidencyDiscountNotice',
+        en,
+        ja,
+        'textarea'
+    );
+    html += `<p class="studio-modal-hint">Deposit for the public sidebar is edited under <strong>Application form</strong> below — <code>programPage.applicationForm.depositAmountDisplay</code> (one source of truth). Optional <strong>Application deadline (ISO)</strong> in that section improves payment-plan month options.</p>`;
     for (let i = 0; i < KEY_DATE_ROWS; i++) {
         html += `<p class="studio-prog-card-slot">Key date ${i + 1}</p>`;
         html += row2(escapeHtml, 'Date', `programPage.programDetails.keyDates.${i}.date`, en, ja);
@@ -337,9 +347,10 @@ export function renderProgramLocaleFormHtml(escapeHtml, enRaw, jaRaw) {
 
   <details class="studio-prog-details">
     <summary class="studio-prog-subhead">Application form (program page)</summary>
-    <p class="studio-modal-hint">One-page apply: deposit line, deadline, optional italic notice under the fee, optional full override for the selection-process block at the top. Falls back to key dates (Application Deadline) when deadline is empty. <strong>Application fee amount (cents)</strong> is required for the &quot;Single application payment&quot; Stripe option (e.g. 5000 for $50.00).</p>`;
+    <p class="studio-modal-hint">One-page apply: deposit line, deadline, optional italic notice under the fee, optional full override for the selection-process block at the top. Falls back to key dates (Application Deadline) when deadline is empty. <strong>Application fee amount (cents)</strong> is required for the &quot;Single application payment&quot; Stripe option (e.g. 5000 for $50.00). <strong>Application deadline (ISO)</strong> (YYYY-MM-DD) stabilizes the program-page payment-plan month dropdown.</p>`;
     html += row2(escapeHtml, 'Deposit amount (display)', 'programPage.applicationForm.depositAmountDisplay', en, ja);
     html += row2(escapeHtml, 'Application fee amount (cents, one-time payment)', 'programPage.applicationForm.applicationFeeAmountCents', en, ja);
+    html += row2(escapeHtml, 'Application deadline (ISO, YYYY-MM-DD, optional)', 'programPage.applicationForm.applicationDeadlineIso', en, ja);
     html += row2(escapeHtml, 'Application deadline (display)', 'programPage.applicationForm.applicationDeadlineDisplay', en, ja);
     html += row2(
         escapeHtml,

@@ -92,6 +92,11 @@ export function normalizeDatabaseSnapshotV1(snapshot) {
     if (!Array.isArray(s.artistFilterCohortYearsStable)) {
         s.artistFilterCohortYearsStable = [];
     }
+    if (s.artistHeroProfileImageStable == null) {
+        s.artistHeroProfileImageStable = null;
+    } else if (!Array.isArray(s.artistHeroProfileImageStable)) {
+        s.artistHeroProfileImageStable = null;
+    }
     if (!Array.isArray(s.membershipStripePeriodEndStable)) {
         s.membershipStripePeriodEndStable = [];
     }

@@ -45,7 +45,74 @@ class ProgramHeroComponent extends HTMLElement {
         this.render();
     }
 
+    /** Minimal shell + spinner until `setProgram` provides data. */
+    renderLoading() {
+        this.shadow.innerHTML = `
+            <style>
+                :host {
+                    display: block;
+                }
+                .program-hero-loader {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 100%;
+                    min-height: calc(100vh - 350px);
+                    padding-top: 80px;
+                    padding-bottom: 120px;
+                    box-sizing: border-box;
+                }
+                .ph-loader {
+                    width: 72px;
+                    height: 72px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    background: transparent;
+                }
+                .ph-loader svg {
+                    display: block;
+                    animation: phLoaderSpin 0.75s linear infinite;
+                }
+                .ph-loader circle {
+                    fill: none;
+                    stroke: #000000;
+                    stroke-width: 1;
+                }
+                @keyframes phLoaderSpin {
+                    to {
+                        transform: rotate(360deg);
+                    }
+                }
+                @media (prefers-reduced-motion: reduce) {
+                    .ph-loader svg {
+                        animation: none;
+                    }
+                }
+                @media (max-width: 1024px) {
+                    .program-hero-loader {
+                        min-height: min(70vh, 720px);
+                        padding-top: clamp(2rem, 6vw, 4rem);
+                        padding-bottom: clamp(2rem, 8vw, 5rem);
+                    }
+                }
+            </style>
+            <div class="program-hero-loader" role="status" aria-live="polite" aria-label="Loading">
+                <div class="ph-loader">
+                    <svg width="72" height="72" viewBox="0 0 24 24" aria-hidden="true">
+                        <circle cx="12" cy="12" r="10.5" stroke-linecap="round" stroke-dasharray="18 48" />
+                    </svg>
+                </div>
+            </div>
+        `;
+    }
+
     render() {
+        if (!this.data) {
+            this.renderLoading();
+            return;
+        }
+
         const locale =
             typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
         const enLoc = this.data?.en && typeof this.data.en === 'object' ? this.data.en : {};
@@ -71,6 +138,55 @@ class ProgramHeroComponent extends HTMLElement {
             <style>
                 :host {
                     display: block;
+                    /* Align with docs/ANIMATION.md — hero entrance (~page veil family) */
+                    --program-hero-entrance-dur: 520ms;
+                    --program-hero-stagger: 55ms;
+                    --program-hero-ease: cubic-bezier(0.4, 0, 0.2, 1);
+                }
+
+                @keyframes programHeroFadeRise {
+                    from {
+                        opacity: 0;
+                        transform: translateY(10px);
+                    }
+                    to {
+                        opacity: 1;
+                        transform: translateY(0);
+                    }
+                }
+
+                .hero-entrance {
+                    opacity: 0;
+                    animation: programHeroFadeRise var(--program-hero-entrance-dur) var(--program-hero-ease)
+                        forwards;
+                }
+
+                .hero-entrance--left {
+                    animation-delay: 0ms;
+                }
+
+                .hero-entrance--category {
+                    animation-delay: calc(1 * var(--program-hero-stagger));
+                }
+
+                .hero-entrance--location {
+                    animation-delay: calc(2 * var(--program-hero-stagger));
+                }
+
+                .hero-entrance--date {
+                    animation-delay: calc(3 * var(--program-hero-stagger));
+                }
+
+                .hero-entrance--cta {
+                    animation-delay: calc(4 * var(--program-hero-stagger));
+                }
+
+                @media (prefers-reduced-motion: reduce) {
+                    .hero-entrance {
+                        animation: none;
+                        opacity: 1;
+                        transform: none;
+                    }
                 }
 
                 .program-hero {
@@ -270,27 +386,27 @@ class ProgramHeroComponent extends HTMLElement {
 
             </style>
             <div class="program-hero">
-                <div class="program-hero-left">
+                <div class="program-hero-left hero-entrance hero-entrance--left">
                     <img src="${imageSrc}" alt="${escapeHtml(withSeoImageAlt(imageAlt))}">
                 </div>
                 <div class="program-hero-right">
                     <div class="program-hero-right-content">
                         <div class="gSpace"></div>
                         <div id="programDetails">
-                            <div class="programCategory">
+                            <div class="programCategory hero-entrance hero-entrance--category">
                                 <div class="catButton">
                                     <p>${imageAlt}</p>
                                 </div>
                             </div>
                             <div class="programLocationDate">
-                                <div class="programLocation">
+                                <div class="programLocation hero-entrance hero-entrance--location">
                                     ${location}
                                 </div>
-                                <div class="programDate">
+                                <div class="programDate hero-entrance hero-entrance--date">
                                     ${season} ${year}
                                 </div>
                             </div>
-                            <div class="programCTA">
+                            <div class="programCTA hero-entrance hero-entrance--cta">
                                 <div class="ctaButton" role="button" tabindex="0" data-program-href="${route}">
                                     ${cta}
                                 </div>

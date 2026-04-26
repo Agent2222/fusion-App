@@ -12,11 +12,11 @@ import Time "mo:base/Time";
 import Buffer "mo:base/Buffer";
 import Debug "mo:base/Debug";
 import Order "mo:base/Order";
-import { migration } "RosterEmailMigration";
 
-// `migration` upgrades on-chain `artistsStable` from `ArtistRecordV0` to `ArtistRecord` (adds `profile.contactEmail`).
-// One-time mainnet migration from minimal subscriber-only wasm used `Migration.mo` (removed after upgrade).
-(with migration) persistent actor {
+// Roster `contactEmail` is on `ArtistRecord` / `ArtistCore`; one-time V0→V1 migration was removed after mainnet backfill.
+// `ProgramRecord` includes `depositAmountDisplay`. The old V0→V1 migration file was removed so upgrades from
+// canisters that already store full `ProgramRecord` do not expect a 7-field `ProgramRecordV0` in stable memory.
+persistent actor {
   /// Internet Identity / admin principals allowed to list/delete subscribers and manage admins.
   /// Initial value is used on **first install only**; upgrades keep stable state. New defaults must also be
   /// listed in `defaultAdminPrincipals()` so `postupgrade` merges them into existing canisters.
@@ -50,6 +50,9 @@ import { migration } "RosterEmailMigration";
 
   stable var programsStable : [(Text, Types.ProgramRecord)] = [];
   stable var journalsStable : [(Text, Types.JournalRecord)] = [];
+  /// `/journal` row list (4 fields) — stable name matches pre–sortOrder mainnet; `postupgrade` copies into `journalLayoutRows` with sortOrder/featured.
+  stable var journalLayoutStable : [Types.JournalLayoutRowV4] = [];
+  stable var artistMediaStable : [(Text, Types.ArtistMedia)] = [];
   stable var editionsStable : [(Text, Types.EditionRecord)] = [];
   stable var contentPagesStable : [(Text, Types.ContentPageRecord)] = [];
   stable var applicantsStable : [(Text, Types.ApplicantRecord)] = [];
@@ -77,6 +80,25 @@ import { migration } "RosterEmailMigration";
   stable var superStaffPrincipalsStable : [Principal] = [];
   /// Join Fusion / Team tab: name + email per principal (exempt from `UserAccount` core layout).
   stable var accountContactStable : [(Principal, Types.AccountContact)] = [];
+
+  stable var soundEnvironmentConfigStable : Types.SoundEnvironmentConfig = {
+    categoryLabel = "Nature";
+    atmosphereAudioUrl = "";
+    voiceSelectionMode = "random";
+    voiceArtistId = null;
+    manualVoiceAudioUrl = "";
+    minIntervalSec = 45;
+    maxIntervalSec = 120;
+    atmosphereVolumePercent = 60;
+    voicesVolumePercent = 40;
+    learnMoreJournalEntryId = null;
+    enabled = false;
+  };
+  /// `/journal` page layout (sortOrder + featured); written by Studio; populated from `journalLayoutStable` on upgrade.
+  stable var journalLayoutRows : [Types.JournalLayoutRow] = [];
+
+  /// Card “Profile” headshot URLs — **append-only** stable slot; separate from `artistsStable` / `ArtistCore` for safe upgrades.
+  stable var artistHeroProfileImageStable : [(Text, Text)] = [];
 
   // In-memory hashmap for fast lookups/updates.
   transient var subscribersByEmail : _HashMap.HashMap<Text, Types.Subscriber> =
@@ -117,6 +139,13 @@ import { migration } "RosterEmailMigration";
   transient var artistFilterCohortYearsById : _HashMap.HashMap<Text, [Nat]> =
     _HashMap.HashMap<Text, [Nat]>(
       artistFilterCohortYearsStable.size(),
+      Text.equal,
+      Text.hash
+    );
+
+  transient var artistHeroProfileImageById : _HashMap.HashMap<Text, Text> =
+    _HashMap.HashMap<Text, Text>(
+      artistHeroProfileImageStable.size(),
       Text.equal,
       Text.hash
     );
@@ -169,6 +198,9 @@ import { migration } "RosterEmailMigration";
   transient var accountContactByPrincipal : _HashMap.HashMap<Principal, Types.AccountContact> =
     _HashMap.HashMap<Principal, Types.AccountContact>(0, Principal.equal, Principal.hash);
 
+  transient var artistMediaByArtistId : _HashMap.HashMap<Text, Types.ArtistMedia> =
+    _HashMap.HashMap<Text, Types.ArtistMedia>(0, Text.equal, Text.hash);
+
   /// 8-digit access code → artist id (derived from `ArtistRecord.accessCode`; rebuilt on upgrade).
   transient var accessCodeToArtistId : _HashMap.HashMap<Text, Text> =
     _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
@@ -194,6 +226,18 @@ import { migration } "RosterEmailMigration";
         accessCodeToArtistId.put(rec.accessCode, id);
       };
     };
+  };
+
+  private func defaultJournalLayout() : [Types.JournalLayoutRow] {
+    [
+      { rowType = "event"; refId = ?"1"; selectionMode = null; artistId = null; sortOrder = 0; featured = false },
+      { rowType = "journal-entry"; refId = ?"0"; selectionMode = null; artistId = null; sortOrder = 1; featured = false },
+      { rowType = "quote"; refId = null; selectionMode = ?"random"; artistId = null; sortOrder = 2; featured = false },
+      { rowType = "journal-entry"; refId = ?"1"; selectionMode = null; artistId = null; sortOrder = 3; featured = false },
+      { rowType = "event"; refId = ?"2"; selectionMode = null; artistId = null; sortOrder = 4; featured = false },
+      { rowType = "journal-entry"; refId = ?"2"; selectionMode = null; artistId = null; sortOrder = 5; featured = false },
+      { rowType = "audio"; refId = null; selectionMode = ?"random"; artistId = null; sortOrder = 6; featured = false },
+    ];
   };
 
   // Populate hashmaps on install / reload.
@@ -226,6 +270,10 @@ import { migration } "RosterEmailMigration";
 
   for (entry in artistFilterCohortYearsStable.vals()) {
     artistFilterCohortYearsById.put(entry.0, entry.1);
+  };
+
+  for (entry in artistHeroProfileImageStable.vals()) {
+    artistHeroProfileImageById.put(entry.0, entry.1);
   };
 
   for (entry in programsStable.vals()) {
@@ -262,6 +310,9 @@ import { migration } "RosterEmailMigration";
 
   for (entry in joinInvitesStable.vals()) {
     joinInvitesByCode.put(entry.0, entry.1);
+  };
+  for (entry in artistMediaStable.vals()) {
+    artistMediaByArtistId.put(entry.0, entry.1);
   };
 
   /// Keep in sync with `adminPrincipals` defaults above — `postupgrade` appends any of these not already stored.
@@ -327,6 +378,7 @@ import { migration } "RosterEmailMigration";
     "products",
     "gallery-access",
     "journal",
+    "sound",
     "content",
     "email",
     "ai",
@@ -943,10 +995,12 @@ import { migration } "RosterEmailMigration";
     artistFeaturedFeaturableIdsStable := featurableIdsSorted();
     artistFeaturedManualIdsStable := Buffer.toArray(manualFeaturedArtistIds);
     joinInvitesStable := _Iter.toArray(joinInvitesByCode.entries());
+    artistMediaStable := _Iter.toArray(artistMediaByArtistId.entries());
     studioPermissionDefaultsStable := _Iter.toArray(studioPermissionDefaultsByCategory.entries());
     studioPermissionOverridesStable := _Iter.toArray(studioPermissionOverridesByPrincipal.entries());
     superStaffPrincipalsStable := superStaffPrincipalsAsArray();
     accountContactStable := _Iter.toArray(accountContactByPrincipal.entries());
+    artistHeroProfileImageStable := _Iter.toArray(artistHeroProfileImageById.entries());
   };
 
   system func postupgrade() {
@@ -1016,6 +1070,16 @@ import { migration } "RosterEmailMigration";
     };
     joinInvitesStable := [];
 
+    artistMediaByArtistId := _HashMap.HashMap<Text, Types.ArtistMedia>(
+      artistMediaStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in artistMediaStable.vals()) {
+      artistMediaByArtistId.put(entry.0, entry.1);
+    };
+    artistMediaStable := [];
+
     rebuildAccessCodeToArtistIdIndex();
 
     artistFilterCohortYearsById := _HashMap.HashMap<Text, [Nat]>(
@@ -1027,6 +1091,16 @@ import { migration } "RosterEmailMigration";
       artistFilterCohortYearsById.put(entry.0, entry.1);
     };
     artistFilterCohortYearsStable := [];
+
+    artistHeroProfileImageById := _HashMap.HashMap<Text, Text>(
+      artistHeroProfileImageStable.size(),
+      Text.equal,
+      Text.hash
+    );
+    for (entry in artistHeroProfileImageStable.vals()) {
+      artistHeroProfileImageById.put(entry.0, entry.1);
+    };
+    artistHeroProfileImageStable := [];
 
     programsById := _HashMap.HashMap<Text, Types.ProgramRecord>(0, Text.equal, Text.hash);
     for (entry in programsStable.vals()) {
@@ -1106,6 +1180,24 @@ import { migration } "RosterEmailMigration";
         adminPrincipals := Array.append(adminPrincipals, [d]);
       };
     };
+
+    if (journalLayoutRows.size() == 0 and journalLayoutStable.size() > 0) {
+      let out = Buffer.Buffer<Types.JournalLayoutRow>(journalLayoutStable.size());
+      var idx : Nat = 0;
+      for (r in journalLayoutStable.vals()) {
+        out.add({
+          rowType = r.rowType;
+          refId = r.refId;
+          selectionMode = r.selectionMode;
+          artistId = r.artistId;
+          sortOrder = idx;
+          featured = false;
+        });
+        idx += 1;
+      };
+      journalLayoutRows := Buffer.toArray(out);
+      journalLayoutStable := [];
+    };
   };
 
   /// Rebuild in-memory maps from stable arrays after `adminImportFullDatabase` assigns them (no default-admin merge).
@@ -1166,6 +1258,15 @@ import { migration } "RosterEmailMigration";
     );
     for (entry in artistFilterCohortYearsStable.vals()) {
       artistFilterCohortYearsById.put(entry.0, entry.1);
+    };
+
+    artistHeroProfileImageById := _HashMap.HashMap<Text, Text>(
+      artistHeroProfileImageStable.size(),
+      Text.equal,
+      Text.hash
+    );
+    for (entry in artistHeroProfileImageStable.vals()) {
+      artistHeroProfileImageById.put(entry.0, entry.1);
     };
 
     programsById := _HashMap.HashMap<Text, Types.ProgramRecord>(0, Text.equal, Text.hash);
@@ -1252,6 +1353,7 @@ import { migration } "RosterEmailMigration";
       membershipByPrincipalStable = _Iter.toArray(membershipByPrincipal.entries());
       membershipStripePeriodEndStable = _Iter.toArray(membershipStripePeriodEndByPrincipal.entries());
       artistFilterCohortYearsStable = _Iter.toArray(artistFilterCohortYearsById.entries());
+      artistHeroProfileImageStable = ?(_Iter.toArray(artistHeroProfileImageById.entries()));
       artistsStable = _Iter.toArray(artistsById.entries());
       programsStable = _Iter.toArray(programsById.entries());
       journalsStable = _Iter.toArray(journalsById.entries());
@@ -1285,6 +1387,10 @@ import { migration } "RosterEmailMigration";
     membershipByPrincipalStable := snapshot.membershipByPrincipalStable;
     membershipStripePeriodEndStable := snapshot.membershipStripePeriodEndStable;
     artistFilterCohortYearsStable := snapshot.artistFilterCohortYearsStable;
+    artistHeroProfileImageStable := switch (snapshot.artistHeroProfileImageStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
     artistsStable := snapshot.artistsStable;
     programsStable := snapshot.programsStable;
     journalsStable := snapshot.journalsStable;
@@ -1441,6 +1547,12 @@ import { migration } "RosterEmailMigration";
     Debug.trap("Could not allocate join code");
   };
 
+  /// Admin: list all join invite records (active and redeemed). Use `active` to find pending single-use codes.
+  public shared query (msg) func adminListJoinInvites() : async [(Text, Types.JoinInviteRecord)] {
+    assertAdmin(msg.caller);
+    return _Iter.toArray(joinInvitesByCode.entries());
+  };
+
   private func assertContactFieldLen(t : Text) {
     if (Text.size(t) > 256) {
       Debug.trap("Contact field too long (max 256 characters)");
@@ -1587,7 +1699,7 @@ import { migration } "RosterEmailMigration";
           slug = artistId;
           image = "";
           featuredOrder = fo;
-          visibility = "public";
+          visibility = "inactive";
           updatedAt = now;
           contactEmail = "";
           filter = null;
@@ -1615,6 +1727,14 @@ import { migration } "RosterEmailMigration";
 
   // ===== Artists (public reads; writes staff/admin) =====
 
+  private func setHeroProfileImageForArtist(artistId : Text, url : Text) {
+    if (Text.size(url) == 0) {
+      ignore artistHeroProfileImageById.remove(artistId);
+    } else {
+      artistHeroProfileImageById.put(artistId, url);
+    };
+  };
+
   private func artistPublicFromCore(core : Types.ArtistCore, id : Text) : Types.Artist {
     let mrp = switch (mostRecentProgramByArtistId.get(id)) {
       case (?t) { t };
@@ -1624,10 +1744,15 @@ import { migration } "RosterEmailMigration";
       case null { null };
       case (?ys) { ?ys };
     };
+    let hero : Text = switch (artistHeroProfileImageById.get(id)) {
+      case null { "" };
+      case (?t) { t };
+    };
     {
       id = core.id;
       slug = core.slug;
       image = core.image;
+      heroProfileImage = hero;
       featuredOrder = core.featuredOrder;
       visibility = core.visibility;
       updatedAt = core.updatedAt;
@@ -1691,8 +1816,22 @@ import { migration } "RosterEmailMigration";
   };
 
   /// Private profiles stay out of feed pools; direct `/profile/:slug` reads still use `getArtistRecordBySlug`.
+  /// Public marketing feeds / listArtists: only `public` rows (not private, pending, or inactive).
+  private func isValidArtistRosterVisibility(visibility : Text) : Bool {
+    visibility == "inactive" or visibility == "pending" or visibility == "private" or visibility == "public";
+  };
+
+  /// Legacy stored values: map empty/unknown to `public` so existing mainnet rows stay listable until edited in Studio.
+  private func normalizeArtistRosterVisibility(visibility : Text) : Text {
+    if (isValidArtistRosterVisibility(visibility)) {
+      visibility;
+    } else {
+      "public";
+    };
+  };
+
   private func artistIncludedInPublicFeeds(profile : Types.ArtistCore) : Bool {
-    profile.visibility != "private";
+    profile.visibility == "public";
   };
 
   /// Public roster with `localesJson` for feeds/cards (name, discipline). Strips `accessCode`.
@@ -1972,13 +2111,13 @@ import { migration } "RosterEmailMigration";
     };
   };
 
-  /// Authenticated artist: set `profile.visibility` (`public` | `private`). Private rows are omitted from public feed lists.
+  /// Authenticated artist: set `profile.visibility` — `inactive` | `pending` | `private` | `public`.
   public shared (msg) func updateMyArtistVisibility(visibility : Text, updatedAt : Text) : async () {
     if (Principal.equal(msg.caller, anonPrincipal)) {
       Debug.trap("Anonymous caller");
     };
-    if (visibility != "public" and visibility != "private") {
-      Debug.trap("visibility must be public or private");
+    if (isValidArtistRosterVisibility(visibility) == false) {
+      Debug.trap("visibility must be inactive, pending, private, or public");
     };
     switch (accountsByPrincipal.get(msg.caller)) {
       case null { Debug.trap("No account for caller") };
@@ -2039,6 +2178,81 @@ import { migration } "RosterEmailMigration";
                   updatedAt = newUpdated;
                 };
                 putArtistRecord({ rec with profile = newProfile });
+              };
+            };
+          };
+        };
+      };
+    };
+  };
+
+  /// Authenticated artist: set headshot (card “Profile” image) for the linked roster row. Stored in `artistHeroProfileImageById`, not in `ArtistCore`.
+  public shared (msg) func updateMyArtistHeroProfileImagePatch(heroProfileImage : Text, updatedAt : Text) : async () {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      Debug.trap("Anonymous caller");
+    };
+    if (heroProfileImage.size() > maxProfileImageUrlLen) {
+      Debug.trap("Profile image URL too long");
+    };
+    switch (accountsByPrincipal.get(msg.caller)) {
+      case null { Debug.trap("No account for caller") };
+      case (?acc) {
+        switch (acc.linkedArtistId) {
+          case null { Debug.trap("No linked artist on account") };
+          case (?aid) {
+            switch (artistsById.get(aid)) {
+              case null { Debug.trap("Linked artist not found") };
+              case (?rec) {
+                let newUpdated : Text = if (updatedAt.size() > 0) {
+                  updatedAt;
+                } else {
+                  rec.profile.updatedAt;
+                };
+                setHeroProfileImageForArtist(aid, heroProfileImage);
+                let newProfile : Types.ArtistCore = { rec.profile with updatedAt = newUpdated };
+                putArtistRecord({ rec with profile = newProfile });
+              };
+            };
+          };
+        };
+      };
+    };
+  };
+
+  /// Authenticated artist: update shared quote/audio fields (EN-only profile-level metadata).
+  public shared (msg) func updateMyArtistQuoteAudioPatch(
+    quote : Text,
+    audioUrl : Text,
+    audioTitle : Text,
+    updatedAt : Text,
+  ) : async () {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      Debug.trap("Anonymous caller");
+    };
+    if (audioUrl.size() > maxProfileImageUrlLen) {
+      Debug.trap("Audio URL too long");
+    };
+    switch (accountsByPrincipal.get(msg.caller)) {
+      case null { Debug.trap("No account for caller") };
+      case (?acc) {
+        switch (acc.linkedArtistId) {
+          case null { Debug.trap("No linked artist on account") };
+          case (?aid) {
+            switch (artistsById.get(aid)) {
+              case null { Debug.trap("Linked artist not found") };
+              case (?rec) {
+                let newUpdated : Text = if (updatedAt.size() > 0) {
+                  updatedAt;
+                } else {
+                  rec.profile.updatedAt;
+                };
+                let m : Types.ArtistMedia = {
+                  quote = quote;
+                  audioUrl = audioUrl;
+                  audioTitle = audioTitle;
+                  updatedAt = newUpdated;
+                };
+                artistMediaByArtistId.put(aid, m);
               };
             };
           };
@@ -2150,7 +2364,12 @@ import { migration } "RosterEmailMigration";
     _Iter.toArray(artistsById.vals());
   };
 
-  private func putArtistRecord(record : Types.ArtistRecord) {
+  private func putArtistRecord(rec : Types.ArtistRecord) {
+    let vis = normalizeArtistRosterVisibility(rec.profile.visibility);
+    let record = {
+      rec with
+      profile = { rec.profile with visibility = vis };
+    };
     let id = record.profile.id;
     let slug = record.profile.slug;
     switch (artistsById.get(id)) {
@@ -2204,17 +2423,24 @@ import { migration } "RosterEmailMigration";
     ?("{" # inner # "}");
   };
 
-  public shared (msg) func upsertArtist(record : Types.ArtistRecord) : async () {
+  public shared (msg) func upsertArtist(record : Types.ArtistRecord, heroProfileImage : Text) : async () {
     assertStaffOrAdmin(msg.caller);
     assertStudioFeatureEdit(msg.caller, "artists");
     putArtistRecord(record);
+    setHeroProfileImageForArtist(record.profile.id, heroProfileImage);
   };
 
-  public shared (msg) func bulkUpsertArtists(records : [Types.ArtistRecord]) : async () {
+  public shared (msg) func bulkUpsertArtists(records : [Types.ArtistRecord], heroProfileImages : [Text]) : async () {
     assertStaffOrAdmin(msg.caller);
     assertStudioFeatureEdit(msg.caller, "artists");
+    if (records.size() != heroProfileImages.size()) {
+      Debug.trap("bulkUpsertArtists: heroProfileImages length mismatch");
+    };
+    var i : Nat = 0;
     for (r in records.vals()) {
       putArtistRecord(r);
+      setHeroProfileImageForArtist(r.profile.id, heroProfileImages[i]);
+      i += 1;
     };
   };
 
@@ -2237,6 +2463,10 @@ import { migration } "RosterEmailMigration";
     _Iter.toArray(artistFilterCohortYearsById.entries());
   };
 
+  public query func listArtistHeroProfileImagePublic() : async [(Text, Text)] {
+    _Iter.toArray(artistHeroProfileImageById.entries());
+  };
+
   public shared (msg) func deleteArtistById(artistId : Text) : async Bool {
     assertStaffOrAdmin(msg.caller);
     assertStudioFeatureEdit(msg.caller, "artists");
@@ -2256,9 +2486,11 @@ import { migration } "RosterEmailMigration";
         unlinkAccountsAndAppsForArtist(artistId);
         cleanupFeaturedForDeletedArtist(artistId);
         ignore artistsById.remove(artistId);
+        ignore artistMediaByArtistId.remove(artistId);
         ignore artistSlugToId.remove(rec.profile.slug);
         ignore mostRecentProgramByArtistId.remove(artistId);
         ignore artistFilterCohortYearsById.remove(artistId);
+        ignore artistHeroProfileImageById.remove(artistId);
         true;
       };
     };
@@ -2318,6 +2550,112 @@ import { migration } "RosterEmailMigration";
   };
 
   // ===== Journal =====
+
+  public query func getJournalLayout() : async [Types.JournalLayoutRow] {
+    if (journalLayoutRows.size() == 0) {
+      return defaultJournalLayout();
+    };
+    journalLayoutRows;
+  };
+
+  public query func listArtistMedia() : async [(Text, Types.ArtistMedia)] {
+    _Iter.toArray(artistMediaByArtistId.entries());
+  };
+
+  public shared query (msg) func getMyArtistMedia() : async ?Types.ArtistMedia {
+    switch (accountsByPrincipal.get(msg.caller)) {
+      case (?acc) {
+        switch (acc.linkedArtistId) {
+          case (?aid) { artistMediaByArtistId.get(aid) };
+          case null { null };
+        };
+      };
+      case null { null };
+    };
+  };
+
+  public shared query (msg) func adminListArtistMediaForStudio() : async [(Text, Types.ArtistMedia)] {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "artists");
+    _Iter.toArray(artistMediaByArtistId.entries());
+  };
+
+  public shared (msg) func adminSetArtistMediaForStudio(
+    artistId : Text,
+    quote : Text,
+    audioUrl : Text,
+    audioTitle : Text,
+    updatedAt : Text,
+  ) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "artists");
+    if (audioUrl.size() > maxProfileImageUrlLen) {
+      Debug.trap("Audio URL too long");
+    };
+    let now = if (updatedAt.size() > 0) updatedAt else "1970-01-01T00:00:00.000Z";
+    let m : Types.ArtistMedia = {
+      quote = quote;
+      audioUrl = audioUrl;
+      audioTitle = audioTitle;
+      updatedAt = now;
+    };
+    artistMediaByArtistId.put(artistId, m);
+  };
+
+  public shared query (msg) func adminGetJournalLayout() : async [Types.JournalLayoutRow] {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "journal");
+    if (journalLayoutRows.size() == 0) {
+      return defaultJournalLayout();
+    };
+    journalLayoutRows;
+  };
+
+  public shared (msg) func adminSetJournalLayout(rows : [Types.JournalLayoutRow]) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "journal");
+    journalLayoutRows := rows;
+    journalLayoutStable := [];
+  };
+
+  // ===== Sound environment (header — public read; Studio “sound” feature for writes) =====
+
+  public query func getSoundEnvironment() : async Types.SoundEnvironmentConfig {
+    soundEnvironmentConfigStable;
+  };
+
+  public shared query (msg) func adminGetSoundEnvironment() : async Types.SoundEnvironmentConfig {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "sound");
+    soundEnvironmentConfigStable;
+  };
+
+  public shared (msg) func adminSetSoundEnvironment(c : Types.SoundEnvironmentConfig) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "sound");
+    if (c.minIntervalSec > c.maxIntervalSec) {
+      Debug.trap("minIntervalSec must be <= maxIntervalSec");
+    };
+    if (c.atmosphereAudioUrl.size() > maxProfileImageUrlLen) {
+      Debug.trap("atmosphere URL too long");
+    };
+    if (c.manualVoiceAudioUrl.size() > maxProfileImageUrlLen) {
+      Debug.trap("manual voice URL too long");
+    };
+    if (c.atmosphereVolumePercent > 100) {
+      Debug.trap("atmosphereVolumePercent out of range");
+    };
+    if (c.voicesVolumePercent > 100) {
+      Debug.trap("voicesVolumePercent out of range");
+    };
+    if (c.categoryLabel.size() > 200) {
+      Debug.trap("categoryLabel too long");
+    };
+    if (c.voiceSelectionMode != "random" and c.voiceSelectionMode != "manual") {
+      Debug.trap("voiceSelectionMode must be random or manual");
+    };
+    soundEnvironmentConfigStable := c;
+  };
 
   public query func listJournalEntries() : async [Types.JournalRecord] {
     let vals = _Iter.toArray(journalsById.vals());

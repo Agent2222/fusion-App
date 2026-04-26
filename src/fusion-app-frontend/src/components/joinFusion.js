@@ -3,7 +3,8 @@
  */
 import { ERROR_USER_INTERRUPT } from '@dfinity/auth-client';
 import posthog from 'posthog-js';
-import { getAuthSnapshot, loginInternetIdentity } from '../utils/icAuth.js';
+import { getAuthSnapshot, loginInternetIdentity, dispatchFusionAuthChange } from '../utils/icAuth.js';
+import { clearAuthenticatedFusionBackendActorCache } from '../utils/earlyAccessSubscribe.js';
 import { registerWithJoinAccessCodeForCaller } from '../utils/database.js';
 import { applyDocumentSeo } from '../utils/documentSeo.js';
 import { metaTrack } from '../utils/metaPixel.js';
@@ -17,11 +18,11 @@ let _joinFusionAuthHandler = null;
  */
 export function generateJoinFusionContent() {
     return `
-        <div class="page-content join-fusion-page" id="joinFusionRoot">
-            <h1>Join the Fusion team</h1>
-            <p class="page-content">You need a single-use 8-digit invite from a canister admin. Sign in with Internet Identity, then complete the form below.</p>
-            <p id="joinFusionAuth" class="page-content" role="status">Checking session…</p>
-            <form id="joinFusionForm" class="page-content" hidden>
+        <div class="join-fusion-page" id="joinFusionRoot">
+            <h1 class="join-fusion-page__title">Join the Fusion Team Studio</h1>
+            <p class="join-fusion-page__intro">Sign in with Internet Identity, then complete the form below.</p>
+            <p id="joinFusionAuth" class="join-fusion-page__status" role="status">Checking session…</p>
+            <form id="joinFusionForm" class="join-fusion-form" hidden>
                 <div class="form-group">
                     <label for="joinFusionFirst">First name</label>
                     <input type="text" id="joinFusionFirst" name="firstName" autocomplete="given-name" required maxlength="256" />
@@ -45,10 +46,12 @@ export function generateJoinFusionContent() {
                     <label for="joinFusionCode">8-digit access code</label>
                     <input type="text" id="joinFusionCode" name="code" inputmode="numeric" pattern="[0-9]{8}" minlength="8" maxlength="8" required />
                 </div>
-                <p id="joinFusionErr" class="page-content" style="color:#b00020" role="alert" hidden></p>
-                <button type="submit" class="btn primary" id="joinFusionSubmit">Register</button>
+                <p id="joinFusionErr" class="join-fusion-page__err" role="alert" hidden></p>
+                <div class="join-fusion-form__actions">
+                    <button type="submit" class="join-fusion-btn--primary join-fusion-form__submit" id="joinFusionSubmit">Register</button>
+                </div>
             </form>
-            <p class="page-content" id="joinFusionHint" style="opacity:0.85"></p>
+            <p class="join-fusion-page__hint" id="joinFusionHint" aria-live="polite"></p>
         </div>
     `;
 }
@@ -78,7 +81,7 @@ async function syncAuthState(root) {
         }
     } else {
         if (el) {
-            el.innerHTML = `Not signed in. <button type="button" class="btn primary" id="joinFusionIIBtn">Sign in with Internet Identity</button>`;
+            el.innerHTML = `Not signed in. <button type="button" class="join-fusion-btn--primary" id="joinFusionIIBtn">Sign in with Internet Identity</button>`;
         }
         if (form) {
             form.hidden = true;
@@ -192,6 +195,8 @@ export default function initJoinFusion() {
                             err.hidden = false;
                         }
                     } else {
+                        clearAuthenticatedFusionBackendActorCache();
+                        await dispatchFusionAuthChange();
                         posthog.capture('join_fusion_registration_succeeded', {
                             role: roleVal,
                             ads_conversion: 'CompleteRegistration',

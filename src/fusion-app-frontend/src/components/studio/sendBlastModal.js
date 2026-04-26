@@ -1,7 +1,6 @@
 /**
- * Studio “Send blast” — filters, Resend batch or optional broadcast, LLM quick draft.
+ * Studio “Send blast” — filters, Resend batch or optional broadcast, LLM quick draft (plain text).
  */
-import { getPublicSiteOrigin } from '../../config.js';
 import { getDataSource, studioReinterpretWithPrompt } from '../../utils/database.js';
 import { openStudioModal } from '../../utils/studioModal.js';
 import { sendEmail, sendEmailBatch, resendCreateBroadcast, resendSendBroadcast } from '../../utils/integrationApi.js';
@@ -39,6 +38,20 @@ function displayNameEn(row) {
 }
 
 /**
+ * Pill label: display name and slug (not internal id), e.g. "Jane (jane-doe)".
+ * @param {object} row
+ * @returns {string}
+ */
+function artistPillLabel(row) {
+    const slug = String(row?.slug ?? '').trim();
+    const name = displayNameEn(row);
+    if (slug && name && name !== slug) {
+        return `${name} (${slug})`;
+    }
+    return name || slug || '—';
+}
+
+/**
  * @param {string} s
  */
 function escapeAttr(s) {
@@ -48,15 +61,31 @@ function escapeAttr(s) {
         .replace(/"/g, '&quot;');
 }
 
+/** Default email signature HTML (fusionart.world assets + social). */
+const DEFAULT_SIGNATURE_HTML = `<p>— Fusion Team</p>
+<p><img src="https://fusionart.world/email/Fusion-Logo-Sig-1.png" alt="Fusion" width="120" height="auto" style="display:block;border:0" /></p>
+<p style="margin:0.5rem 0 0"><a href="https://www.fusionart.world">Fusion Art World</a></p>
+<p>IG: @fusion_intl | TT: @fusion_intl | YT: @fusionartworld</p>`;
+
 /**
- * @param {string} origin
+ * Escape plain text for safe HTML text content.
+ * @param {string} s
  */
-function defaultSignatureHtml(origin) {
-    const base = origin.replace(/\/$/, '');
-    const logo = `${base}/email/Fusion-Logo-Sig-1.png`;
-    return `<p>— Fusion Team</p>
-<p><img src="${logo}" alt="Fusion" width="120" height="auto" style="display:block;border:0" /></p>
-<p style="margin:0.5rem 0 0">Fusion Art World — IG: @fusion_intl | TT: @fusion_intl | YT: @fusionartworld</p>`;
+function escapeHtmlText(s) {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+/**
+ * Turn user-typed body (line breaks preserved) into a single HTML block for email.
+ * @param {string} plain
+ */
+function plainBodyToEmailHtml(plain) {
+    const esc = escapeHtmlText(plain);
+    return `<div style="font-size:15px;line-height:1.55;color:#0f172a;white-space:pre-wrap;word-wrap:break-word">${esc}</div>`;
 }
 
 /**
@@ -64,8 +93,6 @@ function defaultSignatureHtml(origin) {
  */
 export function openSendBlastModal(opts) {
     const { getArtistsRows, onRefresh } = opts;
-    const origin = getPublicSiteOrigin();
-    const defaultSig = defaultSignatureHtml(origin);
 
     const inner = `
 <p class="studio-muted" style="margin:0 0 0.75rem">Only send to artists who have agreed to be contacted. Staff are responsible for compliance with applicable law.</p>
@@ -85,8 +112,8 @@ export function openSendBlastModal(opts) {
 <p class="studio-muted" id="studio-send-blast-overview" style="margin:0.5rem 0">Loading…</p>
 <label class="studio-field" style="margin-top:0.5rem"><span>Subject</span>
   <input type="text" class="studio-input" id="studio-send-blast-subject" maxlength="998" placeholder="Email subject" /></label>
-<label class="studio-field"><span>Body (HTML)</span>
-  <textarea class="studio-textarea" id="studio-send-blast-body" rows="8" spellcheck="true" placeholder="Message HTML"></textarea></label>
+<label class="studio-field"><span>Message (plain text — line breaks kept)</span>
+  <textarea class="studio-textarea studio-send-blast-body" id="studio-send-blast-body" rows="8" spellcheck="true" placeholder="Write your message…"></textarea></label>
 <div class="studio-modal-fields-row" style="align-items:flex-end;flex-wrap:wrap;gap:0.5rem">
   <label class="studio-field"><span>Quick draft tone</span>
     <select class="studio-input" id="studio-send-blast-tone">
@@ -98,9 +125,19 @@ export function openSendBlastModal(opts) {
   </label>
   <button type="button" class="studio-btn-secondary" id="studio-send-blast-llm">Quick draft</button>
 </div>
-<label class="studio-field"><span>Signature (HTML, appended to test &amp; send)</span>
-  <textarea class="studio-textarea" id="studio-send-blast-sig" rows="6" spellcheck="false"></textarea>
-</label>
+<div class="studio-field studio-send-blast-sig-block">
+  <div class="studio-send-blast-sig-row">
+    <span>Signature</span>
+    <button type="button" class="studio-btn-ghost" id="studio-send-blast-sig-toggle" aria-expanded="false">Edit signature</button>
+  </div>
+  <div id="studio-send-blast-sig-preview" class="studio-send-blast-sig-preview" aria-hidden="false"></div>
+  <div id="studio-send-blast-sig-editor" class="studio-send-blast-sig-editor" hidden>
+    <label class="studio-field" style="margin-bottom:0.5rem"><span class="studio-muted">HTML (appended after the message)</span>
+      <textarea class="studio-textarea" id="studio-send-blast-sig" rows="8" spellcheck="false"></textarea>
+    </label>
+    <button type="button" class="studio-btn-secondary" id="studio-send-blast-sig-done">Done editing</button>
+  </div>
+</div>
 <div class="studio-modal-fields-row" style="align-items:flex-end;flex-wrap:wrap;gap:0.5rem">
   <label class="studio-field studio-field--grow"><span>Send test to</span>
     <input type="email" class="studio-input" id="studio-send-blast-test-to" placeholder="you@org.com" autocomplete="email" /></label>
@@ -108,7 +145,7 @@ export function openSendBlastModal(opts) {
 </div>
 <details class="studio-embed-block" style="margin:0.5rem 0">
   <summary>Resend broadcast (optional)</summary>
-  <p class="studio-muted" style="margin:0.5rem 0">Uses Resend <strong>Broadcast</strong> APIs (segment + HTML from above). Create a draft, then send by id, or use <code>send: true</code> in the Resend dashboard after testing.</p>
+  <p class="studio-muted" style="margin:0.5rem 0">Uses Resend <strong>Broadcast</strong> APIs (segment + same email HTML: plain message + signature). Create a draft, then send by id, or use <code>send: true</code> in the Resend dashboard after testing.</p>
   <label class="studio-field"><input type="checkbox" id="studio-send-blast-broadcast-mode" /> <span>Enable broadcast flow (skip transactional batch)</span></label>
   <label class="studio-field"><span>Broadcast name (optional)</span>
     <input type="text" class="studio-input" id="studio-send-blast-bc-name" placeholder="optional" /></label>
@@ -120,18 +157,77 @@ export function openSendBlastModal(opts) {
   </div>
   <button type="button" class="studio-btn-secondary" id="studio-send-blast-bc-send" style="margin-top:0.35rem">Send broadcast</button>
 </details>
-<div class="studio-modal-actions" style="margin-top:0.75rem;padding-top:0.75rem;border-top:1px solid #e2e8f0;flex-wrap:wrap;gap:0.5rem">
-  <span id="studio-send-blast-status" class="studio-sr-only" role="status" aria-live="polite"></span>
-  <button type="button" class="studio-btn-primary" id="studio-send-blast-send" disabled>Send now (batch)</button>
-  <button type="button" class="studio-btn-ghost" data-studio-modal-close="1">Close</button>
+<div class="studio-send-blast-footer">
+  <p id="studio-send-blast-status" class="studio-send-blast-foot-status" role="status" aria-live="polite"></p>
+  <div class="studio-modal-actions studio-modal-actions--send-blast">
+    <button type="button" class="studio-btn-primary" id="studio-send-blast-send" disabled>Send now (batch)</button>
+    <button type="button" class="studio-btn-ghost" data-studio-modal-close="1">Close</button>
+  </div>
 </div>`;
 
     const { close, root } = openStudioModal(inner, { title: 'Send blast', wide: true });
 
-    const sigElInit = root.querySelector('#studio-send-blast-sig');
-    if (sigElInit instanceof HTMLTextAreaElement) {
-        sigElInit.value = defaultSig;
+    const sigTextarea = root.querySelector('#studio-send-blast-sig');
+    const sigPreview = root.querySelector('#studio-send-blast-sig-preview');
+    const sigEditor = root.querySelector('#studio-send-blast-sig-editor');
+    const sigToggle = root.querySelector('#studio-send-blast-sig-toggle');
+    const sigDone = root.querySelector('#studio-send-blast-sig-done');
+
+    if (sigTextarea instanceof HTMLTextAreaElement) {
+        sigTextarea.value = DEFAULT_SIGNATURE_HTML;
     }
+
+    /** Textarea value when "Edit signature" was last opened (for Cancel). */
+    let signatureEditSnapshot = DEFAULT_SIGNATURE_HTML;
+
+    const renderSignaturePreview = () => {
+        if (!(sigPreview instanceof HTMLElement)) return;
+        const html = sigTextarea instanceof HTMLTextAreaElement ? sigTextarea.value : '';
+        sigPreview.innerHTML = html.trim() || '<p class="studio-muted">(empty signature)</p>';
+    };
+
+    const setSignatureEditing = (editing) => {
+        if (sigEditor instanceof HTMLElement) {
+            sigEditor.hidden = !editing;
+        }
+        if (sigPreview instanceof HTMLElement) {
+            sigPreview.hidden = editing;
+        }
+        if (sigToggle instanceof HTMLButtonElement) {
+            sigToggle.setAttribute('aria-expanded', editing ? 'true' : 'false');
+            sigToggle.textContent = editing ? 'Cancel' : 'Edit signature';
+        }
+        if (sigPreview instanceof HTMLElement) {
+            sigPreview.setAttribute('aria-hidden', editing ? 'true' : 'false');
+        }
+        if (editing && sigTextarea instanceof HTMLTextAreaElement) {
+            queueMicrotask(() => sigTextarea.focus());
+        }
+    };
+
+    renderSignaturePreview();
+
+    sigToggle?.addEventListener('click', () => {
+        const nowEditing = sigEditor instanceof HTMLElement && !sigEditor.hidden;
+        if (nowEditing) {
+            if (sigTextarea instanceof HTMLTextAreaElement) {
+                sigTextarea.value = signatureEditSnapshot;
+            }
+            renderSignaturePreview();
+            setSignatureEditing(false);
+        } else {
+            signatureEditSnapshot = sigTextarea instanceof HTMLTextAreaElement ? sigTextarea.value : signatureEditSnapshot;
+            setSignatureEditing(true);
+        }
+    });
+
+    sigDone?.addEventListener('click', () => {
+        if (sigTextarea instanceof HTMLTextAreaElement) {
+            signatureEditSnapshot = sigTextarea.value;
+        }
+        renderSignaturePreview();
+        setSignatureEditing(false);
+    });
 
     const pillsEl = root.querySelector('#studio-send-blast-pills');
     const overviewEl = root.querySelector('#studio-send-blast-overview');
@@ -139,7 +235,6 @@ export function openSendBlastModal(opts) {
     const cohortsEl = root.querySelector('#studio-send-blast-cohorts');
     const subjectEl = root.querySelector('#studio-send-blast-subject');
     const bodyEl = root.querySelector('#studio-send-blast-body');
-    const sigEl = root.querySelector('#studio-send-blast-sig');
     const testToEl = root.querySelector('#studio-send-blast-test-to');
     const statusEl = root.querySelector('#studio-send-blast-status');
     const sendBtn = root.querySelector('#studio-send-blast-send');
@@ -153,13 +248,41 @@ export function openSendBlastModal(opts) {
     const cohortFilter = new Set();
 
     const setStatus = (msg) => {
-        if (statusEl) statusEl.textContent = msg;
+        if (statusEl) statusEl.textContent = msg || '';
+    };
+
+    /**
+     * @param {HTMLButtonElement | null} btn
+     * @param {boolean} busy
+     */
+    const setButtonBusy = (btn, busy) => {
+        if (!btn) return;
+        if (busy) {
+            btn.setAttribute('aria-busy', 'true');
+            btn.disabled = true;
+        } else {
+            btn.setAttribute('aria-busy', 'false');
+            btn.disabled = false;
+        }
+    };
+
+    /**
+     * @param {HTMLButtonElement} btn
+     * @param {string} [label]
+     */
+    const flashButtonSuccess = (btn, label) => {
+        btn.classList.add('studio-btn--async-ok');
+        if (label) btn.textContent = label;
+        window.setTimeout(() => {
+            btn.classList.remove('studio-btn--async-ok');
+        }, 1600);
     };
 
     const fullHtml = () => {
-        const body = bodyEl instanceof HTMLTextAreaElement ? bodyEl.value : '';
-        const sig = sigEl instanceof HTMLTextAreaElement ? sigEl.value : '';
-        return `${body}\n\n${sig}`;
+        const bodyPlain = bodyEl instanceof HTMLTextAreaElement ? bodyEl.value : '';
+        const bodyHtml = plainBodyToEmailHtml(bodyPlain);
+        const sig = sigTextarea instanceof HTMLTextAreaElement ? sigTextarea.value : '';
+        return `${bodyHtml}\n\n${sig.trim()}`;
     };
 
     const recomputeSendEnabled = () => {
@@ -226,10 +349,9 @@ export function openSendBlastModal(opts) {
         pillsEl.innerHTML = list
             .map((row) => {
                 const id = String(row.id ?? '').trim();
-                const name = displayNameEn(row);
-                const label = escapeAttr(`${name} (${id})`);
+                const label = escapeAttr(artistPillLabel(row));
                 const on = selected.has(id);
-                return `<button type="button" class="studio-pill${on ? ' studio-pill--selected' : ''}" data-artist-id="${escapeAttr(id)}" aria-pressed="${on ? 'true' : 'false'}">${label}</button>`;
+                return `<button type="button" class="studio-send-blast-pill${on ? ' studio-send-blast-pill--selected' : ''}" data-artist-id="${escapeAttr(id)}" aria-pressed="${on ? 'true' : 'false'}">${label}</button>`;
             })
             .join('');
 
@@ -239,7 +361,7 @@ export function openSendBlastModal(opts) {
                 if (!id) return;
                 if (selected.has(id)) selected.delete(id);
                 else selected.add(id);
-                btn.classList.toggle('studio-pill--selected', selected.has(id));
+                btn.classList.toggle('studio-send-blast-pill--selected', selected.has(id));
                 btn.setAttribute('aria-pressed', selected.has(id) ? 'true' : 'false');
                 updateOverview();
             });
@@ -311,35 +433,58 @@ export function openSendBlastModal(opts) {
         renderPills();
     });
 
+    const llmBtn = root.querySelector('#studio-send-blast-llm');
+    const llmDefaultLabel =
+        llmBtn instanceof HTMLButtonElement && llmBtn.textContent?.trim() ? llmBtn.textContent.trim() : 'Quick draft';
+
     root.querySelector('#studio-send-blast-llm')?.addEventListener('click', async () => {
         if (!(bodyEl instanceof HTMLTextAreaElement)) return;
+        const btn = root.querySelector('#studio-send-blast-llm');
         const tone =
             (root.querySelector('#studio-send-blast-tone') instanceof HTMLSelectElement
                 ? root.querySelector('#studio-send-blast-tone')?.value
                 : '') || 'Professional and warm';
         const src = bodyEl.value;
-        const prompt = `Quick draft for staff email. Tone: ${tone}. Output HTML fragments only (no outer html/head/body), suitable inside an email. Keep a single clear call to action.`;
+        const prompt = `Quick draft for a staff email to artists. Tone: ${tone}. Output plain text only — no HTML, no markdown, no code fences. Use line breaks between paragraphs. Keep a single clear call to action.`;
         const combined = prompt.length + src.length;
         if (combined > LLM_COMBINED_MAX) {
             alert(`Prompt + body exceeds ${LLM_COMBINED_MAX} characters (canister limit). Shorten the body.`);
             return;
         }
-        const btn = root.querySelector('#studio-send-blast-llm');
-        if (btn instanceof HTMLButtonElement) btn.disabled = true;
-        setStatus('Drafting…');
+        if (btn instanceof HTMLButtonElement) {
+            setButtonBusy(btn, true);
+        }
+        setStatus('Quick draft: working…');
+        let ok = false;
         try {
             const out = await studioReinterpretWithPrompt(prompt, src, 'en');
             bodyEl.value = out.trim();
-            setStatus('Draft ready.');
+            ok = true;
+            setStatus('Quick draft: done. Message was updated below.');
         } catch (e) {
             alert(e instanceof Error ? e.message : String(e));
             setStatus('');
         } finally {
-            if (btn instanceof HTMLButtonElement) btn.disabled = false;
+            if (btn instanceof HTMLButtonElement) {
+                setButtonBusy(btn, false);
+                if (ok) {
+                    flashButtonSuccess(btn, 'Done');
+                    window.setTimeout(() => {
+                        if (btn.textContent === 'Done') btn.textContent = llmDefaultLabel;
+                    }, 1600);
+                }
+            }
         }
     });
 
+    const testBtn = root.querySelector('#studio-send-blast-test');
+    const testDefaultLabel =
+        testBtn instanceof HTMLButtonElement && testBtn.textContent?.trim()
+            ? testBtn.textContent.trim()
+            : 'Send test';
+
     root.querySelector('#studio-send-blast-test')?.addEventListener('click', async () => {
+        const btn = root.querySelector('#studio-send-blast-test');
         const to = testToEl instanceof HTMLInputElement ? testToEl.value.trim() : '';
         if (!to.includes('@')) {
             alert('Enter a valid test recipient email.');
@@ -350,13 +495,28 @@ export function openSendBlastModal(opts) {
             alert('Subject is required.');
             return;
         }
-        setStatus('Sending test…');
+        if (btn instanceof HTMLButtonElement) {
+            setButtonBusy(btn, true);
+        }
+        setStatus('Test email: sending…');
+        let ok = false;
         try {
             await sendEmail({ to, subject: subj, html: fullHtml() });
-            setStatus('Test sent.');
+            ok = true;
+            setStatus(`Test email: sent to ${to}.`);
         } catch (e) {
             alert(e instanceof Error ? e.message : String(e));
             setStatus('');
+        } finally {
+            if (btn instanceof HTMLButtonElement) {
+                setButtonBusy(btn, false);
+                if (ok) {
+                    flashButtonSuccess(btn, 'Sent');
+                    window.setTimeout(() => {
+                        if (btn.textContent === 'Sent') btn.textContent = testDefaultLabel;
+                    }, 1600);
+                }
+            }
         }
     });
 

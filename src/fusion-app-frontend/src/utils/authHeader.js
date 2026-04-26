@@ -4,12 +4,26 @@
 import { getArtists } from './database.js';
 
 /**
+ * Account has on-chain `UserRole` that uses Studio (no public artist profile required).
+ * @param {unknown} account
+ * @returns {boolean}
+ */
+export function accountIsStudioTeamRole(account) {
+    if (!account || typeof account !== 'object') return false;
+    const role = /** @type {Record<string, unknown>} */ (account).role;
+    if (!role || typeof role !== 'object') return false;
+    return 'admin' in role || 'staff' in role || 'collaborator' in role;
+}
+
+/**
  * Map early-access / join category label to Motoko `UserRole` (Candid record variants).
  * @param {string} cat
  * @returns {Record<string, null>}
  */
 export function categoryToUserRole(cat) {
     const s = String(cat || '').toLowerCase();
+    if (s.includes('staff')) return { staff: null };
+    if (s.includes('collaborator')) return { collaborator: null };
     if (s.includes('artist')) return { artist: null };
     if (s.includes('gallery')) return { gallery: null };
     if (s.includes('curator')) return { curator: null };

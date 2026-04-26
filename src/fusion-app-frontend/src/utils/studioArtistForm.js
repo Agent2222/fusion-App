@@ -10,6 +10,7 @@ import {
     worldFieldToTextarea,
 } from './memberProfileForm.js';
 import { normalizeLocalesWorldForStorage } from './worldNormalize.js';
+import { normalizeArtistRosterVisibility } from './database.js';
 
 /** Used by Studio “Translate to New World” to map `world.*` → `worldNew.*` via LLM. */
 export const STUDIO_WORLD_TO_NEW_PATHS = [
@@ -222,7 +223,34 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
           </label>
         </div>
         <div class="studio-modal-fields-row">
-          <label class="studio-field"><span>visibility</span><input name="art-visibility" class="studio-input" value="${esc(escapeHtml, String(a.visibility ?? ''))}" /></label>
+          <label class="studio-field studio-field--grow"><span>Hero profile image (card toggle)</span><input name="art-hero-profile-image" class="studio-input" id="studio-art-hero-profile-image" value="${esc(escapeHtml, String(a.heroProfileImage ?? a.hero_profile_image ?? ''))}" /></label>
+          <label class="studio-file-label studio-btn-ghost studio-field--shrink">
+            <input type="file" accept="image/*" id="studio-art-hero-profile-file" class="studio-file-input" />
+            Upload → URL
+          </label>
+        </div>
+        <div class="studio-modal-fields-row">
+          <label class="studio-field"><span>Visibility</span>
+            <select name="art-visibility" class="studio-input" id="studio-art-visibility">
+              <option value="inactive" ${
+                  String(a.visibility ?? '').toLowerCase() === 'inactive' ? 'selected' : ''
+              }>Inactive</option>
+              <option value="pending" ${
+                  String(a.visibility ?? '').toLowerCase() === 'pending' ? 'selected' : ''
+              }>Pending</option>
+              <option value="private" ${
+                  String(a.visibility ?? '').toLowerCase() === 'private' ? 'selected' : ''
+              }>Private</option>
+              <option value="public" ${
+                  (() => {
+                      const v = String(a.visibility ?? '').toLowerCase();
+                      return v === 'public' || !['inactive', 'pending', 'private'].includes(v);
+                  })()
+                      ? 'selected'
+                      : ''
+              }>Public</option>
+            </select>
+          </label>
           <label class="studio-field studio-field--checkbox">
             <input type="checkbox" name="art-featured" ${a.featured === true ? 'checked' : ''} />
             <span>Featured (home strip, max 8)</span>
@@ -269,6 +297,10 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
           ${rowArt2(escapeHtml, 'bio', 'bio', en, ja, 'textarea')}
           ${rowArt2(escapeHtml, 'bioLong', 'bioLong', en, ja, 'textarea')}
         </div>
+        <h4 class="studio-prog-subhead">Shared profile fields (not localized)</h4>
+        <div class="studio-modal-fields-row">
+          <label class="studio-field studio-field--grow"><span>Quote</span><textarea name="art-profile-quote" class="studio-textarea" rows="3" spellcheck="true">${esc(escapeHtml, String(a.quote ?? ''))}</textarea></label>
+        </div>
       </div>
 
       <div id="studio-art-panel-world" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-art-tab-world" hidden>
@@ -313,6 +345,17 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
 
       <div id="studio-art-panel-media" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-art-tab-media" hidden>
         <p class="studio-modal-hint">Intro gallery (three slots per locale). Use Upload with Studio → Services → S3 configured.</p>
+        <h4 class="studio-prog-subhead">Shared artist audio bite (not localized)</h4>
+        <div class="studio-modal-fields-row">
+          <label class="studio-field studio-field--grow"><span>Audio URL</span><input type="text" class="studio-input" name="art-audio-url" id="studio-art-audio-url" value="${esc(escapeHtml, String(a.audioUrl ?? ''))}" /></label>
+          <label class="studio-file-label studio-btn-ghost studio-field--shrink">
+            <input type="file" accept="audio/*" id="studio-art-audio-file" class="studio-file-input" />
+            Upload audio
+          </label>
+        </div>
+        <div class="studio-modal-fields-row">
+          <label class="studio-field studio-field--grow"><span>Audio title</span><input type="text" class="studio-input" name="art-audio-title" value="${esc(escapeHtml, String(a.audioTitle ?? ''))}" /></label>
+        </div>
         <h4 class="studio-prog-subhead">English</h4>
         ${renderIntroSlot(escapeHtml, 'en', enW, 0)}
         ${renderIntroSlot(escapeHtml, 'en', enW, 1)}
@@ -467,7 +510,10 @@ export function collectArtistRecordFromForm(root, baseArtist) {
     const id = String(fd.get('art-id') || base.id || '').trim();
     const slug = String(fd.get('art-slug') || base.slug || '').trim();
     const image = String(fd.get('art-image') ?? '');
-    const visibility = String(fd.get('art-visibility') ?? 'public');
+    const heroProfileImage = String(fd.get('art-hero-profile-image') ?? '');
+    const visibility = normalizeArtistRosterVisibility(
+        String(fd.get('art-visibility') != null ? fd.get('art-visibility') : 'public')
+    );
     const featuredCb = form.querySelector('input[name="art-featured"]');
     const featurableCb = form.querySelector('input[name="art-featurable"]');
     const _featuredFlags = {
@@ -494,6 +540,10 @@ export function collectArtistRecordFromForm(root, baseArtist) {
         id,
         slug,
         image,
+        heroProfileImage,
+        quote: String(fd.get('art-profile-quote') ?? '').trim(),
+        audioUrl: String(fd.get('art-audio-url') ?? '').trim(),
+        audioTitle: String(fd.get('art-audio-title') ?? '').trim(),
         featuredOrder,
         visibility,
         updatedAt,

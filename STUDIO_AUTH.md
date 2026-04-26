@@ -57,3 +57,38 @@ Deploy **`internet_identity`**, **`internet_identity_frontend`**, and your app t
 - **Studio:** use the same signed-in principal for admin/staff methods; if a call fails with “not authorized,” sign in with an admin principal or run **`bootstrapAdminIfEmpty`** in local dev for anonymous-only workflows.
 
 **VetKD:** use the same agent identity for key derivation paths tied to the user’s principal (see `VETKD.md` when present).
+
+## Custom domain (`fusionart.world`) and Internet Identity
+
+On a **custom domain**, Internet Identity must derive the **same** principal as on the asset canister’s default `https://<canister-id>.icp0.io` host. The app does two things (see `getInternetIdentityDerivationOrigin()` and `loginInternetIdentity()` in [`config.js`](src/fusion-app-frontend/src/config.js) / [`icAuth.js`](src/fusion-app-frontend/src/utils/icAuth.js)):
+
+1. **Static file** — [`public/.well-known/ii-alternative-origins`](src/fusion-app-frontend/public/.well-known/ii-alternative-origins) (JSON) lists the custom host(s), served with correct headers from [`public/.ic-assets.json5`](src/fusion-app-frontend/public/.ic-assets.json5).
+2. **Login** — on `fusionart.world` / `www.fusionart.world`, `AuthClient.login` passes `derivationOrigin` = `MAINNET_FUSION_ASSET_CANISTER_DERIVATION_ORIGIN` (the same origin as the deployed asset canister on mainnet). Override the URL with **`VITE_INTERNET_IDENTITY_DERIVATION_ORIGIN`** if the mainnet **asset** canister id changes.
+
+**Verify deployment (ops checklist)**:
+
+- `canister_ids.json` → `fusion-app-frontend.ic` matches **`MAINNET_FUSION_ASSET_CANISTER_DERIVATION_ORIGIN`** in `config.js` (must be the `https://<id>.icp0.io` base, no trailing slash).
+- After deploy, open: `https://<your-fusion-app-frontend-id>.icp0.io/.well-known/ii-alternative-origins` — expect **200** and JSON:  
+  `{"alternativeOrigins":["https://fusionart.world","https://www.fusionart.world"]}`  
+  (As of documentation time, the repo’s mainnet id is `ekqmo-uiaaa-aaaab-af7ca-cai`; re-check the file if you redeploy.)
+
+**Verify your principal (debugging “no Studio” / join modal after login)**:
+
+- After a successful sign-in, the console logs **`[Fusion] Logged in — principal: ...`** ([`icAuth.js`](src/fusion-app-frontend/src/utils/icAuth.js)).
+- Compare that text to a principal you know the canister trusts: sign in on `https://<asset-id>.icp0.io` (same build) and read the same log, or (as an existing admin) use **`listAdmins`** to see the allow list.
+- If the custom-domain and `.icp0.io` logins now show the **same** principal, II + alternative origins are aligned. If the UI still shows no Studio and **no** canister `console.warn` from `isCallerAdmin` / `getAccountForCaller` (see below), the issue is **on-chain** (principal not in `adminPrincipals` / no `UserAccount`).
+
+**Debug logging (IC errors vs “unknown principal”):**  
+If `isCallerAdmin` or `getAccountForCaller` **throw** (network, replica, or agent), the app used to look identical to “empty account.” Enable **`shouldLogFusionIcAuthErrors`**: in local dev it is on automatically; in production, set **`VITE_FUSION_LOG_IC_AUTH=true`** at build time, or add **`?fusionLogIc=1`** to the URL, then look for `console.warn` lines prefixed with **`[Fusion]`** from the header or post-login pipeline.
+
+**If Studio disappeared only after enabling custom-domain II correctly:**  
+A login on the custom domain *before* `derivationOrigin` + `ii-alternative-origins` could have produced a **different** Internet Identity principal than the canonical one tied to the asset canister. Canister state ( **`adminPrincipals`**, `UserAccount` rows) is keyed by **Principal**. The **new** (canonical) principal must be added the same way as any new admin, for example (from a wallet/CLI session as an **existing** admin; adjust canister name and id for your project):
+
+```bash
+dfx canister call fusion-app-backend addAdmin '(principal "YOUR_PRINCIPAL_TEXT_HERE")' --network ic
+```
+
+If your dfx canister name differs, use that name in place of `fusion-app-backend` (see `dfx.json`). Staff accounts that only existed for the old principal need a corresponding on-chain user row or re-invite flow; there is no automatic merge in the frontend.
+
+**Performance note (custom domain feels slow):**  
+`derivationOrigin` runs only during **Internet Identity login**, not for first content paint. If **`fusionart.world`** is slower than **`https://<asset-id>.icp0.io`**, compare **Lighthouse** or **DevTools → Network** (TTFB, document vs assets) and any CDN / DNS in front of the custom domain. Slowness **immediately after** sign-in can include the **post-login** canister/Stripe/DB work in `runPostLoginPipeline` in [`icAuth.js`](src/fusion-app-frontend/src/utils/icAuth.js), which is separate from initial route load.

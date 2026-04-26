@@ -26,7 +26,7 @@ The wizard has completed a deep integration of PostHog analytics into the Fusion
 | `program_application_submitted` | `src/fusion-app-frontend/src/components/subComponents/application-form.js` |
 | `program_application_failed` | `src/fusion-app-frontend/src/components/subComponents/application-form.js` |
 | `join_network_modal_opened` | `src/fusion-app-frontend/src/components/subComponents/joinNetwork.js` |
-| `membership_payment_completed` | `src/fusion-app-frontend/src/components/subComponents/joinNetwork.js` |
+| `membership_payment_completed` | `src/fusion-app-frontend/src/components/subComponents/joinNetwork.js` — also `amount_cents`, `amount`, `payment_plan` / optional `payment_plan_label`, `page_context`, `join_role`, optional `stripe_subscription_id` (see `docs/META_PIXEL.md`) |
 | `gallery_access_cta_clicked` | `src/fusion-app-frontend/src/components/subComponents/gallery-access-cta.js` |
 | `$pageview` | `src/fusion-app-frontend/src/main.js` |
 

@@ -51,6 +51,12 @@ html[data-studio='true'] body {
   --studio-btn-ghost-border: var(--c2);
   --studio-btn-ghost-fg: var(--c2);
   --studio-btn-ghost-bg: var(--c3);
+  /* Links / info callouts on light panels (align with --c2, not fixed blue) */
+  --studio-accent-on-light: var(--c2);
+  --studio-accent-on-light-hover: color-mix(in srgb, var(--c2) 78%, #0f172a 22%);
+  --studio-info-bg: color-mix(in srgb, var(--c2) 7%, #ffffff 93%);
+  --studio-info-fg: var(--c2);
+  --studio-info-border: color-mix(in srgb, var(--c2) 26%, #e2e8f0 74%);
   /* Vertical / horizontal rhythm (editorial workspace) */
   --studio-space-xs: 0.35rem;
   --studio-space-sm: 0.65rem;
@@ -506,6 +512,65 @@ button.studio-wordmark-btn:hover {
   outline-offset: 2px;
 }
 
+/* Outlined / secondary CTA (theme, not browser default blue) */
+.studio-btn-secondary {
+  border: 1px solid var(--studio-btn-primary-bg);
+  border-radius: 0;
+  padding: 0.5rem 1.1rem;
+  background: var(--studio-btn-ghost-bg);
+  color: var(--studio-btn-primary-bg);
+  cursor: pointer;
+  font-variation-settings: var(--fv-cta);
+  font-size: 0.8rem;
+  line-height: 1.2;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.studio-btn-secondary:hover {
+  background: color-mix(in srgb, var(--studio-btn-primary-bg) 8%, var(--c3, #fff));
+}
+
+.studio-btn-secondary:focus-visible {
+  outline: 2px solid var(--c1, #c12525);
+  outline-offset: 2px;
+}
+
+/* Async: working / success on primary + secondary (Studio modals, dashboard) */
+@keyframes studio-btn-async-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--c2, #0f172a) 0%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--c2, #0f172a) 28%, transparent);
+  }
+}
+
+.studio-app button.studio-btn-primary[aria-busy='true'],
+.studio-app button.studio-btn-secondary[aria-busy='true'],
+.studio-modal-body button.studio-btn-primary[aria-busy='true'],
+.studio-modal-body button.studio-btn-secondary[aria-busy='true'] {
+  animation: studio-btn-async-breathe 0.95s ease-in-out infinite;
+  cursor: wait;
+  pointer-events: none;
+  opacity: 0.95;
+}
+
+.studio-app button.studio-btn--async-ok,
+.studio-modal-body button.studio-btn--async-ok {
+  transition:
+    background 0.2s ease,
+    color 0.2s ease,
+    border-color 0.2s ease;
+  border-color: var(--studio-positive) !important;
+  color: #14532d !important;
+  background: color-mix(in srgb, var(--studio-positive) 16%, var(--c3, #fff)) !important;
+}
+
 .studio-pipeline-row {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -678,11 +743,17 @@ button.studio-wordmark-btn:hover {
 .studio-link-btn {
   border: none;
   background: none;
-  color: #2563eb;
+  color: var(--studio-accent-on-light);
   cursor: pointer;
   font-variation-settings: var(--fv-label);
   font-size: 0.85rem;
   padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.studio-link-btn:hover {
+  color: var(--studio-accent-on-light-hover);
 }
 
 .studio-queue {
@@ -776,9 +847,9 @@ button.studio-wordmark-btn:hover {
 }
 
 .studio-banner--info {
-  background: #eff6ff;
-  color: #1e40af;
-  border: 1px solid #bfdbfe;
+  background: var(--studio-info-bg);
+  color: var(--studio-info-fg);
+  border: 1px solid var(--studio-info-border);
 }
 
 .studio-banner--ok {
@@ -1072,13 +1143,14 @@ button.studio-wordmark-btn:hover {
 }
 
 .studio-quick-link {
-  color: #2563eb;
+  color: var(--studio-accent-on-light);
   text-decoration: underline;
   font-size: 0.95rem;
+  text-underline-offset: 2px;
 }
 
 .studio-quick-link:hover {
-  color: #1d4ed8;
+  color: var(--studio-accent-on-light-hover);
 }
 
 .studio-field {
@@ -1288,6 +1360,28 @@ button.studio-wordmark-btn:hover {
   margin-top: 0.5rem;
   padding-top: 0.5rem;
   border-top: 1px solid #e2e8f0;
+}
+
+.studio-send-blast-footer {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid color-mix(in srgb, var(--c2, #0f172a) 12%, transparent);
+}
+
+.studio-send-blast-foot-status {
+  margin: 0 0 0.5rem;
+  min-height: 1.25em;
+  font-size: 0.8rem;
+  font-variation-settings: var(--fv-label);
+  color: var(--studio-muted);
+}
+
+.studio-modal-actions--send-blast {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 .studio-modal-actions--artist {
@@ -2480,8 +2574,8 @@ button.studio-wordmark-btn:hover {
   color: #92400e;
 }
 .studio-status-pill--reviewing {
-  background: #dbeafe;
-  color: #1e40af;
+  background: color-mix(in srgb, var(--c2) 10%, #eff6ff 90%);
+  color: var(--c2, #0f172a);
 }
 .studio-status-pill--needs {
   background: #fce7f3;
@@ -2498,6 +2592,38 @@ button.studio-wordmark-btn:hover {
 .studio-status-pill--neutral {
   background: #f1f5f9;
   color: #475569;
+}
+
+/* Roster profile visibility (Artists + Pending Approval tables) */
+.studio-roster-vis {
+  display: inline-block;
+  padding: 0.12rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-variation-settings: var(--fv-label-strong);
+  text-transform: capitalize;
+  letter-spacing: 0.02em;
+}
+
+.studio-roster-vis--public {
+  color: #14532d;
+  background: color-mix(in srgb, var(--c4, #4ade80) 28%, transparent);
+}
+
+.studio-roster-vis--pending {
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.studio-roster-vis--private {
+  color: #475569;
+  background: #e2e8f0;
+}
+
+.studio-roster-vis--inactive {
+  color: color-mix(in srgb, var(--c1, #94a3b8) 90%, var(--c2, #000) 10%);
+  background: color-mix(in srgb, var(--c1, #94a3b8) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c2) 12%, transparent);
 }
 
 .studio-table-wrap--sticky-head .studio-table thead th {
@@ -2609,6 +2735,77 @@ button.studio-wordmark-btn:hover {
 }
 
 /* Send blast modal */
+.studio-textarea.studio-send-blast-body {
+  white-space: pre-wrap;
+  line-height: 1.55;
+  font-size: 0.9rem;
+  max-width: 100%;
+}
+
+.studio-send-blast-sig-block {
+  margin-bottom: 1rem;
+}
+
+.studio-send-blast-sig-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.4rem;
+}
+
+.studio-send-blast-sig-row > span:first-child {
+  font-size: 0.8rem;
+  font-variation-settings: var(--fv-label-strong);
+  color: var(--c2, #0f172a);
+}
+
+.studio-send-blast-sig-row .studio-btn-ghost {
+  font-size: 0.75rem;
+  padding: 0.35rem 0.65rem;
+}
+
+.studio-send-blast-sig-preview {
+  border: 1px solid color-mix(in srgb, var(--c2) 14%, #e2e8f0);
+  background: var(--c3, #fff);
+  padding: 0.75rem 1rem;
+  max-height: 14rem;
+  overflow: auto;
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: var(--c2, #0f172a);
+}
+
+.studio-send-blast-sig-preview p {
+  margin: 0.35rem 0 0;
+}
+
+.studio-send-blast-sig-preview p:first-child {
+  margin-top: 0;
+}
+
+.studio-send-blast-sig-preview a {
+  color: var(--studio-accent-on-light, var(--c2));
+}
+
+.studio-send-blast-sig-preview img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+.studio-send-blast-sig-editor .studio-textarea {
+  max-width: 100%;
+  font-family: ui-monospace, 'Cascadia Code', system-ui, monospace;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.studio-send-blast-sig-editor .studio-btn-secondary {
+  margin-top: 0.35rem;
+}
+
 .studio-send-blast-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -2640,34 +2837,48 @@ button.studio-wordmark-btn:hover {
   max-height: min(40vh, 16rem);
   overflow: auto;
   padding: 0.25rem 0;
-  border: 1px solid color-mix(in srgb, var(--c2, #000) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c2) 15%, transparent);
   border-radius: var(--studio-card-radius, 8px);
-  background: #fff;
+  background: var(--c3, #fff);
 }
 
-.studio-pill {
+.studio-send-blast-pills .studio-send-blast-pill {
   font: inherit;
   font-size: 0.85rem;
   padding: 0.35rem 0.65rem;
   border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--c2, #000) 22%, transparent);
-  background: #f8fafc;
+  border: 1px solid color-mix(in srgb, var(--c2) 20%, transparent);
+  background: color-mix(in srgb, var(--c2) 4%, var(--c3, #fff) 96%);
   color: var(--c2, #0f172a);
   cursor: pointer;
   max-width: 100%;
   text-align: left;
+  font-variation-settings: var(--fv-label);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
 }
 
-.studio-pill:hover,
-.studio-pill:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--c1, #c12525) 45%, transparent);
-  outline-offset: 1px;
+.studio-send-blast-pills .studio-send-blast-pill:hover {
+  background: color-mix(in srgb, var(--c2) 9%, var(--c3, #fff) 91%);
+  border-color: color-mix(in srgb, var(--c2) 32%, transparent);
 }
 
-.studio-pill--selected {
-  background: #fef9c3;
-  border-color: #eab308;
-  color: #713f12;
+.studio-send-blast-pills .studio-send-blast-pill:focus-visible {
+  outline: 2px solid var(--c1, #c12525);
+  outline-offset: 2px;
+}
+
+.studio-send-blast-pills .studio-send-blast-pill--selected {
+  background: color-mix(in srgb, var(--c1) 11%, var(--c3, #fff));
+  border-color: color-mix(in srgb, var(--c1) 45%, var(--c2));
+  color: var(--c2, #0f172a);
+}
+
+.studio-send-blast-pills .studio-send-blast-pill--selected:hover {
+  background: color-mix(in srgb, var(--c1) 16%, var(--c3, #fff));
+  border-color: var(--c1, #c12525);
 }
 
 .studio-td-ellipsis {

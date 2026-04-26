@@ -11,6 +11,7 @@ export const S3_UPLOAD_AREAS = [
     'studio/programs',
     'studio/editions',
     'studio/journal',
+    'studio/sound',
     'studio/misc',
     'account/profile',
     'services/test',
@@ -37,6 +38,49 @@ function shortId8() {
 }
 
 /**
+ * @param {string} s
+ * @returns {string}
+ */
+function slugPathPart(s) {
+    return String(s || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9._/-]+/g, '-')
+        .replace(/\/+/g, '/')
+        .replace(/^\/+|\/+$/g, '')
+        .replace(/-+/g, '-');
+}
+
+/**
+ * @param {File} file
+ * @returns {string}
+ */
+function fileExtFromUpload(file) {
+    const name = String(file?.name || '').trim();
+    const dot = name.lastIndexOf('.');
+    if (dot > 0 && dot < name.length - 1) {
+        return `.${slugPathPart(name.slice(dot + 1)).replace(/\./g, '') || 'bin'}`;
+    }
+    return '.bin';
+}
+
+/**
+ * Build a deterministic key for overwrite semantics.
+ * @param {string} area
+ * @param {File} file
+ * @param {{ entityType?: string, entityId?: string, fieldKey?: string }} options
+ * @returns {string | null}
+ */
+function deterministicKey(area, file, options) {
+    const entityType = slugPathPart(options?.entityType || '');
+    const entityId = slugPathPart(options?.entityId || '');
+    const fieldKey = slugPathPart(options?.fieldKey || '');
+    if (!entityType || !entityId || !fieldKey) return null;
+    const ext = fileExtFromUpload(file);
+    return `${area}/${entityType}/${entityId}/${fieldKey}${ext}`;
+}
+
+/**
  * Sanitize filename and cap stem length (extension preserved).
  * @param {string} fileName
  * @param {number} [maxStem]
@@ -59,14 +103,15 @@ function truncatedSafeBase(fileName, maxStem = 40) {
  *
  * @param {File} file
  * @param {HTMLInputElement | null} [inputEl]
- * @param {{ area?: string }} [options] `area` should be one of {@link S3_UPLOAD_AREAS}; unknown values fall back to `studio/misc`.
+ * @param {{ area?: string, entityType?: string, entityId?: string, fieldKey?: string }} [options]
+ * `area` should be one of {@link S3_UPLOAD_AREAS}; unknown values fall back to `studio/misc`.
+ * When `entityType`, `entityId`, and `fieldKey` are provided, upload uses a deterministic key and overwrites existing asset.
  * @returns {Promise<string>}
  */
 export async function uploadBlobToS3(file, inputEl, options = {}) {
     const area = normalizeUploadArea(options.area);
-    const shortId = shortId8();
-    const safeBase = truncatedSafeBase(file.name);
-    const key = `${area}/${shortId}-${safeBase}`;
+    const deterministic = deterministicKey(area, file, options);
+    const key = deterministic || `${area}/${shortId8()}-${truncatedSafeBase(file.name)}`;
     const ct = file.type || 'application/octet-stream';
     const { putUrl, publicUrl } = await presignUpload(key, ct);
     const res = await fetch(putUrl, {

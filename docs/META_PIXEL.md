@@ -14,7 +14,7 @@ Pixel ID **1281327974121956** is bootstrapped in **`src/fusion-app-frontend/src/
 | `Purchase` | Membership: Stripe confirm in join modal (`content_name: membership_signup`). Program application: Stripe confirm for fee (`content_name: program_application_fee`; `value` when one-time fee cents known). |
 | `SubmitApplication` | Application saved to canister after successful flow (`content_ids`: program id) |
 
-PostHog captures at the same points include **`ads_conversion`** matching these names, plus **`value`** / **`currency`** on `membership_payment_completed`. First-touch **UTM** and **`fbclid`** are registered via `src/fusion-app-frontend/src/utils/attribution.js` when PostHog is configured.
+PostHog captures at the same points include **`ads_conversion`** matching these names, plus **`value`** / **`currency`** on `membership_payment_completed`. The same event also includes (when available) **`amount_cents`**, **`amount`**, **`payment_plan`** (from CMS `joinNetworkFlow.*.payment.planKey`, e.g. `bi_monthly`), optional **`payment_plan_label`**, **`page_context`** (from `app-join-network` `context`), **`join_role`**, and optional **`stripe_subscription_id`**. First-touch **UTM** and **`fbclid`** are registered via `src/fusion-app-frontend/src/utils/attribution.js` when PostHog is configured.
 
 ## Post-deploy checklist
 

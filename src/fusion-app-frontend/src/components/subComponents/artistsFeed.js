@@ -9,6 +9,10 @@ import {
     artistSlugFromName,
 } from '../../utils/artistSlug.js';
 import { applyArtistCardImage } from '../../utils/artistCardPlaceholder.js';
+import {
+    getArtistCardImageUrlForCurrentMode,
+    ARTIST_CARD_IMAGE_MODE_EVENT,
+} from '../../utils/artistCardImageMode.js';
 import { getCurrentProgramSeason } from '../../utils/database.js';
 import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
 
@@ -86,6 +90,8 @@ class ArtistsFeedElement extends HTMLElement {
         this._shellReady = false;
         /** @type {number} */
         this._pageUpdateSeq = 0;
+        /** @type {(() => void) | null} */
+        this._onCardImageMode = null;
     }
 
     getArtists() {
@@ -107,6 +113,13 @@ class ArtistsFeedElement extends HTMLElement {
         this.ensureShell();
         if (this.pool.length) {
             void this.updatePage();
+        }
+    }
+
+    disconnectedCallback() {
+        if (this._onCardImageMode) {
+            window.removeEventListener(ARTIST_CARD_IMAGE_MODE_EVENT, this._onCardImageMode);
+            this._onCardImageMode = null;
         }
     }
 
@@ -367,6 +380,13 @@ class ArtistsFeedElement extends HTMLElement {
         this.btnNext.addEventListener('click', () => this.goNext());
         this.btnBackTop.addEventListener('click', () => this.goPrev());
         this.btnNextTop.addEventListener('click', () => this.goNext());
+
+        if (!this._onCardImageMode) {
+            this._onCardImageMode = () => {
+                void this.updatePage();
+            };
+            window.addEventListener(ARTIST_CARD_IMAGE_MODE_EVENT, this._onCardImageMode);
+        }
     }
 
     goPrev() {
@@ -439,7 +459,7 @@ class ArtistsFeedElement extends HTMLElement {
                 </div>
             `;
             const cardImg = card.querySelector('.artist-card-image img');
-            applyArtistCardImage(cardImg, artist.image);
+            applyArtistCardImage(cardImg, getArtistCardImageUrlForCurrentMode(artist));
             const residencyBadge = card.querySelector('.residency-badge');
             if (residencyBadge instanceof HTMLElement) {
                 const y = artistResidencyCardYear(artist);

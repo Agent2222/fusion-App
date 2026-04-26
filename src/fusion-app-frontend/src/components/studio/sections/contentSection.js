@@ -295,7 +295,12 @@ export function attachStudioContentFileUpload(fieldsEl, opts) {
         const el = fieldsEl.querySelector(`.studio-content-str-value[data-path="${CSS.escape(path)}"]`);
         if (!(el instanceof HTMLTextAreaElement) && !(el instanceof HTMLInputElement)) return;
         try {
-            await uploadBlobToS3(f, el, { area });
+            await uploadBlobToS3(f, el, {
+                area,
+                entityType: 'content',
+                entityId: 'page',
+                fieldKey: path.replace(/[^a-z0-9._-]+/gi, '-').toLowerCase(),
+            });
             opts.markDirty();
             opts.showMsg('ok', 'Uploaded — URL inserted. Save to persist.');
             el.dispatchEvent(new Event('input', { bubbles: true }));

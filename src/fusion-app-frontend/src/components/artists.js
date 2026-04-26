@@ -58,6 +58,7 @@ export function render() {
             <main id="artistsMain" class="main-cont">
                 <div id="artistsMainContent" class="feed-container">
                     <app-shout-headline data-content-slug="artists-page"></app-shout-headline>
+                    <div class="artist-card-toggle-row"><app-artist-card-image-toggle id="artistsArtistCardImageToggle" aria-label="Artist card image mode"></app-artist-card-image-toggle></div>
                     <app-featured-artist id="featuredArtist2" active="true"></app-featured-artist>
                     <app-artists-feed id="artistsFeed"></app-artists-feed>
                     <app-join-network id="joinNetwork" data-modal-type="access" context="artists" active="true" data-margin-top="100px" data-margin-bottom="96px"></app-join-network>

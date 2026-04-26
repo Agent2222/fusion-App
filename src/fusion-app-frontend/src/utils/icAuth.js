@@ -3,10 +3,16 @@
  * Dispatches `fusion-auth-change` with `{ identity, principal, authenticated }`.
  */
 import { AuthClient, ERROR_USER_INTERRUPT } from '@dfinity/auth-client';
-import { DEV_MODE, getInternetIdentityUrl } from '../config.js';
+import {
+    DEV_MODE,
+    getInternetIdentityDerivationOrigin,
+    getInternetIdentityUrl,
+    shouldLogFusionIcAuthErrors,
+} from '../config.js';
 import { FUSION_PENDING_MEMBERSHIP_LINK_KEY } from './integrationApi.js';
 import { getProfileSetupDraft } from './profileSetupDraft.js';
 import { clearAdminPerspective } from './adminPerspective.js';
+import { accountIsStudioTeamRole } from './authHeader.js';
 import posthog from 'posthog-js';
 
 function linkedArtistIdFromAccount(acc) {
@@ -99,8 +105,10 @@ export async function loginInternetIdentity() {
     const client = await getAuthClientSingleton();
     const identityProvider = getInternetIdentityUrl();
 
+    const derivationOrigin = getInternetIdentityDerivationOrigin();
     await new Promise((resolve, reject) => {
-        client.login({
+        /** @type {import('@dfinity/auth-client').AuthClientLoginOptions} */
+        const loginOpts = {
             identityProvider,
             maxTimeToLive: TTL_7D_NS,
             onSuccess: () => resolve(undefined),
@@ -111,7 +119,11 @@ export async function loginInternetIdentity() {
                 }
                 reject(err instanceof Error ? err : new Error(String(err ?? 'Internet Identity login failed')));
             },
-        });
+        };
+        if (derivationOrigin) {
+            loginOpts.derivationOrigin = derivationOrigin;
+        }
+        client.login(loginOpts);
     });
 
     const snapAfterLogin = await getAuthSnapshot();
@@ -154,8 +166,10 @@ export async function runPostLoginPipeline() {
         if (typeof actor.isCallerAdmin === 'function') {
             isAdmin = await actor.isCallerAdmin();
         }
-    } catch (_) {
-        /* network / canister */
+    } catch (e) {
+        if (shouldLogFusionIcAuthErrors()) {
+            console.warn('[Fusion] isCallerAdmin failed (post-login pipeline)', e);
+        }
     }
     if (isAdmin) return;
     let acc = null;
@@ -164,8 +178,10 @@ export async function runPostLoginPipeline() {
             const raw = await actor.getAccountForCaller();
             acc = Array.isArray(raw) ? (raw.length ? raw[0] : null) : raw;
         }
-    } catch (_) {
-        /* ignore */
+    } catch (e) {
+        if (shouldLogFusionIcAuthErrors()) {
+            console.warn('[Fusion] getAccountForCaller failed (post-login pipeline, join check)', e);
+        }
     }
     if (acc == null) {
         window.dispatchEvent(
@@ -173,6 +189,10 @@ export async function runPostLoginPipeline() {
                 detail: { logoutIfDismissedWithoutAccount: true },
             })
         );
+        return;
+    }
+
+    if (accountIsStudioTeamRole(/** @type {Record<string, unknown>} */ (acc))) {
         return;
     }
 
@@ -206,8 +226,10 @@ export async function runPostLoginPipeline() {
             const raw = await actor.getAccountForCaller();
             acc = Array.isArray(raw) ? (raw.length ? raw[0] : null) : raw;
         }
-    } catch (_) {
-        /* ignore */
+    } catch (e) {
+        if (shouldLogFusionIcAuthErrors()) {
+            console.warn('[Fusion] getAccountForCaller failed (post-login pipeline, linked artist)', e);
+        }
     }
 
     let linkedArtistId = linkedArtistIdFromAccount(acc);

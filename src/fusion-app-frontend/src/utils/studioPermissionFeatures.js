@@ -7,11 +7,13 @@ export const STUDIO_PERMISSION_FEATURE_ROWS = [
     { id: 'home', label: 'Home' },
     { id: 'subscribers', label: 'Subscribers' },
     { id: 'applicants', label: 'Applicants' },
+    // Roster + Send blast: Studio gates blast on canEdit for this id (no extra Motoko key).
     { id: 'artists', label: 'Artists' },
     { id: 'programs', label: 'Programs' },
     { id: 'products', label: 'Products' },
     { id: 'gallery-access', label: 'Gallery Access' },
     { id: 'journal', label: 'Journal' },
+    { id: 'sound', label: 'Sound' },
     { id: 'content', label: 'Content' },
     { id: 'email', label: 'Email' },
     { id: 'ai', label: 'Ai' },

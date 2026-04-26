@@ -8,6 +8,7 @@ import { openStudioModal } from '../../utils/studioModal.js';
 import {
     adminCreateJoinInviteCodeStudio,
     adminListAccountContactsForStudio,
+    adminListJoinInvitesStudio,
     adminListSuperStaffStudio,
     adminUpsertUserAccountStudio,
     getAccountsForStudio,
@@ -53,6 +54,16 @@ function principalKey(p) {
         return p.toText();
     }
     return String(p ?? '');
+}
+
+/**
+ * @param {unknown} role — Motoko `UserRole` (Candid record)
+ * @returns {string}
+ */
+function joinInviteRoleLabel(role) {
+    if (!role || typeof role !== 'object') return '—';
+    const k = Object.keys(/** @type {Record<string, unknown>} */ (role))[0];
+    return k || '—';
 }
 
 async function copyText(text) {
@@ -106,8 +117,81 @@ export function renderTeamSection() {
                     <tbody id="studioTeamTbody"></tbody>
                 </table>
             </div>
+            <div id="studioTeamPendingInvitesWrap" class="studio-team-pending-invites" hidden>
+                <p class="studio-muted" style="margin-top:1.5rem">
+                    <strong>Pending join invites</strong> — single-use codes not yet redeemed. Staff and collaborators
+                    use <a class="studio-inline-link" href="/join-fusion" target="_blank" rel="noopener">/join-fusion</a>
+                    with the matching role; other roles use the join flow with the same role selected.
+                </p>
+                <div class="studio-table-wrap studio-table-wrap--sticky-head">
+                    <table class="studio-table studio-table--dense" aria-label="Pending join invites">
+                        <thead>
+                            <tr>
+                                <th>Code</th>
+                                <th>Role</th>
+                                <th>Created</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="studioTeamInvitesTbody"></tbody>
+                    </table>
+                </div>
+            </div>
         </div>
     `;
+}
+
+/**
+ * @param {HTMLElement} mainEl
+ */
+async function renderPendingJoinInvitesTable(mainEl) {
+    const wrap = mainEl.querySelector('#studioTeamPendingInvitesWrap');
+    const tbody = mainEl.querySelector('#studioTeamInvitesTbody');
+    if (!wrap || !tbody) return;
+    let rows;
+    try {
+        rows = await adminListJoinInvitesStudio();
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        tbody.innerHTML = `<tr><td colspan="4" class="studio-muted">Could not load invites. ${escapeHtml(
+            msg
+        )}</td></tr>`;
+        wrap.hidden = false;
+        return;
+    }
+    const list = Array.isArray(rows) ? rows : [];
+    const pending = list
+        .map((entry) => {
+            const ex = /** @type {any} */ (entry);
+            const code = Array.isArray(ex) ? ex[0] : ex?.[0] ?? ex?.['0'];
+            const rec = Array.isArray(ex) ? ex[1] : ex?.[1] ?? ex?.['1'];
+            return { code: String(code ?? ''), rec };
+        })
+        .filter((x) => {
+            if (!x.rec || typeof x.rec !== 'object') return false;
+            return /** @type {Record<string, unknown>} */ (x.rec).active === true;
+        });
+    if (pending.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="studio-muted">No active join invites.</td></tr>';
+    } else {
+        pending.sort((a, b) => a.code.localeCompare(b.code));
+        tbody.innerHTML = pending
+            .map(({ code, rec }) => {
+                const r = /** @type {Record<string, unknown>} */ (rec);
+                const role = joinInviteRoleLabel(r.role);
+                const created = escapeHtml(String(r.createdAt ?? '—'));
+                return `<tr>
+        <td><code style="user-select:all">${escapeHtml(code)}</code></td>
+        <td>${escapeHtml(role)}</td>
+        <td>${created}</td>
+        <td><button type="button" class="studio-btn-ghost studio-btn-tiny" data-copy-invite="${escapeHtml(
+            code
+        )}">Copy</button></td>
+      </tr>`;
+            })
+            .join('');
+    }
+    wrap.hidden = false;
 }
 
 const INTERNAL_ROLES = new Set(['staff', 'admin', 'collaborator']);
@@ -128,10 +212,24 @@ export async function initTeamSection(mainEl) {
         if (intro) intro.hidden = true;
         if (tableWrap) tableWrap.hidden = true;
         if (toolbar) toolbar.style.display = 'none';
+        const pendingWrap = mainEl.querySelector('#studioTeamPendingInvitesWrap');
+        if (pendingWrap) pendingWrap.hidden = true;
         gate.className = 'studio-banner studio-banner--warn';
         gate.textContent = "You need canister admin access to view the Team section.";
         if (countEl) countEl.textContent = '—';
         return;
+    }
+
+    if (!mainEl.dataset.studioTeamInviteCopyBound) {
+        mainEl.dataset.studioTeamInviteCopyBound = '1';
+        mainEl.addEventListener('click', (e) => {
+            const t = e.target;
+            if (!(t instanceof Element)) return;
+            const btn = t.closest('button[data-copy-invite]');
+            if (!btn || !mainEl.contains(btn)) return;
+            const c = btn.getAttribute('data-copy-invite') || '';
+            void copyText(c);
+        });
     }
 
     gate.className = 'studio-banner studio-banner--info';
@@ -280,6 +378,8 @@ export async function initTeamSection(mainEl) {
             if (sel instanceof HTMLSelectElement) void doSave(p, sel);
         });
 
+        await renderPendingJoinInvitesTable(mainEl);
+
         const genBtn = mainEl.querySelector('#studioTeamGenInvite');
         if (genBtn) {
             genBtn.addEventListener('click', () => {
@@ -314,6 +414,7 @@ export async function initTeamSection(mainEl) {
                                 void copyText(code);
                             });
                         }
+                        await renderPendingJoinInvitesTable(mainEl);
                     } catch (err) {
                         if (out) {
                             out.textContent = err instanceof Error ? err.message : String(err);
@@ -321,7 +422,6 @@ export async function initTeamSection(mainEl) {
                         }
                     }
                 });
-                void close;
             });
         }
     } catch (e) {

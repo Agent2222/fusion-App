@@ -33,7 +33,7 @@ class AudioRowComponent extends HTMLElement {
     }
 
     static get observedAttributes() {
-        return ['active', 'data-audio-id'];
+        return ['active', 'data-audio-id', 'data-audio-src', 'data-audio-title'];
     }
 
     attributeChangedCallback(prop, oldVal, newVal) {
@@ -72,6 +72,14 @@ class AudioRowComponent extends HTMLElement {
     }
 
     _resolveEntry() {
+        const srcOverride = String(this.getAttribute('data-audio-src') || '').trim();
+        if (srcOverride) {
+            return {
+                id: this.getAttribute('data-audio-id') || 'artist-audio',
+                link: srcOverride,
+                title: String(this.getAttribute('data-audio-title') || 'Artist audio').trim(),
+            };
+        }
         const id = this._getAudioId();
         const list = this._audioList;
         if (id == null || !Array.isArray(list)) return null;

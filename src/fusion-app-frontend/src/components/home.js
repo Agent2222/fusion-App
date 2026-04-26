@@ -22,6 +22,7 @@ export function render() {
                 <div id="homeMainContent" class="feed-container">
                     <app-program-hero id="programHero" active="true"></app-program-hero>
                     <app-coming-up id="comingUp" active="true"></app-coming-up>
+                    <div class="artist-card-toggle-row"><app-artist-card-image-toggle id="homeArtistCardImageToggle" aria-label="Artist card image mode"></app-artist-card-image-toggle></div>
                     <app-featured-artist id="featuredArtist" active="true"></app-featured-artist>
                     <app-objects-highlight id="objectsHighlight" active="true"></app-objects-highlight>
                     <app-gallery-access-cta id="galleryAccessCta" active="true"></app-gallery-access-cta>

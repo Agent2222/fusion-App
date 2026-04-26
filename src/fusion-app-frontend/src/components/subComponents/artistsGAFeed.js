@@ -7,6 +7,10 @@ import {
     artistSlugFromName,
 } from '../../utils/artistSlug.js';
 import { applyArtistCardImage } from '../../utils/artistCardPlaceholder.js';
+import {
+    getArtistCardImageUrlForCurrentMode,
+    ARTIST_CARD_IMAGE_MODE_EVENT,
+} from '../../utils/artistCardImageMode.js';
 import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
 
 import prepIcon from '../../assets/icon-cal.png';
@@ -30,6 +34,8 @@ class ArtistsGAFeedElement extends HTMLElement {
         this.pool = [];
         this.currentPage = 0;
         this._shellReady = false;
+        /** @type {(() => void) | null} */
+        this._onCardImageMode = null;
     }
 
     getArtists() {
@@ -51,6 +57,13 @@ class ArtistsGAFeedElement extends HTMLElement {
         this.ensureShell();
         if (this.pool.length) {
             this.updatePage();
+        }
+    }
+
+    disconnectedCallback() {
+        if (this._onCardImageMode) {
+            window.removeEventListener(ARTIST_CARD_IMAGE_MODE_EVENT, this._onCardImageMode);
+            this._onCardImageMode = null;
         }
     }
 
@@ -369,6 +382,11 @@ class ArtistsGAFeedElement extends HTMLElement {
         this.btnNext.addEventListener('click', () => this.goNext());
         this.btnBackTop.addEventListener('click', () => this.goPrev());
         this.btnNextTop.addEventListener('click', () => this.goNext());
+
+        if (!this._onCardImageMode) {
+            this._onCardImageMode = () => this.updatePage();
+            window.addEventListener(ARTIST_CARD_IMAGE_MODE_EVENT, this._onCardImageMode);
+        }
     }
 
     statusIcon(status) {
@@ -453,7 +471,7 @@ class ArtistsGAFeedElement extends HTMLElement {
                 </div>
             `;
             const gaImg = card.querySelector('.artist-card-image img');
-            applyArtistCardImage(gaImg, artist.image);
+            applyArtistCardImage(gaImg, getArtistCardImageUrlForCurrentMode(artist));
             grid.appendChild(card);
         }
 

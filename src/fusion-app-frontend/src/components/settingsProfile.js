@@ -5,6 +5,8 @@ import {
   getMyArtistRecord,
   updateMyArtistLocalesJson,
   updateMyArtistProfilePatch,
+  updateMyArtistHeroProfileImagePatch,
+  updateMyArtistQuoteAudioPatch,
   getProfileSettingsDevArtistId,
   setProfileSettingsDevArtistId,
   getArtists,
@@ -13,6 +15,7 @@ import {
   getAccountForCaller,
   updateMyArtistPublicSlug,
   updateMyArtistVisibility,
+  normalizeArtistRosterVisibility,
   getPrograms,
   generateAndUpdateMyArtistWorldFromBio,
   artistRowFromMyArtistRecord,
@@ -249,6 +252,16 @@ function setVal(id, v) {
  */
 function setHeroSpinnerVisible(visible) {
   const sp = document.getElementById("mpd_hero_spinner");
+  if (!sp) return;
+  sp.hidden = !visible;
+  sp.setAttribute("aria-hidden", visible ? "false" : "true");
+}
+
+/**
+ * @param {boolean} visible
+ */
+function setHeroProfileSpinnerVisible(visible) {
+  const sp = document.getElementById("mpd_hero_profile_spinner");
   if (!sp) return;
   sp.hidden = !visible;
   sp.setAttribute("aria-hidden", visible ? "false" : "true");
@@ -958,12 +971,14 @@ export function generateSettingsProfileContent() {
                                     <button type="button" class="program-intro-cta mpd-program-intro-cta" id="mpd_apply_residency" data-program-path="${MPD_APPLY_PROGRAM_PATH}" data-apply-open="true">Apply to Residency</button>
                                 </div>
                                 <label class="studio-field studio-field--full mpd-visibility-field">
-                                    <span>Artist feed visibility</span>
+                                    <span>Artist profile visibility</span>
                                     <select id="mpd_profile_visibility" class="studio-input" aria-describedby="mpd_profile_visibility_hint">
-                                        <option value="public">Public — listed on artist feeds</option>
-                                        <option value="private">Private — hidden from feeds (your profile URL still works)</option>
+                                        <option value="inactive">Inactive — profile not yet submitted for review</option>
+                                        <option value="pending">Pending — under review (you will be notified when public)</option>
+                                        <option value="private">Private — unlisted (direct link still works)</option>
+                                        <option value="public">Public — listed on artist feeds and directory</option>
                                     </select>
-                                    <span id="mpd_profile_visibility_hint" class="mpd-field-hint">Private only removes you from public artist lists; people with your link can still open your page.</span>
+                                    <span id="mpd_profile_visibility_hint" class="mpd-field-hint">Only <strong>public</strong> appears on the public artist directory. When your roster state is <strong>inactive</strong>, saving your profile will move it to <strong>pending</strong> for staff review.</span>
                                 </label>
                                 <p id="mpd_datasource_pill" class="member-profile-dashboard__pill" style="display:none;margin-top:0.75rem"></p>
 
@@ -990,6 +1005,9 @@ export function generateSettingsProfileContent() {
                                     <label class="studio-field studio-field--full"><span>Long bio</span>
                                         <textarea id="mpd_bioLong" class="studio-textarea" rows="5"></textarea>
                                     </label>
+                                    <label class="studio-field studio-field--full"><span>Profile quote (shared)</span>
+                                        <textarea id="mpd_profile_quote" class="studio-textarea" rows="2"></textarea>
+                                    </label>
                                 </div>
 
                                 <h3 class="studio-subheading mpd-media-subhead">Hero image</h3>
@@ -1004,6 +1022,28 @@ export function generateSettingsProfileContent() {
                                 <input type="hidden" id="mpd_hero_url" value="" />
                                 <input type="file" id="mpd_hero_file" class="mpd-file-input-hidden" accept="image/*" />
                                 <label for="mpd_hero_file" class="mpd-upload-btn">Upload hero image</label>
+
+                                <h3 class="studio-subheading mpd-media-subhead">Hero profile image (card toggle)</h3>
+                                <p class="studio-muted mpd-media-helper">
+                                  Optional headshot or portrait for the <strong>Profile</strong> view on home, artists, and program cards.
+                                  Falls back to the hero image when empty. Max <strong>1 MB</strong> per file.
+                                </p>
+                                <div class="member-profile-dashboard__hero-preview-wrap">
+                                    <div class="mpd-media-spinner" id="mpd_hero_profile_spinner" hidden aria-hidden="true"></div>
+                                    <img id="mpd_hero_profile_preview" class="member-profile-dashboard__hero-preview" alt="${withSeoImageAlt('Profile headshot preview')}" />
+                                </div>
+                                <input type="hidden" id="mpd_hero_profile_url" value="" />
+                                <input type="file" id="mpd_hero_profile_file" class="mpd-file-input-hidden" accept="image/*" />
+                                <label for="mpd_hero_profile_file" class="mpd-upload-btn">Upload profile image</label>
+
+                                <h3 class="studio-subheading mpd-media-subhead">Audio bite</h3>
+                                <p class="studio-muted mpd-media-helper">Upload a short audio bite for journal audio rows.</p>
+                                <input type="hidden" id="mpd_audio_url" value="" />
+                                <input type="file" id="mpd_audio_file" class="mpd-file-input-hidden" accept="audio/*" />
+                                <label for="mpd_audio_file" class="mpd-upload-btn">Upload audio bite</label>
+                                <label class="studio-field studio-field--full"><span>Audio title</span>
+                                    <input type="text" id="mpd_audio_title" class="studio-input" />
+                                </label>
 
                                 <h3 class="studio-subheading mpd-media-subhead">Intro artwork (max 3)</h3>
                                 <p class="studio-muted mpd-media-helper">
@@ -1276,9 +1316,19 @@ export function generateSettingsProfileContent() {
  * @param {'en'|'ja'} active
  * @param {string} heroUrl
  * @param {string} visibility
+ * @param {{ profileQuote?: string, audioUrl?: string, audioTitle?: string, heroProfileUrl?: string }} [profileMedia]
  */
-function snapshotState(locales, active, heroUrl, visibility) {
-  return JSON.stringify({ locales, active, hero: heroUrl, visibility });
+function snapshotState(locales, active, heroUrl, visibility, profileMedia = {}) {
+  return JSON.stringify({
+    locales,
+    active,
+    hero: heroUrl,
+    heroProfile: String(profileMedia.heroProfileUrl ?? ""),
+    visibility,
+    profileQuote: String(profileMedia.profileQuote ?? ""),
+    audioUrl: String(profileMedia.audioUrl ?? ""),
+    audioTitle: String(profileMedia.audioTitle ?? ""),
+  });
 }
 
 /** @type {((e: BeforeUnloadEvent) => void) | null} */
@@ -1301,10 +1351,14 @@ export default function initSettingsProfile() {
   /** @type {Record<string, unknown> | null} */
   let localesState = null;
   let heroImageUrl = "";
+  let heroProfileImageUrl = "";
+  let profileAudioUrl = "";
   /** @type {string} */
   let baselineSnapshot = "";
   /** @type {string} */
   let profileSlug = "";
+  /** @type {string} */
+  let currentArtistId = "";
 
   const statusEl = document.getElementById("settingsProfileStatus");
   const formWrap = document.getElementById("settingsProfileFormWrap");
@@ -1738,10 +1792,13 @@ export default function initSettingsProfile() {
       merged,
       activeLocale,
       getVal("mpd_hero_url").trim(),
-      (getVal("mpd_profile_visibility").trim() || "public").toLowerCase() ===
-        "private"
-        ? "private"
-        : "public",
+      normalizeArtistRosterVisibility(getVal("mpd_profile_visibility").trim() || "public"),
+      {
+        profileQuote: getVal("mpd_profile_quote").trim(),
+        audioUrl: getVal("mpd_audio_url").trim(),
+        audioTitle: getVal("mpd_audio_title").trim(),
+        heroProfileUrl: getVal("mpd_hero_profile_url").trim(),
+      },
     );
     return cur !== baselineSnapshot;
   };
@@ -1750,18 +1807,28 @@ export default function initSettingsProfile() {
     if (!localesState) return;
     const merged = readLocalesFromDom(localesState, activeLocale, getVal);
     heroImageUrl = getVal("mpd_hero_url").trim();
-    const vis =
-      (getVal("mpd_profile_visibility").trim() || "public").toLowerCase() ===
-      "private"
-        ? "private"
-        : "public";
-    baselineSnapshot = snapshotState(merged, activeLocale, heroImageUrl, vis);
+    heroProfileImageUrl = getVal("mpd_hero_profile_url").trim();
+    const vis = normalizeArtistRosterVisibility(
+      getVal("mpd_profile_visibility").trim() || "public",
+    );
+    baselineSnapshot = snapshotState(merged, activeLocale, heroImageUrl, vis, {
+      profileQuote: getVal("mpd_profile_quote").trim(),
+      audioUrl: getVal("mpd_audio_url").trim(),
+      audioTitle: getVal("mpd_audio_title").trim(),
+      heroProfileUrl: heroProfileImageUrl,
+    });
   };
 
   const saveProfileFromDom = async () => {
     if (!localesState) return;
     setStatus("Saving…");
     try {
+      const recBeforeSave = await getMyArtistRecord();
+      const pBefore = recBeforeSave?.profile;
+      const priorVis =
+        pBefore && typeof pBefore === "object"
+          ? normalizeArtistRosterVisibility(/** @type {Record<string, unknown>} */(pBefore).visibility)
+          : "inactive";
       localesState = readLocalesFromDom(
         /** @type {Record<string, unknown>} */ (localesState),
         activeLocale,
@@ -1777,14 +1844,37 @@ export default function initSettingsProfile() {
       localesState = merged;
       const ts = new Date().toISOString();
       const heroUrl = getVal("mpd_hero_url").trim();
+      const heroProfileUrl = getVal("mpd_hero_profile_url").trim();
+      const profileQuote = getVal("mpd_profile_quote").trim();
+      const audioUrl = getVal("mpd_audio_url").trim();
+      const audioTitle = getVal("mpd_audio_title").trim();
       await updateMyArtistLocalesJson(JSON.stringify(merged), ts);
       await updateMyArtistProfilePatch(heroUrl, ts);
-      const visRaw = (getVal("mpd_profile_visibility").trim() || "public").toLowerCase();
-      await updateMyArtistVisibility(
-        visRaw === "private" ? "private" : "public",
+      await updateMyArtistHeroProfileImagePatch(heroProfileUrl, ts);
+      await updateMyArtistQuoteAudioPatch(
+        { quote: profileQuote, audioUrl, audioTitle },
         ts,
       );
+      const visPicked = normalizeArtistRosterVisibility(
+        getVal("mpd_profile_visibility").trim() || "public",
+      );
+      const vis = priorVis === "inactive" ? "pending" : visPicked;
+      await updateMyArtistVisibility(vis, ts);
+      if (vis !== visPicked && visPicked === "inactive") {
+        setVal("mpd_profile_visibility", "pending");
+      } else {
+        setVal("mpd_profile_visibility", vis);
+      }
+      try {
+        window.dispatchEvent(
+          new CustomEvent("fusion-roster-visibility-updated", { detail: { visibility: vis } }),
+        );
+      } catch {
+        /* ignore */
+      }
       heroImageUrl = heroUrl;
+      heroProfileImageUrl = heroProfileUrl;
+      profileAudioUrl = audioUrl;
       const en = merged.en && typeof merged.en === "object" ? merged.en : {};
       const prefSlug = publicSlugFromEnglishFirstLast(
         String(en.firstName ?? ""),
@@ -1852,6 +1942,40 @@ export default function initSettingsProfile() {
     }
   };
 
+  const updateHeroProfilePreview = () => {
+    const u = getVal("mpd_hero_profile_url").trim();
+    const prev = /** @type {HTMLImageElement | null} */ (
+      document.getElementById("mpd_hero_profile_preview")
+    );
+    if (!prev) return;
+    if (!u) {
+      setHeroProfileSpinnerVisible(false);
+      prev.removeAttribute("src");
+      prev.style.display = "none";
+      return;
+    }
+    setHeroProfileSpinnerVisible(true);
+    prev.style.display = "none";
+    prev.onload = () => {
+      setHeroProfileSpinnerVisible(false);
+      prev.style.display = "block";
+      prev.onload = null;
+      prev.onerror = null;
+    };
+    prev.onerror = () => {
+      setHeroProfileSpinnerVisible(false);
+      prev.onload = null;
+      prev.onerror = null;
+    };
+    prev.src = u;
+    if (prev.complete && prev.naturalHeight > 0) {
+      setHeroProfileSpinnerVisible(false);
+      prev.style.display = "block";
+      prev.onload = null;
+      prev.onerror = null;
+    }
+  };
+
   const rootEl = document.getElementById("mpd_root");
   if (rootEl && !rootEl.dataset.mpdDelegated) {
     rootEl.dataset.mpdDelegated = "1";
@@ -1915,6 +2039,9 @@ export default function initSettingsProfile() {
           setStatus("Uploading hero…");
           const url = await uploadBlobToS3(f, null, {
             area: "account/profile",
+            entityType: "artist",
+            entityId: currentArtistId || profileSlug || "me",
+            fieldKey: "hero",
           });
           setVal("mpd_hero_url", url);
           heroImageUrl = url;
@@ -1922,6 +2049,54 @@ export default function initSettingsProfile() {
           setStatus("");
         } catch (err) {
           setHeroSpinnerVisible(false);
+          setStatus(err instanceof Error ? err.message : String(err));
+        }
+        t.value = "";
+        return;
+      }
+      if (t.id === "mpd_hero_profile_file" && t.files?.[0]) {
+        const f = t.files[0];
+        try {
+          assertMpdImageSizeOk(f);
+        } catch (err) {
+          setStatus(err instanceof Error ? err.message : String(err));
+          t.value = "";
+          return;
+        }
+        setHeroProfileSpinnerVisible(true);
+        try {
+          setStatus("Uploading profile image…");
+          const url = await uploadBlobToS3(f, null, {
+            area: "account/profile",
+            entityType: "artist",
+            entityId: currentArtistId || profileSlug || "me",
+            fieldKey: "heroProfile",
+          });
+          setVal("mpd_hero_profile_url", url);
+          heroProfileImageUrl = url;
+          updateHeroProfilePreview();
+          setStatus("");
+        } catch (err) {
+          setHeroProfileSpinnerVisible(false);
+          setStatus(err instanceof Error ? err.message : String(err));
+        }
+        t.value = "";
+        return;
+      }
+      if (t.id === "mpd_audio_file" && t.files?.[0]) {
+        const f = t.files[0];
+        try {
+          setStatus("Uploading audio…");
+          const url = await uploadBlobToS3(f, null, {
+            area: "account/profile",
+            entityType: "artist",
+            entityId: currentArtistId || profileSlug || "me",
+            fieldKey: "audio",
+          });
+          setVal("mpd_audio_url", url);
+          profileAudioUrl = url;
+          setStatus("");
+        } catch (err) {
           setStatus(err instanceof Error ? err.message : String(err));
         }
         t.value = "";
@@ -1943,6 +2118,9 @@ export default function initSettingsProfile() {
           setStatus("Uploading…");
           const url = await uploadBlobToS3(f, null, {
             area: "account/profile",
+            entityType: "artist",
+            entityId: currentArtistId || profileSlug || "me",
+            fieldKey: `intro-${i}`,
           });
           setVal(`mpd_intro_${i}_src`, url);
           const th = /** @type {HTMLImageElement | null} */ (
@@ -2280,11 +2458,26 @@ export default function initSettingsProfile() {
     );
 
     heroImageUrl = String(p.image ?? "");
+    {
+      const rawHero = /** @type {Record<string, unknown>} */ (p).heroProfileImage ?? p.hero_profile_image;
+      heroProfileImageUrl = (() => {
+        if (Array.isArray(rawHero)) {
+          return String(unwrapOpt(rawHero) ?? "").trim();
+        }
+        return String(rawHero ?? "").trim();
+      })();
+    }
+    currentArtistId = String(p.id ?? "");
+    profileAudioUrl = String(p.audioUrl ?? "");
     setVal("mpd_hero_url", heroImageUrl);
+    setVal("mpd_hero_profile_url", heroProfileImageUrl);
+    setVal("mpd_audio_url", profileAudioUrl);
+    setVal("mpd_audio_title", String(p.audioTitle ?? ""));
+    setVal("mpd_profile_quote", String(p.quote ?? ""));
     updateHeroPreview();
+    updateHeroProfilePreview();
 
-    const visRaw = String(p.visibility ?? "public").trim().toLowerCase();
-    setVal("mpd_profile_visibility", visRaw === "private" ? "private" : "public");
+    setVal("mpd_profile_visibility", normalizeArtistRosterVisibility(p.visibility));
 
     const vu = document.getElementById("mpd_view_profile");
     if (vu && vu instanceof HTMLAnchorElement)

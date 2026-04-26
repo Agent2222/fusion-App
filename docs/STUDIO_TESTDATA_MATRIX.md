@@ -21,7 +21,7 @@ Registry metadata (`primaryStudioSurface`, `studioSurfaces`) lives on each entry
 | `objectsHighlight` | Home | `objects-highlight` |
 | `galleryAccessCta` | Home | `gallery-access-cta` |
 | `joinNetwork` | Home | `join-network` |
-| `joinNetworkFlow` | Home | `join-network-flow` |
+| `joinNetworkFlow` | Home | `join-network-flow` (optional `payment.planKey` per locale for PostHog `payment_plan` on `membership_payment_completed`) |
 | `quoteRow` | Home | `quote-row` |
 | `featureCards` | Home | `feature-cards` |
 | `events` | Home | `events` |

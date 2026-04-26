@@ -1,11 +1,7 @@
 import { navigate } from '../../router.js';
-import {
-    artistDisplayDiscipline,
-    artistDisplayName,
-    artistEnglishBlock,
-    artistSlugFromName,
-} from '../../utils/artistSlug.js';
+import { artistDisplayDiscipline, artistDisplayName } from '../../utils/artistSlug.js';
 import { applyArtistCardImage } from '../../utils/artistCardPlaceholder.js';
+import { getArtistCardProfileUrl } from '../../utils/artistCardImageMode.js';
 import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
 
 function escapeHtml(s) {
@@ -92,10 +88,8 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
 
         card.addEventListener('click', (e) => {
             e.stopPropagation();
-            const en = artistEnglishBlock(artist);
-            const slug =
-                artist.slug || artistSlugFromName(en?.name ?? artistDisplayName(artist, 'en'));
-            navigate(`/profile/${encodeURIComponent(slug)}`);
+            const slug = String(artist?.slug ?? '').trim();
+            if (slug) navigate(`/profile/${encodeURIComponent(slug)}`);
         });
 
         card.innerHTML = `
@@ -108,7 +102,8 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
             </div>
         `;
         const cfImg = card.querySelector('.artist-card-image img');
-        applyArtistCardImage(cfImg, artist.image);
+        /* Program confirmed strip: profile/headshot first, then hero/artwork (independent of header toggle). */
+        applyArtistCardImage(cfImg, getArtistCardProfileUrl(artist));
 
         return card;
     }

@@ -4,7 +4,7 @@ import { metaTrack } from "../../utils/metaPixel.js";
 
 /**
  * Join FUSION — band + multi-stage modal (`data-modal-type`: membership | access | apply).
- * Copy: `testData.joinNetworkFlow`; legacy `context` maps to modal type. See plan: join network modal flow.
+ * Copy: `testData.joinNetworkFlow`; legacy `context` maps to modal type. Optional `payment.planKey` (e.g. `bi_monthly`) drives PostHog `payment_plan` on `membership_payment_completed`. See plan: join network modal flow.
  *
  * Vertical spacing (host margins), any CSS length (e.g. `48px`, `3rem`):
  * - `data-margin-top`, `data-margin-bottom` (preferred)
@@ -186,6 +186,10 @@ class JoinNetworkComponent extends HTMLElement {
     this._paymentAmountCents = 5000;
     /** Fingerprint for reusing the same Stripe Elements session (subscription). */
     this._stripePrepareKey = "";
+    /** Stable key from `joinNetworkFlow.*.payment.planKey` (CMS) for PostHog. */
+    this._paymentPlanKey = /** @type {string | null} */ (null);
+    /** Non-PII display label (e.g. `value.periodLabel`) for `payment_plan_label` on successful payment. */
+    this._paymentPlanLabel = /** @type {string | null} */ (null);
     /** @type {Record<string, unknown> | null} */
     this._joinNetworkFlow = null;
     /** @type {Record<string, unknown> | null} */
@@ -477,6 +481,8 @@ class JoinNetworkComponent extends HTMLElement {
 
   _fillDialogCopy() {
     this._modalType = resolveModalType(this);
+    this._paymentPlanKey = null;
+    this._paymentPlanLabel = null;
     const loc = this._getLocale();
     const mt = this._modalType;
 
@@ -584,9 +590,21 @@ class JoinNetworkComponent extends HTMLElement {
           .map((line) => `<li>${String(line)}</li>`)
           .join("");
       }
+      {
+        const pl = String(/** @type {Record<string, unknown>} */ (value).periodLabel ?? "").trim();
+        if (pl) this._paymentPlanLabel = pl;
+      }
     }
 
     if (payment) {
+      {
+        const pk = payment && "planKey" in payment
+          ? /** @type {Record<string, unknown>} */ (payment).planKey
+          : "";
+        if (typeof pk === "string" && pk.trim()) {
+          this._paymentPlanKey = pk.trim();
+        }
+      }
       this._paymentAmountCents = parseMoneyToCents(payment.amount);
       this._paymentCompleteLabel = payment.completeLabel || "Secure Access";
       this._paymentProcessingLabel =
@@ -978,7 +996,8 @@ class JoinNetworkComponent extends HTMLElement {
       if (outcome !== "ok") {
         const map = {
           invalidCode: "This access code is not valid.",
-          wrongRole: "This code does not match the role you selected.",
+          wrongRole:
+            "This code does not match the role you selected. For staff or collaborator team invites, pick Staff or Collaborator here (or use /join-fusion). Other invite types must match Gallery, Curator, or Collector.",
           artistAlreadyLinked: "This artist profile is already linked to another account.",
           accountExists: "This Internet Identity already has a Fusion account.",
           inviteInactive: "This invite code has already been used or is inactive.",
@@ -991,6 +1010,16 @@ class JoinNetworkComponent extends HTMLElement {
         if (signInBtn) signInBtn.hidden = false;
         if (errEl) errEl.textContent = map[outcome] || map.unknown;
         return;
+      }
+      try {
+        const { clearAuthenticatedFusionBackendActorCache } = await import(
+          "../../utils/earlyAccessSubscribe.js"
+        );
+        const { dispatchFusionAuthChange } = await import("../../utils/icAuth.js");
+        clearAuthenticatedFusionBackendActorCache();
+        await dispatchFusionAuthChange();
+      } catch (authErr) {
+        if (DEV_MODE) console.warn("[JoinNetwork] post-register auth refresh", authErr);
       }
       try {
         sessionStorage.removeItem(PENDING_JOIN_ACCESS_CODE_KEY);
@@ -1384,7 +1413,7 @@ class JoinNetworkComponent extends HTMLElement {
 
   _getSelectedCategoryNormalized() {
     const active = this.shadowRoot?.querySelector(
-      "#jnRoleRow .categoryButton.active",
+      "#jnRoleGroups .categoryButton.active",
     );
     const raw = (active?.textContent || "").trim();
     return normalizeEarlyAccessCategory(raw);
@@ -1602,13 +1631,23 @@ class JoinNetworkComponent extends HTMLElement {
                     font-variation-settings: var(--fv-label-strong);
                     color: var(--jn-c2);
                 }
-                #jnRoleRow {
+                #jnRoleGroups {
+                    width: 100%;
+                }
+                #jnRoleRow,
+                #jnRoleRowTeam {
                     display: flex;
                     flex-wrap: wrap;
                     column-gap: 0.8rem;
                     row-gap: 0.4rem;
                     justify-content: center;
-                    margin-bottom: 0.75rem;
+                    margin-bottom: 0.5rem;
+                }
+                .jn-role-team-hint {
+                    font-size: clamp(0.75rem, 0.9vw, 0.85rem);
+                    margin: 0.5rem 0 0.35rem;
+                    font-variation-settings: var(--fv-caption);
+                    color: color-mix(in srgb, var(--jn-c2) 80%, var(--jn-bg));
                 }
                 /* Match app-feed-filter filterButton: outline chip, sharp corners, opacity hover */
                 .categoryButton {
@@ -1973,11 +2012,18 @@ class JoinNetworkComponent extends HTMLElement {
                                 <input type="text" id="jnAccessCode" name="jn-access-code" inputmode="numeric" autocomplete="one-time-code" placeholder="" />
                             </div>
                             <p class="jn-role-label" id="jnRoleLabel">I'm joining as:</p>
+                            <div id="jnRoleGroups">
                             <div id="jnRoleRow">
                                 <button type="button" class="categoryButton active" data-role="Artist">Artist</button>
                                 <button type="button" class="categoryButton" data-role="Gallery">Gallery</button>
                                 <button type="button" class="categoryButton" data-role="Curator">Curator</button>
                                 <button type="button" class="categoryButton" data-role="Collector">Collector</button>
+                </div>
+                            <p class="jn-role-team-hint" id="jnRoleTeamHint">Team access code (from a Fusion admin):</p>
+                            <div id="jnRoleRowTeam">
+                                <button type="button" class="categoryButton" data-role="Staff">Staff</button>
+                                <button type="button" class="categoryButton" data-role="Collaborator">Collaborator</button>
+                </div>
                 </div>
                             <p id="jnRenewHint"></p>
                             <button type="button" class="jn-btn-primary" id="jnEntryContinue">Continue</button>
@@ -2233,11 +2279,11 @@ class JoinNetworkComponent extends HTMLElement {
       }
     });
 
-    const roleRow = root.querySelector("#jnRoleRow");
-    roleRow?.addEventListener("click", (e) => {
+    const roleGroups = root.querySelector("#jnRoleGroups");
+    roleGroups?.addEventListener("click", (e) => {
       const btn = e.target.closest(".categoryButton");
-      if (!btn || !roleRow.contains(btn)) return;
-      roleRow
+      if (!btn || !roleGroups.contains(btn)) return;
+      roleGroups
         .querySelectorAll(".categoryButton")
         .forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
@@ -2408,14 +2454,28 @@ class JoinNetworkComponent extends HTMLElement {
             return;
           }
           const purchaseValue = this._paymentAmountCents / 100;
+          const pageContext = String(
+            this.getAttribute("context") || "home",
+          ).trim() || "home";
           posthog.capture("membership_payment_completed", {
             modal_type:
               this._modalType ||
               this.getAttribute("data-modal-type") ||
               "membership",
             join_mode: this._joinMode || "full",
+            join_role: cat,
+            page_context: pageContext,
+            amount_cents: this._paymentAmountCents,
+            amount: purchaseValue,
             value: purchaseValue,
             currency: "USD",
+            payment_plan: this._paymentPlanKey ?? "unknown",
+            ...(this._paymentPlanLabel
+              ? { payment_plan_label: this._paymentPlanLabel }
+              : {}),
+            ...(this._fusionSubscriptionId
+              ? { stripe_subscription_id: this._fusionSubscriptionId }
+              : {}),
             ads_conversion: "Purchase",
           });
           metaTrack("Purchase", {

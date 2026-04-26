@@ -127,6 +127,53 @@ export function findArtistByEnglishName(name, artists) {
 }
 
 /**
+ * Resolve a program “confirmed artist” list entry (name, slug-like token, or disambiguated slug) to a roster row.
+ * @param {string} label
+ * @param {Array<object>} artists
+ * @returns {object | null}
+ */
+export function findArtistForConfirmedListLabel(label, artists) {
+    if (!label || !Array.isArray(artists)) return null;
+    const trimmed = String(label).trim();
+    if (!trimmed) return null;
+
+    const byName = findArtistByEnglishName(trimmed, artists);
+    if (byName) return byName;
+
+    const bySlug = findArtistBySlug(trimmed, artists);
+    if (bySlug) return bySlug;
+
+    const want = trimmed.toLowerCase();
+    for (const a of artists) {
+        if (!a || typeof a !== 'object') continue;
+        const s = String(/** @type {Record<string, unknown>} */ (a).slug ?? '')
+            .trim()
+            .toLowerCase();
+        if (!s) continue;
+        if (s === want || s.startsWith(`${want}-`)) return a;
+    }
+
+    for (const a of artists) {
+        if (!a || typeof a !== 'object') continue;
+        const dn = String(artistDisplayName(a, 'en') ?? '')
+            .trim()
+            .toLowerCase();
+        if (dn && dn === want) return a;
+    }
+
+    for (const a of artists) {
+        const e = artistEnglishBlock(a);
+        if (!e || typeof e !== 'object') continue;
+        const fn = String(/** @type {Record<string, unknown>} */ (e).firstName ?? '').trim();
+        const ln = String(/** @type {Record<string, unknown>} */ (e).lastName ?? '').trim();
+        const joined = [fn, ln].filter(Boolean).join(' ').trim().toLowerCase();
+        if (joined && joined === want) return a;
+    }
+
+    return null;
+}
+
+/**
  * Canonical program IDs are stored on the English locale block (`locales.en.programs`).
  * @param {object | null | undefined} artist
  * @returns {string[]}

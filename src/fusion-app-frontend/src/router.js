@@ -284,6 +284,7 @@ class Router {
         if (path === '/studio') {
             document.documentElement.setAttribute('data-theme', 'light');
             document.documentElement.setAttribute('data-studio', 'true');
+            document.documentElement.removeAttribute('data-fusion-page');
             return;
         }
         document.documentElement.removeAttribute('data-studio');
@@ -291,6 +292,18 @@ class Router {
             'data-theme',
             path === '/gallery-access' ? 'dark' : 'light'
         );
+        /* Header layout: sound env control aligns right on artist profile (see app-header). */
+        if (path === '/profile' || path.startsWith('/profile/')) {
+            document.documentElement.setAttribute('data-fusion-page', 'profile');
+        } else {
+            document.documentElement.removeAttribute('data-fusion-page');
+        }
+        /* Artwork/Profile card toggle: home + artists only (program pages use profile-first images on confirmed strip). */
+        if (path === '/' || path === '/artists') {
+            document.documentElement.setAttribute('data-fusion-artist-card-toggle', 'on');
+        } else {
+            document.documentElement.removeAttribute('data-fusion-artist-card-toggle');
+        }
     }
 
     /**

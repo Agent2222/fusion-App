@@ -10,6 +10,10 @@ import {
     artistSlugFromName,
 } from '../../utils/artistSlug.js';
 import { applyArtistCardImage } from '../../utils/artistCardPlaceholder.js';
+import {
+    getArtistCardImageUrlForCurrentMode,
+    ARTIST_CARD_IMAGE_MODE_EVENT,
+} from '../../utils/artistCardImageMode.js';
 import { getCurrentProgramSeason } from '../../utils/database.js';
 import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
 
@@ -26,6 +30,8 @@ class FeaturedArtistComponent extends HTMLElement {
         super();
         this.shadow = this.attachShadow({ mode: 'open' });
         this.data = null;
+        /** @type {(() => void) | null} */
+        this._onCardImageMode = null;
     }
 
     get active() {
@@ -103,7 +109,7 @@ class FeaturedArtistComponent extends HTMLElement {
                 </div>
             `;
             const faImg = card.querySelector('.artist-card-image img');
-            applyArtistCardImage(faImg, artist.image);
+            applyArtistCardImage(faImg, getArtistCardImageUrlForCurrentMode(artist));
 
             const residencyBadge = card.querySelector('.residency-badge');
             if (residencyBadge instanceof HTMLElement) {
@@ -140,6 +146,13 @@ class FeaturedArtistComponent extends HTMLElement {
     }
 
     connectedCallback() {
+        if (!this._onCardImageMode) {
+            this._onCardImageMode = () => {
+                const n = this.data?.artists?.length ?? 0;
+                if (n > 0) void this.createArtistCard(n);
+            };
+            window.addEventListener(ARTIST_CARD_IMAGE_MODE_EVENT, this._onCardImageMode);
+        }
         this.render();
         // Event delegation: render() replaces shadow HTML, so per-node listeners would be lost
         // after setFeaturedArtist() / attribute changes. One listener on the root survives.
@@ -151,6 +164,13 @@ class FeaturedArtistComponent extends HTMLElement {
                     navigate('/artists');
                 }
             });
+        }
+    }
+
+    disconnectedCallback() {
+        if (this._onCardImageMode) {
+            window.removeEventListener(ARTIST_CARD_IMAGE_MODE_EVENT, this._onCardImageMode);
+            this._onCardImageMode = null;
         }
     }
 

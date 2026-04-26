@@ -140,6 +140,14 @@ export const MAINNET_INTERNET_IDENTITY_CANISTER_ID = 'rdmx6-jaaaa-aaaaa-aaadq-ca
  */
 export const MAINNET_FUSION_APP_BACKEND_CANISTER_ID = 'e7x5d-vaaaa-aaaab-af7bq-cai';
 
+/**
+ * This frontend asset canister on mainnet (see repo-root `canister_ids.json` → `fusion-app-frontend.ic`).
+ * Used as Internet Identity **derivation origin** when the app is opened on a custom domain: II issues the same
+ * principals as on `https://<this-id>.icp0.io` if `/.well-known/ii-alternative-origins` on this host lists the custom domain.
+ * @see https://internetcomputer.org/docs/building-apps/authentication/alternative-origins
+ */
+export const MAINNET_FUSION_ASSET_CANISTER_DERIVATION_ORIGIN = 'https://ekqmo-uiaaa-aaaab-af7ca-cai.icp0.io';
+
 let _warnedMissingLocalIi;
 let _loggedLocalInternetIdentityUrlOnce;
 
@@ -286,6 +294,53 @@ export function getInternetIdentityUrl() {
         );
     }
     return built;
+}
+
+/**
+ * When the app runs on a **custom domain** (e.g. `https://fusionart.world`), `AuthClient.login` must set
+ * `derivationOrigin` to the canister’s default `https://…icp0.io` origin, and that origin must host
+ * `/.well-known/ii-alternative-origins` listing the custom host(s). Omit when already on the `.icp0.io` URL
+ * or in local dev.
+ * Override with `VITE_INTERNET_IDENTITY_DERIVATION_ORIGIN` if the asset canister id changes.
+ * @returns {string | undefined}
+ */
+export function getInternetIdentityDerivationOrigin() {
+    if (DEV_MODE) return undefined;
+    try {
+        const v = import.meta.env && import.meta.env.VITE_INTERNET_IDENTITY_DERIVATION_ORIGIN;
+        if (typeof v === 'string' && v.trim()) return v.trim().replace(/\/$/, '');
+    } catch (_) {
+        /* ignore */
+    }
+    if (typeof window !== 'undefined' && window.location && window.location.hostname) {
+        const h = String(window.location.hostname).toLowerCase();
+        if (h === 'fusionart.world' || h === 'www.fusionart.world') {
+            return MAINNET_FUSION_ASSET_CANISTER_DERIVATION_ORIGIN;
+        }
+    }
+    return undefined;
+}
+
+/**
+ * When `true`, log canister errors from `isCallerAdmin` / `getAccountForCaller` in the header and
+ * post-login pipeline so a **failed IC call** is distinguishable from “wrong / unknown principal.”
+ * - Local dev: always on (`DEV_MODE`).
+ * - Production: set **`VITE_FUSION_LOG_IC_AUTH=true`** at build time, or add **`?fusionLogIc=1`** to the page URL.
+ * @returns {boolean}
+ */
+export function shouldLogFusionIcAuthErrors() {
+    if (DEV_MODE) return true;
+    try {
+        if (import.meta.env && import.meta.env.VITE_FUSION_LOG_IC_AUTH === 'true') return true;
+    } catch (_) {
+        /* ignore */
+    }
+    if (typeof window === 'undefined' || !window.location) return false;
+    try {
+        return new URLSearchParams(window.location.search).get('fusionLogIc') === '1';
+    } catch (_) {
+        return false;
+    }
 }
 
 // ============================================

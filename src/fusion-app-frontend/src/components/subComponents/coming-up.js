@@ -9,6 +9,8 @@ class ComingUpComponent extends HTMLElement {
         super();
         this.shadow = this.attachShadow({ mode: 'open' });
         this.data = null;
+        this._observer = null;
+        this._hasEnteredView = false;
     }
 
     get active() {
@@ -81,7 +83,8 @@ class ComingUpComponent extends HTMLElement {
             const routeLink = card.routeLink ?? '';
 
             const cardEl = document.createElement('div');
-            cardEl.classList.add('program-card');
+            cardEl.classList.add('program-card', 'program-card--entrance');
+            cardEl.style.setProperty('--card-entrance-delay', `${80 + i * 55}ms`);
             cardEl.addEventListener('click', () => {
                 if (routeLink) navigate(routeLink);
             });
@@ -101,10 +104,56 @@ class ComingUpComponent extends HTMLElement {
 
             contentEl.appendChild(cardEl);
         }
+
+        this.applyEntranceState();
     }
 
     connectedCallback() {
         this.render();
+        this.setupInViewObserver();
+    }
+
+    disconnectedCallback() {
+        if (this._observer) {
+            this._observer.disconnect();
+            this._observer = null;
+        }
+    }
+
+    setupInViewObserver() {
+        if (this._observer || this._hasEnteredView) return;
+        if (typeof window === 'undefined' || typeof window.IntersectionObserver !== 'function') {
+            this._hasEnteredView = true;
+            this.applyEntranceState();
+            return;
+        }
+        this._observer = new IntersectionObserver(
+            (entries) => {
+                const visible = entries.some((entry) => entry.isIntersecting);
+                if (!visible) return;
+                this._hasEnteredView = true;
+                this.applyEntranceState();
+                if (this._observer) {
+                    this._observer.disconnect();
+                    this._observer = null;
+                }
+            },
+            { threshold: 0.2, rootMargin: '0px 0px -10% 0px' }
+        );
+        this._observer.observe(this);
+    }
+
+    applyEntranceState() {
+        if (!this.shadowRoot) return;
+        const nodes = this.shadowRoot.querySelectorAll('.section-entrance, .program-card--entrance');
+        nodes.forEach((el) => {
+            if (!(el instanceof HTMLElement)) return;
+            if (this._hasEnteredView) {
+                el.classList.add('is-visible');
+            } else {
+                el.classList.remove('is-visible');
+            }
+        });
     }
 
     render() {
@@ -112,6 +161,37 @@ class ComingUpComponent extends HTMLElement {
             <style>
                 :host {
                     display: block;
+                    --coming-up-entrance-duration: 520ms;
+                    --coming-up-entrance-ease: cubic-bezier(0.4, 0, 0.2, 1);
+                }
+
+                @keyframes comingUpFadeRise {
+                    from {
+                        opacity: 0;
+                        transform: translateY(10px);
+                    }
+                    to {
+                        opacity: 1;
+                        transform: translateY(0);
+                    }
+                }
+
+                .section-entrance,
+                .program-card--entrance {
+                    opacity: 0;
+                    transform: translateY(10px);
+                }
+
+                .section-entrance.is-visible {
+                    animation: comingUpFadeRise var(--coming-up-entrance-duration)
+                        var(--coming-up-entrance-ease) forwards;
+                    animation-delay: 0ms;
+                }
+
+                .program-card--entrance.is-visible {
+                    animation: comingUpFadeRise var(--coming-up-entrance-duration)
+                        var(--coming-up-entrance-ease) forwards;
+                    animation-delay: var(--card-entrance-delay, 80ms);
                 }
 
                 .coming-up {
@@ -304,12 +384,22 @@ class ComingUpComponent extends HTMLElement {
                         top: 0;
                     }
                 }
+
+                @media (prefers-reduced-motion: reduce) {
+                    .section-entrance,
+                    .program-card--entrance {
+                        animation: none !important;
+                        opacity: 1 !important;
+                        transform: none !important;
+                    }
+                }
             </style>
             <div class="coming-up">
-                 <div class="header">Current & Upcoming</div>
+                 <div class="header section-entrance">Current & Upcoming</div>
                  <div class="content oneColumn"></div>
             </div>
         `;
+        this.applyEntranceState();
     }
 }
 

@@ -71,19 +71,8 @@ module {
     };
 
     /// Stored roster profile (stable `ArtistRecord.profile`) — no derived/joined fields.
-    public type ArtistCoreV0 = {
-        id : Text;
-        slug : Text;
-        image : Text;
-        featuredOrder : Nat;
-        visibility : Text;
-        updatedAt : Text;
-        filter : ?ArtistFilterStored;
-        galleryFilter : ?ArtistGalleryFilter;
-    };
-
-    /// Current `ArtistCore` (includes `contactEmail` for Studio; added after `ArtistCoreV0` — use `main.mo` migration on upgrade).
     /// `contactEmail` is Studio / blast only; cleared in `sanitizeArtistRecordForPublic` (not in public `Artist`).
+    /// Roster visibility: `inactive` (default new) | `pending` (submitted for review) | `private` (unlisted) | `public` (directory).
     public type ArtistCore = {
         id : Text;
         slug : Text;
@@ -97,20 +86,12 @@ module {
         galleryFilter : ?ArtistGalleryFilter;
     };
 
-    /// Pre–`contactEmail` `ArtistRecord` (stable `artistsStable` before the roster-email upgrade).
-    public type ArtistRecordV0 = {
-        profile : ArtistCoreV0;
-        localesJson : ?Text;
-        notesEncrypted : ?EncryptedBlob;
-        imported : Bool;
-        accessCode : Text;
-    };
-
     /// Public API (`listArtists`, `getArtistBySlug`): includes `mostRecentProgram` from the canister map.
     public type Artist = {
         id : Text;
         slug : Text;
         image : Text;
+        heroProfileImage : Text;
         featuredOrder : Nat;
         visibility : Text;
         updatedAt : Text;
@@ -240,6 +221,7 @@ module {
     /// and `programPage.additionalInfo.aboutProgram` (About Program dropdown).
     /// Site settings key `applicationPaymentGlobal` (opaque Text JSON): global EN/JA bullets for the application form.
     /// `studioStatus`: open | full | active | completed | comingUp (Text for Studio filters).
+    /// `depositAmountDisplay` is part of the stored row; legacy rows were backfilled on upgrade.
     public type ProgramRecord = {
         id : Text;
         routeLink : Text;
@@ -247,6 +229,8 @@ module {
         visibility : Text;
         studioStatus : Text;
         updatedAt : Text;
+        /// Public deposit line (e.g. currency + amount); also mirrored in locale `programPage.applicationForm.depositAmountDisplay` by the Studio app when saving.
+        depositAmountDisplay : Text;
         localesJson : Text;
     };
 
@@ -257,6 +241,50 @@ module {
         entryStatus : Text;
         updatedAt : Text;
         localesJson : Text;
+    };
+
+    /// Legacy 4-field journal layout (pre sortOrder/featured) — used only for stable upgrade migration.
+    public type JournalLayoutRowV4 = {
+        rowType : Text;
+        refId : ?Text;
+        selectionMode : ?Text;
+        artistId : ?Text;
+    };
+
+    /// Ordered row model for `/journal` page composition.
+    /// `rowType`: `event` | `journal-entry` | `quote` | `audio`.
+    /// `selectionMode`: optional for quote/audio (`random` | `manual`).
+    public type JournalLayoutRow = {
+        rowType : Text;
+        refId : ?Text;
+        selectionMode : ?Text;
+        artistId : ?Text;
+        sortOrder : Nat;
+        featured : Bool;
+    };
+
+    /// Public site + Studio: immersive header sound (atmosphere + scheduled artist voice overlays).
+    public type SoundEnvironmentConfig = {
+        categoryLabel : Text;
+        atmosphereAudioUrl : Text;
+        /// `random` | `manual`
+        voiceSelectionMode : Text;
+        voiceArtistId : ?Text;
+        manualVoiceAudioUrl : Text;
+        minIntervalSec : Nat;
+        maxIntervalSec : Nat;
+        atmosphereVolumePercent : Nat;
+        voicesVolumePercent : Nat;
+        learnMoreJournalEntryId : ?Text;
+        enabled : Bool;
+    };
+
+    /// Shared artist media metadata (not localized), stored separately from stable ArtistCore.
+    public type ArtistMedia = {
+        quote : Text;
+        audioUrl : Text;
+        audioTitle : Text;
+        updatedAt : Text;
     };
 
     public type EditionRecord = {
@@ -336,6 +364,8 @@ module {
         membershipStripePeriodEndStable : [(Principal, Text)];
         /// Artist id → cohort years for feed filters (parallel to `artistsStable.profile.filter`).
         artistFilterCohortYearsStable : [(Text, [Nat])];
+        /// Optional: per-artist headshot for card “Profile” view (v1 exports before 2026 omit; parallel map for stable safety).
+        artistHeroProfileImageStable : ?[(Text, Text)];
         artistsStable : [(Text, ArtistRecord)];
         programsStable : [(Text, ProgramRecord)];
         journalsStable : [(Text, JournalRecord)];

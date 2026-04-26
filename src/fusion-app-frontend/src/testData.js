@@ -143,6 +143,7 @@ export const testData = {
             en: [
                 {
                     id: "fusionKaga",
+                    depositAmountDisplay: "$1,000 USD",
                     imageSrc: image1,
                     /** Detail-page hero; `.mp4` uses `<video>`, images use `<img>` (see programView.js). */
                     heroMediaSrc: '/fusion-nature.mp4',
@@ -227,6 +228,9 @@ export const testData = {
                                 additional: "materials/expenses",
                                 applicationFee:
                                     "Application fee: $50 USD (includes 2-month Fusion platform membership).",
+                                remainingBalance: "Residency program balance: ¥200,000 (after deposit).",
+                                japanResidencyDiscountNotice:
+                                    "日本国内に10年以上居住し就労している日本国籍の方は、プログラム料金の割引の対象となる場合があります。ぜひご応募ください。",
                             },
                             keyDates: [
                                 {
@@ -250,6 +254,7 @@ export const testData = {
                         applicationForm: {
                             depositAmountDisplay: "$1,000 USD",
                             applicationFeeAmountCents: 5000,
+                            applicationDeadlineIso: "2026-09-05",
                             applicationDeadlineDisplay: "September 5, 2026",
                             feeNoticeItalic:
                                 "The application fee for our artist residency program is designed to cover processing and administrative costs. This fee helps us manage the selection process, review applications thoroughly, and maintain the high standards of our residency experience. We appreciate your understanding and support in helping us create a vibrant community for artists worldwide.",
@@ -283,7 +288,7 @@ export const testData = {
                         },
                         additionalInfo: {
                             applicationFee:
-                                "The application fee includes a two-month Fusion platform membership. You can use your profile to connect with galleries, collectors, and curators. After you apply, you can manage your subscription from your profile dashboard.",
+                                "The application fee includes a two-month Fusion platform membership.\nYou can use your profile to connect with galleries, collectors, and curators.\nAfter you apply, you can manage your subscription from your profile dashboard.",
                             aboutProgram:
                                 "This residency emphasizes focused studio time in Ishikawa with peer critique and a closing showcase. Expect structured milestones alongside room for experimentation.",
                             faq: [
@@ -300,7 +305,7 @@ export const testData = {
                                 {
                                     title: "Program Notes",
                                     information:
-                                        "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Quis ipsum suspendisse ultrices gravida.",
+                                        "Lorem ipsum dolor sit amet, consectetur adipiscing elit.\nSed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\nQuis ipsum suspendisse ultrices gravida.",
                                 },
                             ],
                             refundPolicy: [
@@ -379,6 +384,7 @@ export const testData = {
             ja: [
                 {
                     id: "fusionKaga",
+                    depositAmountDisplay: "$1,000 USD",
                     imageSrc: image1,
                     focus: "ジャパン・アーティスト・レジデンシー",
                     imageAlt: "展示",
@@ -595,6 +601,7 @@ export const testData = {
                     "slug": "kamauu",
                     "mostRecentProgram": "fusionKaga",
                     "image": image2,
+                    "heroProfileImage": image3,
                     "featuredOrder": 3,
                     "visibility": "public",
                     "updatedAt": "2026-04-01T12:00:00.000Z",
@@ -2404,6 +2411,7 @@ export const testData = {
                     line3Months: '2 Months Access',
                     lineRenew: 'Renews every 2 months',
                     amount: '$50.00',
+                    planKey: 'bi_monthly',
                     totalLabel: 'Total',
                     cardNumberLabel: 'Card Number',
                     expiryLabel: 'Expiry (MM/YY)',
@@ -2426,6 +2434,7 @@ export const testData = {
                     line3Months: '2 か月アクセス',
                     lineRenew: '2 か月ごとに更新',
                     amount: '$50.00',
+                    planKey: 'bi_monthly',
                     totalLabel: '合計',
                     cardNumberLabel: 'カード番号',
                     expiryLabel: '有効期限',
@@ -2609,6 +2618,7 @@ export const testData = {
                     line3Months: '2 Months Access',
                     lineRenew: 'Renews every 2 months',
                     amount: '$50.00',
+                    planKey: 'bi_monthly',
                     totalLabel: 'Total',
                     cardNumberLabel: 'Card Number',
                     expiryLabel: 'Expiry (MM/YY)',
@@ -2631,6 +2641,7 @@ export const testData = {
                     line3Months: '2 か月アクセス',
                     lineRenew: '2 か月ごとに更新',
                     amount: '$50.00',
+                    planKey: 'bi_monthly',
                     totalLabel: '合計',
                     cardNumberLabel: 'カード番号',
                     expiryLabel: '有効期限',
@@ -2814,6 +2825,7 @@ export const testData = {
                     line3Months: '2 Months Access',
                     lineRenew: 'Renews every 2 months',
                     amount: '$50.00',
+                    planKey: 'bi_monthly',
                     totalLabel: 'Total',
                     cardNumberLabel: 'Card Number',
                     expiryLabel: 'Expiry (MM/YY)',
@@ -2836,6 +2848,7 @@ export const testData = {
                     line3Months: '2 か月アクセス',
                     lineRenew: '2 か月ごとに更新',
                     amount: '$50.00',
+                    planKey: 'bi_monthly',
                     totalLabel: '合計',
                     cardNumberLabel: 'カード番号',
                     expiryLabel: '有効期限',
