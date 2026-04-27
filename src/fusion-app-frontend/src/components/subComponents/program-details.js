@@ -1,4 +1,9 @@
 import { programApplicationCtaLabelForAuth, programApplicationReviewLabel } from '../../utils/programApplicationCta.js';
+import {
+    PH_LOADER_BASE_STYLES,
+    PROGRAM_DETAILS_PENDING_WRAPPER_STYLES,
+    programHeroLoaderHtml,
+} from '../../utils/programHeroLoader.js';
 import { revealProgramApplicationOrOpenJoin } from '../../utils/scrollAnchorToViewportGap.js';
 import { formatMonthlyFromRemainingAndMonths, splitTextLinesForBullets } from '../../utils/programDeadlineParse.js';
 
@@ -987,6 +992,17 @@ class ProgramDetailsComponent extends HTMLElement {
     }
 
     render() {
+        if (!this._data) {
+            this.shadow.innerHTML = `
+            <style>
+                ${PH_LOADER_BASE_STYLES}
+                ${PROGRAM_DETAILS_PENDING_WRAPPER_STYLES}
+            </style>
+            ${programHeroLoaderHtml({ wrapperClass: 'program-details-pending-loader', ariaLabel: 'Loading program details' })}
+        `;
+            return;
+        }
+
         this.shadow.innerHTML = `
             <style>
                 :host {

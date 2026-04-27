@@ -816,6 +816,7 @@ class LoadScreenComponent extends HTMLElement {
         // Do not gate on `fonts-ready`: Typekit / document.fonts.ready can take a long time on slow
         // networks and would make “CLICK TO ENTER” feel unresponsive until loading finishes.
         if (!config.siteActive && !this._loadscreenIsAdmin) return;
+        if (this._userHasEnteredSite) return;
 
         this.shadowRoot.host.style.zIndex = '0';
 

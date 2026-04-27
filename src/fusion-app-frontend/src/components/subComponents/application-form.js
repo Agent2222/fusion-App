@@ -117,7 +117,7 @@ class ApplicationFormComponent extends HTMLElement {
         this._membershipFeeWaived = false;
         /** Last `getMembershipAccessForCaller` result for analytics. */
         this._membershipGate = 'unknown';
-        /** Avoid duplicate `program_application_started` on `fusion-auth-change` refresh. */
+        /** After `program_application_started` is sent (on application reveal), avoid sending again. */
         this._hasCapturedProgramApplicationStarted = false;
     }
 
@@ -1441,15 +1441,21 @@ class ApplicationFormComponent extends HTMLElement {
         this._syncApplicationFeeUi();
         await this._prefillFromArtist();
         if (this.shadowRoot) this._hydrateProgramContextInDom();
-        if (!this._hasCapturedProgramApplicationStarted) {
-            this._hasCapturedProgramApplicationStarted = true;
-            try {
-                posthog.capture('program_application_started', {
-                    ...this._posthogApplicationBaseProps(),
-                });
-            } catch {
-                /* ignore */
-            }
+    }
+
+    /**
+     * Call when the program application block is actually shown (after CTA / Begin, not on mount).
+     * Sends `program_application_started` once per in-DOM form instance; see `revealProgramApplicationOrOpenJoin`.
+     */
+    notifyApplicationFunnelRevealed() {
+        if (this._hasCapturedProgramApplicationStarted) return;
+        this._hasCapturedProgramApplicationStarted = true;
+        try {
+            posthog.capture('program_application_started', {
+                ...this._posthogApplicationBaseProps(),
+            });
+        } catch {
+            /* ignore */
         }
     }
 

@@ -1,5 +1,8 @@
+import "./utils/preloadHeaderLogos.js";
 import "./utils/metaPixelBootstrap.js";
 import "./components/subComponents/page-transition.js";
+/** Must run before `router` so `customElements.define('app-loadscreen')` runs before `new Router()` → `handleRoute` (program auto-enter calls `performEnterSite` on the upgraded element). */
+import "./components/shared/loadscreen.js";
 import { router } from "./router.js";
 import { DEV_MODE } from "./config.js";
 import "./index.css";
@@ -30,7 +33,6 @@ if (faviconLink) faviconLink.href = faviconUrl;
 // Import and register custom elements
 import "./components/shared/header.js";
 import "./components/shared/footer.js";
-import "./components/shared/loadscreen.js";
 import "./components/shared/feed-filter.js";
 
 // Subcomponents

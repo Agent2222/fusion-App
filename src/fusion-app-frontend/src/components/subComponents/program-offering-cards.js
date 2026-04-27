@@ -3,6 +3,12 @@
  * Same layout as `app-features-row` (CMS) but data comes from the program record, not `feature-cards` content.
  */
 
+import {
+    PH_LOADER_BASE_STYLES,
+    PROGRAM_OFFERING_PENDING_WRAPPER_STYLES,
+    programHeroLoaderHtml,
+} from '../../utils/programHeroLoader.js';
+
 function escapeHtml(s) {
     return String(s)
         .replace(/&/g, '&amp;')
@@ -17,6 +23,8 @@ class ProgramOfferingCardsComponent extends HTMLElement {
         this.shadow = this.attachShadow({ mode: 'open' });
         /** @type {Array<{ title: string, description: string }>} */
         this._cards = [];
+        /** First `setOfferingCards` from `programView` not yet applied. */
+        this._settled = false;
     }
 
     get active() {
@@ -41,6 +49,7 @@ class ProgramOfferingCardsComponent extends HTMLElement {
      * @param {Array<{ title?: string, description?: string }>} cards — max 3
      */
     setOfferingCards(cards) {
+        this._settled = true;
         this._cards = Array.isArray(cards)
             ? cards
                   .slice(0, 3)
@@ -58,6 +67,17 @@ class ProgramOfferingCardsComponent extends HTMLElement {
     }
 
     render() {
+        if (!this._settled) {
+            this.shadow.innerHTML = `
+            <style>
+                ${PH_LOADER_BASE_STYLES}
+                ${PROGRAM_OFFERING_PENDING_WRAPPER_STYLES}
+            </style>
+            ${programHeroLoaderHtml({ wrapperClass: 'program-offering-pending-loader', ariaLabel: 'Loading' })}
+        `;
+            return;
+        }
+
         const cards = this._cards;
         const cells = cards
             .map((c) => {

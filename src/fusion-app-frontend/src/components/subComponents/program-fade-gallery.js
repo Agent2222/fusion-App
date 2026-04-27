@@ -5,6 +5,11 @@
  * Click advances to next slide and restarts the hold + progress bar.
  */
 
+import {
+    PH_LOADER_BASE_STYLES,
+    PROGRAM_FADE_PENDING_WRAPPER_STYLES,
+    programHeroLoaderHtml,
+} from '../../utils/programHeroLoader.js';
 import { SEO_MEDIA_DEFAULT, withSeoImageAlt } from '../../utils/mediaAltSeo.js';
 
 const FADE_MS = 450;
@@ -83,6 +88,8 @@ class ProgramFadeGalleryElement extends HTMLElement {
         this._wrap = null;
         this._busy = false;
         this._reducedMotion = false;
+        /** `setImages` from program view has not run yet — show shared loader, not “empty”. */
+        this._settled = false;
         /** @type {(e: Event) => void} */
         this._onWrapClick = (e) => {
             e.preventDefault();
@@ -102,6 +109,7 @@ class ProgramFadeGalleryElement extends HTMLElement {
      * @param {{ durationSec?: unknown, altBase?: unknown }} [opts]
      */
     setImages(urls, opts = {}) {
+        this._settled = true;
         this._urls = Array.isArray(urls)
             ? urls.map((u) => String(u ?? '').trim()).filter(Boolean).slice(0, MAX_IMAGES)
             : [];
@@ -120,9 +128,26 @@ class ProgramFadeGalleryElement extends HTMLElement {
     }
 
     connectedCallback() {
-        if (this._urls.length) {
+        if (!this._settled) {
+            this._renderPending();
+        } else if (this._urls.length) {
             this._render();
         }
+    }
+
+    _renderPending() {
+        this.removeAttribute('hidden');
+        this.shadowRoot.innerHTML = `
+            <style>
+                ${PH_LOADER_BASE_STYLES}
+                ${PROGRAM_FADE_PENDING_WRAPPER_STYLES}
+            </style>
+            ${programHeroLoaderHtml({ wrapperClass: 'program-fade-pending-loader', ariaLabel: 'Loading gallery' })}
+        `;
+        this._img = null;
+        this._progressFill = null;
+        this._progressTrack = null;
+        this._wrap = null;
     }
 
     disconnectedCallback() {
@@ -239,6 +264,11 @@ class ProgramFadeGalleryElement extends HTMLElement {
         this._clearHoldTimer();
         this._busy = false;
         this._idx = 0;
+
+        if (!this._settled) {
+            this._renderPending();
+            return;
+        }
 
         if (!this._urls.length) {
             this.setAttribute('hidden', '');

@@ -106,6 +106,27 @@ class HeaderComponent extends HTMLElement {
         }
     }
 
+    /**
+     * Hint which bar asset is LCP: wordmark (desktop) vs symbol (≤1024px). Deprioritize the hidden
+     * bar image and the scroll-reveal float mark.
+     */
+    _applyPrimaryLogoFetchPriority() {
+        const root = this.shadow;
+        if (!root) return;
+        const wide = root.querySelector('#headerLogo');
+        const barSymbol = root.querySelector('#headerLogoSymbol');
+        const floatSymbol = root.querySelector('#headerSymbolLogo');
+        const desktop = window.matchMedia(`(min-width: ${MOBILE_NAV_MAX_PX + 1}px)`).matches;
+        if (desktop) {
+            wide?.setAttribute('fetchpriority', 'high');
+            barSymbol?.setAttribute('fetchpriority', 'low');
+        } else {
+            barSymbol?.setAttribute('fetchpriority', 'high');
+            wide?.setAttribute('fetchpriority', 'low');
+        }
+        floatSymbol?.setAttribute('fetchpriority', 'low');
+    }
+
     get active() {
         return this.getAttribute('active') || false;
     }
@@ -393,6 +414,7 @@ class HeaderComponent extends HTMLElement {
         this._drawerBackdrop = this.shadow.querySelector('#headerDrawerBackdrop');
         /* Do not snapshot --bg onto the host: inline --bg would override html[data-theme]
         updates on client navigation. Shadow content uses inherited --bg from the document. */
+        this._applyPrimaryLogoFetchPriority();
         this.attachEventListeners();
         this.attachMobileNavListeners();
         this.attachIdleHoverGuards();
@@ -1747,7 +1769,7 @@ class HeaderComponent extends HTMLElement {
             <div id="headerDrawerBackdrop" class="header-drawer-backdrop" aria-hidden="true"></div>
             <div id="logoHeader">
                 <div id="logoHeaderInner">
-                    <img id="headerSymbolLogo" src="${SymbolLogo}" alt="${withSeoImageAlt('Fusion logo')}">
+                    <img id="headerSymbolLogo" src="${SymbolLogo}" alt="${withSeoImageAlt('Fusion logo')}" loading="lazy">
                 </div>
             </div>
             <div id="headerProfileSetupPrompt" class="header-profile-setup-host" hidden></div>

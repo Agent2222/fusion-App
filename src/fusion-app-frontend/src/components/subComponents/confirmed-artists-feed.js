@@ -2,6 +2,11 @@ import { navigate } from '../../router.js';
 import { artistDisplayDiscipline, artistDisplayName } from '../../utils/artistSlug.js';
 import { applyArtistCardImage } from '../../utils/artistCardPlaceholder.js';
 import { getArtistCardProfileUrl } from '../../utils/artistCardImageMode.js';
+import {
+    PH_LOADER_BASE_STYLES,
+    CONFIRMED_ARTISTS_PENDING_WRAPPER_STYLES,
+    programHeroLoaderHtml,
+} from '../../utils/programHeroLoader.js';
 import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
 
 function escapeHtml(s) {
@@ -330,6 +335,17 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
     }
 
     render() {
+        if (!this._data) {
+            this.shadow.innerHTML = `
+            <style>
+                ${PH_LOADER_BASE_STYLES}
+                ${CONFIRMED_ARTISTS_PENDING_WRAPPER_STYLES}
+            </style>
+            ${programHeroLoaderHtml({ wrapperClass: 'confirmed-artists-pending-loader', ariaLabel: 'Loading artists' })}
+        `;
+            return;
+        }
+
         this.shadow.innerHTML = `
             <style>
                 :host {

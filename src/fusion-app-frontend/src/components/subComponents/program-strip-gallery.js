@@ -1,3 +1,8 @@
+import {
+    PH_LOADER_BASE_STYLES,
+    PROGRAM_STRIP_PENDING_WRAPPER_STYLES,
+    programHeroLoaderHtml,
+} from '../../utils/programHeroLoader.js';
 import { SEO_MEDIA_DEFAULT, withSeoImageAlt } from '../../utils/mediaAltSeo.js';
 
 /**
@@ -54,6 +59,7 @@ class ProgramStripGalleryElement extends HTMLElement {
             this._syncStripColToMainHeight();
             this._updateScrollButtons();
         };
+        this._settled = false;
     }
 
     /**
@@ -61,6 +67,7 @@ class ProgramStripGalleryElement extends HTMLElement {
      * @param {{ altBase?: unknown }} [opts]
      */
     setImages(urls, opts = {}) {
+        this._settled = true;
         this._urls = Array.isArray(urls)
             ? urls.map((u) => String(u ?? '').trim()).filter(Boolean).slice(0, MAX_IMAGES)
             : [];
@@ -84,6 +91,25 @@ class ProgramStripGalleryElement extends HTMLElement {
 
     connectedCallback() {
         window.addEventListener('resize', this._onWinResize, { passive: true });
+        if (!this._settled) {
+            void this._render();
+        }
+    }
+
+    _renderPending() {
+        if (!this.shadowRoot) return;
+        this.removeAttribute('hidden');
+        this.shadowRoot.innerHTML = `
+            <style>
+                ${PH_LOADER_BASE_STYLES}
+                ${PROGRAM_STRIP_PENDING_WRAPPER_STYLES}
+            </style>
+            ${programHeroLoaderHtml({ wrapperClass: 'program-strip-pending-loader', ariaLabel: 'Loading gallery' })}
+        `;
+        this._mainImg = null;
+        this._stripScroll = null;
+        this._btnUp = null;
+        this._btnDown = null;
     }
 
     disconnectedCallback() {
@@ -199,6 +225,11 @@ class ProgramStripGalleryElement extends HTMLElement {
 
     async _render() {
         if (!this.shadowRoot) return;
+
+        if (!this._settled) {
+            this._renderPending();
+            return;
+        }
 
         if (this._stripScroll) {
             this._stripScroll.removeEventListener('scroll', this._onScroll);

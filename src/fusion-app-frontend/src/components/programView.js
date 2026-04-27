@@ -5,7 +5,6 @@ import {
   getApplicationPaymentGlobal,
   getArtists,
   getMyArtistRecord,
-  getPrograms,
 } from "../utils/database.js";
 import { getAuthSnapshot } from "../utils/icAuth.js";
 import posthog from "posthog-js";
@@ -29,6 +28,7 @@ import {
 } from "../utils/programDeadlineParse.js";
 import { withSeoImageAlt, withSeoVideoLabel } from "../utils/mediaAltSeo.js";
 import { buildProgramRunSidebarDateLines } from "../utils/programSidebarRunDates.js";
+import { programHeroLoaderHtml } from "../utils/programHeroLoader.js";
 
 /**
  * Cohort slot counts are canonical on the English program card. For Japanese,
@@ -117,6 +117,7 @@ export function isVideoUrl(url) {
 function setProgramHeroMedia(container, url, alt, posterStillUrl) {
   if (!container) return;
   const u = String(url || "").trim();
+  container.classList.remove("program-detail-hero-media--pending");
   container.replaceChildren();
   if (!u) return;
 
@@ -327,7 +328,9 @@ export function generateProgramViewContent() {
                 <div id="programViewMainContent" class="feed-container">
                     <div class="page-content program-view-content">
                         <div class="program-detail-hero">
-                            <div id="programDetailHeroMedia" class="program-detail-hero-media"></div>
+                            <div id="programDetailHeroMedia" class="program-detail-hero-media program-detail-hero-media--pending">
+                            ${programHeroLoaderHtml({ wrapperClass: "program-view-hero-pending", ariaLabel: "Loading" })}
+                            </div>
                         </div>
                         <div id="programIntroSection">
                             <div id="programIntroTitle"></div>
@@ -346,7 +349,7 @@ export function generateProgramViewContent() {
                         </div>
                         <div id="keyOfferingsSection">
                             <div id="keyOfferingsTitle"></div>
-                            <app-program-offering-cards id="programOfferingCardsRow" active="true" hidden></app-program-offering-cards>
+                            <app-program-offering-cards id="programOfferingCardsRow" active="true"></app-program-offering-cards>
                         </div>
                         <app-program-fade-gallery id="programFadeGallery"></app-program-fade-gallery>
                         <app-program-details id="programDetailsSection" active="true"></app-program-details>
@@ -444,29 +447,18 @@ async function applyProgramToDom(programPair) {
   const programId = current?.id != null ? String(current.id) : "";
   let applicationsOpen = true;
   if (programId) {
-    try {
-      const rows = await getPrograms();
-      const row = rows.find(
-        (p) =>
-          String(p.id) === programId ||
-          p.id === current?.id ||
-          String(p.id) === String(current?.id),
-      );
-      const statusFromRow = row ? String(row.studioStatus ?? "").trim() : "";
-      const statusFromCard = String(
-        current?.studioStatus ??
-          programPair.en?.studioStatus ??
-          programPair.ja?.studioStatus ??
-          "",
-      ).trim();
-      const effectiveStatus = statusFromRow || statusFromCard;
-      if (effectiveStatus) {
-        applicationsOpen = effectiveStatus.toLowerCase() === "open";
-      } else if (current && "acceptingApplications" in current) {
-        applicationsOpen = Boolean(current.acceptingApplications);
-      }
-    } catch {
-      applicationsOpen = true;
+    // `studioStatus` is already on cards from the same `listPrograms` data as
+    // `findProgramPairByPathname` — do not call `getPrograms()` again (avoids a second canister round-trip).
+    const statusFromCard = String(
+      current?.studioStatus ??
+        programPair.en?.studioStatus ??
+        programPair.ja?.studioStatus ??
+        "",
+    ).trim();
+    if (statusFromCard) {
+      applicationsOpen = statusFromCard.toLowerCase() === "open";
+    } else if (current && "acceptingApplications" in current) {
+      applicationsOpen = Boolean(current.acceptingApplications);
     }
   }
 
@@ -491,50 +483,6 @@ async function applyProgramToDom(programPair) {
         totalSlots,
       }),
     );
-  }
-
-  try {
-    const globalPay = await getApplicationPaymentGlobal();
-    if (
-      formEl &&
-      "setApplicationPaymentGlobalContext" in formEl &&
-      typeof /** @type {{ setApplicationPaymentGlobalContext?: (c: object) => void }} */ (formEl)
-        .setApplicationPaymentGlobalContext === "function"
-    ) {
-      /** @type {{ setApplicationPaymentGlobalContext: (c: object) => void }} */ (
-        formEl
-      ).setApplicationPaymentGlobalContext(globalPay);
-    }
-  } catch {
-    /* ignore */
-  }
-
-  if (
-    confirmedArtistsFeed &&
-    typeof confirmedArtistsFeed.setConfirmedArtistsFeed === "function"
-  ) {
-    const headline = programPage?.confirmedHeadline || "";
-    const pool = (await getArtists()) || [];
-    const resolved = artists.map((name) => {
-      const label = typeof name === "string" ? name : name?.name || "";
-      const found = label ? findArtistForConfirmedListLabel(label, pool) : null;
-      if (found) return found;
-      return {
-        image: placeholderImg,
-        slug: "",
-        __confirmedPlaceholder: true,
-        locales: {
-          en: { name: label || "Artist", discipline: "" },
-          ja: { name: label || "Artist", discipline: "" },
-        },
-      };
-    });
-    confirmedArtistsFeed.setConfirmedArtistsFeed({
-      headline,
-      availableSlots,
-      totalSlots,
-      artists: resolved,
-    });
   }
 
   if (keyOfferingsTitle) {
@@ -684,6 +632,54 @@ async function applyProgramToDom(programPair) {
       platform,
       additionalInfo: programPage?.additionalInfo || null,
       sidebarRunDates,
+    });
+  }
+
+  const [globalPay, artistPool] = await Promise.all([
+    getApplicationPaymentGlobal(),
+    getArtists(),
+  ]);
+
+  try {
+    if (
+      formEl &&
+      "setApplicationPaymentGlobalContext" in formEl &&
+      typeof /** @type {{ setApplicationPaymentGlobalContext?: (c: object) => void }} */ (formEl)
+        .setApplicationPaymentGlobalContext === "function"
+    ) {
+      /** @type {{ setApplicationPaymentGlobalContext: (c: object) => void }} */ (
+        formEl
+      ).setApplicationPaymentGlobalContext(globalPay);
+    }
+  } catch {
+    /* ignore */
+  }
+
+  if (
+    confirmedArtistsFeed &&
+    typeof confirmedArtistsFeed.setConfirmedArtistsFeed === "function"
+  ) {
+    const headline = programPage?.confirmedHeadline || "";
+    const pool = artistPool || [];
+    const resolved = artists.map((name) => {
+      const label = typeof name === "string" ? name : name?.name || "";
+      const found = label ? findArtistForConfirmedListLabel(label, pool) : null;
+      if (found) return found;
+      return {
+        image: placeholderImg,
+        slug: "",
+        __confirmedPlaceholder: true,
+        locales: {
+          en: { name: label || "Artist", discipline: "" },
+          ja: { name: label || "Artist", discipline: "" },
+        },
+      };
+    });
+    confirmedArtistsFeed.setConfirmedArtistsFeed({
+      headline,
+      availableSlots,
+      totalSlots,
+      artists: resolved,
     });
   }
 

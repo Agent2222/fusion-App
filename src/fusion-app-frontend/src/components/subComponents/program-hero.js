@@ -1,5 +1,10 @@
 import { navigate } from '../../router.js';
 import { firstNonEmptyString, mergeLocaleDeep } from '../../utils/localeFallback.js';
+import {
+    PH_LOADER_BASE_STYLES,
+    PROGRAM_HERO_HOME_WRAPPER_STYLES,
+    programHeroLoaderHtml,
+} from '../../utils/programHeroLoader.js';
 import { escapeHtml } from '../../utils/textPreview.js';
 import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
 
@@ -52,58 +57,10 @@ class ProgramHeroComponent extends HTMLElement {
                 :host {
                     display: block;
                 }
-                .program-hero-loader {
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    width: 100%;
-                    min-height: calc(100vh - 350px);
-                    padding-top: 80px;
-                    padding-bottom: 120px;
-                    box-sizing: border-box;
-                }
-                .ph-loader {
-                    width: 72px;
-                    height: 72px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    background: transparent;
-                }
-                .ph-loader svg {
-                    display: block;
-                    animation: phLoaderSpin 0.75s linear infinite;
-                }
-                .ph-loader circle {
-                    fill: none;
-                    stroke: #000000;
-                    stroke-width: 1;
-                }
-                @keyframes phLoaderSpin {
-                    to {
-                        transform: rotate(360deg);
-                    }
-                }
-                @media (prefers-reduced-motion: reduce) {
-                    .ph-loader svg {
-                        animation: none;
-                    }
-                }
-                @media (max-width: 1024px) {
-                    .program-hero-loader {
-                        min-height: min(70vh, 720px);
-                        padding-top: clamp(2rem, 6vw, 4rem);
-                        padding-bottom: clamp(2rem, 8vw, 5rem);
-                    }
-                }
+                ${PH_LOADER_BASE_STYLES}
+                ${PROGRAM_HERO_HOME_WRAPPER_STYLES}
             </style>
-            <div class="program-hero-loader" role="status" aria-live="polite" aria-label="Loading">
-                <div class="ph-loader">
-                    <svg width="72" height="72" viewBox="0 0 24 24" aria-hidden="true">
-                        <circle cx="12" cy="12" r="10.5" stroke-linecap="round" stroke-dasharray="18 48" />
-                    </svg>
-                </div>
-            </div>
+            ${programHeroLoaderHtml({ wrapperClass: 'program-hero-loader' })}
         `;
     }
 

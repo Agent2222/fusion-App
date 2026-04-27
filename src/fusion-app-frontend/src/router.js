@@ -251,6 +251,17 @@ function matchContentRoute(path) {
     return routes[path] || null;
 }
 
+/**
+ * True when `path` is a program detail URL with a non-empty first segment (same idea as `matchContentRoute` for program-view).
+ * @param {string} path
+ */
+function isProgramViewPath(path) {
+    return Boolean(
+        (path.startsWith('/program/') && path.slice('/program/'.length).split('/').filter(Boolean)[0]) ||
+            (path.startsWith('/programs/') && path.slice('/programs/'.length).split('/').filter(Boolean)[0]),
+    );
+}
+
 // Router class
 class Router {
     constructor() {
@@ -310,6 +321,8 @@ class Router {
      * `app-loadscreen` is `position:fixed; z-index:1000` and sits above `#app`. Opening `/studio`
      * (e.g. debug “Open Studio”) before “click to enter” would leave the loadscreen covering the
      * dashboard — hide it for this route only (do not re-show when navigating away).
+     * Program “click to enter” is deferred to `applyProgramViewAutoEnterIfNeeded` after
+     * header/footer exist in `#app` (see `loadscreen.js` `performEnterSite`).
      */
     syncLoadscreenForPath(path) {
         const ls = document.querySelector('app-loadscreen');
@@ -318,6 +331,27 @@ class Router {
         if (path === '/studio' || path.startsWith('/settings')) {
             ls.visible = false;
             ls.style.zIndex = '';
+        }
+    }
+
+    /**
+     * After route HTML is in place, same as a tap on the loadscreen: `performEnterSite` on program deep links
+     * so the veil recedes and #header / #footer get `active` (not before `handleRoute` injects chrome — an early
+     * call can set `_userHasEnteredSite` with no header and block a second enter).
+     * @param {string} path
+     */
+    applyProgramViewAutoEnterIfNeeded(path) {
+        if (typeof document === 'undefined' || !isProgramViewPath(path)) return;
+        const run = () => {
+            const ls = document.querySelector('app-loadscreen');
+            if (ls && typeof ls.performEnterSite === 'function') {
+                ls.performEnterSite();
+            }
+        };
+        if (customElements.get('app-loadscreen')) {
+            run();
+        } else {
+            void customElements.whenDefined('app-loadscreen').then(run);
         }
     }
 
@@ -688,6 +722,7 @@ class Router {
             if (didCover && ptEl && typeof ptEl.reveal === 'function') {
                 await ptEl.reveal();
             }
+            this.applyProgramViewAutoEnterIfNeeded(path);
             this._hasHandledRouteOnce = true;
         }
     }

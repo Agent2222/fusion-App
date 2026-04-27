@@ -91,4 +91,7 @@ export async function revealProgramApplicationOrOpenJoin() {
     }
     const section = document.getElementById('programApplicationSection');
     scrollElementTopToViewportGap(section, PROGRAM_APPLICATION_VIEWPORT_TOP_GAP_PX);
+    if (section && typeof section.notifyApplicationFunnelRevealed === 'function') {
+        section.notifyApplicationFunnelRevealed();
+    }
 }
