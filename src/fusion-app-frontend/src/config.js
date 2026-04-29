@@ -69,7 +69,7 @@ export const config = {
     community: {
       status: {
         public: false,
-        dev: false,
+        dev: true,
       },
       message: 'This is not for every artist.<br><br>It is for those willing to work<br>within unfamiliar environments,<br>alongside others,<br>in close proximity to place and process.',
       comingSoonMessage: 'Forming',

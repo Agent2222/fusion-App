@@ -108,6 +108,7 @@ export function renderTeamSection() {
                     <thead>
                         <tr>
                             <th>Identity</th>
+                            <th>Team member</th>
                             <th>Contact</th>
                             <th>Account role</th>
                             <th>Status</th>
@@ -309,6 +310,11 @@ export async function initTeamSection(mainEl) {
                 const row = rows.get(k);
                 if (!row) return '';
                 const c = row.contact;
+                const memberNameRaw = [c?.firstName || '', c?.lastName || '']
+                    .map((x) => String(x || '').trim())
+                    .filter(Boolean)
+                    .join(' ');
+                const memberName = memberNameRaw || '—';
                 const contactLine =
                     c && (c.firstName || c.lastName || c.email)
                         ? `${[c.firstName, c.lastName].filter(Boolean).join(' ')}${
@@ -327,7 +333,8 @@ export async function initTeamSection(mainEl) {
                 const idSuffix = k.replace(/[^a-z0-9]/gi, '');
 
                 const roleSelect = acc
-                    ? `<label class="studio-sr-only" for="team-role-${idSuffix}">Change role for ${escapeHtml(
+                    ? `<div class="studio-team-role-actions">
+                <label class="studio-sr-only" for="team-role-${idSuffix}">Change role for ${escapeHtml(
                           k
                       )}</label><select class="studio-select" id="team-role-${idSuffix}" data-principal="${escapeHtml(
                           k
@@ -338,12 +345,13 @@ export async function initTeamSection(mainEl) {
                 </select>
                 <button type="button" class="studio-btn-primary studio-btn-tiny" data-principal="${escapeHtml(
                     k
-                )}" data-kind="save-role">Save</button>`
+                )}" data-kind="save-role">Save</button></div>`
                     : '—';
 
                 return `<tr>
         <td><span class="studio-identity-short" title="${escapeHtml(k)}">${escapeHtml(shortPrincipalDisplay(k))}</span>
           <div class="studio-team-badges">${canisterBadge}${superBadge}</div></td>
+        <td>${escapeHtml(memberName)}</td>
         <td class="studio-td-clip">${escapeHtml(contactLine)}</td>
         <td>${acc ? escapeHtml(role) : '—'}</td>
         <td>${acc ? escapeHtml(st) : '—'}</td>

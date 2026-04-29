@@ -1109,6 +1109,40 @@ class SoundEnvironment extends HTMLElement {
         this._syncSoundHeadLabel();
         this._updateCurrentVoiceRowVisibility();
     }
+
+    /**
+     * Route-level override for pages that should suppress sound.
+     * @param {boolean} enabled
+     */
+    setMasterEnabled(enabled) {
+        const next = Boolean(enabled);
+        if (this._masterOn === next && this._atmo && this._voice) return;
+        this._masterOn = next;
+        writeLocalMix({ masterOn: this._masterOn });
+        if (this._atmo) {
+            this._atmo.muted = !this._masterOn;
+        }
+        if (this._voice) {
+            this._voice.muted = !this._masterOn;
+        }
+        if (this._masterOn) {
+            if (this._entered) {
+                void this._playAtmo();
+                this._startVoiceSchedule();
+            }
+        } else {
+            if (this._atmo) {
+                this._atmo.pause();
+                this._atmo.muted = true;
+            }
+            this._voice?.pause();
+            this._stopSchedule();
+            this._unduckAtmo();
+        }
+        this._syncEqIcons();
+        this._syncSoundHeadLabel();
+        this._updateCurrentVoiceRowVisibility();
+    }
 }
 
 customElements.define('app-sound-environment', SoundEnvironment);

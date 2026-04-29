@@ -42,7 +42,11 @@ import { uploadBlobToS3 } from "../utils/studioS3Upload.js";
 import { getProfileSetupDraft } from "../utils/profileSetupDraft.js";
 import { navigate } from "../router.js";
 import { applyDocumentSeo } from "../utils/documentSeo.js";
-import { getEffectiveAccountForSettingsUi } from "../utils/adminPerspective.js";
+import {
+  getEffectiveAccountForSettingsUi,
+  getAdminPerspective,
+  isRealAdminCaller,
+} from "../utils/adminPerspective.js";
 import { firstNonEmptyString } from "../utils/localeFallback.js";
 
 function applySettingsProfileDocumentSeo(dashTitle) {
@@ -948,6 +952,7 @@ export function generateSettingsProfileContent() {
                 <div id="settingsProfileMembershipActions" class="mpd-membership-actions" style="display:none" hidden>
                     <button type="button" class="studio-btn-primary" id="settingsProfileFinishMembership">Finish membership setup</button>
                     <button type="button" class="studio-btn-ghost" id="settingsProfileSyncSubscription">Refresh subscription status</button>
+                    <button type="button" class="studio-btn-ghost" id="settingsProfileAdminBypass" style="display:none" hidden>Admin preview bypass</button>
                 </div>
                 <div id="settingsTestPicker" class="studio-field studio-field--full" style="display:none">
                     <span>Test mode</span>
@@ -1353,6 +1358,7 @@ export default function initSettingsProfile() {
   let heroImageUrl = "";
   let heroProfileImageUrl = "";
   let profileAudioUrl = "";
+  let adminPreviewBypassEnabled = false;
   /** @type {string} */
   let baselineSnapshot = "";
   /** @type {string} */
@@ -1365,6 +1371,39 @@ export default function initSettingsProfile() {
 
   const setStatus = (t) => {
     if (statusEl) statusEl.textContent = t || "";
+  };
+
+  const setAdminBypassVisible = (visible) => {
+    const btn = document.getElementById("settingsProfileAdminBypass");
+    if (!btn) return;
+    if (visible) {
+      btn.style.display = "";
+      btn.removeAttribute("hidden");
+    } else {
+      btn.style.display = "none";
+      btn.setAttribute("hidden", "");
+    }
+  };
+
+  const bootstrapAdminPreviewForm = () => {
+    localesState = { en: {}, ja: {} };
+    activeLocale = "en";
+    heroImageUrl = "";
+    heroProfileImageUrl = "";
+    profileAudioUrl = "";
+    profileSlug = "";
+    currentArtistId = "";
+    fillFormFromLocales(
+      /** @type {Record<string, unknown>} */ (localesState),
+      activeLocale,
+    );
+    setVal("mpd_profile_visibility", "inactive");
+    setVal("mpd_hero_url", "");
+    setVal("mpd_hero_profile_url", "");
+    setVal("mpd_audio_url", "");
+    setVal("mpd_audio_title", "");
+    refreshBaseline();
+    if (formWrap) formWrap.removeAttribute("hidden");
   };
 
   let worldGenRunning = false;
@@ -1820,6 +1859,12 @@ export default function initSettingsProfile() {
   };
 
   const saveProfileFromDom = async () => {
+    if (adminPreviewBypassEnabled) {
+      setStatus(
+        "Admin preview bypass is active. This mode is view/edit preview only and cannot save to a linked profile.",
+      );
+      return;
+    }
     if (!localesState) return;
     setStatus("Saving…");
     try {
@@ -2308,6 +2353,7 @@ export default function initSettingsProfile() {
     const membershipActionsEl = document.getElementById(
       "settingsProfileMembershipActions",
     );
+    setAdminBypassVisible(false);
     if (membershipActionsEl) {
       membershipActionsEl.style.display = "none";
       membershipActionsEl.setAttribute("hidden", "");
@@ -2373,12 +2419,27 @@ export default function initSettingsProfile() {
       setStatus("");
     }
 
+    let adminViewingMemberPerspective = false;
+    let adminPerspectiveGateResult = "";
     if (!isTest && snap.authenticated) {
+      const perspective = getAdminPerspective();
+      const memberPerspective =
+        perspective !== "admin" && perspective !== "staff";
+      if (memberPerspective) {
+        // Perspective switching is an admin tool; trust selected member perspective for preview gating.
+        adminViewingMemberPerspective = true;
+      } else {
+        const adminCaller = await isRealAdminCaller();
+        adminViewingMemberPerspective = adminCaller && memberPerspective;
+      }
+    }
+
+    if (!isTest && snap.authenticated && !adminViewingMemberPerspective) {
       const ens = await ensureMyLinkedArtistProfile();
       if (ens === "noAccount" && !acc) {
         if (hint) {
           hint.textContent =
-            "No member account found. Complete Join to register, then return to this page.";
+            "No member account found. You are signed in, so complete your profile setup, then return to this page.";
         }
         if (formWrap) formWrap.setAttribute("hidden", "");
         applySettingsProfileDocumentSeo(dashTitle);
@@ -2402,8 +2463,42 @@ export default function initSettingsProfile() {
       }
     }
 
-    const rec = await getMyArtistRecord();
+    let rec = await getMyArtistRecord();
+    if (!rec && adminViewingMemberPerspective && !isTest) {
+      try {
+        adminPerspectiveGateResult = await ensureMyLinkedArtistProfile();
+      } catch {
+        adminPerspectiveGateResult = "";
+      }
+      rec = await getMyArtistRecord();
+    }
     if (!rec) {
+      if (adminViewingMemberPerspective) {
+        if (hint) {
+          hint.textContent =
+            "Admin perspective preview could not find a linked artist profile. Use Admin preview bypass to load editable fields for perspective testing.";
+        }
+        if (membershipActionsEl) {
+          membershipActionsEl.style.display = "flex";
+          membershipActionsEl.removeAttribute("hidden");
+        }
+        setAdminBypassVisible(
+          adminPerspectiveGateResult === "needsSubscription" ||
+            adminPerspectiveGateResult === "noAccount" ||
+            adminPerspectiveGateResult === "",
+        );
+        if (adminPreviewBypassEnabled) {
+          bootstrapAdminPreviewForm();
+          setStatus(
+            "Admin preview bypass active. Fields are loaded without account/membership gating.",
+          );
+          applySettingsProfileDocumentSeo(dashTitle);
+          return;
+        }
+        if (formWrap) formWrap.setAttribute("hidden", "");
+        applySettingsProfileDocumentSeo(dashTitle);
+        return;
+      }
       if (hint) {
         hint.textContent =
           "Your profile could not be loaded. Try refreshing the page. If you just subscribed, wait a moment and try again, or sign out and back in.";
@@ -2607,6 +2702,13 @@ export default function initSettingsProfile() {
         setStatus(e instanceof Error ? e.message : String(e));
         return;
       }
+      void load();
+    });
+  document
+    .getElementById("settingsProfileAdminBypass")
+    ?.addEventListener("click", () => {
+      adminPreviewBypassEnabled = true;
+      setStatus("Admin preview bypass enabled. Loading fields…");
       void load();
     });
 

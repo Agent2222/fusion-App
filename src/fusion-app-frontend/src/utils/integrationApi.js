@@ -72,6 +72,24 @@ export async function fetchIntegrationHealth() {
     return res.json();
 }
 
+/**
+ * Resend config from server: default `from` and optional broadcast `segmentId` (see `RESEND_BROADCAST_SEGMENT_ID`).
+ * @returns {Promise<{ from: string | null, segmentId: string | null }>}
+ */
+export async function fetchResendMeta() {
+    const base = getIntegrationBaseUrl();
+    if (!base) {
+        throw new Error('Integration API URL not configured.');
+    }
+    const res = await fetch(`${base}/resend/sender`, { method: 'GET', headers: integrationHeadersJson() });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        const msg = typeof err.error === 'string' ? err.error : `HTTP ${res.status}`;
+        throw new Error(msg);
+    }
+    return res.json();
+}
+
 /** Set while pay-first join awaits Internet Identity after Stripe (`icAuth.runPostLoginPipeline` guard). */
 export const FUSION_PENDING_MEMBERSHIP_LINK_KEY = 'fusion-pending-membership-link';
 

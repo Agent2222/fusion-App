@@ -2337,6 +2337,222 @@ export async function getSubscribers() {
     return Array.isArray(rows) ? rows : [];
 }
 
+/** Test overlay: email campaigns (`EmailCampaignRecord`-like plain objects). */
+const LS_EMAIL_CAMPAIGNS = `${LS_STUDIO_PREFIX}email-campaigns`;
+
+/**
+ * After changing `fusion-app-backend` Candid API (e.g. email campaigns), refresh JS bindings:
+ * `dfx generate fusion-app-backend` from the repo root, or `npm run build` in the frontend when `prebuild` runs generate.
+ */
+
+/**
+ * @returns {object[]}
+ */
+function readTestEmailCampaigns() {
+    const raw = readStudioLs(LS_EMAIL_CAMPAIGNS);
+    return Array.isArray(raw) ? raw : [];
+}
+
+/**
+ * @param {object[]} rows
+ */
+function writeTestEmailCampaigns(rows) {
+    writeStudioLs(LS_EMAIL_CAMPAIGNS, rows);
+}
+
+/**
+ * Staff/admin with Email feature edit — subscriber rows for category counts and batch sends.
+ * @returns {Promise<object[]>}
+ */
+export async function getSubscribersForEmailStudio() {
+    if (getDataSource() === 'test') {
+        return getSubscribers();
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.getSubscribersForEmailStudio !== 'function') {
+        throw new Error(
+            'getSubscribersForEmailStudio missing — run dfx generate fusion-app-backend after backend changes.',
+        );
+    }
+    const rows = await actor.getSubscribersForEmailStudio();
+    return Array.isArray(rows) ? rows : [];
+}
+
+/**
+ * @returns {Promise<object[]>}
+ */
+export async function listEmailCampaigns() {
+    if (getDataSource() === 'test') {
+        const rows = readTestEmailCampaigns();
+        return [...rows].sort((a, b) =>
+            String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')),
+        );
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.listEmailCampaigns !== 'function') {
+        throw new Error(
+            'listEmailCampaigns missing — run dfx generate fusion-app-backend after backend changes.',
+        );
+    }
+    const rows = await actor.listEmailCampaigns();
+    return Array.isArray(rows) ? rows : [];
+}
+
+/**
+ * @param {string} id
+ * @returns {Promise<object | null>}
+ */
+export async function getEmailCampaign(id) {
+    const sid = String(id || '').trim();
+    if (!sid) return null;
+    if (getDataSource() === 'test') {
+        return readTestEmailCampaigns().find((r) => String(r?.id || '') === sid) || null;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.getEmailCampaign !== 'function') {
+        throw new Error(
+            'getEmailCampaign missing — run dfx generate fusion-app-backend after backend changes.',
+        );
+    }
+    return actor.getEmailCampaign(sid);
+}
+
+/**
+ * @param {object} rec — `EmailCampaignRecord` (Candid) shape; empty `id` creates a new row.
+ * @returns {Promise<string>} saved id
+ */
+export async function upsertEmailCampaign(rec) {
+    if (getDataSource() === 'test') {
+        const rows = readTestEmailCampaigns();
+        const idIn = String(rec?.id || '').trim();
+        const now = new Date().toISOString();
+        if (!idIn) {
+            const newId = `ec-test-${Date.now()}`;
+            const { Principal } = await import('@dfinity/principal');
+            const toSave = {
+                ...rec,
+                id: newId,
+                createdBy: rec?.createdBy ?? Principal.anonymous(),
+                createdAt: rec?.createdAt && String(rec.createdAt).trim() ? rec.createdAt : now,
+                updatedAt: now,
+            };
+            rows.push(toSave);
+            writeTestEmailCampaigns(rows);
+            return newId;
+        }
+        const idx = rows.findIndex((r) => String(r?.id || '') === idIn);
+        if (idx < 0) throw new Error('Email campaign not found');
+        const toSave = { ...rows[idx], ...rec, id: idIn, updatedAt: now };
+        rows[idx] = toSave;
+        writeTestEmailCampaigns(rows);
+        return idIn;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.upsertEmailCampaign !== 'function') {
+        throw new Error(
+            'upsertEmailCampaign missing — run dfx generate fusion-app-backend after backend changes.',
+        );
+    }
+    return actor.upsertEmailCampaign(rec);
+}
+
+/**
+ * @param {string} id
+ * @param {string} resendBroadcastId
+ * @param {string | null | undefined} lastError
+ * @returns {Promise<void>}
+ */
+export async function markEmailCampaignSent(id, resendBroadcastId, lastError) {
+    const sid = String(id || '').trim();
+    if (!sid) throw new Error('Campaign id required');
+    if (getDataSource() === 'test') {
+        const rows = readTestEmailCampaigns();
+        const idx = rows.findIndex((r) => String(r?.id || '') === sid);
+        if (idx < 0) throw new Error('Email campaign not found');
+        const now = new Date().toISOString();
+        rows[idx] = {
+            ...rows[idx],
+            status: { sent: null },
+            resendBroadcastId: [String(resendBroadcastId || 'batch')],
+            lastError:
+                lastError != null && String(lastError).trim() ? [String(lastError).trim()] : [],
+            sentAt: [now],
+            updatedAt: now,
+        };
+        writeTestEmailCampaigns(rows);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.markEmailCampaignSent !== 'function') {
+        throw new Error(
+            'markEmailCampaignSent missing — run dfx generate fusion-app-backend after backend changes.',
+        );
+    }
+    const errOpt =
+        lastError != null && String(lastError).trim() ? [String(lastError).trim()] : [];
+    return actor.markEmailCampaignSent(sid, String(resendBroadcastId || ''), errOpt);
+}
+
+/**
+ * @param {string} id
+ * @returns {Promise<string>} new id
+ */
+export async function duplicateEmailCampaign(id) {
+    const sid = String(id || '').trim();
+    if (!sid) throw new Error('Campaign id required');
+    if (getDataSource() === 'test') {
+        const rows = readTestEmailCampaigns();
+        const src = rows.find((r) => String(r?.id || '') === sid);
+        if (!src) throw new Error('Email campaign not found');
+        const { Principal } = await import('@dfinity/principal');
+        const newId = `ec-test-${Date.now()}`;
+        const now = new Date().toISOString();
+        const copy = {
+            ...src,
+            id: newId,
+            status: { draft: null },
+            createdAt: now,
+            updatedAt: now,
+            sentAt: [],
+            resendBroadcastId: [],
+            lastError: [],
+            createdBy: Principal.anonymous(),
+        };
+        rows.push(copy);
+        writeTestEmailCampaigns(rows);
+        return newId;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.duplicateEmailCampaign !== 'function') {
+        throw new Error(
+            'duplicateEmailCampaign missing — run dfx generate fusion-app-backend after backend changes.',
+        );
+    }
+    return actor.duplicateEmailCampaign(sid);
+}
+
+/**
+ * Admin-only on-chain; may fail for non-admins.
+ * @param {string} id
+ * @returns {Promise<boolean>}
+ */
+export async function deleteEmailCampaign(id) {
+    const sid = String(id || '').trim();
+    if (!sid) throw new Error('Campaign id required');
+    if (getDataSource() === 'test') {
+        const rows = readTestEmailCampaigns().filter((r) => String(r?.id || '') !== sid);
+        writeTestEmailCampaigns(rows);
+        return true;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.deleteEmailCampaign !== 'function') {
+        throw new Error(
+            'deleteEmailCampaign missing — run dfx generate fusion-app-backend after backend changes.',
+        );
+    }
+    return actor.deleteEmailCampaign(sid);
+}
+
 /**
  * Programs as flat list for Studio (en card merged with id/route).
  * @returns {Promise<object[]>}
@@ -2664,6 +2880,7 @@ export async function adminSetJournalLayoutStudio(rows) {
 }
 
 const LS_SOUND_ENV = 'fusion-sound-environment';
+const LS_COMMUNITY_PAGE = 'fusion-community-page-json';
 
 /** @returns {Record<string, unknown>} */
 function defaultSoundEnvironmentJs() {
@@ -2777,6 +2994,84 @@ export async function adminSetSoundEnvironmentStudio(config) {
         learnMoreJournalEntryId: c.learnMoreJournalEntryId ? [String(c.learnMoreJournalEntryId)] : [],
         enabled: Boolean(c.enabled),
     });
+}
+
+/** @typedef {ReturnType<import('./communityPageDefaults.js').defaultCommunityPage>} CommunityPageShape */
+
+/** @returns {Promise<Record<string, unknown>>} */
+export async function getCommunityPagePublic() {
+    const { normalizeCommunityPage } = await import('./communityPageDefaults.js');
+    if (getDataSource() === 'test') {
+        const raw = readStudioLs(LS_COMMUNITY_PAGE);
+        if (raw != null && typeof raw === 'object' && !Array.isArray(raw)) {
+            return normalizeCommunityPage(raw);
+        }
+        return normalizeCommunityPage({});
+    }
+    try {
+        const actor = await getFusionBackendActor();
+        if (!actor || typeof actor.getCommunityPagePublic !== 'function') {
+            const { normalizeCommunityPage: norm } = await import('./communityPageDefaults.js');
+            return norm({});
+        }
+        const t = await actor.getCommunityPagePublic();
+        const text = typeof t === 'string' ? t : String(t ?? '');
+        if (!text.trim()) {
+            const { normalizeCommunityPage: norm } = await import('./communityPageDefaults.js');
+            return norm({});
+        }
+        try {
+            const j = JSON.parse(text);
+            return normalizeCommunityPage(j);
+        } catch {
+            const { normalizeCommunityPage: norm } = await import('./communityPageDefaults.js');
+            return norm({});
+        }
+    } catch {
+        const { normalizeCommunityPage: norm } = await import('./communityPageDefaults.js');
+        return norm({});
+    }
+}
+
+/** @returns {Promise<Record<string, unknown>>} */
+export async function adminGetCommunityPageStudio() {
+    const { normalizeCommunityPage } = await import('./communityPageDefaults.js');
+    if (getDataSource() === 'test') {
+        return getCommunityPagePublic();
+    }
+    try {
+        const actor = await getStudioAuthenticatedActor();
+        if (actor && typeof actor.adminGetCommunityPage === 'function') {
+            const t = await actor.adminGetCommunityPage();
+            const text = typeof t === 'string' ? t : String(t ?? '');
+            if (text.trim()) {
+                try {
+                    return normalizeCommunityPage(JSON.parse(text));
+                } catch {
+                    return normalizeCommunityPage({});
+                }
+            }
+        }
+    } catch {
+        /* fall through */
+    }
+    return getCommunityPagePublic();
+}
+
+/**
+ * @param {Record<string, unknown>} bundle
+ */
+export async function adminSetCommunityPageStudio(bundle) {
+    const text = JSON.stringify(bundle);
+    if (getDataSource() === 'test') {
+        writeStudioLs(LS_COMMUNITY_PAGE, bundle && typeof bundle === 'object' ? bundle : {});
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminSetCommunityPage !== 'function') {
+        throw new Error('adminSetCommunityPage unavailable — run dfx generate fusion-app-backend from the project root.');
+    }
+    await actor.adminSetCommunityPage(text);
 }
 
 /**

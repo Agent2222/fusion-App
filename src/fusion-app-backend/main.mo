@@ -81,6 +81,11 @@ persistent actor {
   /// Join Fusion / Team tab: name + email per principal (exempt from `UserAccount` core layout).
   stable var accountContactStable : [(Principal, Types.AccountContact)] = [];
 
+  /// Studio → Email: saved campaigns.
+  stable var emailCampaignsStable : [(Text, Types.EmailCampaignRecord)] = [];
+  /// Monotonic id counter for new campaigns (ids are `Nat` as `Text`); reconciled in `postupgrade` when loading from `emailCampaignsStable`.
+  stable var nextEmailCampaignId : Nat = 0;
+
   stable var soundEnvironmentConfigStable : Types.SoundEnvironmentConfig = {
     categoryLabel = "Nature";
     atmosphereAudioUrl = "";
@@ -96,6 +101,9 @@ persistent actor {
   };
   /// `/journal` page layout (sortOrder + featured); written by Studio; populated from `journalLayoutStable` on upgrade.
   stable var journalLayoutRows : [Types.JournalLayoutRow] = [];
+
+  /// `/community` landing JSON (Studio-managed; validated only by size — clients parse).
+  stable var communityPageJsonStable : Text = "{}";
 
   /// Card “Profile” headshot URLs — **append-only** stable slot; separate from `artistsStable` / `ArtistCore` for safe upgrades.
   stable var artistHeroProfileImageStable : [(Text, Text)] = [];
@@ -204,6 +212,9 @@ persistent actor {
   /// 8-digit access code → artist id (derived from `ArtistRecord.accessCode`; rebuilt on upgrade).
   transient var accessCodeToArtistId : _HashMap.HashMap<Text, Text> =
     _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
+
+  transient var emailCampaignsById : _HashMap.HashMap<Text, Types.EmailCampaignRecord> =
+    _HashMap.HashMap<Text, Types.EmailCampaignRecord>(0, Text.equal, Text.hash);
 
   private let maxManualFeaturedStrip : Nat = 8;
 
@@ -314,6 +325,9 @@ persistent actor {
   for (entry in artistMediaStable.vals()) {
     artistMediaByArtistId.put(entry.0, entry.1);
   };
+  for (entry in emailCampaignsStable.vals()) {
+    emailCampaignsById.put(entry.0, entry.1);
+  };
 
   /// Keep in sync with `adminPrincipals` defaults above — `postupgrade` appends any of these not already stored.
   private func defaultAdminPrincipals() : [Principal] {
@@ -380,6 +394,7 @@ persistent actor {
     "journal",
     "sound",
     "content",
+    "community",
     "email",
     "ai",
     "galleries",
@@ -1001,6 +1016,7 @@ persistent actor {
     superStaffPrincipalsStable := superStaffPrincipalsAsArray();
     accountContactStable := _Iter.toArray(accountContactByPrincipal.entries());
     artistHeroProfileImageStable := _Iter.toArray(artistHeroProfileImageById.entries());
+    emailCampaignsStable := _Iter.toArray(emailCampaignsById.entries());
   };
 
   system func postupgrade() {
@@ -1015,6 +1031,25 @@ persistent actor {
       subscribersByEmail.put(email, sub);
     };
     subscribersStable := [];
+
+    emailCampaignsById := _HashMap.HashMap<Text, Types.EmailCampaignRecord>(
+      emailCampaignsStable.size(),
+      Text.equal,
+      Text.hash
+    );
+    for (entry in emailCampaignsStable.vals()) {
+      emailCampaignsById.put(entry.0, entry.1);
+    };
+    emailCampaignsStable := [];
+    var maxEmailId : Nat = nextEmailCampaignId;
+    for (entry in emailCampaignsById.entries()) {
+      let e = entry.0;
+      switch (Nat.fromText(e)) {
+        case (?(n)) { if (n > maxEmailId) { maxEmailId := n } };
+        case null { };
+      };
+    };
+    nextEmailCampaignId := maxEmailId;
 
     accountsByPrincipal := _HashMap.HashMap<Principal, Types.UserAccountCore>(
       accountsStable.size(),
@@ -1557,6 +1592,15 @@ persistent actor {
     if (Text.size(t) > 256) {
       Debug.trap("Contact field too long (max 256 characters)");
     };
+  };
+
+  private func emailNowText() : Text {
+    Int.toText(Int.abs(Time.now() / 1_000_000_000));
+  };
+
+  private func newEmailCampaignId() : Text {
+    nextEmailCampaignId := nextEmailCampaignId + 1;
+    Nat.toText(nextEmailCampaignId);
   };
 
   /// Register with an 8-digit invite or artist roster access code — creates an **active** exempt account.
@@ -2149,6 +2193,7 @@ persistent actor {
 
   /// Max URL length for profile hero image (HTTPS / asset ref).
   private let maxProfileImageUrlLen : Nat = 4096;
+  private let maxCommunityPageJsonChars : Nat = 500_000;
 
   /// Authenticated artist: update `profile.image` (and `updatedAt`) for the linked roster row only.
   public shared (msg) func updateMyArtistProfilePatch(image : Text, updatedAt : Text) : async () {
@@ -2657,6 +2702,27 @@ persistent actor {
     soundEnvironmentConfigStable := c;
   };
 
+  // ===== Community landing (`/community` — JSON blob; Studio “community” feature) =====
+
+  public query func getCommunityPagePublic() : async Text {
+    communityPageJsonStable;
+  };
+
+  public shared query (msg) func adminGetCommunityPage() : async Text {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "community");
+    communityPageJsonStable;
+  };
+
+  public shared (msg) func adminSetCommunityPage(json : Text) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "community");
+    if (json.size() > maxCommunityPageJsonChars) {
+      Debug.trap("Community page JSON too large");
+    };
+    communityPageJsonStable := json;
+  };
+
   public query func listJournalEntries() : async [Types.JournalRecord] {
     let vals = _Iter.toArray(journalsById.vals());
     Array.sort(
@@ -2962,5 +3028,132 @@ persistent actor {
       count += 1;
     };
     count;
+  };
+
+  // ===== Studio Email Campaigns (staff + email feature) =====
+
+  /// Staff/admin with Email feature edit: same rows as `getSubscribers` (for category counts / batch in Studio).
+  public shared query (msg) func getSubscribersForEmailStudio() : async [Types.Subscriber] {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "email");
+    return _Iter.toArray(subscribersByEmail.vals());
+  };
+
+  public shared query (msg) func listEmailCampaigns() : async [Types.EmailCampaignRecord] {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "email");
+    let vals = _Iter.toArray(emailCampaignsById.vals());
+    return Array.sort(
+      vals,
+      func(a : Types.EmailCampaignRecord, b : Types.EmailCampaignRecord) : Order.Order {
+        Text.compare(b.updatedAt, a.updatedAt);
+      },
+    );
+  };
+
+  public shared query (msg) func getEmailCampaign(id : Text) : async ?Types.EmailCampaignRecord {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "email");
+    emailCampaignsById.get(id);
+  };
+
+  public shared (msg) func upsertEmailCampaign(rec : Types.EmailCampaignRecord) : async Text {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "email");
+    let nowT = emailNowText();
+    if (Text.size(rec.id) == 0) {
+      let newId = newEmailCampaignId();
+      let toSave : Types.EmailCampaignRecord = {
+        rec with
+        id = newId;
+        createdBy = msg.caller;
+        createdAt = if (Text.size(rec.createdAt) > 0) {
+          rec.createdAt;
+        } else {
+          nowT;
+        };
+        updatedAt = nowT;
+      };
+      emailCampaignsById.put(newId, toSave);
+      return newId;
+    } else {
+      switch (emailCampaignsById.get(rec.id)) {
+        case null { Debug.trap("Email campaign not found") };
+        case (?old) {
+          let toSave : Types.EmailCampaignRecord = {
+            rec with
+            createdBy = old.createdBy;
+            createdAt = old.createdAt;
+            updatedAt = nowT;
+          };
+          emailCampaignsById.put(rec.id, toSave);
+          return rec.id;
+        };
+      };
+    };
+  };
+
+  public shared (msg) func markEmailCampaignSent(
+    id : Text,
+    resendBroadcastId : Text,
+    lastError : ?Text,
+  ) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "email");
+    let nowT = emailNowText();
+    switch (emailCampaignsById.get(id)) {
+      case null { Debug.trap("Email campaign not found") };
+      case (?rec) {
+        let toSave : Types.EmailCampaignRecord = {
+          rec with
+          status = #sent;
+          resendBroadcastId = ?resendBroadcastId;
+          lastError = lastError;
+          sentAt = ?nowT;
+          updatedAt = nowT;
+        };
+        emailCampaignsById.put(id, toSave);
+      };
+    };
+  };
+
+  public shared (msg) func duplicateEmailCampaign(id : Text) : async Text {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "email");
+    switch (emailCampaignsById.get(id)) {
+      case null { Debug.trap("Email campaign not found") };
+      case (?rec) {
+        let newId = newEmailCampaignId();
+        let nowT = emailNowText();
+        let copy : Types.EmailCampaignRecord = {
+          id = newId;
+          title = rec.title;
+          subject = rec.subject;
+          previewText = rec.previewText;
+          htmlBody = rec.htmlBody;
+          textBody = rec.textBody;
+          templateId = rec.templateId;
+          audience = rec.audience;
+          internalNotes = rec.internalNotes;
+          status = #draft;
+          createdAt = nowT;
+          updatedAt = nowT;
+          sentAt = null;
+          resendBroadcastId = null;
+          lastError = null;
+          createdBy = msg.caller;
+        };
+        emailCampaignsById.put(newId, copy);
+        return newId;
+      };
+    };
+  };
+
+  public shared (msg) func deleteEmailCampaign(id : Text) : async Bool {
+    assertAdmin(msg.caller);
+    switch (emailCampaignsById.remove(id)) {
+      case null { false };
+      case (?_) { true };
+    };
   };
 };

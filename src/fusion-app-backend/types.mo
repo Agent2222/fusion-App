@@ -350,6 +350,39 @@ module {
     /// Tab key: `staff` | `curator` | `collector` | `artist` | `gallery` (lowercase Text).
     public type StudioPermissionDefaultsEntry = (Text, StudioPermissionMatrix);
 
+    // --- Studio Email Campaigns (Studio → Email; staff/admin) ---
+
+    public type EmailCampaignStatusV = {
+        #draft;
+        #pendingSend;
+        #sent;
+        #failed;
+    };
+
+    public type EmailAudienceKindV = {
+        #allBroadcast;
+        #category : Text;
+    };
+
+    public type EmailCampaignRecord = {
+        id : Text;
+        title : ?Text;
+        subject : Text;
+        previewText : Text;
+        htmlBody : Text;
+        textBody : ?Text;
+        templateId : ?Text;
+        audience : EmailAudienceKindV;
+        internalNotes : Text;
+        status : EmailCampaignStatusV;
+        createdAt : Text;
+        updatedAt : Text;
+        sentAt : ?Text;
+        resendBroadcastId : ?Text;
+        lastError : ?Text;
+        createdBy : Principal;
+    };
+
     public type StudioPermissionOverrideEntry = (Principal, StudioPermissionMatrix);
 
     /// Admin-only full canister backup / restore (`adminExportFullDatabase` / `adminImportFullDatabase`).

@@ -69,7 +69,12 @@ class HeaderComponent extends HTMLElement {
         this._onProfileSetupPromptBound = null;
         /** @type {(() => void) | null} */
         this._onRosterVisBound = null;
-        this._profileSetupPrompt = { open: false, fullName: '', email: '' };
+        this._profileSetupPrompt = {
+            open: false,
+            mode: 'setup',
+            fullName: '',
+            email: '',
+        };
     }
 
     /**
@@ -442,10 +447,12 @@ class HeaderComponent extends HTMLElement {
         void this._refreshHeaderAuthState();
         this._onRouteChangeForNavBound = () => {
             this._syncActiveNavLink();
+            this._syncSoundEnvironmentForRoute();
             this.closeMobileMenu();
         };
         window.addEventListener('routeChange', this._onRouteChangeForNavBound);
         this._syncActiveNavLink();
+        this._syncSoundEnvironmentForRoute();
         if (this.getAttribute('active') === 'true') {
             this.attachScrollHideBehavior();
             this.resetIdleHideTimer();
@@ -501,6 +508,31 @@ class HeaderComponent extends HTMLElement {
             if (active) a.setAttribute('aria-current', 'page');
             else a.removeAttribute('aria-current');
         });
+    }
+
+    /**
+     * @param {string} path
+     * @returns {boolean}
+     */
+    _soundSuppressedForPath(path) {
+        const p = String(path || '/');
+        return p === '/studio' || p.startsWith('/settings') || p === '/profile' || p.startsWith('/profile/');
+    }
+
+    _syncSoundEnvironmentForRoute() {
+        const root = this.shadowRoot;
+        if (!root) return;
+        const env = root.querySelector('#headerSoundEnv');
+        if (!(env instanceof HTMLElement)) return;
+        const suppress = this._soundSuppressedForPath(window.location.pathname || '/');
+        if (suppress) {
+            env.setAttribute('hidden', '');
+            if (typeof env.setMasterEnabled === 'function') {
+                env.setMasterEnabled(false);
+            }
+            return;
+        }
+        env.removeAttribute('hidden');
     }
 
     _fillAuthPair() {
@@ -567,13 +599,48 @@ class HeaderComponent extends HTMLElement {
         const d = detail && typeof detail === 'object' ? detail : {};
         const fullName = String(d.fullName ?? '').trim();
         const email = String(d.email ?? '').trim();
-        this._profileSetupPrompt = { open: true, fullName, email };
+        this._profileSetupPrompt = { open: true, mode: 'setup', fullName, email };
+        this._renderProfileSetupPrompt();
+    }
+
+    _openCompleteProfileInfoPrompt() {
+        this._profileSetupPrompt = {
+            open: true,
+            mode: 'completeProfileInfo',
+            fullName: '',
+            email: '',
+        };
         this._renderProfileSetupPrompt();
     }
 
     _closeProfileSetupPrompt() {
         this._profileSetupPrompt.open = false;
         this._renderProfileSetupPrompt();
+    }
+
+    async _handleCompleteProfileCta() {
+        this._closeProfileSetupPrompt();
+        try {
+            const db = await import('../../utils/database.js');
+            const gate = await db.getMembershipAccessForCaller();
+            if (gate === 'noAccount' || gate === 'needsSubscription') {
+                window.dispatchEvent(
+                    new CustomEvent('fusion-open-join-network', {
+                        detail: { mode: 'resubscribe' },
+                    })
+                );
+                return;
+            }
+            await db.ensureMyLinkedArtistProfile();
+            const { maybeSeedLocalesFromProfileSetupDraftIfEmpty } = await import(
+                '../../utils/profileSetupSeedLocales.js'
+            );
+            await maybeSeedLocalesFromProfileSetupDraftIfEmpty();
+        } catch {
+            /* ignore and continue to settings */
+        }
+        activateDeactivate('/settings/profile');
+        navigate('/settings/profile');
     }
 
     _renderProfileSetupPrompt() {
@@ -590,6 +657,29 @@ class HeaderComponent extends HTMLElement {
         const email = this._profileSetupPrompt.email;
         const detail = email ? `${name} (${email})` : name;
         host.hidden = false;
+        if (this._profileSetupPrompt.mode === 'completeProfileInfo') {
+            host.innerHTML = `
+                <div class="header-profile-setup-modal header-profile-setup-modal--top-right" role="dialog" aria-modal="true" aria-label="${
+                    en ? 'Complete profile' : 'プロフィールを完成'
+                }">
+                    <p class="header-profile-setup-title">${en ? 'Complete your profile' : 'プロフィールを完成'}</p>
+                    <p class="header-profile-setup-copy">${
+                        en
+                            ? 'Your account needs to be linked to a member profile before you can edit Settings.'
+                            : '設定を編集するには、アカウントをメンバープロフィールに紐づける必要があります。'
+                    }</p>
+                    <div class="header-profile-setup-actions">
+                        <button type="button" class="headerRectBtn" data-action="close-profile-setup">${
+                            en ? 'Close' : '閉じる'
+                        }</button>
+                        <button type="button" class="headerRectBtn headerRectBtn--register" data-action="confirm-complete-profile">${
+                            en ? 'Continue' : '続ける'
+                        }</button>
+                    </div>
+                </div>
+            `;
+            return;
+        }
         host.innerHTML = `
             <div class="header-profile-setup-overlay" data-action="close-profile-setup"></div>
             <div class="header-profile-setup-modal" role="dialog" aria-modal="true" aria-label="${
@@ -1047,8 +1137,7 @@ class HeaderComponent extends HTMLElement {
                 }
                 if (action === 'complete-profile') {
                     this.closeMobileMenu();
-                    activateDeactivate('/settings/profile');
-                    navigate('/settings/profile');
+                    this._openCompleteProfileInfoPrompt();
                     return;
                 }
                 if (action === 'close-profile-setup') {
@@ -1069,6 +1158,11 @@ class HeaderComponent extends HTMLElement {
                         activateDeactivate('/settings/profile');
                         navigate('/settings/profile');
                     });
+                    return;
+                }
+                if (action === 'confirm-complete-profile') {
+                    this.closeMobileMenu();
+                    void this._handleCompleteProfileCta();
                     return;
                 }
                 const href = rectBtn.getAttribute('data-href');
@@ -1406,10 +1500,6 @@ class HeaderComponent extends HTMLElement {
                 }
 
                 .headerRectBtn--complete-profile {
-                    position: fixed;
-                    top: 1rem;
-                    right: 1rem;
-                    z-index: 170;
                     background: var(--c3);
                 }
 
@@ -1443,6 +1533,14 @@ class HeaderComponent extends HTMLElement {
                     border: 1px solid var(--c2);
                     box-sizing: border-box;
                     padding: 1rem;
+                }
+
+                .header-profile-setup-modal--top-right {
+                    top: 10rem;
+                    right: 2rem;
+                    left: auto;
+                    transform: none;
+                    width: min(92vw, 420px);
                 }
 
                 .header-profile-setup-title {
@@ -1714,6 +1812,12 @@ class HeaderComponent extends HTMLElement {
                         width: 100%;
                         top: auto;
                         right: auto;
+                    }
+
+                    .header-profile-setup-modal--top-right {
+                        top: 1rem;
+                        right: 1rem;
+                        width: min(92vw, 360px);
                     }
 
                     #headerDrawerBackdrop {

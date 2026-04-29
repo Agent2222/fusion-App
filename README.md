@@ -41,6 +41,8 @@ npm run generate
 
 at any time. This is recommended before starting the frontend development server, and will be run automatically any time you run `dfx deploy`.
 
+**Studio / API sync:** when you add or change public Motoko methods (e.g. email campaign endpoints on `fusion-app-backend`), run `dfx generate fusion-app-backend` from the repo root so `src/declarations/` matches the canister. Do not edit generated files by hand.
+
 If you are making frontend changes, you can start a development server with
 
 ```bash
@@ -73,3 +75,34 @@ The frontend can call a small Node service in [`services/fusion-integration-api/
 Studio **Services** can store the integration URL and Stripe publishable keys in `localStorage` for local development (see `src/fusion-app-frontend/src/utils/studioServicesConfig.js`).
 
 Local dev: run `npm run integration-api` from the repo root (default port `8787`), then set `VITE_INTEGRATION_API_URL=/integration` — Vite proxies `/integration` to the integration server (see `src/fusion-app-frontend/vite.config.js`).
+
+### Progressive Web App (PWA)
+
+The frontend now includes installable PWA support via `vite-plugin-pwa`:
+
+- Manifest is generated as `manifest.webmanifest` during build
+- Service worker uses Workbox `generateSW` (`sw.js` + `workbox-*.js`)
+- App icons are sourced from:
+  - `src/fusion-app-frontend/public/pwa-192.png`
+  - `src/fusion-app-frontend/public/pwa-512.png`
+  - `src/fusion-app-frontend/public/pwa-512-maskable.png`
+  - `src/fusion-app-frontend/public/apple-touch-icon.png` (iOS polish)
+
+Build and verify:
+
+```bash
+# Build frontend shell + PWA assets
+cd src/fusion-app-frontend
+npx vite build --outDir dist_check
+
+# Preview locally (optional)
+npx vite preview --outDir dist_check
+```
+
+Validation checklist:
+
+- Open DevTools → **Application**:
+  - **Manifest** shows installable metadata
+  - **Service Workers** shows active `sw.js`
+- Run Lighthouse on preview or staging and confirm PWA checks pass.
+- Deploy as usual (`dfx deploy`) once the built output folder matches your asset canister `source` in `dfx.json`.

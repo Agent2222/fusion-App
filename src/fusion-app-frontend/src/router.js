@@ -126,7 +126,7 @@ const routes = {
         isFullPage: false,
     },
     '/community': {
-        loader: () => import('./components/navPages.js'),
+        loader: () => import('./components/community.js'),
         title: 'Community · Fusion',
         description: 'Fusion’s artist community and membership programs.',
         contentGenerator: 'generateCommunityContent'

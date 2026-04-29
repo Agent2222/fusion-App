@@ -38,6 +38,7 @@ stripe listen --forward-to localhost:8787/webhooks/stripe
 | `IC_HOST` | for canister calls | Replica URL (`http://127.0.0.1:4943` or `https://ic0.app`) |
 | `RESEND_API_KEY` | for email | Resend API key |
 | `RESEND_FROM` | for email | Verified sender, e.g. `Fusion <onboarding@resend.dev>` |
+| `RESEND_BROADCAST_SEGMENT_ID` | no | If set, returned by `GET /resend/sender` as `segmentId` for Studio “All subscribers (broadcast)” defaults. |
 | `AWS_REGION` or `S3_REGION` | for S3 | Region |
 | `S3_BUCKET` | for S3 | Bucket name |
 | `AWS_ACCESS_KEY_ID` | for S3 on **Render / most hosts** | IAM user access key (`AKIA…`). Required unless the process can use another [default credential chain](https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/setting-credentials-node.html) (e.g. local `~/.aws/credentials`). |
@@ -62,6 +63,7 @@ stripe listen --forward-to localhost:8787/webhooks/stripe
 - `POST /webhooks/stripe` — **raw** JSON body; Stripe signature via `STRIPE_WEBHOOK_SECRET`
 - `POST /email/send` — body `{ to, subject, html | text, replyTo?, from? }` — optional `from` overrides `RESEND_FROM` when set (must be a verified sender in Resend)
 - `POST /email/batch` — body `{ messages: [{ to, subject, html? | text? }], from?, replyTo? }` — Resend batch send, chunked to ≤100 per call with a short delay between chunks. Returns `{ ok, okCount, failCount, results }`.
+- `GET /resend/sender` — `from` (same as `RESEND_FROM`) and optional `segmentId` (from `RESEND_BROADCAST_SEGMENT_ID`) for Studio email campaigns
 - `GET /resend/templates` — list templates (Resend REST, API key on server)
 - `POST /resend/templates` — create template
 - `GET /resend/templates/:id` — get template

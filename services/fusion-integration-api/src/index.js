@@ -44,6 +44,7 @@ const stripe = stripeSecret ? new Stripe(stripeSecret) : null;
 const resendApiKey = process.env.RESEND_API_KEY || '';
 const resend = resendApiKey ? new Resend(resendApiKey) : null;
 const resendFrom = process.env.RESEND_FROM || '';
+const resendBroadcastSegmentId = (process.env.RESEND_BROADCAST_SEGMENT_ID || '').trim();
 /** Optional absolute URL to replace the default site logo in HTML (staff can also paste full URLs in the Studio modal). */
 const fusionSignatureLogoUrl = (process.env.FUSION_SIGNATURE_LOGO_URL || '').trim();
 const RESEND_API_BASE = 'https://api.resend.com';
@@ -1200,6 +1201,13 @@ function guardResendJsonBody(req, res, body) {
     }
     return true;
 }
+
+app.get('/resend/sender', requireApiKey, (_req, res) => {
+    return res.json({
+        from: resendFrom || null,
+        segmentId: resendBroadcastSegmentId || null,
+    });
+});
 
 app.get('/resend/templates', requireApiKey, async (_req, res) => {
     const out = await resendRestJson('/templates', { method: 'GET' });

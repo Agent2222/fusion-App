@@ -23,6 +23,8 @@ import {
     setStudioShellGate,
     studioFeatureAccess,
 } from '../utils/studioShellState.js';
+import { studioIconHref } from '../utils/studioIconRegistry.js';
+import studioWordmarkLogo from '../assets/Fusion-X-logo-03.png';
 
 function normalizeHash() {
     const raw = (window.location.hash || '').replace(/^#/, '').trim().toLowerCase();
@@ -61,17 +63,32 @@ function buildStudioNavButtonsHtml(activeId) {
             continue;
         }
         const groupLabel = escapeHtml(g.label);
+        const groupKey = groupLabel.toLowerCase();
+        const groupIcon = studioIconHref(`group-${groupKey}`);
         const groupInner = items
             .map((item) => {
                 const active = item.id === activeId ? ' is-active' : '';
                 const idHtml = escapeHtml(item.id);
-                return `<button type="button" class="studio-nav-item${active}" data-studio-section="${idHtml}">${escapeHtml(
-                    item.label
-                )}</button>`;
+                const itemIcon = studioIconHref(`nav-${item.id}`);
+                return `<button type="button" class="studio-nav-item${active}" data-studio-section="${idHtml}">
+                  <span class="studio-nav-item__icon" aria-hidden="true">${
+                      itemIcon
+                          ? `<img src="${escapeHtml(itemIcon)}" alt="" />`
+                          : '<span class="studio-nav-item__icon-fallback">•</span>'
+                  }</span>
+                  <span class="studio-nav-item__label">${escapeHtml(item.label)}</span>
+                </button>`;
             })
             .join('');
         chunks.push(
-            `<div class="studio-nav-group" role="group" aria-label="${groupLabel}"><div class="studio-nav-group__label">${groupLabel}</div><div class="studio-nav-group__items">${groupInner}</div></div>`
+            `<div class="studio-nav-group" role="group" aria-label="${groupLabel}">
+              <div class="studio-nav-group__label"><span class="studio-nav-group__icon" aria-hidden="true">${
+                  groupIcon
+                      ? `<img src="${escapeHtml(groupIcon)}" alt="" />`
+                      : '<span class="studio-nav-group__icon-fallback">·</span>'
+              }</span>${groupLabel}</div>
+              <div class="studio-nav-group__items">${groupInner}</div>
+            </div>`
         );
     }
     return chunks.join('');
@@ -88,7 +105,9 @@ export function render() {
             <div class="studio-nav-backdrop" id="studioNavBackdrop" hidden aria-hidden="true"></div>
             <aside class="studio-sidebar" id="studioSidebar" aria-label="Studio navigation">
                 <a class="studio-back" href="/">← Public site</a>
-                <button type="button" class="studio-wordmark studio-wordmark-btn" id="studioWordmark">Fusion</button>
+                <button type="button" class="studio-wordmark studio-wordmark-btn" id="studioWordmark" aria-label="Fusion Studio">
+                    <img class="studio-wordmark-logo" src="${studioWordmarkLogo}" alt="Fusion" />
+                </button>
                 <nav class="studio-nav" id="studioNav">
                     ${renderNavButtons(initial)}
                 </nav>
@@ -109,7 +128,9 @@ export function render() {
                     <div class="studio-topbar-actions">
                         <span class="studio-topbar-admin-label">Admin</span>
                         <button type="button" class="studio-topbar-account-btn" id="studioAccountBtn" aria-label="Account dashboard">Account</button>
-                        <button type="button" id="studioSettingsBtn" aria-label="Settings">⚙</button>
+                        <button type="button" id="studioSettingsBtn" aria-label="Settings">
+                            <span class="studio-topbar-settings-icon" aria-hidden="true">◦</span>
+                        </button>
                     </div>
                 </header>
                 <div class="studio-workspace-rail">

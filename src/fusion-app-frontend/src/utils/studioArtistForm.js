@@ -157,9 +157,12 @@ function renderIntroSlot(escapeHtml, loc, world, slotIndex) {
     const p = `world.introGallery.${slotIndex}`;
     return `<div class="studio-art-intro-slot">
       <p class="studio-prog-subhead">Slot ${slotIndex + 1} (${loc.toUpperCase()})</p>
-      <div class="studio-modal-fields-row">
+      <div class="studio-modal-fields-row studio-modal-fields-row--asset">
+        <figure class="studio-asset-thumb">
+          <img data-preview-input="#studio-art-intro-src-${loc}-${slotIndex}" alt="Intro slot preview" loading="lazy" />
+        </figure>
         <label class="studio-field studio-field--grow"><span>src (URL)</span>
-          <input type="text" class="studio-input studio-art-intro-src" data-art-locale="${loc}" data-art-path="${p}.src" value="${esc(escapeHtml, s.src)}" /></label>
+          <input type="text" id="studio-art-intro-src-${loc}-${slotIndex}" class="studio-input studio-art-intro-src" data-art-locale="${loc}" data-art-path="${p}.src" value="${esc(escapeHtml, s.src)}" /></label>
         <label class="studio-file-label studio-btn-ghost studio-field--shrink">
           <input type="file" accept="image/*" class="studio-file-input studio-art-intro-file" data-art-upload-locale="${loc}" data-art-upload-slot="${slotIndex}" />
           Upload
@@ -196,8 +199,8 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
     const advJson = esc(escapeHtml, JSON.stringify(a, null, 2));
 
     return `
-<form id="studio-art-manage-form" class="studio-modal-form studio-modal-form--artist">
-  <p class="studio-muted">Edit roster and locale copy. Unknown locale keys are preserved on save. Slug changes can break URLs — slug is read-only here.</p>
+<form id="studio-art-manage-form" class="studio-modal-form studio-modal-form--artist studio-artist-editor-form">
+  <p class="studio-muted studio-artist-editor-intro">Edit roster and locale copy. Unknown locale keys are preserved on save. Slug is read-only.</p>
   <div class="studio-tabs" data-studio-tabs="artist-manage">
     <div class="studio-tabs__list" role="tablist" aria-label="Artist sections">
       <button type="button" class="studio-tabs__tab is-active" role="tab" aria-selected="true" aria-controls="studio-art-panel-roster" id="studio-art-tab-roster">Roster</button>
@@ -211,18 +214,28 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
     </div>
     <div class="studio-tabs__panels">
       <div id="studio-art-panel-roster" class="studio-tabs__panel is-active" role="tabpanel" aria-labelledby="studio-art-tab-roster">
+        <div class="studio-artist-panel-head">
+          <h3>Roster &amp; Profile</h3>
+          <p>Edit the artist&rsquo;s roster details and profile settings.</p>
+        </div>
         <div class="studio-modal-fields-row">
           <label class="studio-field"><span>ID</span><input name="art-id" class="studio-input" readonly value="${esc(escapeHtml, String(a.id ?? ''))}" /></label>
           <label class="studio-field"><span>Slug</span><input name="art-slug" class="studio-input" readonly value="${esc(escapeHtml, String(a.slug ?? ''))}" /></label>
         </div>
-        <div class="studio-modal-fields-row">
+        <div class="studio-modal-fields-row studio-modal-fields-row--asset">
+          <figure class="studio-asset-thumb">
+            <img data-preview-input="#studio-art-hero-image" alt="Hero image preview" loading="lazy" />
+          </figure>
           <label class="studio-field studio-field--grow"><span>Hero image URL</span><input name="art-image" class="studio-input" id="studio-art-hero-image" value="${esc(escapeHtml, String(a.image ?? ''))}" /></label>
           <label class="studio-file-label studio-btn-ghost studio-field--shrink">
             <input type="file" accept="image/*" id="studio-art-hero-file" class="studio-file-input" />
             Upload → URL
           </label>
         </div>
-        <div class="studio-modal-fields-row">
+        <div class="studio-modal-fields-row studio-modal-fields-row--asset">
+          <figure class="studio-asset-thumb">
+            <img data-preview-input="#studio-art-hero-profile-image" alt="Hero profile preview" loading="lazy" />
+          </figure>
           <label class="studio-field studio-field--grow"><span>Hero profile image (card toggle)</span><input name="art-hero-profile-image" class="studio-input" id="studio-art-hero-profile-image" value="${esc(escapeHtml, String(a.heroProfileImage ?? a.hero_profile_image ?? ''))}" /></label>
           <label class="studio-file-label studio-btn-ghost studio-field--shrink">
             <input type="file" accept="image/*" id="studio-art-hero-profile-file" class="studio-file-input" />
@@ -418,9 +431,12 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
       </div>
     </div>
   </div>
-  <div class="studio-modal-actions studio-modal-actions--artist">
-    <button type="button" class="studio-btn-danger" id="studio-art-delete">Delete artist</button>
-    <button type="submit" class="studio-btn-primary" id="studio-art-form-save">Save artist</button>
+  <div class="studio-modal-actions studio-modal-actions--artist studio-artist-editor-actions">
+    <button type="button" class="studio-btn-danger studio-btn-danger-quiet" id="studio-art-delete">Delete artist</button>
+    <div class="studio-artist-editor-actions-right">
+      <button type="button" class="studio-btn-ghost" id="studio-art-cancel">Cancel</button>
+      <button type="submit" class="studio-btn-primary" id="studio-art-form-save">Save changes</button>
+    </div>
   </div>
 </form>`;
 }

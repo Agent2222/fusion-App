@@ -47,7 +47,6 @@ import {
     adminSetArtistMediaForStudio,
     getEventsList,
     getSubscribers as loadSubscribersFromDataSource,
-    getSubscribersCsv,
     setDataSource,
     upsertApplicantStudio,
     deleteApplicantStudio,
@@ -83,6 +82,7 @@ import { MAX_MANUAL_FEATURED, readArtistFeaturedMeta } from '../../utils/artistF
 import { LEGACY_PROFILE_BASE } from '../../utils/studioLegacyProfileUrls.js';
 import { openStudioModal } from '../../utils/studioModal.js';
 import { openSendBlastModal } from './sendBlastModal.js';
+import { initEmailCampaignStudio, renderEmailCampaignStudio } from './emailCampaignStudio.js';
 import {
     createPaymentIntent,
     fetchIntegrationHealth,
@@ -95,6 +95,10 @@ import {
     syncSubscriptionFromStripeByEmail,
 } from '../../utils/integrationApi.js';
 import { uploadBlobToS3 } from '../../utils/studioS3Upload.js';
+import {
+    renderCommunitySection,
+    initCommunitySection,
+} from './sections/communityStudio.js';
 import {
     renderContent,
     initContent,
@@ -163,16 +167,17 @@ export const STUDIO_NAV_GROUPS = [
             { id: 'products', label: 'Products' },
             { id: 'journal', label: 'Journal' },
             { id: 'sound', label: 'Sound' },
+            { id: 'community', label: 'Community' },
             { id: 'content', label: 'Content' },
             { id: 'email', label: 'Email' },
-            { id: 'ai', label: 'Ai' },
+            { id: 'ai', label: 'Assistance' },
         ],
     },
     {
         label: 'Accounts',
         items: [
+            { id: 'pending-approval', label: 'Status' },
             { id: 'artists', label: 'Artists' },
-            { id: 'pending-approval', label: 'Pending Approval' },
             { id: 'curators', label: 'Curators' },
             { id: 'collectors', label: 'Collectors' },
             { id: 'galleries', label: 'Galleries' },
@@ -201,7 +206,7 @@ const TITLE_MAP = {
     [STUDIO_DASHBOARD_ID]: 'Dashboard',
     team: 'Team',
     permissions: 'Permissions',
-    'pending-approval': 'Pending Approval',
+    'pending-approval': 'Status',
     ...Object.fromEntries(STUDIO_NAV.map((n) => [n.id, n.label])),
 };
 
@@ -237,6 +242,8 @@ export function renderStudioMain(sectionId) {
             return renderJournal();
         case 'sound':
             return renderSound();
+        case 'community':
+            return renderCommunitySection();
         case 'home':
             return renderHome();
         case 'content':
@@ -427,6 +434,7 @@ function renderApplicants() {
 function renderArtists() {
     return `
         <div class="studio-section-stack studio-category-page">
+            <section id="studio-artists-list-surface">
             ${studioPageHeaderHtml({
                 title: 'Artists',
                 subtitle: 'Admin roster — visibility, codes, and public links',
@@ -456,35 +464,44 @@ function renderArtists() {
                     Random featured (pick up to ${MAX_MANUAL_FEATURED} from featurable pool)
                 </label>
             </div>
-            <p class="studio-banner studio-banner--info">Admin roster: use <strong>Manage</strong> for structured editing (tabs: roster, identity, world, media, links/SEO). Batch JSON remains for bulk import. <strong>Advanced JSON</strong> in the modal applies <strong>test overlay</strong> only (localStorage).</p>
-            <p class="studio-muted">Batch upload: JSON array of artist rows (see <code>ArtistRecord</code> shape), or <code>{ "artists": [ … ] }</code>. Imported rows get an 8-digit access code for future account linking.</p>
-            <p class="studio-muted">Per-artist <strong>access code</strong> in Manage is for claiming an existing roster profile. <strong>Generate artist join invite</strong> creates a separate single-use code for new members without a roster row (same 8-digit format).</p>
-            <div class="studio-subscribers-toolbar studio-subscribers-toolbar--artists">
-                <label class="studio-file-label studio-btn-ghost">
-                    <input type="file" accept="application/json,.json" id="studio-artists-batch-json" class="studio-file-input" />
-                    Batch upload (JSON)
-                </label>
-                <button type="button" class="studio-btn-secondary" id="studio-artists-gen-invite">Generate artist join invite</button>
-                <button type="button" class="studio-btn-ghost" id="studio-artists-sync-hero">Sync Profile Images</button>
-                <button type="button" class="studio-btn-ghost" id="studio-artists-sync-gallery">Sync Gallery</button>
-            </div>
-            <div class="studio-artists-shout-block" style="margin:0.75rem 0 1rem">
-                <p class="studio-muted" style="margin:0 0 0.5rem">Public <strong>/artists</strong> page — headline above the featured strip (plain text; line breaks preserved). Also listed under <strong>Content</strong>.</p>
-                <div id="studio-artists-shout-fields" class="studio-content-fields"></div>
-                <div class="studio-toolbar-actions" style="margin-top:0.65rem">
-                    <button type="button" class="studio-btn-primary" id="studio-artists-shout-save">Save shout headline</button>
+            <details class="studio-section-accordion studio-section-accordion--artists-admin">
+                <summary class="studio-section-accordion__summary">Admin tools & guidance</summary>
+                <div class="studio-section-accordion__body">
+                    <p class="studio-banner studio-banner--info">Admin roster: use <strong>Manage</strong> for structured editing (tabs: roster, identity, world, media, links/SEO). Batch JSON remains for bulk import. <strong>Advanced JSON</strong> in the manage surface applies <strong>test overlay</strong> only (localStorage).</p>
+                    <p class="studio-muted">Batch upload: JSON array of artist rows (see <code>ArtistRecord</code> shape), or <code>{ "artists": [ … ] }</code>. Imported rows get an 8-digit access code for future account linking.</p>
+                    <p class="studio-muted">Per-artist <strong>access code</strong> in Manage is for claiming an existing roster profile. <strong>Generate artist join invite</strong> creates a separate single-use code for new members without a roster row (same 8-digit format).</p>
+                    <div class="studio-subscribers-toolbar studio-subscribers-toolbar--artists">
+                        <label class="studio-file-label studio-btn-ghost">
+                            <input type="file" accept="application/json,.json" id="studio-artists-batch-json" class="studio-file-input" />
+                            Batch upload (JSON)
+                        </label>
+                        <button type="button" class="studio-btn-secondary" id="studio-artists-gen-invite">Generate artist join invite</button>
+                        <button type="button" class="studio-btn-ghost" id="studio-artists-sync-hero">Sync Profile Images</button>
+                        <button type="button" class="studio-btn-ghost" id="studio-artists-sync-gallery">Sync Gallery</button>
+                    </div>
+                    <p class="studio-muted">Public <strong>/artists</strong> page — headline above the featured strip (plain text; line breaks preserved). Also listed under <strong>Content</strong>.</p>
+                    <div id="studio-artists-shout-fields" class="studio-content-fields"></div>
+                    <div class="studio-toolbar-actions" style="margin-top:0.65rem">
+                        <button type="button" class="studio-btn-primary" id="studio-artists-shout-save">Save shout headline</button>
+                    </div>
+                    <p id="studio-artists-shout-msg" class="studio-banner studio-banner--info" style="display:none;margin-top:0.5rem" role="status"></p>
                 </div>
-                <p id="studio-artists-shout-msg" class="studio-banner studio-banner--info" style="display:none;margin-top:0.5rem" role="status"></p>
-            </div>
-            <div class="studio-artists-world-batch" style="margin:0 0 1rem">
-                <p class="studio-muted" style="margin:0 0 0.5rem">
-                    Generate <strong>Kamauu-style</strong> world copy (micro-bio, perspective, vision, constructing, context, quote) from English bio/discipline via the canister LLM. Japanese locales are filled by translation.
-                </p>
-                <button type="button" class="studio-btn-secondary" id="studio-artists-world-batch-open">Generate world from bio (batch)…</button>
-            </div>
-            <div class="studio-artists-send-blast" style="margin:0 0 1rem">
-                <button type="button" class="studio-btn-secondary" id="studio-artists-send-blast-open">Send blast…</button>
-            </div>
+            </details>
+            <details class="studio-section-accordion studio-section-accordion--artists-world">
+                <summary class="studio-section-accordion__summary">World copy generator</summary>
+                <div class="studio-section-accordion__body">
+                    <p class="studio-muted">
+                        Generate <strong>Kamauu-style</strong> world copy (micro-bio, perspective, vision, constructing, context, quote) from English bio/discipline via the canister LLM. Japanese locales are filled by translation.
+                    </p>
+                    <button type="button" class="studio-btn-secondary" id="studio-artists-world-batch-open">Generate world from bio (batch)…</button>
+                </div>
+            </details>
+            <details class="studio-section-accordion studio-section-accordion--artists-comms">
+                <summary class="studio-section-accordion__summary">Comms</summary>
+                <div class="studio-section-accordion__body">
+                    <button type="button" class="studio-btn-secondary" id="studio-artists-send-blast-open">Send blast…</button>
+                </div>
+            </details>
             <div id="studio-artists-banner" class="studio-banner studio-banner--info"></div>
             <div class="studio-table-wrap studio-table-wrap--sticky-head">
                 <table class="studio-table studio-table--dense">
@@ -506,6 +523,8 @@ function renderArtists() {
                     <tbody id="studio-artists-tbody"><tr><td colspan="11">Loading…</td></tr></tbody>
                 </table>
             </div>
+            </section>
+            <section id="studio-artist-manage-surface" class="studio-artist-manage-surface" hidden></section>
         </div>
     `;
 }
@@ -513,17 +532,18 @@ function renderArtists() {
 function renderPendingApproval() {
     return `
         <div class="studio-section-stack studio-category-page">
+            <section id="studio-pending-list-surface">
             ${studioPageHeaderHtml({
-                title: 'Pending Approval',
-                subtitle: 'Artist roster profiles awaiting visibility review (state = pending)',
+                title: 'Status',
+                subtitle: 'Artist roster profiles needing review (pending + inactive)',
                 countId: 'studio-pending-approval-header-count',
-                countLabel: 'in queue',
+                countLabel: 'pending + inactive',
             })}
             ${studioFilterBarHtml({
                 searchId: 'studio-pending-approval-search',
                 searchPlaceholder: 'Filter slug, id, email…',
             })}
-            <p class="studio-muted">Set visibility to <strong>public</strong> when approved, or change state in <strong>Manage</strong> as needed.</p>
+            <p class="studio-muted">Set visibility to <strong>public</strong> when approved, or use <strong>Manage</strong> to move artists between <strong>pending</strong>, <strong>inactive</strong>, and other states.</p>
             <div class="studio-table-wrap studio-table-wrap--sticky-head">
                 <table class="studio-table studio-table--dense">
                     <thead>
@@ -539,6 +559,8 @@ function renderPendingApproval() {
                     <tbody id="studio-pending-approval-tbody"><tr><td colspan="6">Loading…</td></tr></tbody>
                 </table>
             </div>
+            </section>
+            <section id="studio-pending-manage-surface" class="studio-artist-manage-surface" hidden></section>
         </div>
     `;
 }
@@ -824,28 +846,156 @@ function renderSound() {
 }
 
 function renderEmail() {
-    return `
-        <div class="studio-section-stack">
-            <p class="studio-muted">Export subscriber emails for campaigns (requires Live + admin).</p>
-            <button type="button" class="studio-btn-primary" id="studio-email-export">Download CSV</button>
-            <pre id="studio-email-preview" class="studio-pre" hidden></pre>
-        </div>
-    `;
+    return renderEmailCampaignStudio();
 }
 
 function renderAi() {
     return `
-        <div class="studio-section-stack">
-            <label class="studio-field">
-                <span>Model label (local preview)</span>
-                <input type="text" id="studio-ai-model" class="studio-input" placeholder="e.g. fusion-assistant-v1" />
-            </label>
-            <label class="studio-field">
-                <span>Notes</span>
-                <textarea id="studio-ai-notes" class="studio-textarea" rows="4" placeholder="Internal notes — future: siteSettings on canister"></textarea>
-            </label>
-            <button type="button" class="studio-btn-primary" id="studio-ai-save">Save locally</button>
-            <p id="studio-ai-msg" class="studio-banner studio-banner--info" style="display:none;margin-top:12px"></p>
+        <div class="studio-section-stack studio-category-page studio-assistance-page">
+            <header class="studio-assistance-header">
+                <div class="studio-assistance-header__crumbs">Studio <span>›</span> Assistance</div>
+                <div class="studio-assistance-header__row">
+                    <div>
+                        <h2 class="studio-assistance-header__title">Assistance</h2>
+                        <p class="studio-assistance-header__subtitle">Internal tools for writing, translation, and refinement across the platform.</p>
+                    </div>
+                    <button type="button" class="studio-btn-ghost studio-assistance-guide-btn">Usage guide</button>
+                </div>
+            </header>
+            <div class="studio-assistance-layout">
+                <section class="studio-assistance-main">
+                    <div class="studio-assistance-grid">
+                        <div class="studio-assistance-card studio-assistance-tabs-card">
+                            <div class="studio-tabs studio-assistance-tabs" id="studio-assist-tabs">
+                                <div class="studio-tabs__list" role="tablist" aria-label="Assistance actions">
+                                    <button type="button" class="studio-tabs__tab is-active" role="tab" id="studio-assist-tab-refine" aria-selected="true" aria-controls="studio-assist-panel-refine"><span class="studio-assistance-tab-icon" aria-hidden="true">✧</span>Refine</button>
+                                    <button type="button" class="studio-tabs__tab" role="tab" id="studio-assist-tab-generate" aria-selected="false" aria-controls="studio-assist-panel-generate"><span class="studio-assistance-tab-icon" aria-hidden="true">✎</span>Generate</button>
+                                    <button type="button" class="studio-tabs__tab" role="tab" id="studio-assist-tab-translate" aria-selected="false" aria-controls="studio-assist-panel-translate"><span class="studio-assistance-tab-icon" aria-hidden="true">◌</span>Translate</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="studio-assistance-col">
+                            <section class="studio-assistance-card">
+                                <div class="studio-section-title-row">
+                                    <h2>1. Input</h2>
+                                    <button type="button" class="studio-btn-ghost" id="studio-assist-clear">Clear</button>
+                                </div>
+                                <p class="studio-muted">Paste or type the content you want to refine.</p>
+                                <textarea id="studio-assist-input" class="studio-textarea studio-assist-textarea" rows="12" placeholder="Paste artist bio, email draft, program copy, or notes…"></textarea>
+                                <div class="studio-tabs__panels studio-assistance-panels">
+                                        <section id="studio-assist-panel-refine" class="studio-tabs__panel is-active" role="tabpanel" aria-labelledby="studio-assist-tab-refine">
+                                            <h3 class="studio-assistance-panel-title">2. Refinement options</h3>
+                                            <p class="studio-muted">Adjust tone and length to match your needs.</p>
+                                            <div class="studio-assist-two-fields">
+                                                <label class="studio-field">
+                                                    <span>Tone</span>
+                                                    <select id="studio-assist-tone" class="studio-select">
+                                                        <option value="Neutral">Neutral</option>
+                                                        <option value="Elevated" selected>Elevated</option>
+                                                        <option value="Direct">Direct</option>
+                                                    </select>
+                                                </label>
+                                                <label class="studio-field">
+                                                    <span>Length</span>
+                                                    <select id="studio-assist-length" class="studio-select">
+                                                        <option value="Shorten">Shorten</option>
+                                                        <option value="Keep" selected>Keep</option>
+                                                        <option value="Expand">Expand</option>
+                                                    </select>
+                                                </label>
+                                            </div>
+                                            <button type="button" class="studio-btn-primary" id="studio-assist-run-refine">Refine Text</button>
+                                        </section>
+                                        <section id="studio-assist-panel-generate" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-assist-tab-generate" hidden>
+                                            <h3 class="studio-assistance-panel-title">2. Compose from prompt</h3>
+                                            <p class="studio-muted">Create new content from a prompt.</p>
+                                            <label class="studio-field">
+                                                <span>What do you want to create?</span>
+                                                <textarea id="studio-assist-generate-prompt" class="studio-textarea" rows="4" placeholder="Describe what to generate and any constraints."></textarea>
+                                            </label>
+                                            <div class="studio-assistance-presets" role="group" aria-label="Quick presets">
+                                                <button type="button" class="studio-btn-ghost studio-assist-preset" data-preset="Artist bio">Artist bio</button>
+                                                <button type="button" class="studio-btn-ghost studio-assist-preset" data-preset="Residency description">Residency description</button>
+                                                <button type="button" class="studio-btn-ghost studio-assist-preset" data-preset="Email outreach">Email outreach</button>
+                                                <button type="button" class="studio-btn-ghost studio-assist-preset" data-preset="Instagram caption">Instagram caption</button>
+                                            </div>
+                                            <button type="button" class="studio-btn-primary" id="studio-assist-run-generate">Generate</button>
+                                        </section>
+                                        <section id="studio-assist-panel-translate" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-assist-tab-translate" hidden>
+                                            <h3 class="studio-assistance-panel-title">2. Translation options</h3>
+                                            <p class="studio-muted">Translate and localize content.</p>
+                                            <div class="studio-assist-two-fields">
+                                                <label class="studio-field">
+                                                    <span>From</span>
+                                                    <input type="text" class="studio-input" value="Auto-detect" readonly />
+                                                </label>
+                                                <label class="studio-field">
+                                                    <span>To</span>
+                                                    <input type="text" class="studio-input" value="Japanese (日本語)" readonly />
+                                                </label>
+                                            </div>
+                                            <fieldset class="studio-assist-translate-style">
+                                                <legend class="studio-sr-only">Translation style</legend>
+                                                <label><input type="radio" name="studio-assist-translate-style" value="natural" checked /> Natural / localized</label>
+                                                <label><input type="radio" name="studio-assist-translate-style" value="literal" /> Literal / direct</label>
+                                            </fieldset>
+                                            <button type="button" class="studio-btn-primary" id="studio-assist-run-translate">Translate to Japanese</button>
+                                        </section>
+                                </div>
+                            </section>
+                        </div>
+                        <div class="studio-assistance-col">
+                            <section class="studio-assistance-card">
+                                <div class="studio-section-title-row">
+                                    <h2>3. Output</h2>
+                                    <div class="studio-toolbar-actions" style="margin:0">
+                                        <button type="button" class="studio-btn-ghost" id="studio-assist-copy-inline">Copy</button>
+                                        <button type="button" class="studio-btn-ghost" id="studio-assist-replace-inline">Replace input</button>
+                                    </div>
+                                </div>
+                                <p class="studio-muted">Refined content ready to use.</p>
+                                <textarea id="studio-assist-output" class="studio-textarea studio-assist-textarea" rows="18" placeholder="Output appears here…" readonly></textarea>
+                            </section>
+                        </div>
+                    </div>
+                </section>
+                <aside class="studio-assistance-sidebar">
+                    <section class="studio-assistance-card">
+                        <h3 class="studio-subheading">Assistant profile</h3>
+                        <div class="studio-assistance-profile">
+                            <strong>FUSION Assistant v1</strong>
+                            <span class="studio-muted">Tone: Elevated / Editorial</span>
+                            <span class="studio-muted">Language bias: EN → JP</span>
+                        </div>
+                    </section>
+                    <section class="studio-assistance-card">
+                        <h3 class="studio-subheading">Usage context</h3>
+                        <p class="studio-muted">Help the assistant understand what you are working on.</p>
+                        <label class="studio-field">
+                            <span>Context</span>
+                            <select id="studio-assist-context" class="studio-select">
+                                <option value="Artist profile">Artist profile</option>
+                                <option value="Residency program">Residency program</option>
+                                <option value="Email">Email</option>
+                                <option value="Internal notes">Internal notes</option>
+                            </select>
+                        </label>
+                    </section>
+                    <details class="studio-assistance-card studio-assistance-notes" open>
+                        <summary class="studio-subheading">Internal context (not public)</summary>
+                        <label class="studio-field studio-field--full">
+                            <span class="studio-sr-only">Notes</span>
+                            <textarea id="studio-assist-notes" class="studio-textarea" rows="5" placeholder="Use this to guide tone and constraints for this draft."></textarea>
+                        </label>
+                    </details>
+                </aside>
+            </div>
+            <div class="studio-assistance-bottom-bar">
+                <button type="button" class="studio-btn-ghost" id="studio-assist-copy-output">Copy output</button>
+                <button type="button" class="studio-btn-ghost" id="studio-assist-apply">Apply to field</button>
+                <button type="button" class="studio-btn-primary" id="studio-assist-save-draft">Save draft</button>
+            </div>
+            <p id="studio-assist-msg" class="studio-banner studio-banner--info" style="display:none"></p>
         </div>
     `;
 }
@@ -1078,14 +1228,15 @@ function renderServices() {
 
 function renderSettings() {
     return `
-        <div class="studio-section-stack">
-            <dl class="studio-dl">
+        <div class="studio-section-stack studio-category-page studio-settings-page">
+            <section class="studio-settings-card">
+            <dl class="studio-dl studio-settings-dl">
                 <dt>Data source (<code>database.js</code>)</dt>
                 <dd id="studio-set-datasource">—</dd>
                 <dt>Network (<code>config.devMode</code>)</dt>
                 <dd id="studio-set-network">—</dd>
             </dl>
-            <div class="studio-field-row">
+            <div class="studio-field-row studio-settings-source-row">
                 <label class="studio-field studio-field--inline">
                     <input type="radio" name="studio-datasource" value="test" id="studio-ds-test" />
                     Use test data (localStorage overlays)
@@ -1096,6 +1247,7 @@ function renderSettings() {
                 </label>
             </div>
             <p class="studio-muted">Same as the loadscreen Debug control. Internet Identity has no site password — recovery uses II docs.</p>
+            </section>
             <div id="studio-db-admin-tools" class="studio-db-admin-tools" hidden>
                 <h3 class="studio-subheading">Admin — full database backup</h3>
                 <p class="studio-muted">
@@ -1194,15 +1346,21 @@ function rosterVisibilityBadgeHtml(vis) {
 /**
  * @param {object} tableRow
  * @param {() => void | Promise<void>} afterSave
+ * @param {HTMLElement} hostEl
+ * @param {HTMLElement | null} [listSurface]
  */
-function openStudioArtistManageFromRow(tableRow, afterSave) {
+function openStudioArtistManageFromRow(tableRow, afterSave, hostEl, listSurface = null) {
     const slug = String(tableRow.slug || '');
-    const title = `Artist — ${String(slug || tableRow.id || '')}`;
-    const { close, root } = openStudioModal(
-        `<div class="studio-modal-form" id="studio-art-load-placeholder"><p class="studio-muted">Loading…</p></div>`,
-        { title, wide: true }
-    );
-    const bodyEl = root.querySelector('.studio-modal-body');
+    hostEl.hidden = false;
+    hostEl.innerHTML = `<div class="studio-artist-manage-loading"><p class="studio-muted">Loading artist…</p></div>`;
+    if (listSurface) listSurface.hidden = true;
+
+    const close = () => {
+        hostEl.innerHTML = '';
+        hostEl.hidden = true;
+        if (listSurface) listSurface.hidden = false;
+    };
+
     void (async () => {
         /** @type {object | null} */
         let full = null;
@@ -1213,18 +1371,120 @@ function openStudioArtistManageFromRow(tableRow, afterSave) {
             close();
             return;
         }
-        if (!full || !bodyEl) {
+        if (!full) {
             alert('Could not load artist.');
             close();
             return;
         }
         const profileLink = `/profile/${encodeURIComponent(String(full.slug || ''))}`;
-        bodyEl.innerHTML = `
-              <p><a class="studio-action-link" href="${escapeHtml(profileLink)}" target="_blank" rel="noopener">Open public profile</a></p>
-              ${renderArtistManageModalHtml(escapeHtml, full, { isTest: getDataSource() === 'test' })}
-            `;
+        const statusText = String(full.locales?.en?.status || full.status || 'Artist');
+        const slugLabel = String(full.slug || full.id || '').trim();
+        const joinedAt = String(full.createdAt || full.joinedAt || '').slice(0, 10) || '—';
+        const visibility = normalizeArtistRosterVisibility(full.visibility);
+        const visibilityBadgeMod =
+            visibility === 'public'
+                ? 'is-public'
+                : visibility === 'pending'
+                  ? 'is-pending'
+                  : visibility === 'private'
+                    ? 'is-private'
+                    : 'is-inactive';
+        hostEl.innerHTML = `
+            <div class="studio-artist-manage-shell">
+                <div class="studio-artist-manage-top">
+                    <div class="studio-artist-manage-crumb">Studio / Artists</div>
+                    <div class="studio-artist-manage-top-actions">
+                        <button type="button" class="studio-btn-ghost" id="studio-art-more-actions">More actions</button>
+                        <button type="button" class="studio-btn-ghost" id="studio-art-exit-manage" aria-label="Exit manage">✕</button>
+                    </div>
+                </div>
+                <h2 class="studio-artist-manage-title">Manage Artist</h2>
+                <section class="studio-artist-identity-bar">
+                    <div class="studio-artist-identity-main">
+                        <div class="studio-artist-identity-avatar">${escapeHtml(
+                            String(full.locales?.en?.name || full.slug || 'A').slice(0, 2).toUpperCase()
+                        )}</div>
+                        <div class="studio-artist-identity-meta">
+                            <div class="studio-artist-identity-name">${escapeHtml(
+                                String(full.locales?.en?.name || full.slug || full.id || 'Artist')
+                            )} <span class="studio-artist-identity-slug">${escapeHtml(slugLabel)}</span></div>
+                            <div class="studio-artist-identity-subline">
+                                <span>${escapeHtml(statusText)}</span>
+                                <span class="studio-artist-status-pill ${visibilityBadgeMod}">${escapeHtml(
+                                    visibility
+                                )}</span>
+                                <span>Joined ${escapeHtml(joinedAt)}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="studio-artist-identity-side">
+                        <div class="studio-artist-identity-kv">
+                            <span>Profile</span>
+                            <a class="studio-action-link" href="${escapeHtml(profileLink)}" target="_blank" rel="noopener">Open profile ↗</a>
+                        </div>
+                        <div class="studio-artist-identity-kv">
+                            <span>Visibility</span>
+                            <strong>${escapeHtml(visibility)}</strong>
+                        </div>
+                    </div>
+                </section>
+                <div class="studio-artist-manage-content">
+                    <div class="studio-artist-manage-main">
+                        ${renderArtistManageModalHtml(escapeHtml, full, { isTest: getDataSource() === 'test' })}
+                    </div>
+                    <aside class="studio-artist-context-panel">
+                        <section class="studio-artist-context-card">
+                            <h3>Artist Overview</h3>
+                            <div class="studio-artist-kv"><span>Total programs</span><strong>${escapeHtml(String((full.appliedPrograms || []).length || 0))}</strong></div>
+                            <div class="studio-artist-kv"><span>Exclusive content</span><strong>${escapeHtml(String((full.locales?.en?.links || []).length || 0))}</strong></div>
+                            <div class="studio-artist-kv"><span>Discussions</span><strong>—</strong></div>
+                            <div class="studio-artist-kv"><span>Followers</span><strong>—</strong></div>
+                            <div class="studio-artist-kv"><span>Last active</span><strong>${escapeHtml(String(full.updatedAt || '—').slice(0, 10) || '—')}</strong></div>
+                        </section>
+                        <section class="studio-artist-context-card">
+                            <h3>Quick Links</h3>
+                            <a class="studio-action-link" href="${escapeHtml(profileLink)}" target="_blank" rel="noopener">View public profile</a>
+                            <a class="studio-action-link" href="/artists" target="_blank" rel="noopener">View artist content</a>
+                            <a class="studio-action-link" href="mailto:${escapeHtml(String(full.contactEmail || ''))}">Send email</a>
+                            <button type="button" class="studio-action-link studio-action-link--btn" disabled title="Impersonation is unavailable in this build">Impersonate</button>
+                        </section>
+                        <section class="studio-artist-context-card">
+                            <h3>System Info</h3>
+                            <div class="studio-artist-kv"><span>Created</span><strong>${escapeHtml(String(full.createdAt || '—').slice(0, 10) || '—')}</strong></div>
+                            <div class="studio-artist-kv"><span>Updated</span><strong>${escapeHtml(String(full.updatedAt || '—').slice(0, 10) || '—')}</strong></div>
+                            <div class="studio-artist-kv"><span>Artist ID</span><strong>${escapeHtml(String(full.id || '—'))}</strong></div>
+                        </section>
+                    </aside>
+                </div>
+            </div>
+        `;
+        const root = hostEl;
+        const initAssetPreviews = () => {
+            root.querySelectorAll('img[data-preview-input]').forEach((imgEl) => {
+                const sel = imgEl.getAttribute('data-preview-input');
+                if (!sel) return;
+                const input = root.querySelector(sel);
+                if (!(input instanceof HTMLInputElement)) return;
+                const apply = () => {
+                    const v = String(input.value || '').trim();
+                    if (!v) {
+                        imgEl.removeAttribute('src');
+                        imgEl.closest('.studio-asset-thumb')?.classList.add('is-empty');
+                        return;
+                    }
+                    imgEl.setAttribute('src', v);
+                    imgEl.closest('.studio-asset-thumb')?.classList.remove('is-empty');
+                };
+                input.addEventListener('input', apply);
+                input.addEventListener('change', apply);
+                apply();
+            });
+        };
+        root.querySelector('#studio-art-exit-manage')?.addEventListener('click', () => close());
+        root.querySelector('#studio-art-cancel')?.addEventListener('click', () => close());
         initArtistManageTabs(root);
         void initArtistProgramsTab(root, full);
+        initAssetPreviews();
 
         root.querySelector('#studio-art-translate-to-new-world')?.addEventListener('click', async () => {
             const promptEl = root.querySelector('#studio-art-new-world-prompt');
@@ -1849,6 +2109,7 @@ const STUDIO_INIT = {
     'gallery-access': initGalleryAccess,
     journal: initJournal,
     sound: initSound,
+    community: initCommunitySection,
     content: initContent,
     email: initEmail,
     ai: initAi,
@@ -2750,8 +3011,16 @@ async function initArtists(mainEl) {
         wireArtistTableRowActions();
     };
 
+    const manageHost = mainEl.querySelector('#studio-artist-manage-surface');
+    const listSurface = mainEl.querySelector('#studio-artists-list-surface');
     const openArtistManageModal = (tableRow) => {
-        openStudioArtistManageFromRow(tableRow, load);
+        if (!(manageHost instanceof HTMLElement)) return;
+        openStudioArtistManageFromRow(
+            tableRow,
+            load,
+            manageHost,
+            listSurface instanceof HTMLElement ? listSurface : null
+        );
     };
 
     const load = async () => {
@@ -3030,21 +3299,24 @@ async function initPendingApproval(mainEl) {
     const tbody = mainEl.querySelector('#studio-pending-approval-tbody');
     const searchInput = mainEl.querySelector('#studio-pending-approval-search');
     const countEl = mainEl.querySelector('#studio-pending-approval-header-count');
+    const manageHost = mainEl.querySelector('#studio-pending-manage-surface');
+    const listSurface = mainEl.querySelector('#studio-pending-list-surface');
     /** @type {object[]} */
-    let allPending = [];
+    let allStatusRows = [];
 
     const runLoad = async () => {
         const all = await getArtistsForStudio();
-        allPending = all.filter(
-            (a) => normalizeArtistRosterVisibility(/** @type {unknown} */ (a).visibility) === 'pending'
-        );
+        allStatusRows = all.filter((a) => {
+            const v = normalizeArtistRosterVisibility(/** @type {unknown} */ (a).visibility);
+            return v === 'pending' || v === 'inactive';
+        });
         applyPendingFilter();
     };
 
     const applyPendingFilter = () => {
         if (!tbody) return;
         const q = (searchInput instanceof HTMLInputElement ? searchInput.value : '').trim().toLowerCase();
-        const list = allPending.filter((a) => {
+        const list = allStatusRows.filter((a) => {
             if (!q) return true;
             const hay = `${a.slug} ${a.id} ${a.contactEmail ?? ''}`.toLowerCase();
             return hay.includes(q);
@@ -3052,7 +3324,9 @@ async function initPendingApproval(mainEl) {
         if (countEl) countEl.textContent = String(list.length);
         if (!list.length) {
             tbody.innerHTML = `<tr><td colspan="6">${
-                allPending.length ? 'No rows match search.' : 'No artists in pending state.'
+                allStatusRows.length
+                    ? 'No rows match search.'
+                    : 'No artists currently in pending or inactive state.'
             }</td></tr>`;
             return;
         }
@@ -3081,9 +3355,15 @@ async function initPendingApproval(mainEl) {
         tbody.querySelectorAll('.studio-art-pending-manage').forEach((btn) => {
             btn.addEventListener('click', () => {
                 const id = btn.getAttribute('data-id');
-                const row = allPending.find((x) => String(x.id) === String(id));
+                const row = allStatusRows.find((x) => String(x.id) === String(id));
                 if (row) {
-                    openStudioArtistManageFromRow(row, runLoad);
+                    if (!(manageHost instanceof HTMLElement)) return;
+                    openStudioArtistManageFromRow(
+                        row,
+                        runLoad,
+                        manageHost,
+                        listSurface instanceof HTMLElement ? listSurface : null
+                    );
                 }
             });
         });
@@ -4593,57 +4873,258 @@ async function initJournal(mainEl) {
 }
 
 async function initEmail(mainEl) {
-    const btn = mainEl.querySelector('#studio-email-export');
-    const pre = mainEl.querySelector('#studio-email-preview');
-    btn?.addEventListener('click', async () => {
-        try {
-            const csv = await getSubscribersCsv();
-            if (pre) {
-                pre.hidden = false;
-                pre.textContent = csv.slice(0, 4000) + (csv.length > 4000 ? '\n…' : '');
-            }
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'fusion-subscribers.csv';
-            a.click();
-            URL.revokeObjectURL(url);
-        } catch (e) {
-            alert(e instanceof Error ? e.message : String(e));
-        }
-    });
+    await initEmailCampaignStudio(mainEl);
 }
 
 function initAi(mainEl) {
-    const model = mainEl.querySelector('#studio-ai-model');
-    const notes = mainEl.querySelector('#studio-ai-notes');
-    const msg = mainEl.querySelector('#studio-ai-msg');
-    const key = 'fusion-studio-ai-settings';
+    const key = 'fusion-studio-assistance-draft-v1';
+    const msg = mainEl.querySelector('#studio-assist-msg');
+    const inputEl = mainEl.querySelector('#studio-assist-input');
+    const outputEl = mainEl.querySelector('#studio-assist-output');
+    const notesEl = mainEl.querySelector('#studio-assist-notes');
+    const contextEl = mainEl.querySelector('#studio-assist-context');
+    const toneEl = mainEl.querySelector('#studio-assist-tone');
+    const lengthEl = mainEl.querySelector('#studio-assist-length');
+    const genPromptEl = mainEl.querySelector('#studio-assist-generate-prompt');
+    const setMsg = (kind, text) => {
+        if (!(msg instanceof HTMLElement)) return;
+        if (!text) {
+            msg.style.display = 'none';
+            msg.textContent = '';
+            return;
+        }
+        msg.style.display = 'block';
+        msg.className = `studio-banner studio-banner--${kind}`;
+        msg.textContent = text;
+    };
+    const setBusy = (btn, on, busyText) => {
+        if (!(btn instanceof HTMLButtonElement)) return;
+        if (!btn.dataset.label) btn.dataset.label = btn.textContent || '';
+        btn.disabled = on;
+        btn.textContent = on ? busyText : btn.dataset.label;
+    };
+    const activeTranslateStyle = () => {
+        const selected = mainEl.querySelector('input[name="studio-assist-translate-style"]:checked');
+        return selected instanceof HTMLInputElement ? selected.value : 'natural';
+    };
+    const switchTab = (tabId) => {
+        const tabs = ['refine', 'generate', 'translate'];
+        tabs.forEach((id) => {
+            const t = mainEl.querySelector(`#studio-assist-tab-${id}`);
+            const p = mainEl.querySelector(`#studio-assist-panel-${id}`);
+            const active = id === tabId;
+            if (t instanceof HTMLButtonElement) {
+                t.classList.toggle('is-active', active);
+                t.setAttribute('aria-selected', active ? 'true' : 'false');
+            }
+            if (p instanceof HTMLElement) {
+                p.classList.toggle('is-active', active);
+                p.hidden = !active;
+            }
+        });
+    };
+    const readInput = () => (inputEl instanceof HTMLTextAreaElement ? inputEl.value.trim() : '');
+    const setOutput = (text) => {
+        if (!(outputEl instanceof HTMLTextAreaElement)) return;
+        outputEl.value = text || '';
+    };
+    mainEl.querySelectorAll('#studio-assist-tabs .studio-tabs__tab').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const id = btn.id.endsWith('generate')
+                ? 'generate'
+                : btn.id.endsWith('translate')
+                  ? 'translate'
+                  : 'refine';
+            switchTab(id);
+        });
+    });
+    mainEl.querySelectorAll('.studio-assist-quick').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const tab = btn.getAttribute('data-tab');
+            if (tab === 'generate' || tab === 'translate' || tab === 'refine') switchTab(tab);
+            const preset = btn.getAttribute('data-preset');
+            if (preset && genPromptEl instanceof HTMLTextAreaElement) {
+                genPromptEl.value = `${preset} for FUSION`;
+            }
+        });
+    });
+    mainEl.querySelectorAll('.studio-assist-preset').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const p = btn.getAttribute('data-preset') || '';
+            if (genPromptEl instanceof HTMLTextAreaElement) {
+                genPromptEl.value = p;
+                genPromptEl.focus();
+            }
+        });
+    });
+    mainEl.querySelector('#studio-assist-clear')?.addEventListener('click', () => {
+        if (inputEl instanceof HTMLTextAreaElement) inputEl.value = '';
+    });
+    mainEl.querySelector('#studio-assist-run-refine')?.addEventListener('click', async (e) => {
+        const source = readInput();
+        if (!source) {
+            setMsg('warn', 'Add input text first.');
+            return;
+        }
+        const tone = toneEl instanceof HTMLSelectElement ? toneEl.value : 'Elevated';
+        const len = lengthEl instanceof HTMLSelectElement ? lengthEl.value : 'Keep';
+        const context = contextEl instanceof HTMLSelectElement ? contextEl.value : 'Artist profile';
+        const notes = notesEl instanceof HTMLTextAreaElement ? notesEl.value.trim() : '';
+        const prompt = [
+            'Refine this text for FUSION internal editorial use.',
+            `Context: ${context}.`,
+            `Tone: ${tone}.`,
+            `Length instruction: ${len}.`,
+            notes ? `Internal context: ${notes}.` : '',
+            'Keep factual meaning, improve clarity and structure.',
+        ]
+            .filter(Boolean)
+            .join(' ');
+        const btn = e.currentTarget;
+        setBusy(btn, true, 'Refining…');
+        setMsg('info', 'Running refinement…');
+        try {
+            const out = await studioReinterpretWithPrompt(prompt, source, 'en');
+            setOutput(String(out || ''));
+            setMsg('ok', 'Refinement complete.');
+        } catch (err) {
+            setMsg('error', err instanceof Error ? err.message : String(err));
+        } finally {
+            setBusy(btn, false, 'Refine Text');
+        }
+    });
+    mainEl.querySelector('#studio-assist-run-generate')?.addEventListener('click', async (e) => {
+        const request = genPromptEl instanceof HTMLTextAreaElement ? genPromptEl.value.trim() : '';
+        if (!request) {
+            setMsg('warn', 'Add a generation prompt first.');
+            return;
+        }
+        const context = contextEl instanceof HTMLSelectElement ? contextEl.value : 'Artist profile';
+        const notes = notesEl instanceof HTMLTextAreaElement ? notesEl.value.trim() : '';
+        const prompt = [
+            'Compose new original copy for FUSION.',
+            `Context: ${context}.`,
+            notes ? `Internal context: ${notes}.` : '',
+            'Output should be publication-ready and concise.',
+        ]
+            .filter(Boolean)
+            .join(' ');
+        const btn = e.currentTarget;
+        setBusy(btn, true, 'Generating…');
+        setMsg('info', 'Generating draft…');
+        try {
+            const out = await studioReinterpretWithPrompt(prompt, request, 'en');
+            setOutput(String(out || ''));
+            setMsg('ok', 'Generation complete.');
+        } catch (err) {
+            setMsg('error', err instanceof Error ? err.message : String(err));
+        } finally {
+            setBusy(btn, false, 'Generate');
+        }
+    });
+    mainEl.querySelector('#studio-assist-run-translate')?.addEventListener('click', async (e) => {
+        const source = readInput();
+        if (!source) {
+            setMsg('warn', 'Add English text first.');
+            return;
+        }
+        const style = activeTranslateStyle();
+        const btn = e.currentTarget;
+        setBusy(btn, true, 'Translating…');
+        setMsg('info', 'Translating…');
+        try {
+            let out = await studioTranslateEnToJa(source);
+            if (style === 'literal') {
+                out = await studioReinterpretWithPrompt(
+                    'Rewrite this Japanese translation in a literal/direct style while keeping original meaning.',
+                    out,
+                    'ja'
+                );
+            }
+            setOutput(String(out || ''));
+            setMsg('ok', 'Translation complete.');
+        } catch (err) {
+            setMsg('error', err instanceof Error ? err.message : String(err));
+        } finally {
+            setBusy(btn, false, 'Translate to Japanese');
+        }
+    });
+    const copyOutput = async () => {
+        const text = outputEl instanceof HTMLTextAreaElement ? outputEl.value : '';
+        if (!text.trim()) {
+            setMsg('warn', 'No output to copy yet.');
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(text);
+            setMsg('ok', 'Output copied.');
+        } catch {
+            setMsg('error', 'Clipboard unavailable in this browser context.');
+        }
+    };
+    mainEl.querySelector('#studio-assist-copy-inline')?.addEventListener('click', () => void copyOutput());
+    mainEl.querySelector('#studio-assist-copy-output')?.addEventListener('click', () => void copyOutput());
+    mainEl.querySelector('#studio-assist-replace-inline')?.addEventListener('click', () => {
+        const out = outputEl instanceof HTMLTextAreaElement ? outputEl.value : '';
+        if (inputEl instanceof HTMLTextAreaElement) inputEl.value = out;
+    });
+    mainEl.querySelector('#studio-assist-apply')?.addEventListener('click', () => {
+        const out = outputEl instanceof HTMLTextAreaElement ? outputEl.value : '';
+        const target = document.activeElement;
+        if (!out.trim()) {
+            setMsg('warn', 'No output available.');
+            return;
+        }
+        if (
+            target instanceof HTMLTextAreaElement ||
+            (target instanceof HTMLInputElement && /^(text|search|url|email)$/i.test(target.type))
+        ) {
+            target.value = out;
+            target.dispatchEvent(new Event('input', { bubbles: true }));
+            setMsg('ok', 'Applied to active field.');
+            return;
+        }
+        setMsg('info', 'Focus a text field first, then click Apply to field.');
+    });
+    mainEl.querySelector('#studio-assist-save-draft')?.addEventListener('click', () => {
+        const payload = {
+            input: inputEl instanceof HTMLTextAreaElement ? inputEl.value : '',
+            output: outputEl instanceof HTMLTextAreaElement ? outputEl.value : '',
+            notes: notesEl instanceof HTMLTextAreaElement ? notesEl.value : '',
+            context: contextEl instanceof HTMLSelectElement ? contextEl.value : 'Artist profile',
+            tone: toneEl instanceof HTMLSelectElement ? toneEl.value : 'Elevated',
+            length: lengthEl instanceof HTMLSelectElement ? lengthEl.value : 'Keep',
+            prompt: genPromptEl instanceof HTMLTextAreaElement ? genPromptEl.value : '',
+            translateStyle: activeTranslateStyle(),
+        };
+        try {
+            localStorage.setItem(key, JSON.stringify(payload));
+            setMsg('ok', 'Draft saved.');
+        } catch (err) {
+            setMsg('error', err instanceof Error ? err.message : String(err));
+        }
+    });
     try {
         const raw = localStorage.getItem(key);
         if (raw) {
             const o = JSON.parse(raw);
-            if (model) model.value = o.model || '';
-            if (notes) notes.value = o.notes || '';
+            if (inputEl instanceof HTMLTextAreaElement) inputEl.value = String(o.input || '');
+            if (outputEl instanceof HTMLTextAreaElement) outputEl.value = String(o.output || '');
+            if (notesEl instanceof HTMLTextAreaElement) notesEl.value = String(o.notes || '');
+            if (contextEl instanceof HTMLSelectElement && o.context) contextEl.value = String(o.context);
+            if (toneEl instanceof HTMLSelectElement && o.tone) toneEl.value = String(o.tone);
+            if (lengthEl instanceof HTMLSelectElement && o.length) lengthEl.value = String(o.length);
+            if (genPromptEl instanceof HTMLTextAreaElement) genPromptEl.value = String(o.prompt || '');
+            if (o.translateStyle === 'literal' || o.translateStyle === 'natural') {
+                const radio = mainEl.querySelector(
+                    `input[name="studio-assist-translate-style"][value="${o.translateStyle}"]`
+                );
+                if (radio instanceof HTMLInputElement) radio.checked = true;
+            }
         }
     } catch {
         /* ignore */
     }
-    mainEl.querySelector('#studio-ai-save')?.addEventListener('click', () => {
-        try {
-            localStorage.setItem(
-                key,
-                JSON.stringify({ model: model?.value || '', notes: notes?.value || '' })
-            );
-            if (msg) {
-                msg.style.display = 'block';
-                msg.textContent = 'Saved locally. Future: sync to canister siteSettings.';
-            }
-        } catch (e) {
-            alert(e instanceof Error ? e.message : String(e));
-        }
-    });
 }
 
 /**
@@ -4676,6 +5157,7 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
     /** Latest canister account payload for Save (updated after Stripe check + sync). */
     let workingRaw = /** @type {Record<string, unknown>} */ (raw);
     const principal = row.principal;
+    const curRole = row.role || 'artist';
     const curStatus = row.status || 'pending';
     const exempt = !!row.membershipExemptManual;
     const stripeSt = row.stripeSubscriptionStatus || '—';
@@ -4703,7 +5185,19 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
 
         <section class="studio-user-manage-section">
           <h3 class="studio-user-manage-section-title">Account status</h3>
-          <p class="studio-muted studio-user-manage-hint">Fusion account lifecycle (pending / active / suspended).</p>
+          <p class="studio-muted studio-user-manage-hint">Update role assignment and lifecycle (pending / active / suspended).</p>
+          <div class="studio-user-manage-control-row">
+            <label class="studio-user-manage-label" for="studio-user-edit-role">Role</label>
+            <select id="studio-user-edit-role" class="studio-select studio-user-manage-select" aria-label="Account role">
+              <option value="artist" ${curRole === 'artist' ? 'selected' : ''}>artist</option>
+              <option value="gallery" ${curRole === 'gallery' ? 'selected' : ''}>gallery</option>
+              <option value="curator" ${curRole === 'curator' ? 'selected' : ''}>curator</option>
+              <option value="collector" ${curRole === 'collector' ? 'selected' : ''}>collector</option>
+              <option value="staff" ${curRole === 'staff' ? 'selected' : ''}>staff</option>
+              <option value="collaborator" ${curRole === 'collaborator' ? 'selected' : ''}>collaborator</option>
+              <option value="admin" ${curRole === 'admin' ? 'selected' : ''}>admin</option>
+            </select>
+          </div>
           <div class="studio-user-manage-control-row">
             <label class="studio-user-manage-label" for="studio-user-edit-status">Status</label>
             <select id="studio-user-edit-status" class="studio-select studio-user-manage-select" aria-label="Account status">
@@ -5061,6 +5555,8 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
     });
 
     saveBtn?.addEventListener('click', async () => {
+        const roleSel = root.querySelector('#studio-user-edit-role');
+        const roleKey = roleSel instanceof HTMLSelectElement ? roleSel.value : 'artist';
         const sel = root.querySelector('#studio-user-edit-status');
         const statusKey = sel instanceof HTMLSelectElement ? sel.value : 'pending';
         const memSel = root.querySelector('#studio-user-edit-membership');
@@ -5068,6 +5564,7 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
         const ex = mem === 'manual_exempt';
         const patched = {
             ...workingRaw,
+            role: { [roleKey]: null },
             status: { [statusKey]: null },
             membershipExemptManual: ex,
             updatedAt: new Date().toISOString(),

@@ -61,6 +61,12 @@ import "./components/subComponents/journalRow.js";
 import "./components/subComponents/quoteRow.js";
 import "./components/subComponents/audioRow.js";
 import "./components/subComponents/joinNetwork.js";
+import "./components/subComponents/community-hero.js";
+import "./components/subComponents/exclusive-content-highlight.js";
+import "./components/subComponents/community-connect.js";
+import "./components/subComponents/community-network-cards.js";
+import "./components/subComponents/community-upcoming-sessions.js";
+import "./components/subComponents/community-promo-block.js";
 import "./components/subComponents/signInModal.js";
 import { initIcAuth } from "./utils/icAuth.js";
 /** Warm Stripe.js so the join-network payment step does not wait on first dynamic import. */

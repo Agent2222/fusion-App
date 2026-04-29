@@ -12,6 +12,8 @@ export const S3_UPLOAD_AREAS = [
     'studio/editions',
     'studio/journal',
     'studio/sound',
+    'studio/community',
+    'studio/email',
     'studio/misc',
     'account/profile',
     'services/test',

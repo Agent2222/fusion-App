@@ -321,7 +321,7 @@ body {
 }
 
 .page.settings-profile-page {
-  margin-top: 2rem;
+  margin-top: 180px;
 }
 
 .settings-profile-page .feed-container {
@@ -2842,11 +2842,64 @@ html[data-theme='dark'] .join-fusion-page__err {
   padding-right: 0;
 }
 
+/* Community (journal-like scroll shell + join at bottom) */
+#communityMainContent {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  overflow-y: auto;
+  overflow-x: hidden;
+  gap: 0;
+  padding-top: 130px;
+  padding-bottom: 350px;
+}
+
+.community-content {
+  width: 100%;
+  box-sizing: border-box;
+  padding-left: clamp(0.5rem, 2vw, 1.25rem);
+  padding-right: clamp(0.5rem, 2vw, 1.25rem);
+}
+
+.community-page #communityMainContent,
+.community-page .community-content {
+  color: var(--c2);
+  font-family: 'momochidori-variable', Arial, sans-serif;
+}
+
+.community-foot-grid {
+  display: grid;
+  grid-template-columns: 1fr minmax(260px, 340px);
+  gap: clamp(1.5rem, 4vw, 3rem);
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 3rem 0 4rem;
+  align-items: stretch;
+  box-sizing: border-box;
+}
+
+@media (max-width: 900px) {
+  .community-foot-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.community-network-section {
+  padding: 2rem 0 1rem;
+}
+
+.community-page .shoutHeadline {
+  margin-top: 25%;
+}
+
 /* ----- Program view + page shells: narrow viewports (desktop rules above unchanged) ----- */
 @media (max-width: 1024px) {
   #programsMainContent,
   #programViewMainContent,
-  #journalMainContent {
+  #journalMainContent,
+  #communityMainContent {
     padding-top: clamp(5rem, 12vw, 8rem);
     padding-bottom: clamp(8rem, 20vw, 15rem);
   }
@@ -2907,7 +2960,8 @@ html[data-theme='dark'] .join-fusion-page__err {
     margin-bottom: 30rem;
   }
 
-  #journalMainContent {
+  #journalMainContent,
+  #communityMainContent {
     margin-bottom: 20rem;
   }
 
@@ -2917,10 +2971,6 @@ html[data-theme='dark'] .join-fusion-page__err {
 
   #contextSubHeadlineText {
     font-size: clamp(1.2rem, 1.2vw, 1.5rem);
-  }
-
-  .community-page .shoutHeadline {
-    margin-top: 25%;
   }
 
   .journal-entry-description {
