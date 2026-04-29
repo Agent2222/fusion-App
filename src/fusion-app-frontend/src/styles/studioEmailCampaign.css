@@ -56,7 +56,8 @@
     .studio-btn-ghost,
     .studio-btn-primary,
     .studio-ec__subtab,
-    .studio-ec__edtab,
+    .studio-ec__camp,
+    .studio-ec__preview-open,
     .studio-ec__tbt,
     .studio-ec__aib,
     .studio-ec__pill
@@ -144,7 +145,7 @@
 
 .studio-ec__layout {
   display: grid;
-  grid-template-columns: minmax(180px, 220px) minmax(220px, 0.9fr) minmax(0, 1.45fr) minmax(240px, 320px);
+  grid-template-columns: minmax(240px, 0.88fr) minmax(0, 1.5fr) minmax(240px, 300px);
   gap: 0;
   min-height: 760px;
   background: #ffffff;
@@ -213,18 +214,31 @@
   border: 1px solid var(--ec-border);
   border-radius: 6px;
   background: #fff;
-  color: inherit;
+  color: var(--ec-ink);
   cursor: pointer;
   font: inherit;
-  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  appearance: none;
+  -webkit-tap-highlight-color: rgba(17, 17, 17, 0.12);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease, background 0.12s ease, color 0.12s ease;
 }
 
 .studio-ec__camp:hover {
   border-color: #111111;
+  color: #111111;
+  background: #fbf7f5;
+}
+
+.studio-ec__camp:active {
+  border-color: #111111;
+  color: #111111;
+  background: #f2efed;
+  box-shadow: none;
 }
 
 .studio-ec__camp.is-active {
   border-color: #111111;
+  color: #111111;
+  background: #fbf7f5;
   box-shadow: 0 0 0 1px rgba(17, 17, 17, 0.2);
 }
 
@@ -252,6 +266,11 @@
   border-radius: 6px;
 }
 
+.studio-ec__panel--campaigns .studio-ec__hint {
+  margin: 0.5rem 0.25rem 0;
+  padding: 0;
+}
+
 .studio-ec__hint {
   font-size: 0.75rem;
   color: var(--ec-ink-muted);
@@ -260,17 +279,26 @@
   font-variation-settings: var(--ec-fv-text);
 }
 
-/* ---- Left assist column ---- */
+/* ---- Left assist column (campaigns + compose / generate / templates) ---- */
 .studio-ec__col--assist {
   background: #ffffff;
+  min-width: 0;
 }
 
 .studio-ec__subtabs {
   display: flex;
-  min-height: 64px;
+  min-height: 56px;
   align-items: stretch;
   border-bottom: 1px solid var(--ec-border);
   background: #fff;
+}
+
+/* Four top tabs: slightly tighter so labels fit */
+.studio-ec__subtabs--four .studio-ec__subtab {
+  font-size: 0.75rem;
+  padding: 0.45rem 0.2rem;
+  min-width: 0;
+  flex: 1;
 }
 
 .studio-ec__subtab {
@@ -286,17 +314,35 @@
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
   box-sizing: border-box;
+  -webkit-tap-highlight-color: rgba(17, 17, 17, 0.1);
+  appearance: none;
 }
 
 .studio-ec__subtab.is-active {
   color: var(--ec-ink);
   font-variation-settings: var(--fv-title);
   border-bottom-color: #111111;
+  background: transparent;
 }
 
 .studio-ec__subtab:hover:not(.is-active) {
   color: #111111;
+  background: #f2efed;
+}
+
+.studio-ec__subtab:active {
+  color: #111111;
+  background: #ece8e5;
+}
+
+.studio-ec__subtab.is-active:hover {
+  background: rgba(0, 0, 0, 0.02);
+  color: #111111;
+}
+
+.studio-ec__subtab.is-active:active {
   background: rgba(0, 0, 0, 0.04);
+  color: #111111;
 }
 
 .studio-ec__assist-panels,
@@ -305,6 +351,18 @@
   flex: 1;
   overflow: auto;
   min-height: 0;
+}
+
+.studio-ec__panel--campaigns .studio-ec__list-head {
+  margin: -0.35rem -0.5rem 0.75rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: 8px;
+}
+
+.studio-ec__panel--campaigns .studio-ec__list-scroll {
+  min-height: 120px;
+  max-height: min(42vh, 380px);
+  padding: 0.75rem 0.5rem 1rem;
 }
 
 .studio-ec__assist-title {
@@ -476,34 +534,33 @@
 
 .studio-ec__edtabs {
   display: flex;
-  border-bottom: 1px solid var(--ec-border);
   margin: 0.2rem 0 0.35rem;
   gap: 0.25rem;
 }
 
-.studio-ec__edtab {
-  padding: 0.4rem 0.65rem;
+.studio-ec__edtabs--bodybar {
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--ec-border);
+  padding-bottom: 0.4rem;
+  margin-bottom: 0.5rem;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.studio-ec__body-tab-label {
   font-size: 0.875rem;
-  font-weight: normal;
-  font-variation-settings: var(--fv-label);
-  background: none;
-  border: none;
-  color: var(--ec-ink-muted);
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  border-radius: 6px 6px 0 0;
-}
-
-.studio-ec__edtab.is-active {
-  color: var(--ec-ink);
   font-variation-settings: var(--fv-title);
-  border-bottom-color: #111111;
+  color: var(--ec-ink);
+  margin: 0;
 }
 
-.studio-ec__edtab:hover:not(.is-active) {
-  color: #111111;
-  background: rgba(0, 0, 0, 0.04);
+.studio-ec__preview-open {
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  padding: 0.35rem 0.85rem;
+  min-height: 36px;
+  border-radius: var(--ec-radius-sm);
 }
 
 .studio-ec__editor-wrap {
@@ -651,21 +708,20 @@
   border-color: #111111;
 }
 
-.studio-ec__previewwrap {
-  flex: 1;
-  min-height: 240px;
-  border: 1px solid var(--ec-border);
-  border-radius: var(--ec-radius-md);
-  overflow: hidden;
-  background: #fff;
+/* Preview opens in a Studio modal; iframe lives in modal body */
+.studio-ec-preview-pop {
+  width: 100%;
+  margin: 0;
 }
 
-.studio-ec__preview-frame {
+.studio-modal-body .studio-ec__preview-frame--pop {
   width: 100%;
-  min-height: 300px;
-  height: 100%;
-  border: none;
+  min-height: min(68vh, 580px);
+  max-height: 72vh;
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-md);
   background: #fff;
+  box-sizing: border-box;
 }
 
 /* ---- Right settings ---- */
@@ -793,26 +849,6 @@
   font-variation-settings: var(--ec-fv-text);
 }
 
-.studio-ec__read {
-  font-size: 0.78rem;
-  line-height: 1.4;
-  color: var(--ec-ink-muted);
-  margin: 0;
-  font-variation-settings: var(--ec-fv-text);
-}
-
-.studio-ec__from {
-  font-size: 0.8rem;
-  line-height: 1.4;
-  word-break: break-word;
-  color: var(--ec-ink);
-  margin: 0;
-  padding: 0.4rem 0.5rem;
-  background: #fff;
-  border: 1px solid var(--ec-border);
-  border-radius: 6px;
-}
-
 .studio-ec__settings-links {
   display: flex;
   flex-direction: column;
@@ -872,6 +908,11 @@
   justify-content: flex-end;
 }
 
+/* Primary actions stay on the right; delete stays on the left for visibility. */
+.studio-ec__dock-in .studio-ec__delete {
+  margin-right: auto;
+}
+
 .studio-ec__dock .studio-btn-secondary,
 .studio-ec__dock .studio-btn-primary {
   border-radius: var(--ec-radius-sm);
@@ -888,13 +929,8 @@
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
   }
 
-  .studio-ec__col--list,
   .studio-ec__col--assist {
-    max-height: 260px;
-  }
-
-  .studio-ec__col--list {
-    border-right: 1px solid var(--ec-border);
+    max-height: 280px;
   }
 
   .studio-ec__col--editor,
@@ -914,16 +950,15 @@
     flex-direction: column;
   }
 
-  .studio-ec__col--list,
   .studio-ec__col--assist {
-    max-height: 200px;
+    max-height: 220px;
   }
 }
 
 @media (prefers-reduced-motion: no-preference) {
   .studio-ec__camp,
   .studio-ec__subtab,
-  .studio-ec__edtab {
+  .studio-ec__preview-open {
     transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
   }
 }
@@ -950,4 +985,137 @@
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
+}
+
+/* Outrank global studio.css .studio-btn-* (slate / color-mix with primary) inside Email studio */
+.studio-app .studio-ec .studio-btn-secondary:hover,
+.studio-app .studio-ec .studio-btn-secondary:focus-visible {
+  background: #f2efed !important;
+  color: #111111 !important;
+  border-color: #111111 !important;
+  filter: none !important;
+  box-shadow: none;
+}
+
+.studio-app .studio-ec .studio-btn-primary:hover,
+.studio-app .studio-ec .studio-btn-primary:focus-visible {
+  filter: none !important;
+  background: #262626 !important;
+  border-color: #262626 !important;
+  color: #ffffff !important;
+}
+
+.studio-app .studio-ec .studio-btn-ghost:hover,
+.studio-app .studio-ec .studio-btn-ghost:focus-visible {
+  background: #f2efed !important;
+  color: #111111 !important;
+  border-color: #111111 !important;
+  filter: none !important;
+}
+
+/* Subtabs + campaign list: beat global .studio-app button / slate link tones */
+.studio-app .studio-ec button.studio-ec__subtab:not(.is-active) {
+  color: #6f6f6f !important;
+  background: transparent !important;
+  filter: none !important;
+}
+
+.studio-app .studio-ec button.studio-ec__subtab.is-active {
+  color: #111111 !important;
+  background: transparent !important;
+  filter: none !important;
+}
+
+.studio-app .studio-ec button.studio-ec__subtab:hover:not(.is-active) {
+  color: #111111 !important;
+  background: #f2efed !important;
+  filter: none !important;
+}
+
+.studio-app .studio-ec button.studio-ec__subtab:active {
+  color: #111111 !important;
+  background: #ece8e5 !important;
+  filter: none !important;
+}
+
+.studio-app .studio-ec .studio-ec__camp {
+  color: #111111 !important;
+  background: #ffffff !important;
+  filter: none !important;
+}
+
+.studio-app .studio-ec .studio-ec__camp .studio-ec__camp-meta {
+  color: #6f6f6f !important;
+}
+
+.studio-app .studio-ec .studio-ec__camp:hover {
+  color: #111111 !important;
+  background: #fbf7f5 !important;
+  border-color: #111111 !important;
+  filter: none !important;
+}
+
+.studio-app .studio-ec .studio-ec__camp:active {
+  color: #111111 !important;
+  background: #f2efed !important;
+  border-color: #111111 !important;
+  filter: none !important;
+}
+
+.studio-app .studio-ec .studio-ec__camp.is-active {
+  color: #111111 !important;
+  background: #fbf7f5 !important;
+  border-color: #111111 !important;
+  filter: none !important;
+}
+
+/* Broadcast segment row: preset + UUID + SYNC / READY (see studio-resend-sync--*) */
+.studio-ec-segment-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  width: 100%;
+}
+
+.studio-ec .studio-ec-segment-row .studio-select {
+  flex: 1 1 200px;
+  min-width: 10rem;
+}
+
+.studio-ec .studio-ec-segment-row .studio-input {
+  flex: 2 1 220px;
+  min-width: 10rem;
+}
+
+.studio-ec .studio-resend-sync {
+  flex: 0 0 auto;
+  min-width: 7.5rem;
+  font-weight: 600;
+  font-size: 0.8rem;
+  border-radius: var(--ec-radius-sm, 6px);
+  padding: 0.55rem 0.85rem;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-family: inherit;
+  font-variation-settings: var(--ec-fv-text, inherit);
+}
+
+.studio-ec .studio-resend-sync:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Pending: subscribers still need Fusion tag + Resend add */
+.studio-ec .studio-resend-sync--pending {
+  background: #eab308;
+  color: #0f172a;
+  border-color: #ca8a04;
+}
+
+/* Roster in sync for current segment in Fusion */
+.studio-ec .studio-resend-sync--ready {
+  background: var(--c4, #a2b792);
+  color: #0f172a;
+  border-color: color-mix(in srgb, var(--c4, #a2b792) 75%, #0f172a 25%);
 }

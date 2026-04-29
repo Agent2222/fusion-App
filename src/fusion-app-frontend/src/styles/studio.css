@@ -793,6 +793,30 @@ button.studio-wordmark-btn:hover {
   color: var(--studio-pill-dev-text);
 }
 
+/* Subscribers → Manage audiences: tappable segment toggles */
+.studio-audience-pill-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.75rem 0 1rem;
+}
+
+button.studio-audience-pill.studio-pill {
+  border: 1px solid var(--studio-btn-ghost-border, var(--c2));
+  background: #fff;
+  border-radius: 999px;
+  padding: 0.35rem 0.8rem;
+  cursor: pointer;
+  font: inherit;
+  color: #0f172a;
+}
+
+button.studio-audience-pill.studio-pill.studio-pill--active {
+  background: var(--c4, #a2b792);
+  color: #0f172a;
+  border-color: color-mix(in srgb, var(--c2, #0f172a) 18%, var(--c4, #a2b792));
+}
+
 .studio-link-btn {
   border: none;
   background: none;
@@ -1699,6 +1723,14 @@ button.studio-wordmark-btn:hover {
   padding: 0 0.85rem 0.85rem;
 }
 
+/* Artists → Comms: clearer edge vs adjacent accordions (Email lives in its own section now) */
+.studio-section-accordion.studio-section-accordion--artists-comms {
+  border: 1px solid #dedbd8;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
+}
+
 .studio-assistance-page {
   gap: 0.75rem;
 }
@@ -2045,6 +2077,163 @@ button.studio-wordmark-btn:hover {
   background: #f8fafc;
   border-radius: 0;
   border: 1px solid #e2e8f0;
+}
+
+/* Applicants — structured application payload (view + edit modals) */
+.studio-app-payload-dl {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem 0;
+  margin: 0.5rem 0 1rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  padding: 0.75rem 1rem;
+}
+
+.studio-app-payload-dl__row {
+  display: grid;
+  grid-template-columns: minmax(7.5rem, 11rem) 1fr;
+  gap: 0.35rem 0.75rem;
+  padding: 0.2rem 0;
+  border-bottom: 1px solid color-mix(in srgb, #64748b 12%, transparent);
+}
+.studio-app-payload-dl__row:last-child {
+  border-bottom: 0;
+}
+
+.studio-app-payload-dl dt {
+  margin: 0;
+  color: #64748b;
+  font-weight: 500;
+  font-size: 0.82rem;
+}
+.studio-app-payload-dl dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+a.studio-app-payload-link {
+  color: #0c4a6e;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+a.studio-app-payload-link:hover {
+  color: #0f172a;
+}
+
+.studio-app-payload-other-label {
+  margin: 0.75rem 0 0.25rem;
+}
+
+.studio-app-internal-notes {
+  margin: 0.75rem 0 0;
+}
+.studio-app-internal-notes__body {
+  margin-top: 0.35rem;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  padding: 0.5rem 0.65rem;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+}
+
+.studio-app-status-with-email {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem 1rem;
+  margin: 0.5rem 0 0.75rem;
+}
+.studio-app-status-with-email__status {
+  flex: 1;
+  min-width: 10rem;
+}
+.studio-app-status-with-email__send {
+  display: flex;
+  align-items: center;
+  padding-bottom: 0.15rem;
+}
+
+/* Services → Resend: new applicant notification + Send Test */
+.studio-svc-app-notify-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem 1rem;
+  margin: 0.5rem 0 0.25rem;
+}
+.studio-svc-app-notify-row__input {
+  flex: 1 1 16rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+}
+.studio-svc-app-notify-row__test {
+  flex: 0 0 auto;
+  padding-bottom: 0.15rem;
+}
+
+.studio-community {
+  --studio-community-border: color-mix(in srgb, var(--c2, #0f172a) 14%, transparent);
+  --studio-community-canvas: color-mix(in srgb, var(--c3, #fff) 92%, var(--c4, #a2b792) 8%);
+}
+
+.studio-community__stack {
+  display: grid;
+  gap: 1rem;
+}
+
+.studio-community__section {
+  border: 1px solid var(--studio-community-border);
+  background: var(--studio-community-canvas);
+  padding: 1rem;
+}
+
+.studio-community__section-head {
+  margin-bottom: 0.75rem;
+}
+
+.studio-community__section-head .studio-subheading {
+  margin: 0 0 0.25rem;
+}
+
+.studio-community__section-head .studio-muted {
+  margin: 0;
+}
+
+.studio-community__form {
+  max-width: 56rem;
+}
+
+.studio-community__form .studio-field-group.studio-community__card {
+  border: 1px solid var(--studio-community-border);
+  background: #fff;
+  padding: 0.9rem;
+  margin: 0 0 0.8rem;
+}
+
+.studio-community__subhead {
+  margin-top: 1.25rem;
+}
+
+.studio-community__table-wrap {
+  margin-bottom: 0.55rem;
+}
+
+.studio-community__inline-actions {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 0.2rem;
+}
+
+.studio-community__actions {
+  margin-top: 0.85rem;
 }
 
 .studio-content-editor {
@@ -3168,11 +3357,111 @@ button.studio-wordmark-btn:hover {
   border-color: var(--c1, #c12525);
 }
 
+/* Individual email modal (roster table → one-off email) */
+.studio-individual-email__to {
+  font-size: 0.86rem;
+  color: var(--studio-muted, #64748b);
+}
+
+.studio-textarea.studio-individual-email__body {
+  white-space: pre-wrap;
+  line-height: 1.55;
+  font-size: 0.9rem;
+  max-width: 100%;
+}
+
+/* Artists / Status tables: Email column action */
+.studio-td-email {
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.studio-artist-email-btn {
+  font-size: 0.72rem;
+  padding: 0.32rem 0.55rem;
+  min-width: 3.25rem;
+  border-radius: 6px;
+}
+
+.studio-artist-email-btn--has-email {
+  background: var(--c4, #a2b792);
+  border-color: color-mix(in srgb, var(--c2, #0f172a) 18%, var(--c4, #a2b792));
+  color: var(--c2, #0f172a);
+}
+
+.studio-artist-email-btn--has-email:hover:not(:disabled) {
+  filter: brightness(0.97);
+  border-color: color-mix(in srgb, var(--c2) 35%, transparent);
+}
+
+.studio-artist-email-btn--has-email:focus-visible {
+  outline: 2px solid var(--c2, #0f172a);
+  outline-offset: 2px;
+}
+
 .studio-td-ellipsis {
   max-width: 10rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Full-screen login gate when not authenticated (above workspace, below account overlay content) */
+.studio-auth-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 350;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0)
+    env(safe-area-inset-left, 0);
+  box-sizing: border-box;
+  pointer-events: auto;
+}
+
+.studio-auth-gate[hidden] {
+  display: none !important;
+}
+
+.studio-auth-gate__scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 10, 16, 0.82);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.studio-auth-gate__panel {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 22rem);
+  margin: 0 1.25rem;
+  padding: 1.5rem 1.5rem 1.25rem;
+  text-align: center;
+  background: #0f172a;
+  color: #f1f5f9;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+  border-radius: 8px;
+}
+
+.studio-auth-gate__title {
+  margin: 0 0 0.5rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #f8fafc;
+}
+
+.studio-auth-gate__text {
+  margin: 0 0 1.1rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: #94a3b8;
+}
+
+.studio-auth-gate__panel .studio-btn-primary {
+  min-width: 8rem;
 }
 
 /* Account: modal overlay above Studio workspace (embeds member dashboard) */
@@ -3518,14 +3807,56 @@ button.studio-wordmark-btn:hover {
   white-space: nowrap;
 }
 
-/* Artist manage redesign: full-width in-page surface (replaces popup workflow) */
+/* Artist manage: tokens aligned with Studio → Email (warm off-white, #dedbd8, #111) */
 .studio-artist-manage-surface {
+  --am-border: #dedbd8;
+  --am-border-soft: #ece8e5;
+  --am-ink: #111111;
+  --am-ink-secondary: #3f3f3f;
+  --am-ink-muted: #6f6f6f;
+  --am-canvas: #fbf7f5;
+  --am-surface: #ffffff;
+  --am-radius: 10px;
+  --am-radius-lg: 14px;
+  --am-shadow: 0 12px 30px rgba(0, 0, 0, 0.04);
+  --am-fv-text: var(--fv-label, 'wght' 500, 'wdth' 110);
   width: 100%;
   box-sizing: border-box;
-  background: #f5f5f3;
-  border: 1px solid #ececeb;
-  border-radius: 8px;
-  padding: 0.7rem 0.85rem 0.9rem;
+  background: var(--am-canvas);
+  border: 1px solid var(--am-border);
+  border-radius: var(--am-radius-lg);
+  padding: 1rem 1.15rem 1.1rem;
+  box-shadow: var(--am-shadow);
+  -webkit-font-smoothing: antialiased;
+  color: var(--am-ink);
+  font-variation-settings: var(--am-fv-text);
+  font-family: 'momochidori-variable', 'Inter', system-ui, sans-serif;
+  accent-color: #111111;
+  caret-color: #111111;
+  -webkit-tap-highlight-color: rgba(0, 0, 0, 0.06);
+}
+
+.studio-artist-manage-surface ::selection {
+  background: rgba(17, 17, 17, 0.1);
+  color: inherit;
+}
+
+.studio-artist-manage-surface
+  :is(
+    .studio-input,
+    .studio-textarea,
+    .studio-select,
+    .studio-btn-primary,
+    .studio-btn-secondary,
+    .studio-btn-ghost
+  ):focus {
+  outline: none;
+}
+
+.studio-artist-manage-surface
+  :is(.studio-input, .studio-textarea, .studio-select):focus-visible {
+  outline: 1px solid #111111;
+  outline-offset: 2px;
 }
 
 .studio-artist-manage-shell {
@@ -3541,17 +3872,22 @@ button.studio-wordmark-btn:hover {
 }
 
 .studio-artist-manage-crumb {
-  font-size: 0.72rem;
-  color: var(--studio-muted);
-  font-variation-settings: var(--fv-label);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--am-ink);
+  font-variation-settings: var(--fv-title);
+  opacity: 0.9;
 }
 
 .studio-artist-manage-title {
-  margin: 0.25rem 0 0.55rem;
-  font-size: clamp(2.05rem, 2.6vw, 2.3rem);
+  margin: 0.35rem 0 0.75rem;
+  font-size: clamp(1.35rem, 2.2vw, 1.65rem);
+  font-weight: normal;
   font-variation-settings: var(--fv-title);
-  color: #161616;
+  color: var(--am-ink);
   letter-spacing: 0.01em;
+  line-height: 1.2;
 }
 
 .studio-artist-manage-top-actions {
@@ -3565,11 +3901,12 @@ button.studio-wordmark-btn:hover {
   justify-content: space-between;
   align-items: stretch;
   gap: 1rem;
-  background: #fff;
-  border: 1px solid #ececeb;
-  border-radius: 8px;
-  padding: 0.75rem 0.85rem;
-  margin-bottom: 0.75rem;
+  background: var(--am-surface, #fff);
+  border: 1px solid var(--am-border, #dedbd8);
+  border-radius: var(--am-radius, 10px);
+  padding: 0.85rem 1rem;
+  margin-bottom: 0.85rem;
+  box-shadow: var(--am-shadow, 0 12px 30px rgba(0, 0, 0, 0.04));
 }
 
 .studio-artist-identity-main {
@@ -3583,43 +3920,45 @@ button.studio-wordmark-btn:hover {
   width: 62px;
   height: 62px;
   border-radius: 50%;
-  background: #efefef;
-  color: #2a2a2a;
+  background: var(--am-border-soft, #ece8e5);
+  color: var(--am-ink, #111);
   display: grid;
   place-items: center;
-  font-size: 1.3rem;
-  font-variation-settings: var(--fv-subtitle);
+  font-size: 1.15rem;
+  font-variation-settings: var(--fv-title);
+  border: 1px solid var(--am-border, #dedbd8);
 }
 
 .studio-artist-identity-name {
-  font-size: clamp(1.95rem, 2.05vw, 2.05rem);
-  font-variation-settings: var(--fv-subtitle);
-  color: #161616;
-  line-height: 1;
+  font-size: clamp(1.1rem, 1.5vw, 1.25rem);
+  font-variation-settings: var(--fv-title);
+  color: var(--am-ink, #111);
+  line-height: 1.3;
 }
 
 .studio-artist-identity-slug {
   margin-left: 0.5rem;
   display: inline-block;
   vertical-align: middle;
-  padding: 0.18rem 0.4rem;
+  padding: 0.2rem 0.45rem;
   border-radius: 999px;
-  border: 1px solid #e5e7eb;
-  background: #f7f7f8;
-  color: #6b7280;
-  font-size: 0.68rem;
-  font-variation-settings: var(--fv-caption);
+  border: 1px solid var(--am-border, #dedbd8);
+  background: var(--am-canvas, #fbf7f5);
+  color: var(--am-ink-muted, #6f6f6f);
+  font-size: 0.7rem;
+  font-variation-settings: var(--fv-label);
 }
 
 .studio-artist-identity-subline {
-  margin-top: 0.18rem;
+  margin-top: 0.25rem;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.45rem 0.6rem;
-  color: #4a4a4a;
-  font-size: 0.78rem;
-  font-variation-settings: var(--fv-label);
+  color: var(--am-ink-secondary, #3f3f3f);
+  font-size: 0.8rem;
+  line-height: 1.4;
+  font-variation-settings: var(--am-fv-text, var(--fv-label));
 }
 
 .studio-artist-status-pill {
@@ -3671,8 +4010,9 @@ button.studio-wordmark-btn:hover {
 }
 
 .studio-artist-identity-kv span {
-  color: #6a6a6a;
+  color: var(--am-ink-muted, #6f6f6f);
   min-width: 64px;
+  font-variation-settings: var(--fv-title);
 }
 
 .studio-artist-manage-content {
@@ -3683,10 +4023,11 @@ button.studio-wordmark-btn:hover {
 }
 
 .studio-artist-manage-main .studio-modal-form--artist {
-  border: 1px solid #ececeb;
-  background: #fff;
-  border-radius: 8px;
-  padding: 0.35rem;
+  border: 1px solid var(--am-border, #dedbd8);
+  background: var(--am-surface, #fff);
+  border-radius: var(--am-radius, 10px);
+  padding: 0.5rem 0.5rem 0.65rem;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
 }
 
 .studio-artist-manage-main .studio-modal-form--artist .studio-tabs__panels {
@@ -3712,32 +4053,34 @@ button.studio-wordmark-btn:hover {
 }
 
 .studio-artist-context-card {
-  border: 1px solid #ececeb;
-  background: #fff;
-  border-radius: 8px;
-  padding: 0.75rem;
+  border: 1px solid var(--am-border, #dedbd8);
+  background: var(--am-surface, #fff);
+  border-radius: var(--am-radius, 10px);
+  padding: 0.85rem 0.9rem;
 }
 
 .studio-artist-context-card h3 {
   margin: 0 0 0.55rem;
-  font-size: 0.9rem;
+  font-size: 0.82rem;
   text-transform: none;
-  color: #232323;
-  font-variation-settings: var(--fv-label-strong);
+  color: var(--am-ink, #111);
+  font-variation-settings: var(--fv-title);
 }
 
 .studio-artist-kv {
   display: flex;
   justify-content: space-between;
   gap: 0.6rem;
-  font-size: 0.78rem;
-  color: #585858;
+  font-size: 0.8rem;
+  color: var(--am-ink-secondary, #3f3f3f);
   padding: 0.28rem 0;
+  line-height: 1.35;
+  font-variation-settings: var(--am-fv-text, var(--fv-label));
 }
 
 .studio-artist-kv strong {
-  color: #1a1a1a;
-  font-variation-settings: var(--fv-label-strong);
+  color: var(--am-ink, #111);
+  font-variation-settings: var(--fv-title);
 }
 
 .studio-artist-context-card .studio-action-link {
@@ -3748,42 +4091,47 @@ button.studio-wordmark-btn:hover {
 }
 
 .studio-artist-editor-form .studio-tabs__list {
-  border-bottom: 1px solid #ececeb;
+  border-bottom: 1px solid var(--am-border, #dedbd8);
   margin-bottom: 0.95rem;
-  gap: 0.22rem;
+  gap: 0.2rem;
 }
 
 .studio-artist-editor-form .studio-tabs__tab {
   border: 0;
-  border-radius: 0;
-  font-size: 0.76rem;
-  color: #525252;
+  border-radius: 6px 6px 0 0;
+  font-size: 0.8rem;
+  color: var(--am-ink-muted, #6f6f6f);
   background: transparent;
-  padding: 0.5rem 0.58rem;
-  transition: color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+  padding: 0.5rem 0.55rem;
+  transition: color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  font-variation-settings: var(--fv-label);
+  -webkit-tap-highlight-color: rgba(17, 17, 17, 0.1);
 }
 
 .studio-artist-editor-form .studio-tabs__tab:hover {
-  color: #212121;
-  background: #f8f8f8;
+  color: var(--am-ink, #111);
+  background: #f2efed;
 }
 
 .studio-artist-editor-form .studio-tabs__tab.is-active {
-  color: #121212;
+  color: var(--am-ink, #111);
+  font-variation-settings: var(--fv-title);
   box-shadow: inset 0 -2px 0 #111;
+  background: rgba(0, 0, 0, 0.02);
 }
 
 .studio-artist-editor-intro {
   margin-bottom: 0.85rem;
-  font-size: 0.88rem;
-  color: #59606d;
-  line-height: 1.45;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  color: var(--am-ink-secondary, #3f3f3f);
+  font-variation-settings: var(--am-fv-text, var(--fv-label));
 }
 
 .studio-artist-editor-actions {
   margin-top: 0.9rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid #ececeb;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--am-border, #dedbd8);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -3812,38 +4160,56 @@ button.studio-wordmark-btn:hover {
 
 .studio-artist-panel-head {
   margin-bottom: 0.65rem;
-  padding-bottom: 0.55rem;
-  border-bottom: 1px solid #ececec;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--am-border, #dedbd8);
 }
 
 .studio-artist-panel-head h3 {
   margin: 0;
-  font-size: 1.04rem;
-  font-variation-settings: var(--fv-label-strong);
-  color: #212121;
+  font-size: 0.95rem;
+  font-weight: normal;
+  font-variation-settings: var(--fv-title);
+  color: var(--am-ink, #111);
 }
 
 .studio-artist-panel-head p {
-  margin: 0.2rem 0 0;
-  font-size: 0.84rem;
-  color: #6b7280;
+  margin: 0.3rem 0 0;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--am-ink-secondary, #3f3f3f);
+  font-variation-settings: var(--am-fv-text, var(--fv-label));
 }
 
 .studio-artist-manage-main .studio-field span {
-  font-size: 0.86rem;
-  color: #2f3744;
+  font-size: 0.8rem;
+  color: var(--am-ink, #111);
+  font-variation-settings: var(--fv-title);
 }
 
 .studio-artist-manage-main .studio-input,
 .studio-artist-manage-main .studio-textarea,
 .studio-artist-manage-main .studio-select {
-  font-size: 0.9rem;
+  font-size: 0.875rem;
+  line-height: 1.35;
+  border-color: var(--am-border, #dedbd8);
+  color: var(--am-ink, #111);
+  font-variation-settings: var(--am-fv-text, var(--fv-label));
+}
+
+.studio-artist-manage-main .studio-input:focus,
+.studio-artist-manage-main .studio-textarea:focus,
+.studio-artist-manage-main .studio-select:focus {
+  border-color: #111;
+  box-shadow: none;
+  outline: none;
 }
 
 .studio-artist-manage-main .studio-modal-hint,
 .studio-artist-manage-main .studio-muted {
-  font-size: 0.84rem;
-  font-variation-settings: var(--fv-label-strong);
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--am-ink-secondary, #3f3f3f);
+  font-variation-settings: var(--am-fv-text, var(--fv-label));
 }
 
 .studio-asset-thumb {
@@ -3892,21 +4258,31 @@ button.studio-wordmark-btn:hover {
 }
 
 .studio-artist-manage-top .studio-btn-ghost {
-  border-color: #d4d4d8;
-  color: #252525;
+  border: 1px solid var(--am-border, #dedbd8);
+  color: var(--am-ink, #111);
   background: #ffffff;
-  font-size: 0.74rem;
-  padding: 0.38rem 0.62rem;
+  font-size: 0.8rem;
+  padding: 0.4rem 0.7rem;
+  border-radius: 6px;
 }
 
 .studio-artist-manage-top .studio-btn-ghost:hover {
-  background: #fafafa;
+  background: #f2efed;
+  border-color: #111;
+  color: #111;
   filter: none;
 }
 
 .studio-artist-editor-actions .studio-btn-ghost {
-  border-color: #d4d4d8;
-  color: #2b2b2b;
+  border: 1px solid var(--am-border, #dedbd8);
+  color: var(--am-ink, #111);
+  border-radius: 6px;
+}
+
+.studio-artist-editor-actions .studio-btn-ghost:hover {
+  background: #f2efed;
+  border-color: #111;
+  filter: none;
 }
 
 .studio-artist-editor-actions .studio-btn-primary {
@@ -3932,4 +4308,46 @@ button.studio-wordmark-btn:hover {
     position: static;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   }
+}
+
+/* Warm main / rail when artist manage is open (matches Studio → Email) */
+.studio-main:has([data-studio-artist-manage]) {
+  background: #fbf7f5;
+  padding: 1.75rem 2rem 6rem;
+  box-sizing: border-box;
+}
+
+.studio-workspace:has([data-studio-artist-manage]) .studio-topbar {
+  border-bottom-color: #dedbd8;
+}
+
+.studio-workspace:has([data-studio-artist-manage]) .studio-workspace-rail {
+  background: #fbf7f5;
+  border-bottom-color: #dedbd8;
+}
+
+/* Match Email button hovers / focus (global .studio-app often tints controls cool gray) */
+.studio-app .studio-artist-manage-surface .studio-btn-secondary:hover,
+.studio-app .studio-artist-manage-surface .studio-btn-secondary:focus-visible {
+  background: #f2efed !important;
+  color: #111111 !important;
+  border-color: #111111 !important;
+  filter: none !important;
+  box-shadow: none;
+}
+
+.studio-app .studio-artist-manage-surface .studio-btn-primary:hover,
+.studio-app .studio-artist-manage-surface .studio-btn-primary:focus-visible {
+  filter: none !important;
+  background: #262626 !important;
+  border-color: #262626 !important;
+  color: #ffffff !important;
+}
+
+.studio-app .studio-artist-manage-surface .studio-btn-ghost:hover,
+.studio-app .studio-artist-manage-surface .studio-btn-ghost:focus-visible {
+  background: #f2efed !important;
+  color: #111111 !important;
+  border-color: #111111 !important;
+  filter: none !important;
 }

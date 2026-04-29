@@ -3,6 +3,23 @@ import Nat "mo:base/Nat";
 import Text "mo:base/Text";
 
 module {
+    /// Resend audience segment: display name + UUID from Resend dashboard (Studio Services → Resend, max 5 on canister).
+    public type ResendSegmentSlot = {
+        name : Text;
+        segmentId : Text;
+    };
+
+    /// Pre–Resend-audiences stable row (same 5 fields as `Subscriber` before 2026). `subscribersStable` stays this shape for IC stable upgrade compatibility.
+    public type SubscriberV0 = {
+        email : Text;
+        category : Text;
+        // Comes from the frontend as a string (e.g. ISO date).
+        timestamp : Text;
+        fullName : Text;
+        /// `membership` | `access` | `apply` | empty
+        intent : Text;
+    };
+
     public type Subscriber = {
         email : Text;
         category : Text;
@@ -11,6 +28,19 @@ module {
         fullName : Text;
         /// `membership` | `access` | `apply` | empty
         intent : Text;
+        /// Resend segment UUIDs (idempotent SYNC Audience, Studio Manage pills). Default `[]` for new rows and legacy.
+        audiences : [Text];
+    };
+
+    public func subscriberFromV0(s : SubscriberV0) : Subscriber {
+        {
+            email = s.email;
+            category = s.category;
+            timestamp = s.timestamp;
+            fullName = s.fullName;
+            intent = s.intent;
+            audiences = [];
+        };
     };
 
     /// Stored on-chain in `ArtistCore.profile.filter` — must keep **all** legacy fields (see stable upgrade M0216).

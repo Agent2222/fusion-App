@@ -1,9 +1,10 @@
 /**
- * Studio “Send blast” — filters, Resend batch or optional broadcast, LLM quick draft (plain text).
+ * Studio “Send blast” — filters, transactional Resend batch, LLM quick draft (plain text).
  */
 import { getDataSource, studioReinterpretWithPrompt } from '../../utils/database.js';
 import { openStudioModal } from '../../utils/studioModal.js';
-import { sendEmail, sendEmailBatch, resendCreateBroadcast, resendSendBroadcast } from '../../utils/integrationApi.js';
+import { sendEmail, sendEmailBatch } from '../../utils/integrationApi.js';
+import { DEFAULT_SIGNATURE_HTML } from '../../utils/emailHtml.js';
 
 const LLM_COMBINED_MAX = 12000;
 
@@ -38,17 +39,15 @@ function displayNameEn(row) {
 }
 
 /**
- * Pill label: display name and slug (not internal id), e.g. "Jane (jane-doe)".
+ * Roster has at least a plausible contact email (blast is skipped without @).
  * @param {object} row
- * @returns {string}
+ * @returns {boolean}
  */
-function artistPillLabel(row) {
-    const slug = String(row?.slug ?? '').trim();
-    const name = displayNameEn(row);
-    if (slug && name && name !== slug) {
-        return `${name} (${slug})`;
-    }
-    return name || slug || '—';
+function hasContactEmail(row) {
+    const em = String(row?.contactEmail ?? '')
+        .trim()
+        .toLowerCase();
+    return em.includes('@');
 }
 
 /**
@@ -60,12 +59,6 @@ function escapeAttr(s) {
         .replace(/</g, '&lt;')
         .replace(/"/g, '&quot;');
 }
-
-/** Default email signature HTML (fusionart.world assets + social). */
-const DEFAULT_SIGNATURE_HTML = `<p>— Fusion Team</p>
-<p><img src="https://fusionart.world/email/Fusion-Logo-Sig-1.png" alt="Fusion" width="120" height="auto" style="display:block;border:0" /></p>
-<p style="margin:0.5rem 0 0"><a href="https://www.fusionart.world">Fusion Art World</a></p>
-<p>IG: @fusion_intl | TT: @fusion_intl | YT: @fusionartworld</p>`;
 
 /**
  * Escape plain text for safe HTML text content.
@@ -96,7 +89,6 @@ export function openSendBlastModal(opts) {
 
     const inner = `
 <p class="studio-muted" style="margin:0 0 0.75rem">Only send to artists who have agreed to be contacted. Staff are responsible for compliance with applicable law.</p>
-<p class="studio-banner studio-banner--info" style="margin:0 0 0.75rem">Default path uses transactional <strong>batch</strong> email to roster <code>contactEmail</code> values. Optional <strong>Resend broadcast</strong> uses the integration API pass-through (configure audience/template in Resend).</p>
 <div class="studio-send-blast-toolbar">
   <label class="studio-field studio-field--grow"><span>Search</span>
     <input type="search" class="studio-input" id="studio-send-blast-search" placeholder="Slug, id, name…" autocomplete="off" /></label>
@@ -143,20 +135,6 @@ export function openSendBlastModal(opts) {
     <input type="email" class="studio-input" id="studio-send-blast-test-to" placeholder="you@org.com" autocomplete="email" /></label>
   <button type="button" class="studio-btn-secondary" id="studio-send-blast-test">Send test</button>
 </div>
-<details class="studio-embed-block" style="margin:0.5rem 0">
-  <summary>Resend broadcast (optional)</summary>
-  <p class="studio-muted" style="margin:0.5rem 0">Uses Resend <strong>Broadcast</strong> APIs (segment + same email HTML: plain message + signature). Create a draft, then send by id, or use <code>send: true</code> in the Resend dashboard after testing.</p>
-  <label class="studio-field"><input type="checkbox" id="studio-send-blast-broadcast-mode" /> <span>Enable broadcast flow (skip transactional batch)</span></label>
-  <label class="studio-field"><span>Broadcast name (optional)</span>
-    <input type="text" class="studio-input" id="studio-send-blast-bc-name" placeholder="optional" /></label>
-  <label class="studio-field"><span>Segment id</span>
-    <input type="text" class="studio-input" id="studio-send-blast-bc-audience" placeholder="Resend segment id" /></label>
-  <div class="studio-modal-fields-row">
-    <button type="button" class="studio-btn-ghost" id="studio-send-blast-bc-create">Create broadcast</button>
-    <input type="text" class="studio-input" id="studio-send-blast-bc-id" placeholder="Broadcast id (after create)" style="flex:1" />
-  </div>
-  <button type="button" class="studio-btn-secondary" id="studio-send-blast-bc-send" style="margin-top:0.35rem">Send broadcast</button>
-</details>
 <div class="studio-send-blast-footer">
   <p id="studio-send-blast-status" class="studio-send-blast-foot-status" role="status" aria-live="polite"></p>
   <div class="studio-modal-actions studio-modal-actions--send-blast">
@@ -238,7 +216,6 @@ export function openSendBlastModal(opts) {
     const testToEl = root.querySelector('#studio-send-blast-test-to');
     const statusEl = root.querySelector('#studio-send-blast-status');
     const sendBtn = root.querySelector('#studio-send-blast-send');
-    const broadcastMode = root.querySelector('#studio-send-blast-broadcast-mode');
 
     /** @type {object[]} */
     let allRows = [];
@@ -282,7 +259,9 @@ export function openSendBlastModal(opts) {
         const bodyPlain = bodyEl instanceof HTMLTextAreaElement ? bodyEl.value : '';
         const bodyHtml = plainBodyToEmailHtml(bodyPlain);
         const sig = sigTextarea instanceof HTMLTextAreaElement ? sigTextarea.value : '';
-        return `${bodyHtml}\n\n${sig.trim()}`;
+        const sigTrim = sig.trim();
+        if (!sigTrim) return bodyHtml;
+        return `${bodyHtml}<div style="margin:36px 0 0;padding:40px 0 0;border-top:1px solid #e5e2df">${sigTrim}</div>`;
     };
 
     const recomputeSendEnabled = () => {
@@ -290,10 +269,6 @@ export function openSendBlastModal(opts) {
         if (getDataSource() !== 'live') {
             sendBtn.disabled = true;
             sendBtn.title = 'Switch to live data to send email.';
-            return;
-        }
-        if (broadcastMode instanceof HTMLInputElement && broadcastMode.checked) {
-            sendBtn.disabled = true;
             return;
         }
         sendBtn.disabled = false;
@@ -331,16 +306,18 @@ export function openSendBlastModal(opts) {
     const updateOverview = () => {
         if (!overviewEl) return;
         const vis = filteredRows();
-        const withEmail = vis.filter(
-            (a) => String(a.contactEmail ?? '').trim().includes('@') && selected.has(String(a.id)),
-        );
+        const nSelected = vis.filter((a) => selected.has(String(a.id))).length;
         const cDesc =
             cohortFilter.size === 0
                 ? 'all cohorts'
                 : `cohort ${[...cohortFilter].sort((a, b) => a - b).join(', ')}`;
         const q = (searchEl instanceof HTMLInputElement ? searchEl.value : '').trim();
         const searchDesc = q ? `search “${q}”` : 'no search';
-        overviewEl.textContent = `${withEmail.length} of ${vis.length} visible selected have a non-empty contact email (${cDesc}, ${searchDesc}).`;
+        if (allRows.length === 0) {
+            overviewEl.textContent = 'No artists with a contact email in their roster profile match this list.';
+        } else {
+            overviewEl.textContent = `${nSelected} of ${vis.length} visible selected (${cDesc}, ${searchDesc}).`;
+        }
     };
 
     const renderPills = () => {
@@ -349,7 +326,7 @@ export function openSendBlastModal(opts) {
         pillsEl.innerHTML = list
             .map((row) => {
                 const id = String(row.id ?? '').trim();
-                const label = escapeAttr(artistPillLabel(row));
+                const label = escapeAttr(displayNameEn(row));
                 const on = selected.has(id);
                 return `<button type="button" class="studio-send-blast-pill${on ? ' studio-send-blast-pill--selected' : ''}" data-artist-id="${escapeAttr(id)}" aria-pressed="${on ? 'true' : 'false'}">${label}</button>`;
             })
@@ -407,7 +384,8 @@ export function openSendBlastModal(opts) {
             return;
         }
         try {
-            allRows = await getArtistsRows();
+            const raw = await getArtistsRows();
+            allRows = (Array.isArray(raw) ? raw : []).filter(hasContactEmail);
         } catch (e) {
             if (overviewEl) overviewEl.textContent = e instanceof Error ? e.message : String(e);
             return;
@@ -517,60 +495,6 @@ export function openSendBlastModal(opts) {
                     }, 1600);
                 }
             }
-        }
-    });
-
-    broadcastMode?.addEventListener('change', recomputeSendEnabled);
-
-    root.querySelector('#studio-send-blast-bc-create')?.addEventListener('click', async () => {
-        const nameInp = root.querySelector('#studio-send-blast-bc-name');
-        const name =
-            nameInp instanceof HTMLInputElement && nameInp.value.trim() ? nameInp.value.trim() : 'Fusion blast';
-        const seg =
-            root.querySelector('#studio-send-blast-bc-audience') instanceof HTMLInputElement
-                ? root.querySelector('#studio-send-blast-bc-audience')?.value?.trim()
-                : '';
-        if (!seg) {
-            alert('Set segment id (from Resend).');
-            return;
-        }
-        const subj = subjectEl instanceof HTMLInputElement ? subjectEl.value.trim() : '';
-        if (!subj) {
-            alert('Subject is required.');
-            return;
-        }
-        setStatus('Creating broadcast…');
-        try {
-            const data = await resendCreateBroadcast({
-                name,
-                segmentId: seg,
-                subject: subj,
-                html: fullHtml(),
-            });
-            const id = data?.id ?? data?.data?.id;
-            const idInp = root.querySelector('#studio-send-blast-bc-id');
-            if (id && idInp instanceof HTMLInputElement) idInp.value = id;
-            setStatus(id ? `Created broadcast ${id}.` : 'Create returned — check Resend dashboard.');
-        } catch (e) {
-            alert(e instanceof Error ? e.message : String(e));
-            setStatus('');
-        }
-    });
-
-    root.querySelector('#studio-send-blast-bc-send')?.addEventListener('click', async () => {
-        const idInp = root.querySelector('#studio-send-blast-bc-id');
-        const id = idInp instanceof HTMLInputElement ? idInp.value.trim() : '';
-        if (!id) {
-            alert('Create a broadcast or paste a broadcast id.');
-            return;
-        }
-        setStatus('Sending broadcast…');
-        try {
-            await resendSendBroadcast(id);
-            setStatus('Broadcast send requested.');
-        } catch (e) {
-            alert(e instanceof Error ? e.message : String(e));
-            setStatus('');
         }
     });
 

@@ -19,38 +19,48 @@ function escapeHtml(s) {
 /** @returns {string} */
 export function renderCommunitySection() {
     return `
-        <div class="studio-section-stack studio-category-page">
+        <div class="studio-section-stack studio-category-page studio-community">
             ${studioPageHeaderHtml({
                 title: 'Community',
                 subtitle: '/community landing — hero video, exclusive row, connect, network cards, sessions, promo',
                 countId: 'studio-community-header-count',
                 countLabel: '',
             })}
-            <div class="studio-tabs" data-studio-tabs="community">
-                <div class="studio-tabs__list" role="tablist" aria-label="Community sections">
-                    <button type="button" class="studio-tabs__tab is-active" role="tab" id="studio-com-tab-hero" aria-selected="true" aria-controls="studio-com-panel-hero">Hero</button>
-                    <button type="button" class="studio-tabs__tab" role="tab" id="studio-com-tab-exc" aria-selected="false" aria-controls="studio-com-panel-exc">Exclusive</button>
-                    <button type="button" class="studio-tabs__tab" role="tab" id="studio-com-tab-con" aria-selected="false" aria-controls="studio-com-panel-con">Connect</button>
-                    <button type="button" class="studio-tabs__tab" role="tab" id="studio-com-tab-foot" aria-selected="false" aria-controls="studio-com-panel-foot">Footer</button>
-                </div>
-                <div class="studio-tabs__panels">
-                    <div id="studio-com-panel-hero" class="studio-tabs__panel is-active" role="tabpanel" aria-labelledby="studio-com-tab-hero">
-                        <div id="studio-com-form-hero" class="studio-section-stack" style="max-width:44rem"></div>
-                    </div>
-                    <div id="studio-com-panel-exc" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-com-tab-exc" hidden>
-                        <div id="studio-com-form-exc" class="studio-section-stack" style="max-width:48rem"></div>
-                    </div>
-                    <div id="studio-com-panel-con" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-com-tab-con" hidden>
-                        <div id="studio-com-form-con" class="studio-section-stack" style="max-width:44rem"></div>
-                    </div>
-                    <div id="studio-com-panel-foot" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-com-tab-foot" hidden>
-                        <div id="studio-com-form-foot" class="studio-section-stack" style="max-width:56rem"></div>
-                    </div>
-                </div>
-            </div>
             <p id="studio-community-msg" class="studio-banner studio-banner--info" style="display:none"></p>
-            <div class="studio-toolbar-actions" style="margin-top:1rem">
-                <button type="button" class="studio-btn-primary" id="studio-community-save">Save community page</button>
+            <div class="studio-community__stack">
+                <section class="studio-community__section" aria-labelledby="studio-community-hero-title">
+                    <div class="studio-community__section-head">
+                        <h3 id="studio-community-hero-title" class="studio-subheading">Hero</h3>
+                        <p class="studio-muted">Primary video and CTA copy shown on `/community`.</p>
+                    </div>
+                    <div id="studio-com-form-hero" class="studio-community__form"></div>
+                </section>
+                <section class="studio-community__section" aria-labelledby="studio-community-exclusive-title">
+                    <div class="studio-community__section-head">
+                        <h3 id="studio-community-exclusive-title" class="studio-subheading">Exclusive</h3>
+                        <p class="studio-muted">Three featured cards with image, locale copy, and destination.</p>
+                    </div>
+                    <div id="studio-com-form-exc" class="studio-community__form"></div>
+                </section>
+                <section class="studio-community__section" aria-labelledby="studio-community-connect-title">
+                    <div class="studio-community__section-head">
+                        <h3 id="studio-community-connect-title" class="studio-subheading">Connect</h3>
+                        <p class="studio-muted">Section headings, links, and three info bites.</p>
+                    </div>
+                    <div id="studio-com-form-con" class="studio-community__form"></div>
+                </section>
+                <section class="studio-community__section" aria-labelledby="studio-community-footer-title">
+                    <div class="studio-community__section-head">
+                        <h3 id="studio-community-footer-title" class="studio-subheading">Promo, Network, Sessions</h3>
+                        <p class="studio-muted">Promo copy plus repeatable network cards and session rows.</p>
+                    </div>
+                    <div id="studio-com-form-foot" class="studio-community__form"></div>
+                </section>
+            </div>
+            <div class="studio-community__actions">
+                <div class="studio-toolbar-actions">
+                    <button type="button" class="studio-btn-primary" id="studio-community-save">Save community page</button>
+                </div>
             </div>
         </div>
     `;
@@ -100,7 +110,7 @@ function renderExclusiveForm(bundle) {
         const c = raw && typeof raw === 'object' ? /** @type {Record<string, unknown>} */ (raw) : {};
         const n = i + 1;
         return `
-            <fieldset class="studio-field-group" style="border:1px solid rgba(0,0,0,0.12);padding:1rem;border-radius:6px;margin-bottom:1rem">
+            <fieldset class="studio-field-group studio-community__card">
                 <legend>Card ${n}</legend>
                 <label class="studio-field"><span>Image URL</span><input type="text" id="st-com-ex-${i}-img" class="studio-input" value="${escapeHtml(String(c.imageUrl ?? ''))}" /></label>
                 <label class="studio-field"><span>Line EN</span><input type="text" id="st-com-ex-${i}-en" class="studio-input" value="${escapeHtml(String(c.lineEn ?? ''))}" /></label>
@@ -125,7 +135,7 @@ function renderConnectForm(bundle) {
     const biteFields = bites.slice(0, 3).map((raw, i) => {
         const b = raw && typeof raw === 'object' ? /** @type {Record<string, unknown>} */ (raw) : {};
         return `
-            <fieldset class="studio-field-group" style="border:1px solid rgba(0,0,0,0.12);padding:1rem;border-radius:6px;margin-bottom:1rem">
+            <fieldset class="studio-field-group studio-community__card">
                 <legend>Bite ${i + 1}</legend>
                 <label class="studio-field"><span>Title EN</span><input type="text" id="st-com-cn-b${i}-ten" class="studio-input" value="${escapeHtml(String(b.titleEn ?? ''))}" /></label>
                 <label class="studio-field"><span>Title JA</span><input type="text" id="st-com-cn-b${i}-tja" class="studio-input" value="${escapeHtml(String(b.titleJa ?? ''))}" /></label>
@@ -192,23 +202,27 @@ function renderFootForm(bundle) {
         <label class="studio-field"><span>Subline EN</span><input type="text" id="st-com-pr-s-en" class="studio-input" value="${escapeHtml(String(pr.sublineEn ?? ''))}" /></label>
         <label class="studio-field"><span>Subline JA</span><input type="text" id="st-com-pr-s-ja" class="studio-input" value="${escapeHtml(String(pr.sublineJa ?? ''))}" /></label>
 
-        <h3 class="studio-subheading" style="margin-top:1.5rem">Network cards</h3>
-        <div class="studio-table-wrap studio-table-wrap--rounded">
+        <h3 class="studio-subheading studio-community__subhead">Network cards</h3>
+        <div class="studio-table-wrap studio-table-wrap--rounded studio-community__table-wrap">
             <table class="studio-table studio-table--dense">
                 <thead><tr><th>Name</th><th>Role</th><th>Location</th><th>Avatar URL</th><th>Connect href</th><th></th></tr></thead>
                 <tbody id="st-com-net-tbody">${netRows || ''}</tbody>
             </table>
         </div>
-        <button type="button" class="studio-btn-ghost" id="st-com-net-add">Add network card</button>
+        <div class="studio-community__inline-actions">
+            <button type="button" class="studio-btn-ghost" id="st-com-net-add">Add network card</button>
+        </div>
 
-        <h3 class="studio-subheading" style="margin-top:1.5rem">Upcoming sessions</h3>
-        <div class="studio-table-wrap studio-table-wrap--rounded">
+        <h3 class="studio-subheading studio-community__subhead">Upcoming sessions</h3>
+        <div class="studio-table-wrap studio-table-wrap--rounded studio-community__table-wrap">
             <table class="studio-table studio-table--dense">
                 <thead><tr><th>Thumb</th><th>Kind</th><th>Title</th><th>Date/time line</th><th>Reg label</th><th>Reg href</th><th></th></tr></thead>
                 <tbody id="st-com-ss-tbody">${sessRows || ''}</tbody>
             </table>
         </div>
-        <button type="button" class="studio-btn-ghost" id="st-com-ss-add">Add session</button>
+        <div class="studio-community__inline-actions">
+            <button type="button" class="studio-btn-ghost" id="st-com-ss-add">Add session</button>
+        </div>
     `;
 }
 

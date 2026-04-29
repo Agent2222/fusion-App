@@ -60,7 +60,7 @@ function maybeApplyFusionLogoUrl(html) {
         return html;
     }
     return html.replace(
-        /https?:\/\/[^"'\s>]*\/email\/Fusion-Logo-Sig-1\.png/gi,
+        /https?:\/\/[^"'\s>]*\/email\/(?:Fusion-Logo-Sig-1|Fusion-X-logo-02)\.png/gi,
         fusionSignatureLogoUrl,
     );
 }
@@ -1298,6 +1298,8 @@ app.post('/resend/broadcasts', requireApiKey, async (req, res) => {
             const sendNow = b.send === true;
             const payload = {
                 segmentId,
+                /** Some Resend API/SDK paths expect snake_case on the wire. */
+                segment_id: segmentId,
                 from: fromAddr,
                 subject: subject.slice(0, 998),
                 html,

@@ -6,10 +6,12 @@ import { openStudioModal } from '../../utils/studioModal.js';
 import { uploadBlobToS3 } from '../../utils/studioS3Upload.js';
 import { getStudioShellGate, studioFeatureAccess } from '../../utils/studioShellState.js';
 import {
+    appendSubscriberResendAudienceForStudio,
     duplicateEmailCampaign,
     deleteEmailCampaign,
     getDataSource,
     getEmailCampaign,
+    getResendSegmentConfigFromCanister,
     getSubscribersCsv,
     getSubscribersForEmailStudio,
     listEmailCampaigns,
@@ -21,11 +23,14 @@ import {
 } from '../../utils/database.js';
 import {
     fetchResendMeta,
+    getIntegrationBaseUrl,
+    resendAddContactToSegment,
     resendCreateBroadcast,
     sendEmail,
     sendEmailBatch,
 } from '../../utils/integrationApi.js';
 import { EMAIL_CAMPAIGN_TEMPLATES, getEmailTemplateById, wrapEmailHtml } from '../../utils/emailCampaignTemplates.js';
+import { Principal } from '@dfinity/principal';
 
 const AUTOSAVE_MS = 1500;
 const LLM_MAX = 12000;
@@ -91,10 +96,9 @@ function fullEmailHtml(html) {
 /**
  * @param {unknown} rec
  * @param {{ id?: string, Principal?: import('@dfinity/principal').Principal }} [extra]
- * @returns {Promise<object>}
+ * @returns {object}
  */
-async function toUpsertRecord(rec, extra) {
-    const { Principal } = await import('@dfinity/principal');
+function toUpsertRecord(rec, extra) {
     const id = extra?.id != null ? String(extra.id) : String(rec?.id ?? '');
     const titleForSave = Array.isArray(rec?.title)
         ? rec.title
@@ -131,25 +135,134 @@ function esc(s) {
         .replace(/"/g, '&quot;');
 }
 
+/**
+ * @param {string} s
+ * @param {string} key
+ * @returns {string | undefined}
+ */
+function extractJsonStringValueLenient(s, key) {
+    const need = `"${key}"`;
+    const head = s.indexOf(need);
+    if (head < 0) return undefined;
+    const afterKey = s.indexOf(':', head + need.length);
+    if (afterKey < 0) return undefined;
+    let p = afterKey + 1;
+    while (p < s.length && /\s/.test(s[p])) p += 1;
+    if (p >= s.length || s[p] !== '"') return undefined;
+    p += 1;
+    let out = '';
+    while (p < s.length) {
+        const c = s[p];
+        if (c === '\\' && p + 1 < s.length) {
+            const n = s[p + 1];
+            if (n === 'n') {
+                out += '\n';
+                p += 2;
+                continue;
+            }
+            if (n === 'r') {
+                out += '\r';
+                p += 2;
+                continue;
+            }
+            if (n === 't') {
+                out += '\t';
+                p += 2;
+                continue;
+            }
+            if (n === 'u' && p + 5 < s.length) {
+                const h = s.slice(p + 2, p + 6);
+                if (/^[0-9a-fA-F]{4}$/.test(h)) {
+                    out += String.fromCharCode(parseInt(h, 16));
+                    p += 6;
+                    continue;
+                }
+            }
+            if (n === '"' || n === '\\' || n === '/') {
+                out += n;
+                p += 2;
+                continue;
+            }
+        }
+        if (c === '"') {
+            let q = p + 1;
+            while (q < s.length && /\s/.test(s[q])) q += 1;
+            if (q >= s.length || s[q] === ',' || s[q] === '}') {
+                return out;
+            }
+        }
+        out += c;
+        p += 1;
+    }
+    return out.length > 0 ? out : undefined;
+}
+
+/**
+ * Parse model output for "Generate draft" (strict JSON, then tolerant fallbacks
+ * for code fences, trailing text, and unescaped newlines in string values).
+ * @param {string} raw
+ * @returns {{ subject?: string, previewText?: string, htmlBody?: string } | null}
+ */
+function parseEmailDraftLlmJson(raw) {
+    const t0 = String(raw).replace(/^\uFEFF/, '').trim();
+    const stripFences = (s) => s.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/g, '').trim();
+    const tryParse = (s) => {
+        try {
+            return JSON.parse(s);
+        } catch {
+            return null;
+        }
+    };
+    for (const t1 of [t0, stripFences(t0)]) {
+        if (!t1) continue;
+        const o1 = tryParse(t1);
+        if (o1 && typeof o1 === 'object') return /** @type {any} */ (o1);
+        const m = t1.match(/\{[\s\S]*\}/);
+        if (m) {
+            const o2 = tryParse(m[0]);
+            if (o2 && typeof o2 === 'object') return /** @type {any} */ (o2);
+        }
+    }
+    const reCtrl = /[\u0000-\u0008\u000B\u000C\u000E-\u001F]+/g;
+    for (const t1 of [t0, stripFences(t0)]) {
+        if (!t1) continue;
+        const t2 = t1.replace(reCtrl, ' ');
+        const o3 = tryParse(t2);
+        if (o3 && typeof o3 === 'object') return /** @type {any} */ (o3);
+        const m2 = t2.match(/\{[\s\S]*\}/);
+        if (m2) {
+            const o4 = tryParse(m2[0]);
+            if (o4 && typeof o4 === 'object') return /** @type {any} */ (o4);
+        }
+    }
+    const t = stripFences(t0) || t0;
+    const subject = extractJsonStringValueLenient(t, 'subject');
+    const previewText = extractJsonStringValueLenient(t, 'previewText');
+    const htmlBody = extractJsonStringValueLenient(t, 'htmlBody');
+    if (subject == null && previewText == null && htmlBody == null) return null;
+    return { subject, previewText, htmlBody };
+}
+
 export function renderEmailCampaignStudio() {
     return `
 <div class="studio-ec" data-studio-ec-root>
   <div class="studio-ec__layout" role="group" aria-label="Email campaign layout">
-    <aside class="studio-ec__col studio-ec__col--list" aria-label="Campaigns">
-      <div class="studio-ec__list-head">
-        <h2 class="studio-ec__h">Campaigns</h2>
-        <button type="button" class="studio-btn-secondary studio-ec__btn-new" id="studio-ec-new">New</button>
-      </div>
-      <div class="studio-ec__list-scroll">
-        <ul class="studio-ec__campaign-list" id="studio-ec-campaign-list"></ul>
-      </div>
-      <p class="studio-ec__hint" id="studio-ec-list-hint"></p>
-    </aside>
-    <aside class="studio-ec__col studio-ec__col--assist" aria-label="Start from prompt or template">
-      <div class="studio-ec__subtabs" role="tablist" aria-label="Assistance">
+    <aside class="studio-ec__col studio-ec__col--assist" aria-label="Campaigns and assistance">
+      <div class="studio-ec__subtabs studio-ec__subtabs--four" role="tablist" aria-label="Left panel">
+        <button type="button" class="studio-ec__subtab" id="studio-ec-ltab-cam" data-ec-ltab="campaigns" role="tab" aria-selected="false">Campaigns</button>
         <button type="button" class="studio-ec__subtab is-active" id="studio-ec-ltab-a" data-ec-ltab="compose" role="tab" aria-selected="true">Compose</button>
         <button type="button" class="studio-ec__subtab" id="studio-ec-ltab-b" data-ec-ltab="gen" role="tab" aria-selected="false">Generate</button>
         <button type="button" class="studio-ec__subtab" id="studio-ec-ltab-c" data-ec-ltab="tpl" role="tab" aria-selected="false">Templates</button>
+      </div>
+      <div id="studio-ec-panel-l-campaigns" class="studio-ec__assist-panels studio-ec__panel--campaigns" role="region" aria-label="Saved campaigns" hidden>
+        <div class="studio-ec__list-head">
+          <h2 class="studio-ec__h">Campaigns</h2>
+          <button type="button" class="studio-btn-secondary studio-ec__btn-new" id="studio-ec-new">New</button>
+        </div>
+        <div class="studio-ec__list-scroll">
+          <ul class="studio-ec__campaign-list" id="studio-ec-campaign-list"></ul>
+        </div>
+        <p class="studio-ec__hint" id="studio-ec-list-hint"></p>
       </div>
       <div id="studio-ec-panel-l-compose" class="studio-ec__assist-panels" role="region" aria-label="Assisted compose">
         <p class="studio-ec__assist-title">Compose with assistance</p>
@@ -220,9 +333,9 @@ export function renderEmailCampaignStudio() {
           <input type="text" class="studio-input" id="studio-ec-preview" maxlength="200" placeholder="Shown in inbox preheader" />
         </label>
       </div>
-      <div class="studio-ec__edtabs" role="tablist" aria-label="Body view">
-        <button type="button" class="studio-ec__edtab is-active" id="studio-ec-tab-compose" role="tab" aria-selected="true">Body</button>
-        <button type="button" class="studio-ec__edtab" id="studio-ec-tab-preview" role="tab" aria-selected="false">Preview</button>
+      <div class="studio-ec__edtabs studio-ec__edtabs--bodybar" role="group" aria-label="Message body">
+        <span class="studio-ec__body-tab-label" id="studio-ec-body-label">Body</span>
+        <button type="button" class="studio-btn-secondary studio-ec__preview-open" id="studio-ec-open-preview" title="Open rendered preview in a window">Preview</button>
       </div>
       <div class="studio-ec__editor-wrap" id="studio-ec-editor-surface">
         <div class="studio-ec__toolbar" id="studio-ec-toolbar" role="toolbar" aria-label="Message formatting">
@@ -233,10 +346,12 @@ export function renderEmailCampaignStudio() {
           <button type="button" class="studio-ec__tbt" data-cmd="ul" title="List">List</button>
           <span class="studio-ec__tsep" aria-hidden="true"></span>
           <button type="button" class="studio-ec__tbt" id="studio-ec-image" title="Image">Image</button>
+          <span class="studio-ec__tsep" aria-hidden="true"></span>
+          <button type="button" class="studio-ec__tbt" id="studio-ec-edit-html" title="Edit raw HTML">&lt;/&gt; HTML</button>
           <input type="file" id="studio-ec-image-file" accept="image/*" class="studio-sr-only" aria-hidden="true" />
         </div>
         <div class="studio-ec__card">
-          <div id="studio-ec-body" class="studio-ec__body" contenteditable="true" spellcheck="true" data-placeholder="Type your message, or use Generate in the first column."></div>
+          <div id="studio-ec-body" class="studio-ec__body" contenteditable="true" spellcheck="true" data-placeholder="Type your message, or use Generate in the left panel."></div>
         </div>
         <div class="studio-ec__aibar" id="studio-ec-selbar" role="toolbar" aria-label="Text assistance">
           <span class="studio-ec__aibar-label" id="studio-ec-selbar-label">Content assist</span>
@@ -246,11 +361,8 @@ export function renderEmailCampaignStudio() {
           <button type="button" class="studio-ec__aib" id="studio-ec-sel-ja">To Japanese</button>
         </div>
       </div>
-      <div id="studio-ec-preview-pane" class="studio-ec__previewwrap" hidden>
-        <iframe class="studio-ec__preview-frame" id="studio-ec-preview-frame" title="HTML preview" sandbox="allow-same-origin"></iframe>
-      </div>
     </section>
-    <aside class="studio-ec__col studio-ec__col--settings" aria-label="Audience and delivery">
+    <aside class="studio-ec__col studio-ec__col--settings" aria-label="Campaign and audience">
       <div class="studio-ec__settings-section">
         <h3 class="studio-ec__sh">Campaign</h3>
         <label class="studio-field">
@@ -270,17 +382,16 @@ export function renderEmailCampaignStudio() {
           <select class="studio-select" id="studio-ec-audience"></select>
         </label>
         <label class="studio-field">
-          <span>Broadcast segment id (Resend)</span>
-          <input type="text" class="studio-input" id="studio-ec-segment" placeholder="From Resend or integration env" />
+          <span>Broadcast segment (Resend)</span>
+          <div class="studio-ec-segment-row">
+            <select class="studio-select" id="studio-ec-segment-preset" aria-label="Segment from canister">
+              <option value="">— Configured in Services → Resend —</option>
+            </select>
+            <input type="text" class="studio-input" id="studio-ec-segment" placeholder="Segment UUID" autocomplete="off" />
+            <button type="button" class="studio-resend-sync studio-resend-sync--ready" id="studio-ec-sync-audience">READY</button>
+          </div>
+          <p class="studio-muted" id="studio-ec-sync-hint" style="margin:0.35rem 0 0;font-size:0.85rem"></p>
         </label>
-      </div>
-      <div class="studio-ec__settings-section">
-        <h3 class="studio-ec__sh">Delivery</h3>
-        <p class="studio-ec__read">Send is immediate when you use <em>Send campaign</em> (no scheduler in v1).</p>
-      </div>
-      <div class="studio-ec__settings-section">
-        <h3 class="studio-ec__sh">Sender (integration server)</h3>
-        <p class="studio-ec__from" id="studio-ec-from-display" title="Resend from-address">—</p>
       </div>
       <div class="studio-ec__settings-section">
         <h3 class="studio-ec__sh">Test email</h3>
@@ -302,6 +413,7 @@ export function renderEmailCampaignStudio() {
   <div class="studio-ec__dock" id="studio-ec-dock" role="region" aria-label="Email actions">
     <p class="studio-ec__msg" id="studio-ec-msg" style="display:none" role="status" aria-live="polite"></p>
     <div class="studio-ec__dock-in">
+      <button type="button" class="studio-btn-secondary studio-ec__delete" data-ec-dock="delete" id="studio-ec-dock-delete" disabled>Delete</button>
       <button type="button" class="studio-btn-secondary" data-ec-dock="save" id="studio-ec-dock-save">Save draft</button>
       <button type="button" class="studio-btn-secondary" data-ec-dock="test" id="studio-ec-dock-test">Send test</button>
       <button type="button" class="studio-btn-primary" data-ec-dock="send" id="studio-ec-dock-send">Send campaign</button>
@@ -327,10 +439,7 @@ export async function initEmailCampaignStudio(mainEl) {
     const listEl = root.querySelector('#studio-ec-campaign-list');
     const listHint = root.querySelector('#studio-ec-list-hint');
     const bodyEl = root.querySelector('#studio-ec-body');
-    const tabCompose = root.querySelector('#studio-ec-tab-compose');
-    const tabPreview = root.querySelector('#studio-ec-tab-preview');
-    const previewPane = root.querySelector('#studio-ec-preview-pane');
-    const previewFrame = root.querySelector('#studio-ec-preview-frame');
+    const openPreviewBtn = root.querySelector('#studio-ec-open-preview');
     const editorWrap = root.querySelector('.studio-ec__editor-wrap');
     const aibarEl = root.querySelector('#studio-ec-selbar');
     const savedEl = root.querySelector('#studio-ec-save-state');
@@ -339,10 +448,10 @@ export async function initEmailCampaignStudio(mainEl) {
     const subjN = root.querySelector('#studio-ec-subject-n');
     const prevN = root.querySelector('#studio-ec-preview-n');
     const recipientEst = root.querySelector('#studio-ec-recipient-est');
-    const fromDisplay = root.querySelector('#studio-ec-from-display');
     const assistPrompt = root.querySelector('#studio-ec-assist-prompt');
     const toneEl = root.querySelector('#studio-ec-tone');
     const lengthEl = root.querySelector('#studio-ec-length');
+    const panelCampaigns = root.querySelector('#studio-ec-panel-l-campaigns');
     const panelComposeL = root.querySelector('#studio-ec-panel-l-compose');
     const panelTplL = root.querySelector('#studio-ec-panel-l-tpl');
 
@@ -352,6 +461,9 @@ export async function initEmailCampaignStudio(mainEl) {
     const templateSel = root.querySelector('#studio-ec-template');
     const audSel = root.querySelector('#studio-ec-audience');
     const segmentInp = root.querySelector('#studio-ec-segment');
+    const segmentPreset = root.querySelector('#studio-ec-segment-preset');
+    const syncAudienceBtn = root.querySelector('#studio-ec-sync-audience');
+    const syncHint = root.querySelector('#studio-ec-sync-hint');
     const notesTa = root.querySelector('#studio-ec-notes');
     const testTo = root.querySelector('#studio-ec-test-to');
 
@@ -393,14 +505,15 @@ export async function initEmailCampaignStudio(mainEl) {
     };
 
     const syncDeleteButtonState = () => {
-        const btn = root.querySelector('#studio-ec-delete');
+        const delBtns = root.querySelectorAll('.studio-ec__delete');
         const hint = root.querySelector('#studio-ec-delete-hint');
-        if (!(btn instanceof HTMLButtonElement)) return;
         const { teamNavAllowed } = getStudioShellGate();
         const live = getDataSource() === 'live';
         const hasId = Boolean(currentId);
         const canDelete = hasId && (!live || teamNavAllowed);
-        btn.disabled = !canDelete;
+        delBtns.forEach((b) => {
+            if (b instanceof HTMLButtonElement) b.disabled = !canDelete;
+        });
         if (hint) {
             if (!hasId) {
                 hint.textContent =
@@ -432,40 +545,39 @@ export async function initEmailCampaignStudio(mainEl) {
         }
     };
 
-    const showPreview = (on) => {
-        if (previewPane instanceof HTMLElement) previewPane.hidden = !on;
-        if (editorWrap instanceof HTMLElement) editorWrap.hidden = on;
-        if (aibarEl instanceof HTMLElement) aibarEl.hidden = on;
-        if (tabCompose instanceof HTMLButtonElement) {
-            tabCompose.classList.toggle('is-active', !on);
-            tabCompose.setAttribute('aria-selected', on ? 'false' : 'true');
-        }
-        if (tabPreview instanceof HTMLButtonElement) {
-            tabPreview.classList.toggle('is-active', on);
-            tabPreview.setAttribute('aria-selected', on ? 'true' : 'false');
-        }
-        if (on && previewFrame instanceof HTMLIFrameElement && bodyEl instanceof HTMLElement) {
-            const doc = previewFrame.contentDocument;
+    const openMessagePreviewModal = () => {
+        if (!(bodyEl instanceof HTMLElement)) return;
+        const inner = fullEmailHtml(bodyEl.innerHTML);
+        const { root: mroot } = openStudioModal(
+            `<p class="studio-muted" style="margin:0 0 0.75rem">Approximate appearance in a mail client. Remote images need public URLs to load here.</p>
+        <div class="studio-ec-preview-pop"><iframe class="studio-ec__preview-frame studio-ec__preview-frame--pop" title="HTML preview" sandbox="allow-same-origin" style="display:block;width:100%"></iframe></div>`,
+            { title: 'Message preview', wide: true },
+        );
+        const fr = mroot.querySelector('iframe.studio-ec__preview-frame--pop');
+        if (fr instanceof HTMLIFrameElement) {
+            const doc = fr.contentDocument;
             if (doc) {
                 doc.open();
                 doc.write(
-                    `<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><base target="_blank" rel="noopener"></head><body style="margin:0;padding:0">${fullEmailHtml(bodyEl.innerHTML)}</body></html>`,
+                    `<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><base target="_blank" rel="noopener"></head><body style="margin:0;padding:0">${inner}</body></html>`,
                 );
                 doc.close();
             }
         }
     };
 
-    tabCompose?.addEventListener('click', () => showPreview(false));
-    tabPreview?.addEventListener('click', () => showPreview(true));
+    openPreviewBtn?.addEventListener('click', () => openMessagePreviewModal());
 
     const setLeftSubtab = (k) => {
-        const isTpl = k === 'tpl';
-        if (panelComposeL) panelComposeL.toggleAttribute('hidden', isTpl);
+        const key = k || 'compose';
+        const isCampaigns = key === 'campaigns';
+        const isTpl = key === 'tpl';
+        if (panelCampaigns) panelCampaigns.toggleAttribute('hidden', !isCampaigns);
+        if (panelComposeL) panelComposeL.toggleAttribute('hidden', isTpl || isCampaigns);
         if (panelTplL) panelTplL.toggleAttribute('hidden', !isTpl);
         root.querySelectorAll('[data-ec-ltab]').forEach((b) => {
             if (b instanceof HTMLButtonElement) {
-                const on = b.getAttribute('data-ec-ltab') === k;
+                const on = b.getAttribute('data-ec-ltab') === key;
                 b.classList.toggle('is-active', on);
                 b.setAttribute('aria-selected', on ? 'true' : 'false');
             }
@@ -474,11 +586,8 @@ export async function initEmailCampaignStudio(mainEl) {
     root.querySelectorAll('[data-ec-ltab]').forEach((btn) => {
         btn.addEventListener('click', () => {
             const k = btn.getAttribute('data-ec-ltab') || 'compose';
-            if (k === 'tpl') setLeftSubtab('tpl');
-            else {
-                setLeftSubtab(k);
-                if (k === 'gen' && assistPrompt instanceof HTMLTextAreaElement) assistPrompt.focus();
-            }
+            setLeftSubtab(k);
+            if (k === 'gen' && assistPrompt instanceof HTMLTextAreaElement) assistPrompt.focus();
         });
     });
 
@@ -500,17 +609,103 @@ export async function initEmailCampaignStudio(mainEl) {
             if (segmentInp instanceof HTMLInputElement && !segmentInp.value.trim() && resendMeta.segmentId) {
                 segmentInp.value = resendMeta.segmentId;
             }
-            if (fromDisplay) {
-                fromDisplay.textContent = resendMeta.from
-                    ? String(resendMeta.from)
-                    : 'Set RESEND_FROM in integration API';
-            }
         } catch {
             resendMeta = { from: null, segmentId: null };
-            if (fromDisplay) {
-                fromDisplay.textContent = 'Integration API unavailable';
-            }
         }
+    };
+
+    /** @type {{ name: string, segmentId: string }[]} */
+    let resendSegmentSlots = [];
+
+    const validRosterEmail = (em) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(em || '').trim());
+
+    const getActiveSegmentId = () => {
+        if (segmentInp instanceof HTMLInputElement) {
+            const t = segmentInp.value.trim();
+            if (t) return t;
+        }
+        if (segmentPreset instanceof HTMLSelectElement) {
+            const v = segmentPreset.value.trim();
+            if (v && v !== '__custom__') return v;
+        }
+        return '';
+    };
+
+    const recomputeSyncButton = () => {
+        if (!(syncAudienceBtn instanceof HTMLButtonElement)) return;
+        const live = getDataSource() === 'live';
+        const integ = Boolean(getIntegrationBaseUrl());
+        const seg = getActiveSegmentId();
+        if (!live || !integ || !seg) {
+            syncAudienceBtn.disabled = true;
+            syncAudienceBtn.textContent = 'SYNC';
+            syncAudienceBtn.className = 'studio-resend-sync studio-resend-sync--ready';
+            if (syncHint) {
+                syncHint.textContent = !live
+                    ? 'SYNC requires Live data source and Integration API.'
+                    : !integ
+                      ? 'Set Integration API URL under Services.'
+                      : 'Choose or enter a segment UUID for broadcast + SYNC.';
+            }
+            return;
+        }
+        let need = 0;
+        for (const s of subscribers) {
+            const em = String(s?.email || '').trim();
+            if (!validRosterEmail(em)) continue;
+            const aud = Array.isArray(s?.audiences) ? s.audiences : [];
+            if (!aud.includes(seg)) need += 1;
+        }
+        if (need > 0) {
+            syncAudienceBtn.disabled = false;
+            syncAudienceBtn.textContent = 'SYNC Audience';
+            syncAudienceBtn.className = 'studio-resend-sync studio-resend-sync--pending';
+            if (syncHint) syncHint.textContent = `${need} subscriber(s) not yet in this segment (Fusion + Resend after SYNC).`;
+        } else {
+            syncAudienceBtn.disabled = true;
+            syncAudienceBtn.textContent = 'READY';
+            syncAudienceBtn.className = 'studio-resend-sync studio-resend-sync--ready';
+            if (syncHint)
+                syncHint.textContent = 'All valid emails already include this segment id in Fusion audiences.';
+        }
+    };
+
+    const loadResendSegmentPresets = async () => {
+        resendSegmentSlots = [];
+        try {
+            resendSegmentSlots = await getResendSegmentConfigFromCanister();
+        } catch {
+            resendSegmentSlots = [];
+        }
+        if (!(segmentPreset instanceof HTMLSelectElement)) {
+            recomputeSyncButton();
+            return;
+        }
+        const idNow = (segmentInp instanceof HTMLInputElement ? segmentInp.value : '').trim();
+        const fr = document.createDocumentFragment();
+        const o0 = document.createElement('option');
+        o0.value = '';
+        o0.textContent = '— Configured in Services → Resend —';
+        fr.appendChild(o0);
+        for (const s of resendSegmentSlots) {
+            const id = String(s?.segmentId || '').trim();
+            if (!id) continue;
+            const o = document.createElement('option');
+            o.value = id;
+            o.textContent = String(s?.name || '').trim() || `${id.slice(0, 8)}…`;
+            fr.appendChild(o);
+        }
+        const oc = document.createElement('option');
+        oc.value = '__custom__';
+        oc.textContent = 'Custom…';
+        fr.appendChild(oc);
+        segmentPreset.replaceChildren(fr);
+        if (idNow && [...segmentPreset.options].some((opt) => opt.value === idNow)) {
+            segmentPreset.value = idNow;
+        } else if (idNow) {
+            segmentPreset.value = '__custom__';
+        }
+        recomputeSyncButton();
     };
 
     const loadSubscribers = async () => {
@@ -539,6 +734,7 @@ export async function initEmailCampaignStudio(mainEl) {
             sorted.map((c) => `<option value="cat:${esc(c)}">Category: ${esc(c)} (batch)</option>`).join('');
         if (cur && [...audSel.options].some((o) => o.value === cur)) audSel.value = cur;
         updateRecipientEst();
+        recomputeSyncButton();
     };
 
     const applyTemplate = (tplId) => {
@@ -549,7 +745,7 @@ export async function initEmailCampaignStudio(mainEl) {
         if (bodyEl instanceof HTMLElement) bodyEl.innerHTML = t.bodyHtml;
     };
 
-    const readFormToRecord = async () => {
+    const readFormToRecord = () => {
         const base = current && typeof current === 'object' ? current : { id: currentId || '' };
         const aud = audSel instanceof HTMLSelectElement ? valueToAudience(audSel.value) : { allBroadcast: null };
         const htmlBody = bodyEl instanceof HTMLElement ? bodyEl.innerHTML : String(/** @type {any} */(base).htmlBody || '');
@@ -603,7 +799,7 @@ export async function initEmailCampaignStudio(mainEl) {
     const saveNow = async () => {
         setSaved('Saving…');
         try {
-            const rec = await readFormToRecord();
+            const rec = readFormToRecord();
             const id = await upsertEmailCampaign(rec);
             currentId = id;
             const fresh = await getEmailCampaign(id);
@@ -650,16 +846,35 @@ export async function initEmailCampaignStudio(mainEl) {
             })
             .join('');
 
-        listEl.querySelectorAll('button[data-id]').forEach((btn) => {
-            btn.addEventListener('click', async () => {
-                const id = btn.getAttribute('data-id');
-                if (!id) return;
-                const rec = await getEmailCampaign(id);
-                if (rec) applyRecordToForm(rec);
-            });
-        });
         syncDeleteButtonState();
     };
+
+    const onCampaignListClick = async (e) => {
+        if (!(listEl instanceof HTMLElement)) return;
+        const t = e.target;
+        if (!(t instanceof Element)) return;
+        const btn = t.closest('button.studio-ec__camp[data-id]');
+        if (!(btn instanceof HTMLButtonElement) || !listEl.contains(btn)) return;
+        e.preventDefault();
+        const id = btn.getAttribute('data-id');
+        if (!id) return;
+        try {
+            const rec = await getEmailCampaign(id);
+            if (rec) {
+                applyRecordToForm(rec);
+                listEl.querySelectorAll('button.studio-ec__camp').forEach((b) => {
+                    b.classList.toggle('is-active', b.getAttribute('data-id') === id);
+                });
+            } else {
+                setMsg('error', 'Campaign not found.');
+            }
+        } catch (err) {
+            setMsg('error', err instanceof Error ? err.message : String(err));
+        }
+    };
+    listEl?.addEventListener('click', (e) => {
+        void onCampaignListClick(e);
+    });
 
     bodyEl?.addEventListener('input', () => scheduleSave());
     [titleInp, subjInp, prevInp, notesTa, audSel, templateSel].forEach((el) => {
@@ -681,9 +896,8 @@ export async function initEmailCampaignStudio(mainEl) {
         }
     });
 
-    root.querySelector('#studio-ec-new')?.addEventListener('click', async () => {
-        const { Principal } = await import('@dfinity/principal');
-        const empty = await toUpsertRecord(
+    root.querySelector('#studio-ec-new')?.addEventListener('click', () => {
+        const empty = toUpsertRecord(
             {
                 id: '',
                 title: /** @type {any} */ ([]),
@@ -714,6 +928,34 @@ export async function initEmailCampaignStudio(mainEl) {
     });
 
     root.querySelector('#studio-ec-dock-save')?.addEventListener('click', () => void saveNow());
+
+    root.querySelector('#studio-ec-edit-html')?.addEventListener('click', () => {
+        if (!(bodyEl instanceof HTMLElement)) return;
+        const initial = bodyEl.innerHTML;
+        const { close, root: mroot } = openStudioModal(
+            `<p class="studio-muted">Edit the raw message HTML. Broken markup can affect preview and delivery.</p>
+      <label class="studio-field"><span>HTML</span>
+        <textarea id="ec-html-ta" class="studio-textarea" rows="22" style="width:100%;min-height:220px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:0.8rem;line-height:1.35"></textarea>
+      </label>
+      <p class="studio-modal-actions" style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:0.75rem;flex-wrap:wrap">
+        <button type="button" class="studio-btn-ghost" id="ec-html-cancel">Cancel</button>
+        <button type="button" class="studio-btn-primary" id="ec-html-apply">Apply</button>
+      </p>`,
+            { title: 'Edit message HTML', wide: true },
+        );
+        const ta = mroot.querySelector('#ec-html-ta');
+        if (ta instanceof HTMLTextAreaElement) ta.value = initial;
+        mroot.querySelector('#ec-html-cancel')?.addEventListener('click', () => close());
+        mroot.querySelector('#ec-html-apply')?.addEventListener('click', () => {
+            if (ta instanceof HTMLTextAreaElement && bodyEl) {
+                const v = ta.value.trim();
+                bodyEl.innerHTML = v || '<p><br></p>';
+                updateCharCounts();
+                scheduleSave();
+            }
+            close();
+        });
+    });
 
     const getSelectionInEditor = () => {
         const sel = window.getSelection();
@@ -748,7 +990,7 @@ export async function initEmailCampaignStudio(mainEl) {
         const subj0 = subjInp instanceof HTMLInputElement ? subjInp.value : '';
         const body0 = bodyEl instanceof HTMLElement ? bodyEl.innerText : '';
         const request = { goal: idea, tone, length: len, currentSubject: subj0, currentBodyText: body0 };
-        const prompt = `You help staff write marketing email HTML for FUSION. ${tone} tone. ${len} length. Reply with a single JSON object only (no markdown, no backticks) with keys: "subject" (string), "previewText" (string, max 160 chars), "htmlBody" (string, inner HTML only — use semantic tags, inline styles for email; no full document wrapper; may include a single h1, paragraphs, a CTA link to https://www.fusionart.world). JSON object:`;
+        const prompt = `You help staff write marketing email HTML for FUSION. ${tone} tone. ${len} length. Reply with a single JSON object only (no markdown, no backticks) with keys: "subject" (string), "previewText" (string, max 160 chars), "htmlBody" (string, inner HTML only — use semantic tags, inline styles for email; no full document wrapper; may include a single h1, paragraphs, a CTA link to https://www.fusionart.world). In "htmlBody", if you need a newline inside the string, use the two-character sequence backslash + n, never a raw line break. JSON object:`;
         const src = JSON.stringify(request);
         if (prompt.length + src.length > LLM_MAX) {
             alert('Prompt is too long for the canister. Shorten the description.');
@@ -758,13 +1000,10 @@ export async function initEmailCampaignStudio(mainEl) {
         try {
             const raw = await studioReinterpretWithPrompt(prompt, src, 'en');
             const t = raw.trim();
-            let json;
-            try {
-                json = JSON.parse(t);
-            } catch {
-                const m = t.match(/\{[\s\S]*\}/);
-                if (m) json = JSON.parse(m[0]);
-                else throw new Error('Could not parse JSON from the model. Try a shorter prompt.');
+            const json = parseEmailDraftLlmJson(t);
+            if (!json || (json.subject == null && json.previewText == null && json.htmlBody == null)) {
+                setMsg('error', 'Could not parse JSON from the model. Try a shorter prompt or regenerate.');
+                return;
             }
             if (subjInp instanceof HTMLInputElement && json.subject) subjInp.value = String(json.subject);
             if (prevInp instanceof HTMLInputElement && json.previewText) {
@@ -918,7 +1157,7 @@ export async function initEmailCampaignStudio(mainEl) {
     });
 
     const patchStatus = async (rec, st) => {
-        const u = await toUpsertRecord({ ...rec, status: st, updatedAt: rec.updatedAt });
+        const u = toUpsertRecord({ ...rec, status: st, updatedAt: rec.updatedAt });
         return upsertEmailCampaign(u);
     };
 
@@ -928,14 +1167,18 @@ export async function initEmailCampaignStudio(mainEl) {
             setMsg('error', 'Enter a test recipient email.');
             return;
         }
-        if (getDataSource() !== 'live') {
-            setMsg('error', 'Send test requires Live + Integration API.');
+        if (!getIntegrationBaseUrl()) {
+            setMsg(
+                'error',
+                'Integration API URL is not set. Configure Studio → Services, or VITE_INTEGRATION_API_URL in the build.',
+            );
             return;
         }
         setMsg('info', 'Sending test…');
         try {
-            const rec = await readFormToRecord();
-            const html = fullEmailHtml(rec.htmlBody);
+            const rec = readFormToRecord();
+            const bodyHtml = bodyEl instanceof HTMLElement ? bodyEl.innerHTML : String(rec.htmlBody || '');
+            const html = fullEmailHtml(bodyHtml);
             const subj = subjInp instanceof HTMLInputElement ? subjInp.value.trim() : '';
             await sendEmail({ to, subject: subj || 'Fusion — test', html });
             setMsg('ok', 'Test email sent.');
@@ -958,7 +1201,7 @@ export async function initEmailCampaignStudio(mainEl) {
             setMsg('error', 'Save the campaign first.');
             return;
         }
-        const rec = (await getEmailCampaign(currentId)) || (await readFormToRecord());
+        const rec = (await getEmailCampaign(currentId)) || readFormToRecord();
         if (!rec) {
             setMsg('error', 'Could not load campaign.');
             return;
@@ -974,13 +1217,14 @@ export async function initEmailCampaignStudio(mainEl) {
         setMsg('info', 'Sending…');
         try {
             let catEmails = /** @type {string[]} */ ([]);
-            const seg =
-                audVal === 'all' && segmentInp instanceof HTMLInputElement
-                    ? segmentInp.value.trim()
-                    : '';
+            /** Broadcast segment: must match preset select OR UUID input (see getActiveSegmentId). */
+            const seg = audVal === 'all' ? getActiveSegmentId() : '';
             if (audVal === 'all') {
                 if (!seg) {
-                    setMsg('error', 'Set a Resend segment id (Broadcast audience).');
+                    setMsg(
+                        'error',
+                        'Choose a broadcast segment (Services → Resend presets or paste UUID next to it).',
+                    );
                     return;
                 }
             } else {
@@ -1026,7 +1270,7 @@ export async function initEmailCampaignStudio(mainEl) {
             try {
                 const r = await getEmailCampaign(String(currentId));
                 if (r) {
-                    const u = await toUpsertRecord({ ...r, status: { failed: null }, lastError: [err] });
+                    const u = toUpsertRecord({ ...r, status: { failed: null }, lastError: [err] });
                     await upsertEmailCampaign(u);
                 }
             } catch {
@@ -1132,7 +1376,57 @@ export async function initEmailCampaignStudio(mainEl) {
 
     root.querySelector('#studio-ec-history')?.addEventListener('click', () => void openHistory());
 
-    root.querySelector('#studio-ec-delete')?.addEventListener('click', async () => {
+    segmentPreset?.addEventListener('change', () => {
+        if (!(segmentPreset instanceof HTMLSelectElement) || !(segmentInp instanceof HTMLInputElement)) return;
+        const v = segmentPreset.value;
+        if (v === '__custom__') return;
+        if (v) segmentInp.value = v;
+        recomputeSyncButton();
+    });
+    segmentInp?.addEventListener('input', () => recomputeSyncButton());
+    segmentInp?.addEventListener('change', () => recomputeSyncButton());
+    syncAudienceBtn?.addEventListener('click', async () => {
+        const seg = getActiveSegmentId();
+        if (!seg) {
+            setMsg('error', 'Set a segment UUID first.');
+            return;
+        }
+        if (getDataSource() !== 'live') {
+            setMsg('error', 'SYNC requires Live data source.');
+            return;
+        }
+        if (!getIntegrationBaseUrl()) {
+            setMsg('error', 'Integration API URL not set (Studio → Services).');
+            return;
+        }
+        setMsg('info', 'SYNCing audience…');
+        let ok = 0;
+        let fail = 0;
+        for (const s of subscribers) {
+            const em = String(s?.email || '').trim();
+            if (!validRosterEmail(em)) continue;
+            const aud = Array.isArray(s?.audiences) ? s.audiences : [];
+            if (aud.includes(seg)) continue;
+            try {
+                await resendAddContactToSegment({ segmentId: seg, email: em });
+                await appendSubscriberResendAudienceForStudio(em, seg);
+                ok += 1;
+            } catch {
+                fail += 1;
+            }
+            await new Promise((r) => setTimeout(r, 150));
+        }
+        try {
+            subscribers = await getSubscribersForEmailStudio();
+            repopulateAudienceSelect();
+        } catch {
+            /* ignore */
+        }
+        recomputeSyncButton();
+        setMsg('ok', `SYNC done: ${ok} updated, ${fail} failed.`);
+    });
+
+    const onDeleteCampaignClick = async () => {
         const id = String(currentId || '').trim();
         if (!id) {
             setMsg('error', 'Save the campaign at least once before you can delete it (or use “New” to discard the editor).');
@@ -1178,6 +1472,10 @@ export async function initEmailCampaignStudio(mainEl) {
         } finally {
             syncDeleteButtonState();
         }
+    };
+
+    root.querySelectorAll('.studio-ec__delete').forEach((btn) => {
+        btn.addEventListener('click', () => void onDeleteCampaignClick());
     });
 
     setLeftSubtab('compose');
@@ -1186,6 +1484,11 @@ export async function initEmailCampaignStudio(mainEl) {
 
     await loadMeta();
     await loadSubscribers();
+    await loadResendSegmentPresets();
+    if (segmentInp instanceof HTMLInputElement && !segmentInp.value.trim() && resendMeta.segmentId) {
+        segmentInp.value = resendMeta.segmentId;
+        recomputeSyncButton();
+    }
     await refreshList();
 
     if (!listEl?.querySelector('button[data-id]')) {

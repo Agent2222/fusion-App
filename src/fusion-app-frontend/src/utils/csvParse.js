@@ -72,18 +72,29 @@ export function parseSubscriberCsv(text) {
     const nameIdx = header.findIndex((h) => h === 'fullname' || h === 'name');
     const intentIdx = header.findIndex((h) => h === 'intent');
     const tsIdx = header.findIndex((h) => h === 'timestamp');
+    const audIdx = header.findIndex(
+        (h) => h === 'resendsegmentids' || h === 'audiences' || h === 'resend_segment_ids',
+    );
     if (emailIdx < 0) return [];
     const out = [];
     for (let r = 1; r < rows.length; r++) {
         const line = rows[r];
         const email = (line[emailIdx] || '').trim();
         if (!email) continue;
+        const audStr = audIdx >= 0 ? (line[audIdx] || '').trim() : '';
+        const audiences = audStr
+            ? audStr
+                  .split(/[;,]/)
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+            : [];
         out.push({
             email,
             category: catIdx >= 0 ? (line[catIdx] || '').trim() : '',
             fullName: nameIdx >= 0 ? (line[nameIdx] || '').trim() : '',
             intent: intentIdx >= 0 ? (line[intentIdx] || '').trim() : '',
             timestamp: tsIdx >= 0 ? (line[tsIdx] || '').trim() : new Date().toISOString(),
+            audiences,
         });
     }
     return out;

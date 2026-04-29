@@ -84,21 +84,30 @@ RSYNC_EXCLUDES=(
   --exclude '**/.DS_Store'
 )
 
-# Finder duplicate: works when bash/rsync cannot write to the volume (Cursor + removable TCC)
+# Finder copy: works when bash/rsync cannot write to the volume (Cursor + removable TCC).
+# We create an empty folder named TARGET_BASENAME first, then duplicate *contents* of the source tree.
+# Duplicating the whole project folder into the month dir would create another "fusion-app" next to an
+# existing backup "fusion-app" and Finder errors with -15267 (same name).
 copy_via_finder() {
   echo "rsync blocked by macOS; using Finder to copy (full folder including node_modules — may take a while)…" >&2
-  osascript <<ASCRIPT
-tell application "Finder"
+  osascript - "$ROOT" "$TARGET_BASENAME" "$MONTH_NAME" <<'ASCRIPT'
+on run argv
+  set rootPath to item 1 of argv
+  set targetBasename to item 2 of argv
+  set monthName to item 3 of argv
+  tell application "Finder"
     try
-        activate
-        set srcAlias to POSIX file "$ROOT" as alias
-        set monthF to folder "${MONTH_NAME}" of folder "FUSION" of folder "Web Backups" of disk "SCOGE SSD"
-        set dupItem to duplicate srcAlias to monthF
-        set name of dupItem to "${TARGET_BASENAME}"
+      activate
+      set monthF to folder monthName of folder "FUSION" of folder "Web Backups" of disk "SCOGE SSD"
+      set srcAlias to POSIX file rootPath as alias
+      set srcF to folder srcAlias
+      set destFolder to make new folder at monthF with properties {name: targetBasename}
+      duplicate every item of srcF to destFolder
     on error errMsg number errNum
-        error errMsg number errNum
+      error errMsg number errNum
     end try
-end tell
+  end tell
+end run
 ASCRIPT
 }
 

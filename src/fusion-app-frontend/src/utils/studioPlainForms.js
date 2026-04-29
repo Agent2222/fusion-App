@@ -269,26 +269,165 @@ export function applyJournalPlainLocales(prevEn, prevJa, plain) {
     };
 }
 
+/** Keys from program `application-form` `_collectPayload` (plus staff `notes`). */
+export const APPLICANT_KNOWN_FORM_KEYS = [
+    'firstName',
+    'lastName',
+    'email',
+    'country',
+    'stateProvince',
+    'city',
+    'website',
+    'discipline',
+    'bioStatement',
+    'exploration',
+    'residencyGoals',
+];
+
+const APPLICANT_FIELD_LABELS = {
+    firstName: 'First name',
+    lastName: 'Last name',
+    email: 'Email',
+    country: 'Country',
+    stateProvince: 'State / province',
+    city: 'City',
+    website: 'Website',
+    discipline: 'Discipline',
+    bioStatement: 'Bio / statement',
+    exploration: 'Exploration',
+    residencyGoals: 'Residency goals',
+};
+
+/**
+ * @param {string} payloadJson
+ * @returns {{ fields: Record<string, string>, internalNotes: string, other: Record<string, unknown> | null, rawInvalid: string | null }}
+ */
+export function parseApplicantPayload(payloadJson) {
+    const raw = String(payloadJson ?? '').trim();
+    if (!raw) {
+        return { fields: {}, internalNotes: '', other: null, rawInvalid: null };
+    }
+    try {
+        const o = JSON.parse(raw);
+        if (!o || typeof o !== 'object' || Array.isArray(o)) {
+            return { fields: {}, internalNotes: '', other: null, rawInvalid: raw };
+        }
+        /** @type {Record<string, string>} */
+        const fields = {};
+        for (const k of APPLICANT_KNOWN_FORM_KEYS) {
+            if (Object.prototype.hasOwnProperty.call(o, k)) {
+                fields[k] = String(/** @type {Record<string, unknown>} */ (o)[k] ?? '');
+            }
+        }
+        const internalNotes =
+            typeof o.notes === 'string'
+                ? o.notes
+                : typeof o.message === 'string'
+                  ? o.message
+                  : typeof o.comment === 'string'
+                    ? o.comment
+                    : '';
+        /** @type {Record<string, unknown>} */
+        const other = {};
+        for (const k of Object.keys(o)) {
+            if (k === 'notes' || k === 'message' || k === 'comment') continue;
+            if (APPLICANT_KNOWN_FORM_KEYS.includes(k)) continue;
+            other[k] = o[k];
+        }
+        const otherKeys = Object.keys(other);
+        return {
+            fields,
+            internalNotes,
+            other: otherKeys.length ? other : null,
+            rawInvalid: null,
+        };
+    } catch {
+        return { fields: {}, internalNotes: '', other: null, rawInvalid: raw };
+    }
+}
+
+/**
+ * @param {string} internalNotes
+ * @param {string} previousPayloadJson
+ * @returns {string} JSON string for `payloadJson` on applicant record
+ */
+export function mergeApplicantInternalNotes(internalNotes, previousPayloadJson) {
+    const t = String(internalNotes ?? '').trim();
+    let prev = {};
+    try {
+        const p = JSON.parse(String(previousPayloadJson || '{}'));
+        if (p && typeof p === 'object' && !Array.isArray(p)) prev = /** @type {Record<string, unknown>} */ (p);
+    } catch {
+        /* ignore */
+    }
+    const next = { ...prev, notes: t };
+    return JSON.stringify(next);
+}
+
+/**
+ * @param {string} href
+ * @returns {string}
+ */
+function normalizeWebsiteHref(href) {
+    const s = String(href ?? '').trim();
+    if (!s) return '';
+    if (/^https?:\/\//i.test(s)) return s;
+    if (s.startsWith('//')) return `https:${s}`;
+    return `https://${s}`;
+}
+
+/**
+ * Read-only HTML for application fields + profile link (Studio applicant modals).
+ * @param {string} payloadJson
+ * @param {{ siteOrigin: string, profileSlug?: string | null, escapeHtml: (s: string) => string }} opts
+ * @returns {string}
+ */
+export function buildApplicantApplicationSectionHtml(payloadJson, opts) {
+    const { siteOrigin, profileSlug, escapeHtml } = opts;
+    const { fields, other, rawInvalid } = parseApplicantPayload(payloadJson);
+    if (rawInvalid) {
+        return `<p class="studio-muted">Could not parse payload as JSON. Showing raw text.</p><pre class="studio-textarea-mono studio-app-payload-raw" style="max-height:12rem;overflow:auto;font-size:0.75rem">${escapeHtml(rawInvalid)}</pre>`;
+    }
+    const rows = [];
+    for (const k of APPLICANT_KNOWN_FORM_KEYS) {
+        const label = APPLICANT_FIELD_LABELS[k] || k;
+        let v = fields[k] ?? '';
+        if (k === 'website' && v) {
+            const h = normalizeWebsiteHref(v);
+            const safe = escapeHtml(h);
+            v = `<a href="${safe}" target="_blank" rel="noopener noreferrer" class="studio-app-payload-link">${safe}</a>`;
+        } else {
+            v = v ? escapeHtml(v) : '—';
+        }
+        rows.push(`<div class="studio-app-payload-dl__row"><dt>${escapeHtml(label)}</dt><dd>${v}</dd></div>`);
+    }
+    const em = String(fields.email || '').trim().toLowerCase();
+    const profile = profileSlug
+        ? `${String(siteOrigin || '').replace(/\/$/, '')}/profile/${encodeURIComponent(profileSlug)}`
+        : '';
+    const profileCell = profile
+        ? `<a href="${escapeHtml(profile)}" target="_blank" rel="noopener noreferrer" class="studio-app-payload-link">/${escapeHtml(profileSlug || '')}</a>`
+        : '—';
+    rows.push(
+        `<div class="studio-app-payload-dl__row"><dt>Artist profile</dt><dd>${profileCell}</dd></div>`,
+    );
+    let otherBlock = '';
+    if (other && Object.keys(other).length) {
+        otherBlock = `<p class="studio-muted studio-app-payload-other-label">Other data</p><pre class="studio-textarea-mono studio-app-payload-raw" style="max-height:8rem;overflow:auto;font-size:0.75rem">${escapeHtml(JSON.stringify(other, null, 2))}</pre>`;
+    }
+    return `<div class="studio-app-payload-dl">${rows.join('')}</div>${otherBlock}`;
+}
+
 /**
  * Applicant payload: show notes only in UI; preserve structured JSON when present.
+ * Prefer {@link parseApplicantPayload} for Studio UI; this remains for legacy callers.
  * @param {string} payloadJson
  */
 export function applicantPayloadToPlainNotes(payloadJson) {
-    const raw = String(payloadJson ?? '').trim();
-    if (!raw) return '';
-    try {
-        const o = JSON.parse(raw);
-        if (o && typeof o === 'object' && !Array.isArray(o)) {
-            if (typeof o.notes === 'string') return o.notes;
-            if (typeof o.message === 'string') return o.message;
-            if (typeof o.comment === 'string') return o.comment;
-            const keys = Object.keys(o);
-            if (keys.length === 1 && typeof o[keys[0]] === 'string') return String(o[keys[0]]);
-        }
-        return JSON.stringify(o, null, 2);
-    } catch {
-        return raw;
-    }
+    const { internalNotes, rawInvalid } = parseApplicantPayload(payloadJson);
+    if (rawInvalid) return rawInvalid;
+    if (internalNotes) return internalNotes;
+    return '';
 }
 
 /**

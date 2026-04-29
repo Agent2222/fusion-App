@@ -30,6 +30,8 @@ import {
     getJournalEntryForStudio,
     getProgramRecordForStudio,
     getPrograms,
+    buildNewApplicantStaffNotificationEmail,
+    getProgramDisplayNameFromRow,
     getApplicationPaymentGlobal,
     getCurrentProgramSeason,
     setApplicationPaymentGlobal,
@@ -46,8 +48,12 @@ import {
     adminSetSoundEnvironmentStudio,
     adminSetArtistMediaForStudio,
     getEventsList,
+    getResendSegmentConfigFromCanister,
     getSubscribers as loadSubscribersFromDataSource,
+    getSubscribersCsv,
     setDataSource,
+    setResendSegmentConfigOnCanister,
+    setSubscriberAudiencesForStudio,
     upsertApplicantStudio,
     deleteApplicantStudio,
     studioReinterpretWithPrompt,
@@ -73,7 +79,10 @@ import {
 import {
     applicantPayloadToPlainNotes,
     applyJournalPlainLocales,
+    buildApplicantApplicationSectionHtml,
     journalLocalesToPlain,
+    mergeApplicantInternalNotes,
+    parseApplicantPayload,
     plainNotesToApplicantPayload,
     shortPrincipalDisplay,
     shortRefLabel,
@@ -82,6 +91,8 @@ import { MAX_MANUAL_FEATURED, readArtistFeaturedMeta } from '../../utils/artistF
 import { LEGACY_PROFILE_BASE } from '../../utils/studioLegacyProfileUrls.js';
 import { openStudioModal } from '../../utils/studioModal.js';
 import { openSendBlastModal } from './sendBlastModal.js';
+import { openIndividualEmailModal } from './individualEmailModal.js';
+import { openApplicantEmailModal as openApplicantEmailComposer } from './applicantEmailModal.js';
 import { initEmailCampaignStudio, renderEmailCampaignStudio } from './emailCampaignStudio.js';
 import {
     createPaymentIntent,
@@ -126,6 +137,7 @@ import { collectAccessCodesFromArtists, normalizeArtistImportRow } from '../../u
 import { initArtistProgramsTab } from '../../utils/studioArtistPrograms.js';
 import {
     LS_APPLICATION_ADMIN_EMAILS,
+    getApplicationStaffNotificationEmails,
     LS_INTEGRATION_API_KEY,
     LS_INTEGRATION_API_URL,
     LS_RESEND_FROM_OVERRIDE,
@@ -330,9 +342,11 @@ function renderSubscribers() {
                     <input type="file" id="studio-subscriber-csv" accept=".csv,text/csv" class="studio-file-input" />
                     Upload CSV
                 </label>
+                <button type="button" class="studio-btn-ghost" id="studio-subscribers-download-csv">Download CSV</button>
                 <button type="button" class="studio-btn-ghost" id="studio-subscribers-refresh">
                     Refresh list
                 </button>
+                <button type="button" class="studio-btn-secondary" id="studio-subscribers-all-to-general">All To General</button>
             </div>
             <div id="studio-subscribers-csv-msg" class="studio-banner studio-banner--info" style="display:none"></div>
             <div id="studio-subscribers-banner" class="studio-banner studio-banner--info" style="display:none"></div>
@@ -345,11 +359,13 @@ function renderSubscribers() {
                             <th>Name</th>
                             <th>Intent</th>
                             <th>Timestamp</th>
-                            <th class="studio-td-actions">Actions</th>
+                            <th>Audiences</th>
+                            <th class="studio-td-actions studio-subscribers-col-manage">Manage</th>
+                            <th class="studio-td-actions studio-subscribers-col-delete">Delete</th>
                         </tr>
                     </thead>
                     <tbody id="studio-subscribers-tbody">
-                        <tr><td colspan="6">Loading…</td></tr>
+                        <tr><td colspan="8">Loading…</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -1175,13 +1191,33 @@ function renderServices() {
                                 <span>From (optional)</span>
                                 <input type="text" id="studio-svc-resend-from" class="studio-input" placeholder='Fusion &lt;onboarding@resend.dev&gt; — must be allowed in Resend' autocomplete="off" />
                             </label>
-                            <label class="studio-field studio-field--full">
-                                <span>Additional application notification recipients</span>
-                                <textarea id="studio-svc-application-admin-emails" class="studio-input studio-textarea-mono" rows="3" placeholder="extra1@example.com, extra2@example.com"></textarea>
-                            </label>
-                            <p class="studio-muted studio-field--full">
-                                <code>info@fusionart.world</code> always receives new program-application notifications. Use the field above to add more staff addresses (comma or newline separated).
-                            </p>
+                            <h4 class="studio-subheading studio-field--full" style="margin-top:0.5rem">Audience segments (canister)</h4>
+                            <p class="studio-muted studio-field--full">Up to five Resend audience segment UUIDs with display names. Used in Email → broadcast segment picker and Subscribers “Audiences”. Saved on-chain (Services edit permission).</p>
+                            <label class="studio-field"><span>Segment 1 name</span><input type="text" id="studio-svc-seg-name-1" class="studio-input" placeholder="e.g. Members" /></label>
+                            <label class="studio-field"><span>Segment 1 id</span><input type="text" id="studio-svc-seg-id-1" class="studio-input" placeholder="UUID" autocomplete="off" /></label>
+                            <label class="studio-field"><span>Segment 2 name</span><input type="text" id="studio-svc-seg-name-2" class="studio-input" /></label>
+                            <label class="studio-field"><span>Segment 2 id</span><input type="text" id="studio-svc-seg-id-2" class="studio-input" autocomplete="off" /></label>
+                            <label class="studio-field"><span>Segment 3 name</span><input type="text" id="studio-svc-seg-name-3" class="studio-input" /></label>
+                            <label class="studio-field"><span>Segment 3 id</span><input type="text" id="studio-svc-seg-id-3" class="studio-input" autocomplete="off" /></label>
+                            <label class="studio-field"><span>Segment 4 name</span><input type="text" id="studio-svc-seg-name-4" class="studio-input" /></label>
+                            <label class="studio-field"><span>Segment 4 id</span><input type="text" id="studio-svc-seg-id-4" class="studio-input" autocomplete="off" /></label>
+                            <label class="studio-field"><span>Segment 5 name</span><input type="text" id="studio-svc-seg-name-5" class="studio-input" /></label>
+                            <label class="studio-field"><span>Segment 5 id</span><input type="text" id="studio-svc-seg-id-5" class="studio-input" autocomplete="off" /></label>
+                            <div class="studio-field studio-field--full studio-services-actions">
+                                <button type="button" class="studio-btn-primary" id="studio-svc-resend-segments-save">Save segments to canister</button>
+                            </div>
+                            <h4 class="studio-subheading studio-field--full" style="margin-top:0.5rem">New Applicant Notification</h4>
+                            <p class="studio-muted studio-field--full">When someone submits a program application, staff receive an email with the subject <strong>New Fusion &lt;program name&gt; Applicant</strong> (name, website, link to Studio → Applicants). <code>info@fusionart.world</code> always receives these; add more addresses below (comma-separated).</p>
+                            <div class="studio-field studio-field--full studio-svc-app-notify-row">
+                                <label class="studio-svc-app-notify-row__input">
+                                    <span>Additional staff emails</span>
+                                    <input type="text" id="studio-svc-application-admin-emails" class="studio-input" placeholder="ops@example.com, hiring@example.com" autocomplete="off" />
+                                </label>
+                                <div class="studio-svc-app-notify-row__test">
+                                    <span class="studio-sr-only">Send a test new-applicant email</span>
+                                    <button type="button" class="studio-btn-ghost" id="studio-svc-new-applicant-notify-test">Send Test</button>
+                                </div>
+                            </div>
                             <div class="studio-field studio-field--full studio-services-actions">
                                 <button type="button" class="studio-btn-ghost" id="studio-svc-help-resend">How to set up Resend</button>
                                 <button type="button" class="studio-btn-primary" id="studio-svc-send-test">Send test email</button>
@@ -1390,7 +1426,7 @@ function openStudioArtistManageFromRow(tableRow, afterSave, hostEl, listSurface 
                     ? 'is-private'
                     : 'is-inactive';
         hostEl.innerHTML = `
-            <div class="studio-artist-manage-shell">
+            <div class="studio-artist-manage-shell" data-studio-artist-manage>
                 <div class="studio-artist-manage-top">
                     <div class="studio-artist-manage-crumb">Studio / Artists</div>
                     <div class="studio-artist-manage-top-actions">
@@ -1839,21 +1875,6 @@ function buildApplicantEmailToSlugMap(artists) {
     return m;
 }
 
-const STUDIO_APPLICANT_EMAIL_PRESETS = {
-    schedule: {
-        label: 'Schedule meeting',
-        /** @param {{ fullName?: string, programId?: string }} r */
-        body: (r) =>
-            `Hello ${String(r.fullName || 'there').trim()},\n\nWe would like to schedule a meeting to discuss your application for program ${String(r.programId || '').trim()}.\n\nPlease reply with your availability.\n\n— Fusion`,
-    },
-    confirmation: {
-        label: 'Send confirmation',
-        /** @param {{ fullName?: string, programId?: string }} r */
-        body: (r) =>
-            `Hello ${String(r.fullName || 'there').trim()},\n\nThis confirms we have received your application for program ${String(r.programId || '').trim()}.\n\nWe will be in touch with next steps.\n\n— Fusion`,
-    },
-};
-
 /**
  * @param {object} row
  */
@@ -2184,12 +2205,17 @@ async function initSubscribers(mainEl) {
     const bootstrapBtn = mainEl.querySelector('#studio-bootstrap-admin');
     const refreshBtn = mainEl.querySelector('#studio-subscribers-refresh');
     const addBtn = mainEl.querySelector('#studio-subscriber-add');
+    const allToGeneralBtn = mainEl.querySelector('#studio-subscribers-all-to-general');
     const csvInput = mainEl.querySelector('#studio-subscriber-csv');
+    const downloadCsvBtn = mainEl.querySelector('#studio-subscribers-download-csv');
     const searchInput = mainEl.querySelector('#studio-subscribers-search');
     const countEl = mainEl.querySelector('#studio-subscribers-header-count');
 
     const subPerm = studioFeatureAccess('subscribers');
-    const subCols = subPerm.canEdit ? 6 : 5;
+    const subCols = subPerm.canEdit ? 8 : 6;
+
+    /** @type {Array<{ name: string, segmentId: string }>} */
+    let resendSegmentList = [];
 
     /** @type {object[]} */
     let allSubscriberRows = [];
@@ -2208,7 +2234,20 @@ async function initSubscribers(mainEl) {
         csvMsg.textContent = text;
     };
 
-    const wireDelete = () => {
+    const segmentIdToLabel = (id) => {
+        const t = String(id || '').trim();
+        if (!t) return '—';
+        const hit = resendSegmentList.find((x) => String(x.segmentId).trim() === t);
+        return (hit && String(hit.name || '').trim()) || `${t.slice(0, 8)}…`;
+    };
+
+    const formatAudiencesCell = (row) => {
+        const a = Array.isArray(row.audiences) ? row.audiences : [];
+        if (!a.length) return '—';
+        return a.map((id) => escapeHtml(segmentIdToLabel(id))).join(', ');
+    };
+
+    const wireSubscriberRowActions = () => {
         tbody?.querySelectorAll('.studio-sub-delete').forEach((btn) => {
             btn.addEventListener('click', async () => {
                 const email = btn.getAttribute('data-email');
@@ -2222,6 +2261,57 @@ async function initSubscribers(mainEl) {
                     showBanner('error', `Delete failed: ${msg}`);
                     if (DEV_MODE) console.error(e);
                 }
+            });
+        });
+        tbody?.querySelectorAll('.studio-sub-manage').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const email = btn.getAttribute('data-email');
+                if (!email) return;
+                const row = allSubscriberRows.find(
+                    (r) => String(r.email).toLowerCase() === email.toLowerCase(),
+                );
+                const have = new Set(
+                    (Array.isArray(row?.audiences) ? row.audiences : []).map((x) => String(x).trim()).filter(Boolean),
+                );
+                const slots = (resendSegmentList || [])
+                    .map((s) => ({ name: String(s?.name || '').trim(), id: String(s?.segmentId || '').trim() }))
+                    .filter((s) => s.id);
+                const pillHtml = slots.length
+                    ? slots
+                          .map(
+                              (s) => `
+            <button type="button" class="studio-pill studio-audience-pill ${have.has(s.id) ? 'studio-pill--active' : ''}" data-seg="${escapeHtml(s.id)}">
+              ${escapeHtml(s.name || s.id.slice(0, 8) + '…')}
+            </button>`,
+                          )
+                          .join('')
+                    : '<p class="studio-muted">Configure segment names/ids in Studio → Services → Resend, then save to the canister.</p>';
+                const body = `<div class="studio-modal-form studio-audience-manage" data-email="${escapeHtml(email)}">
+            <p class="studio-muted">Toggle which Resend segments this address is tagged with in Fusion (canister only). Use Email → <strong>SYNC Audience</strong> to push to Resend.</p>
+            <div class="studio-audience-pill-wrap">${pillHtml}</div>
+            <button type="button" class="studio-btn-primary" id="studio-audience-save">Save</button>
+          </div>`;
+                const { close, root: modalRoot } = openStudioModal(body, { title: `Audiences — ${escapeHtml(email)}`, wide: true });
+                const wrap = modalRoot.querySelector('.studio-audience-manage');
+                wrap?.querySelectorAll('.studio-audience-pill').forEach((p) => {
+                    p.addEventListener('click', () => p.classList.toggle('studio-pill--active'));
+                });
+                modalRoot.querySelector('#studio-audience-save')?.addEventListener('click', async () => {
+                    const em = wrap?.getAttribute('data-email') || email;
+                    const next = /** @type {string[]} */ ([]);
+                    wrap?.querySelectorAll('.studio-audience-pill.studio-pill--active').forEach((p) => {
+                        const s = p.getAttribute('data-seg');
+                        if (s) next.push(s);
+                    });
+                    try {
+                        await setSubscriberAudiencesForStudio(em, next);
+                        close();
+                        await loadRows();
+                        showBanner('ok', 'Audiences updated.');
+                    } catch (e) {
+                        alert(e instanceof Error ? e.message : String(e));
+                    }
+                });
             });
         });
     };
@@ -2246,12 +2336,18 @@ async function initSubscribers(mainEl) {
                     <td>${escapeHtml(row.fullName ?? '')}</td>
                     <td>${escapeHtml(row.intent ?? '')}</td>
                     <td>${escapeHtml(row.timestamp)}</td>
-                    ${subPerm.canEdit ? `<td class="studio-td-actions"><button type="button" class="studio-btn-ghost studio-sub-delete" data-email="${escapeHtml(row.email)}">DELETE</button></td>` : ''}
+                    <td>${formatAudiencesCell(row)}</td>
+                    ${
+                        subPerm.canEdit
+                            ? `<td class="studio-subscribers-col-manage"><button type="button" class="studio-btn-ghost studio-sub-manage" data-email="${escapeHtml(row.email)}">Audiences</button></td>
+                    <td class="studio-td-actions studio-subscribers-col-delete"><button type="button" class="studio-btn-ghost studio-sub-delete" data-email="${escapeHtml(row.email)}">DELETE</button></td>`
+                            : ''
+                    }
                 </tr>
-            `
+            `,
                 )
                 .join('');
-            if (subPerm.canEdit) wireDelete();
+            if (subPerm.canEdit) wireSubscriberRowActions();
         }
         if (countEl) {
             countEl.textContent = q ? String(rows.length) : String(allSubscriberRows.length);
@@ -2271,6 +2367,11 @@ async function initSubscribers(mainEl) {
                 tbody.innerHTML = `<tr><td colspan="${subCols}">Bindings out of date — run <code>dfx generate fusion-app-backend</code> after pulling backend changes.</td></tr>`;
                 if (DEV_MODE) console.error(genErr);
                 return;
+            }
+            try {
+                resendSegmentList = await getResendSegmentConfigFromCanister();
+            } catch {
+                resendSegmentList = [];
             }
             if (getDataSource() === 'test') {
                 showBanner(
@@ -2297,9 +2398,82 @@ async function initSubscribers(mainEl) {
 
     if (!subPerm.canEdit) {
         addBtn?.setAttribute('hidden', '');
+        allToGeneralBtn?.setAttribute('hidden', '');
         csvInput?.closest('label')?.setAttribute('hidden', '');
-        mainEl.querySelector('.studio-table--dense thead .studio-td-actions')?.setAttribute('hidden', '');
+        mainEl.querySelectorAll('.studio-subscribers-col-manage, .studio-subscribers-col-delete').forEach((el) => {
+            el.setAttribute('hidden', '');
+        });
     }
+
+    allToGeneralBtn?.addEventListener('click', () => {
+        const slots = (resendSegmentList || [])
+            .map((s) => ({ name: String(s?.name || '').trim(), id: String(s?.segmentId || '').trim() }))
+            .filter((s) => s.id);
+        const pillHtml = slots.length
+            ? slots
+                  .map(
+                      (s) => `
+            <button type="button" class="studio-pill studio-audience-pill" data-seg="${escapeHtml(s.id)}">
+              ${escapeHtml(s.name || s.id.slice(0, 8) + '…')}
+            </button>`,
+                  )
+                  .join('')
+            : '<p class="studio-muted">Configure segment names/ids in Studio → Services → Resend, then save to the canister.</p>';
+        const body = `<div class="studio-modal-form studio-audience-manage studio-audience-manage--batch" id="studio-audience-batch-form">
+            <p class="studio-muted">Select one or more Resend audience segments. Each will be <strong>added</strong> to every subscriber’s Fusion audiences (existing tags are kept). Use Email → <strong>SYNC Audience</strong> to push to Resend afterward.</p>
+            <div class="studio-audience-pill-wrap">${pillHtml}</div>
+            <div class="studio-modal-actions" style="gap:0.5rem;flex-wrap:wrap">
+              <button type="button" class="studio-btn-primary" id="studio-subscribers-batch-audience-apply">Add to all subscribers</button>
+            </div>
+          </div>`;
+        const { close, root: modalRoot } = openStudioModal(body, { title: 'Add audiences to all subscribers', wide: true });
+        modalRoot.querySelectorAll('.studio-audience-pill').forEach((p) => {
+            p.addEventListener('click', () => p.classList.toggle('studio-pill--active'));
+        });
+        modalRoot.querySelector('#studio-subscribers-batch-audience-apply')?.addEventListener('click', async () => {
+            const selected = /** @type {string[]} */ ([]);
+            modalRoot.querySelectorAll('.studio-audience-pill.studio-pill--active').forEach((p) => {
+                const s = p.getAttribute('data-seg');
+                if (s) selected.push(s);
+            });
+            if (!selected.length) {
+                alert('Select at least one audience segment.');
+                return;
+            }
+            const n = allSubscriberRows.length;
+            if (n === 0) {
+                alert('No subscribers to update.');
+                return;
+            }
+            if (
+                !confirm(
+                    `Add ${selected.length} segment(s) to all ${n} subscriber(s)? This updates the canister only; sync to Resend separately if needed.`,
+                )
+            ) {
+                return;
+            }
+            try {
+                for (const row of allSubscriberRows) {
+                    const em = String(row.email || '').trim();
+                    if (!em) continue;
+                    const have = new Set(
+                        (Array.isArray(row.audiences) ? row.audiences : [])
+                            .map((x) => String(x).trim())
+                            .filter(Boolean),
+                    );
+                    for (const id of selected) {
+                        if (id) have.add(id);
+                    }
+                    await setSubscriberAudiencesForStudio(em, [...have]);
+                }
+                close();
+                await loadRows();
+                showBanner('ok', `Updated audiences for ${n} subscriber(s).`);
+            } catch (e) {
+                alert(e instanceof Error ? e.message : String(e));
+            }
+        });
+    });
 
     addBtn?.addEventListener('click', () => {
         const body = `
@@ -2371,6 +2545,22 @@ async function initSubscribers(mainEl) {
     });
 
     refreshBtn?.addEventListener('click', () => loadRows());
+
+    downloadCsvBtn?.addEventListener('click', async () => {
+        try {
+            const csv = await getSubscribersCsv();
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'fusion-subscribers.csv';
+            a.click();
+            URL.revokeObjectURL(url);
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            showCsv('error', msg);
+        }
+    });
 
     searchInput?.addEventListener('input', () => applySubscriberFilter());
 
@@ -2553,16 +2743,31 @@ async function initApplicants(mainEl) {
         }
     };
 
+    const reload = async () => {
+        allRows = await getApplicants();
+        try {
+            const artists = await getArtistsForStudio();
+            applicantEmailToSlug = buildApplicantEmailToSlugMap(artists);
+        } catch {
+            applicantEmailToSlug = new Map();
+        }
+        renderPage();
+    };
+
     const openApplicantViewModal = (id) => {
         const r = allRows.find((x) => x.id === id);
         if (!r) return;
-        let payloadPretty = String(r.payloadJson || '').trim();
-        try {
-            const o = JSON.parse(payloadPretty);
-            payloadPretty = JSON.stringify(o, null, 2);
-        } catch {
-            /* raw */
-        }
+        const em = String(r.email || '')
+            .trim()
+            .toLowerCase();
+        const siteOrigin = getPublicSiteOrigin();
+        const profileSlug = em ? applicantEmailToSlug.get(em) || null : null;
+        const { internalNotes } = parseApplicantPayload(r.payloadJson);
+        const appBlock = buildApplicantApplicationSectionHtml(r.payloadJson, { siteOrigin, profileSlug, escapeHtml });
+        const internalBlock =
+            internalNotes && internalNotes.trim()
+                ? `<div class="studio-app-internal-notes"><strong>Internal notes</strong><div class="studio-app-internal-notes__body">${escapeHtml(internalNotes)}</div></div>`
+                : '';
         const body = `
           <div class="studio-modal-form">
             <p><strong>Email:</strong> ${escapeHtml(r.email)}</p>
@@ -2570,9 +2775,9 @@ async function initApplicants(mainEl) {
             <p><strong>Program:</strong> ${escapeHtml(r.programId)}</p>
             <p><strong>Status:</strong> ${applicantStatusPillHtml(r.status)}</p>
             <p><strong>Created:</strong> ${escapeHtml(r.createdAt)}</p>
-            <label class="studio-field studio-field--full"><span>Application payload (read-only)</span>
-              <textarea class="studio-textarea studio-textarea-mono" rows="16" readonly spellcheck="false">${escapeHtml(payloadPretty)}</textarea>
-            </label>
+            <h3 class="studio-subheading">Application</h3>
+            ${appBlock}
+            ${internalBlock}
           </div>`;
         openStudioModal(body, { title: 'View application', wide: true });
     };
@@ -2580,76 +2785,23 @@ async function initApplicants(mainEl) {
     const openApplicantEmailModal = (id) => {
         const r = allRows.find((x) => x.id === id);
         if (!r) return;
-        const body = `
-          <div class="studio-modal-form">
-            <p class="studio-muted">To: <strong>${escapeHtml(r.email)}</strong></p>
-            <label class="studio-field studio-field--full"><span>Category</span>
-              <select id="studio-app-email-category" class="studio-select">
-                <option value="schedule">${escapeHtml(STUDIO_APPLICANT_EMAIL_PRESETS.schedule.label)}</option>
-                <option value="confirmation">${escapeHtml(STUDIO_APPLICANT_EMAIL_PRESETS.confirmation.label)}</option>
-              </select>
-            </label>
-            <label class="studio-field studio-field--full"><span>Message</span>
-              <textarea id="studio-app-email-body" class="studio-textarea" rows="12" spellcheck="true"></textarea>
-            </label>
-            <button type="button" class="studio-btn-primary" id="studio-app-email-send">Send</button>
-            <p id="studio-app-email-msg" class="studio-banner studio-banner--info" style="display:none;margin-top:0.75rem" role="status"></p>
-          </div>`;
-        const { close, root } = openStudioModal(body, {
-            title: `Send email — ${escapeHtml(r.email)}`,
-            wide: true,
-        });
-        const cat = root.querySelector('#studio-app-email-category');
-        const ta = root.querySelector('#studio-app-email-body');
-        const msg = root.querySelector('#studio-app-email-msg');
-        const applyPreset = () => {
-            const k = cat instanceof HTMLSelectElement ? cat.value : 'schedule';
-            const preset = STUDIO_APPLICANT_EMAIL_PRESETS[k] || STUDIO_APPLICANT_EMAIL_PRESETS.schedule;
-            if (ta instanceof HTMLTextAreaElement) ta.value = preset.body(r);
-        };
-        applyPreset();
-        cat?.addEventListener('change', applyPreset);
-        root.querySelector('#studio-app-email-send')?.addEventListener('click', async () => {
-            if (!getIntegrationBaseUrl()) {
-                if (msg) {
-                    msg.style.display = 'block';
-                    msg.className = 'studio-banner studio-banner--warn';
-                    msg.textContent = 'Integration API URL is not configured.';
-                }
-                return;
-            }
-            const text = ta instanceof HTMLTextAreaElement ? ta.value.trim() : '';
-            if (!text) {
-                if (msg) {
-                    msg.style.display = 'block';
-                    msg.className = 'studio-banner studio-banner--warn';
-                    msg.textContent = 'Message is empty.';
-                }
-                return;
-            }
-            const subject = `[Fusion] Program application — ${String(r.programId || '').trim()}`;
-            try {
-                await sendEmail({ to: r.email, subject, text });
-                if (msg) {
-                    msg.style.display = 'block';
-                    msg.className = 'studio-banner studio-banner--info';
-                    msg.textContent = 'Sent.';
-                }
-                close();
-            } catch (e) {
-                if (msg) {
-                    msg.style.display = 'block';
-                    msg.className = 'studio-banner studio-banner--warn';
-                    msg.textContent = e instanceof Error ? e.message : String(e);
-                }
-            }
-        });
+        openApplicantEmailComposer(r, { onSent: reload });
     };
 
     const openApplicantModal = (id) => {
         const r = allRows.find((x) => x.id === id);
         if (!r) return;
-        const notesPlain = applicantPayloadToPlainNotes(r.payloadJson);
+        const { internalNotes, rawInvalid } = parseApplicantPayload(r.payloadJson);
+        const initialNotes = rawInvalid ? applicantPayloadToPlainNotes(r.payloadJson) : internalNotes;
+        const em = String(r.email || '')
+            .trim()
+            .toLowerCase();
+        const siteOrigin = getPublicSiteOrigin();
+        const profileSlug = em ? applicantEmailToSlug.get(em) || null : null;
+        const appBlock = buildApplicantApplicationSectionHtml(r.payloadJson, { siteOrigin, profileSlug, escapeHtml });
+        const rawInvalidBanner = rawInvalid
+            ? '<p class="studio-banner studio-banner--warn" style="margin-top:0.5rem">Application payload is not valid JSON. Save keeps the stored payload unchanged until it is valid JSON; internal note edits are ignored in that case.</p>'
+            : '';
         const deleteBlock = canDeleteApplicants
             ? `<div class="studio-modal-actions studio-modal-actions--applicant-delete">
             <button type="button" class="studio-btn-danger" id="studio-app-modal-delete">Delete applicant</button>
@@ -2659,17 +2811,26 @@ async function initApplicants(mainEl) {
           <div class="studio-modal-form">
             <p class="studio-muted">Reference: <code class="studio-code-inline">${escapeHtml(shortRefLabel(r.id))}</code></p>
             <p><strong>${escapeHtml(r.email)}</strong>${r.fullName ? ` — ${escapeHtml(r.fullName)}` : ''}</p>
-            <label class="studio-field"><span>Status</span>
-              <select id="studio-app-modal-status" class="studio-select">
-                <option value="pending">Pending</option>
-                <option value="reviewing">Reviewing</option>
-                <option value="needsInfo">Needs info</option>
-                <option value="accepted">Approved</option>
-                <option value="rejected">Denied</option>
-              </select>
-            </label>
-            <label class="studio-field studio-field--full"><span>Notes</span>
-              <textarea id="studio-app-modal-payload" class="studio-textarea" rows="14" placeholder="Internal notes (plain text). Structured data is preserved when you only add notes."></textarea>
+            ${rawInvalidBanner}
+            <h3 class="studio-subheading">Application</h3>
+            ${appBlock}
+            <div class="studio-app-status-with-email">
+              <label class="studio-field studio-app-status-with-email__status"><span>Status</span>
+                <select id="studio-app-modal-status" class="studio-select">
+                  <option value="pending">Pending</option>
+                  <option value="reviewing">Reviewing</option>
+                  <option value="needsInfo">Needs info</option>
+                  <option value="accepted">Approved</option>
+                  <option value="rejected">Denied</option>
+                </select>
+              </label>
+              <div class="studio-app-status-with-email__send">
+                <span class="studio-sr-only">Send email to applicant</span>
+                <button type="button" class="studio-btn-ghost" id="studio-app-modal-send-email">Send email</button>
+              </div>
+            </div>
+            <label class="studio-field studio-field--full"><span>Internal notes (staff only)</span>
+              <textarea id="studio-app-modal-notes" class="studio-textarea" rows="6" placeholder="Visible in Studio only; not sent to the applicant."></textarea>
             </label>
             <button type="button" class="studio-btn-primary" id="studio-app-modal-save">Save</button>
             ${deleteBlock}
@@ -2680,17 +2841,70 @@ async function initApplicants(mainEl) {
         });
         const sel = root.querySelector('#studio-app-modal-status');
         if (sel) sel.value = r.status;
-        const ta = root.querySelector('#studio-app-modal-payload');
-        if (ta) ta.value = notesPlain;
+        const notesTa = root.querySelector('#studio-app-modal-notes');
+        if (notesTa instanceof HTMLTextAreaElement) {
+            notesTa.value = initialNotes;
+        }
+        let statusAtOpen = r.status;
+
+        const makePayloadForSave = () => {
+            const rawInner = root.querySelector('#studio-app-modal-notes')?.value ?? '';
+            if (rawInvalid) return r.payloadJson;
+            return mergeApplicantInternalNotes(rawInner, r.payloadJson);
+        };
+
+        root.querySelector('#studio-app-modal-send-email')?.addEventListener('click', () => {
+            openApplicantEmailComposer(r, { onSent: reload });
+        });
+        sel?.addEventListener('change', () => {
+            if (!(sel instanceof HTMLSelectElement)) return;
+            if (sel.value === statusAtOpen) return;
+            let promptResolved = false;
+            const { close: closePrompt, root: pr } = openStudioModal(
+                `<p>Save this status change and open the email composer?</p>
+            <div class="studio-modal-actions" style="gap:0.5rem;flex-wrap:wrap">
+              <button type="button" class="studio-btn-primary" id="studio-app-status-prompt-yes">Save and send email</button>
+              <button type="button" class="studio-btn-secondary" id="studio-app-status-prompt-no">Cancel</button>
+            </div>`,
+                {
+                    title: 'Status changed',
+                    compact: true,
+                    onClose: () => {
+                        if (promptResolved) return;
+                        if (sel instanceof HTMLSelectElement) sel.value = statusAtOpen;
+                    },
+                },
+            );
+            pr.querySelector('#studio-app-status-prompt-yes')?.addEventListener('click', async () => {
+                promptResolved = true;
+                closePrompt();
+                const status = sel.value;
+                const payloadJson = makePayloadForSave();
+                try {
+                    await upsertApplicantStudio({ ...r, status, payloadJson });
+                    statusAtOpen = status;
+                    close();
+                    await reload();
+                    const fresh = allRows.find((x) => x.id === r.id);
+                    if (fresh) openApplicantEmailComposer(fresh, { onSent: reload });
+                } catch (e) {
+                    alert(e instanceof Error ? e.message : String(e));
+                }
+            });
+            pr.querySelector('#studio-app-status-prompt-no')?.addEventListener('click', () => {
+                promptResolved = true;
+                if (sel instanceof HTMLSelectElement) sel.value = statusAtOpen;
+                closePrompt();
+            });
+        });
         root.querySelector('#studio-app-modal-save')?.addEventListener('click', async () => {
             const status = sel?.value || 'pending';
-            const rawNotes = root.querySelector('#studio-app-modal-payload')?.value ?? '';
-            const payloadJson = plainNotesToApplicantPayload(rawNotes, r.payloadJson);
+            const payloadJson = makePayloadForSave();
             try {
                 await upsertApplicantStudio({ ...r, status, payloadJson });
+                statusAtOpen = status;
                 close();
-                allRows = await getApplicants();
-                renderPage();
+                await reload();
             } catch (e) {
                 alert(e instanceof Error ? e.message : String(e));
             }
@@ -2712,23 +2926,11 @@ async function initApplicants(mainEl) {
                     return;
                 }
                 close();
-                allRows = await getApplicants();
-                renderPage();
+                await reload();
             } catch (e) {
                 alert(e instanceof Error ? e.message : String(e));
             }
         });
-    };
-
-    const reload = async () => {
-        allRows = await getApplicants();
-        try {
-            const artists = await getArtistsForStudio();
-            applicantEmailToSlug = buildApplicantEmailToSlugMap(artists);
-        } catch {
-            applicantEmailToSlug = new Map();
-        }
-        renderPage();
     };
 
     tbody?.addEventListener('click', async (e) => {
@@ -2953,6 +3155,16 @@ async function initArtists(mainEl) {
                 }
             });
         });
+        tbody.querySelectorAll('.studio-artist-email-btn').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                if (!canSendRosterBlast) return;
+                const id = btn.getAttribute('data-id');
+                const row = allArtists.find((x) => String(x.id) === String(id));
+                if (row) {
+                    openIndividualEmailModal(row, { onSent: load });
+                }
+            });
+        });
     };
 
     const applyArtistFilter = () => {
@@ -2978,15 +3190,18 @@ async function initArtists(mainEl) {
             tbody.innerHTML = `<tr><td colspan="11">${allArtists.length ? 'No rows match filters.' : 'No artists.'}</td></tr>`;
             return;
         }
+        const emailPermTitle = 'Email (requires Edit permission for Artists in Studio → Permissions)';
+        const emailBtnDisabled = canSendRosterBlast ? '' : ' disabled';
         tbody.innerHTML = artists
             .map((a) => {
                 const slugRaw = String(a.slug || '');
                 const slug = escapeHtml(slugRaw);
                 const emRaw = String(a.contactEmail ?? '').trim();
-                const em =
-                    emRaw && emRaw.length > 28
-                        ? `${escapeHtml(emRaw.slice(0, 25))}…`
-                        : escapeHtml(emRaw || '—');
+                const hasEm = emRaw.toLowerCase().includes('@');
+                const emailMod = hasEm ? ' studio-artist-email-btn--has-email' : '';
+                const emailTitle = canSendRosterBlast
+                    ? emRaw || 'No contact email on file — open to compose a draft'
+                    : emailPermTitle;
                 const imp = a.imported ? 'Yes' : '—';
                 const code = a.accessCode ? escapeHtml(String(a.accessCode)) : '—';
                 const idEsc = escapeHtml(String(a.id || ''));
@@ -2996,7 +3211,11 @@ async function initArtists(mainEl) {
                 return `<tr>
                 <td>${slug}</td>
                 <td>${idEsc}</td>
-                <td class="studio-td-ellipsis" title="${escapeHtml(emRaw)}">${em}</td>
+                <td class="studio-td-actions studio-td-email">
+                  <button type="button" class="studio-btn-ghost studio-artist-email-btn${emailMod}" data-id="${idEsc}"${emailBtnDisabled} title="${escapeHtml(
+                    emailTitle
+                )}" aria-label="Email artist">Email</button>
+                </td>
                 <td>${imp}</td>
                 <td><code class="studio-code-inline">${code}</code></td>
                 <td>${rosterVisibilityBadgeHtml(a.visibility)}</td>
@@ -3301,6 +3520,9 @@ async function initPendingApproval(mainEl) {
     const countEl = mainEl.querySelector('#studio-pending-approval-header-count');
     const manageHost = mainEl.querySelector('#studio-pending-manage-surface');
     const listSurface = mainEl.querySelector('#studio-pending-list-surface');
+    const canSendRosterBlast = studioFeatureAccess('artists').canEdit;
+    const emailPermTitle = 'Email (requires Edit permission for Artists in Studio → Permissions)';
+    const emailBtnDisabled = canSendRosterBlast ? '' : ' disabled';
     /** @type {object[]} */
     let allStatusRows = [];
 
@@ -3335,15 +3557,20 @@ async function initPendingApproval(mainEl) {
                 const slugRaw = String(a.slug || '');
                 const slug = escapeHtml(slugRaw);
                 const emRaw = String(a.contactEmail ?? '').trim();
-                const em =
-                    emRaw && emRaw.length > 28
-                        ? `${escapeHtml(emRaw.slice(0, 25))}…`
-                        : escapeHtml(emRaw || '—');
+                const hasEm = emRaw.toLowerCase().includes('@');
+                const emailMod = hasEm ? ' studio-artist-email-btn--has-email' : '';
+                const emailTitle = canSendRosterBlast
+                    ? emRaw || 'No contact email on file — open to compose a draft'
+                    : emailPermTitle;
                 const idEsc = escapeHtml(String(a.id || ''));
                 return `<tr>
                 <td>${slug}</td>
                 <td>${idEsc}</td>
-                <td class="studio-td-ellipsis" title="${escapeHtml(emRaw)}">${em}</td>
+                <td class="studio-td-actions studio-td-email">
+                  <button type="button" class="studio-btn-ghost studio-artist-email-btn${emailMod}" data-id="${idEsc}"${emailBtnDisabled} title="${escapeHtml(
+                    emailTitle
+                )}" aria-label="Email artist">Email</button>
+                </td>
                 <td>${rosterVisibilityBadgeHtml(a.visibility)}</td>
                 <td><a class="studio-action-link" href="/profile/${encodeURIComponent(
                     slugRaw
@@ -3352,6 +3579,16 @@ async function initPendingApproval(mainEl) {
             </tr>`;
             })
             .join('');
+        tbody.querySelectorAll('.studio-artist-email-btn').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                if (!canSendRosterBlast) return;
+                const id = btn.getAttribute('data-id');
+                const row = allStatusRows.find((x) => String(x.id) === String(id));
+                if (row) {
+                    openIndividualEmailModal(row, { onSent: runLoad });
+                }
+            });
+        });
         tbody.querySelectorAll('.studio-art-pending-manage').forEach((btn) => {
             btn.addEventListener('click', () => {
                 const id = btn.getAttribute('data-id');
@@ -5923,6 +6160,50 @@ async function initServices(mainEl) {
     };
 
     load();
+    const loadResendSegmentFields = async () => {
+        for (let i = 1; i <= 5; i += 1) {
+            const ni = mainEl.querySelector(`#studio-svc-seg-name-${i}`);
+            const ii = mainEl.querySelector(`#studio-svc-seg-id-${i}`);
+            if (ni instanceof HTMLInputElement) ni.value = '';
+            if (ii instanceof HTMLInputElement) ii.value = '';
+        }
+        try {
+            const slots = await getResendSegmentConfigFromCanister();
+            if (!Array.isArray(slots)) return;
+            slots.slice(0, 5).forEach((s, idx) => {
+                const i = idx + 1;
+                const ni = mainEl.querySelector(`#studio-svc-seg-name-${i}`);
+                const ii = mainEl.querySelector(`#studio-svc-seg-id-${i}`);
+                if (ni instanceof HTMLInputElement) ni.value = String(s?.name || '');
+                if (ii instanceof HTMLInputElement) ii.value = String(s?.segmentId || '');
+            });
+        } catch {
+            /* ignore */
+        }
+    };
+    void loadResendSegmentFields();
+    mainEl.querySelector('#studio-svc-resend-segments-save')?.addEventListener('click', async () => {
+        const slots = [];
+        for (let i = 1; i <= 5; i += 1) {
+            const ni = mainEl.querySelector(`#studio-svc-seg-name-${i}`);
+            const ii = mainEl.querySelector(`#studio-svc-seg-id-${i}`);
+            const name = ni instanceof HTMLInputElement ? ni.value.trim() : '';
+            const segmentId = ii instanceof HTMLInputElement ? ii.value.trim() : '';
+            if (name || segmentId) slots.push({ name, segmentId });
+        }
+        if (slots.length > 5) {
+            show('error', 'At most 5 segments.');
+            return;
+        }
+        show('info', 'Saving…');
+        try {
+            await setResendSegmentConfigOnCanister(slots);
+            show('ok', 'Segment config saved to canister.');
+            await loadResendSegmentFields();
+        } catch (e) {
+            show('error', e instanceof Error ? e.message : String(e));
+        }
+    });
     const subEn = mainEl.querySelector('#studio-svc-subscription-en');
     const subJa = mainEl.querySelector('#studio-svc-subscription-ja');
     const loadSubscriptionFields = async () => {
@@ -6007,6 +6288,51 @@ async function initServices(mainEl) {
                 ...(fromOpt && fromOpt.includes('@') ? { from: fromOpt } : {}),
             });
             show('ok', 'Test email sent.');
+        } catch (e) {
+            show('error', e instanceof Error ? e.message : String(e));
+        }
+    });
+
+    mainEl.querySelector('#studio-svc-new-applicant-notify-test')?.addEventListener('click', async () => {
+        if (!getIntegrationBaseUrl()) {
+            show('error', 'Integration API URL is not configured (Services → URL).');
+            return;
+        }
+        if (appNotify) {
+            try {
+                localStorage.setItem(LS_APPLICATION_ADMIN_EMAILS, String(appNotify.value || '').trim());
+            } catch {
+                /* ignore */
+            }
+        }
+        const staffRecipients = getApplicationStaffNotificationEmails();
+        if (!staffRecipients.length) {
+            show('error', 'No staff notification recipients (unexpected).');
+            return;
+        }
+        show('info', 'Sending new applicant test…');
+        try {
+            const programs = await getPrograms();
+            const programName = programs[0] ? getProgramDisplayNameFromRow(programs[0]) : 'Sample program';
+            const { subject, text } = buildNewApplicantStaffNotificationEmail({
+                programName,
+                payloadFields: {
+                    firstName: 'Test',
+                    lastName: 'Applicant',
+                    website: 'https://example.org',
+                },
+                submittedAt: new Date().toISOString(),
+            });
+            const fromOpt = (resendFrom?.value || '').trim();
+            for (const to of staffRecipients) {
+                await sendEmail({
+                    to,
+                    subject,
+                    text,
+                    ...(fromOpt && fromOpt.includes('@') ? { from: fromOpt } : {}),
+                });
+            }
+            show('ok', 'New applicant notification test sent to all staff recipients.');
         } catch (e) {
             show('error', e instanceof Error ? e.message : String(e));
         }

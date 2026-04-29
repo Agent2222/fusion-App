@@ -27,8 +27,13 @@ persistent actor {
     Principal.fromText("5mnm6-7wh7d-imemq-z22vs-zgudw-szmvi-ake5j-o3q22-eodai-4sj4y-oqe"),
   ];
 
-  // Stable snapshot of the HashMap entries (email -> subscriber).
-  stable var subscribersStable : [(Text, Types.Subscriber)] = [];
+  /// Legacy 5-field rows (pre–Resend-audiences). Kept empty after first flush to `subscribersV1` so stable upgrade from older canisters still deserializes.
+  stable var subscribersStable : [(Text, Types.SubscriberV0)] = [];
+  /// Canonical subscriber rows including `audiences` (new stable slot; empty on canisters that have not upgraded yet).
+  stable var subscribersV1 : [(Text, Types.Subscriber)] = [];
+
+  /// Studio → Services / Resend: up to five named segment UUIDs (UI + SYNC).
+  stable var resendSegmentConfigStable : [Types.ResendSegmentSlot] = [];
 
   /// Principal -> user account core (roles, links). Flushed in preupgrade.
   stable var accountsStable : [(Principal, Types.UserAccountCore)] = [];
@@ -111,7 +116,7 @@ persistent actor {
   // In-memory hashmap for fast lookups/updates.
   transient var subscribersByEmail : _HashMap.HashMap<Text, Types.Subscriber> =
     _HashMap.HashMap<Text, Types.Subscriber>(
-      subscribersStable.size(),
+      subscribersV1.size() + subscribersStable.size(),
       Text.equal,
       Text.hash
     );
@@ -251,12 +256,30 @@ persistent actor {
     ];
   };
 
-  // Populate hashmaps on install / reload.
-  for (entry in subscribersStable.vals()) {
-    let email = entry.0;
-    let sub = entry.1;
-    subscribersByEmail.put(email, sub);
+  /// Prefer `subscribersV1` (rows with `audiences`); otherwise migrate 5-field `subscribersStable` (legacy).
+  private func reloadSubscribersFromStables() {
+    subscribersByEmail := _HashMap.HashMap<Text, Types.Subscriber>(
+      subscribersV1.size() + subscribersStable.size(),
+      Text.equal,
+      Text.hash
+    );
+    if (subscribersV1.size() > 0) {
+      for (entry in subscribersV1.vals()) {
+        let email = entry.0;
+        let sub = entry.1;
+        subscribersByEmail.put(email, sub);
+      };
+    } else {
+      for (entry in subscribersStable.vals()) {
+        let email = entry.0;
+        let v0 = entry.1;
+        subscribersByEmail.put(email, Types.subscriberFromV0(v0));
+      };
+    };
   };
+
+  // Populate hashmaps on install / reload.
+  reloadSubscribersFromStables();
 
   for (entry in accountsStable.vals()) {
     let p = entry.0;
@@ -993,7 +1016,8 @@ persistent actor {
   };
 
   system func preupgrade() {
-    subscribersStable := _Iter.toArray(subscribersByEmail.entries());
+    subscribersV1 := _Iter.toArray(subscribersByEmail.entries());
+    subscribersStable := [];
     accountsStable := _Iter.toArray(accountsByPrincipal.entries());
     membershipByPrincipalStable := _Iter.toArray(membershipByPrincipal.entries());
     membershipStripePeriodEndStable := _Iter.toArray(membershipStripePeriodEndByPrincipal.entries());
@@ -1020,16 +1044,8 @@ persistent actor {
   };
 
   system func postupgrade() {
-    subscribersByEmail := _HashMap.HashMap<Text, Types.Subscriber>(
-      subscribersStable.size(),
-      Text.equal,
-      Text.hash
-    );
-    for (entry in subscribersStable.vals()) {
-      let email = entry.0;
-      let sub = entry.1;
-      subscribersByEmail.put(email, sub);
-    };
+    reloadSubscribersFromStables();
+    subscribersV1 := [];
     subscribersStable := [];
 
     emailCampaignsById := _HashMap.HashMap<Text, Types.EmailCampaignRecord>(
@@ -1237,14 +1253,7 @@ persistent actor {
 
   /// Rebuild in-memory maps from stable arrays after `adminImportFullDatabase` assigns them (no default-admin merge).
   private func rebuildTransientFromImportedStableArrays() {
-    subscribersByEmail := _HashMap.HashMap<Text, Types.Subscriber>(
-      subscribersStable.size(),
-      Text.equal,
-      Text.hash
-    );
-    for (entry in subscribersStable.vals()) {
-      subscribersByEmail.put(entry.0, entry.1);
-    };
+    reloadSubscribersFromStables();
 
     accountsByPrincipal := _HashMap.HashMap<Principal, Types.UserAccountCore>(
       accountsStable.size(),
@@ -1417,7 +1426,8 @@ persistent actor {
     adminPrincipals := snapshot.adminPrincipals;
     integrationServicePrincipal := snapshot.integrationServicePrincipal;
     artistFeaturedRandomModeStable := snapshot.artistFeaturedRandomMode;
-    subscribersStable := snapshot.subscribersStable;
+    subscribersV1 := snapshot.subscribersStable;
+    subscribersStable := [];
     accountsStable := snapshot.accountsStable;
     membershipByPrincipalStable := snapshot.membershipByPrincipalStable;
     membershipStripePeriodEndStable := snapshot.membershipStripePeriodEndStable;
@@ -2988,23 +2998,32 @@ persistent actor {
   ) : async Bool {
     switch (subscribersByEmail.get(email)) {
       case null {
-        subscribersByEmail.put(email, {
-          timestamp = timestamp;
-          email = email;
-          category = category;
-          fullName = fullName;
-          intent = intent;
-        });
+        subscribersByEmail.put(
+          email,
+          {
+            timestamp = timestamp;
+            email = email;
+            category = category;
+            fullName = fullName;
+            intent = intent;
+            audiences = [];
+          },
+        );
         return false;
       };
-      case (?_) {
-        subscribersByEmail.put(email, {
-          timestamp = timestamp;
-          email = email;
-          category = category;
-          fullName = fullName;
-          intent = intent;
-        });
+      case (?prev) {
+        let keep = prev.audiences;
+        subscribersByEmail.put(
+          email,
+          {
+            timestamp = timestamp;
+            email = email;
+            category = category;
+            fullName = fullName;
+            intent = intent;
+            audiences = keep;
+          },
+        );
         return true;
       };
     };
@@ -3028,6 +3047,50 @@ persistent actor {
       count += 1;
     };
     count;
+  };
+
+  // ===== Resend audience segments (Studio Services) + Studio subscriber audiences (subscribers / email) =====
+
+  public shared query (msg) func getResendSegmentConfigForStudio() : async [Types.ResendSegmentSlot] {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "services");
+    resendSegmentConfigStable;
+  };
+
+  public shared (msg) func setResendSegmentConfigForStudio(slots : [Types.ResendSegmentSlot]) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "services");
+    if (slots.size() > 5) {
+      Debug.trap("at most 5 Resend segment slots");
+    };
+    resendSegmentConfigStable := slots;
+  };
+
+  public shared (msg) func setSubscriberAudiencesByEmailForStudio(email : Text, audiences : [Text]) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "subscribers");
+    switch (subscribersByEmail.get(email)) {
+      case null { Debug.trap("subscriber not found") };
+      case (?sub) { subscribersByEmail.put(email, { sub with audiences = audiences }) };
+    };
+  };
+
+  public shared (msg) func appendSubscriberResendAudienceForStudio(email : Text, segmentId : Text) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "email");
+    if (Text.size(email) == 0 or Text.size(segmentId) == 0) {
+      return;
+    };
+    switch (subscribersByEmail.get(email)) {
+      case null { return };
+      case (?sub) {
+        for (a in sub.audiences.vals()) {
+          if (a == segmentId) { return };
+        };
+        let next = Array.append(sub.audiences, [segmentId]);
+        subscribersByEmail.put(email, { sub with audiences = next });
+      };
+    };
   };
 
   // ===== Studio Email Campaigns (staff + email feature) =====

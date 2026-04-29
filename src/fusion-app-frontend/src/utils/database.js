@@ -5,7 +5,7 @@
  * `config.testData` / `VITE_USE_TEST_DATA` → `'test'` vs `'live'` (see ../config.js).
  * Live home blocks (`getProgramHero`, etc.) use canister site settings only — no silent testData fallback.
  */
-import { config } from '../config.js';
+import { config, getPublicSiteOrigin } from '../config.js';
 import { testData } from '../testData.js';
 import {
     applyFeaturedFlagsFromStudioSave,
@@ -585,6 +585,22 @@ export function setDataSource(source) {
 export function unwrapOpt(opt) {
     if (!opt || !Array.isArray(opt) || opt.length === 0) return undefined;
     return opt[0];
+}
+
+/**
+ * Candid `?Record` is `[] | [record]`; if bindings ever return a plain object, accept it.
+ * @template T
+ * @param {unknown} val
+ * @returns {T | null}
+ */
+function unwrapCandidOptionalRecord(val) {
+    if (val == null) return null;
+    if (Array.isArray(val)) {
+        if (val.length === 0) return null;
+        return /** @type {T} */ (val[0] ?? null);
+    }
+    if (typeof val === 'object') return /** @type {T} */ (val);
+    return null;
 }
 
 /**
@@ -1603,6 +1619,99 @@ function fakeArtistRecordFromTestArtist(a) {
 }
 
 /**
+ * Human-readable program title for notification emails (matches Studio program list heuristics).
+ * @param {object | null | undefined} p program row from {@link getPrograms} or mapped record
+ * @returns {string}
+ */
+export function getProgramDisplayNameFromRow(p) {
+    if (!p || typeof p !== 'object') return '';
+    const o = /** @type {Record<string, unknown>} */ (p);
+    const id = String(o.id ?? '');
+    if (o.enCard && typeof o.enCard === 'object') {
+        const en = /** @type {Record<string, unknown>} */ (o.enCard);
+        const pp =
+            en.programPage && typeof en.programPage === 'object'
+                ? /** @type {Record<string, unknown>} */ (en.programPage)
+                : {};
+        const t = String(pp.headline || en.headline || en.location || en.focus || id).trim();
+        if (t) return t;
+    }
+    try {
+        const lj = String(o.localesJson ?? '');
+        if (lj) {
+            const parsed = JSON.parse(lj);
+            const en = parsed.en && typeof parsed.en === 'object' ? parsed.en : {};
+            const pp = en.programPage && typeof en.programPage === 'object' ? en.programPage : {};
+            const t = String(pp.headline || en.headline || en.location || en.focus || id).trim();
+            if (t) return t;
+        }
+    } catch {
+        /* ignore */
+    }
+    const rootPp =
+        o.programPage && typeof o.programPage === 'object'
+            ? /** @type {Record<string, unknown>} */ (o.programPage)
+            : {};
+    const t2 = String(
+        rootPp.headline || o.headline || o.location || o.focus || id,
+    ).trim();
+    if (t2) return t2;
+    if (id) {
+        return id
+            .replace(/[-_]/g, ' ')
+            .replace(/\b\w/g, (c) => c.toUpperCase());
+    }
+    return 'Program';
+}
+
+/**
+ * @param {string} programId
+ * @returns {Promise<string>}
+ */
+export async function getProgramDisplayNameForNotification(programId) {
+    const pid = String(programId || '').trim();
+    if (!pid) return 'Program';
+    const list = await getPrograms();
+    const row = list.find((x) => x && String(/** @type {Record<string, unknown>} */ (x).id ?? '') === pid);
+    if (row) {
+        const n = getProgramDisplayNameFromRow(row);
+        if (n) return n;
+    }
+    return pid
+        .replace(/[-_]/g, ' ')
+        .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/**
+ * Staff email for new program applications (Integration API + Resend).
+ * @param {{ programName: string, payloadFields: Record<string, string>, submittedAt?: string, applicantsUrl?: string }} opts
+ * @returns {{ subject: string, text: string }}
+ */
+export function buildNewApplicantStaffNotificationEmail(opts) {
+    const programName = String(opts.programName || 'Program').trim() || 'Program';
+    const payloadFields = opts.payloadFields || {};
+    const applicantName =
+        `${String(payloadFields.firstName || '').trim()} ${String(payloadFields.lastName || '').trim()}`.trim() ||
+        '—';
+    const websiteRaw = String(payloadFields.website || '').trim();
+    const website = websiteRaw || '—';
+    const submittedAt = String(opts.submittedAt || new Date().toISOString());
+    const base = getPublicSiteOrigin().replace(/\/$/, '');
+    const applicantsUrl = (opts.applicantsUrl || `${base}/studio#applicants`).replace(/\/$/, '');
+    const subject = `New Fusion ${programName} Applicant`;
+    const text = [
+        `A new application was submitted for ${programName}.`,
+        '',
+        `Applicant: ${applicantName}`,
+        `Website: ${website}`,
+        `Submitted: ${submittedAt}`,
+        '',
+        `Review applicants in Studio: ${applicantsUrl}`,
+    ].join('\n');
+    return { subject, text };
+}
+
+/**
  * @param {string} programId
  * @param {Record<string, string>} payloadFields
  * @param {string} submittedAt
@@ -1613,14 +1722,12 @@ async function notifyProgramApplicationSubmittedByEmail(programId, payloadFields
         .trim();
     const applicantEmail = String(payloadFields.email || '').trim();
     const staffRecipients = getApplicationStaffNotificationEmails();
-    const staffSummary = [
-        `Program ID: ${pid}`,
-        applicantName ? `Applicant: ${applicantName}` : null,
-        applicantEmail ? `Email: ${applicantEmail}` : null,
-        `Submitted at: ${submittedAt}`,
-    ]
-        .filter(Boolean)
-        .join('\n');
+    const programName = await getProgramDisplayNameForNotification(pid);
+    const { subject: staffSubject, text: staffText } = buildNewApplicantStaffNotificationEmail({
+        programName,
+        payloadFields,
+        submittedAt,
+    });
     const tasks = [];
     if (applicantEmail) {
         tasks.push(
@@ -1645,8 +1752,8 @@ async function notifyProgramApplicationSubmittedByEmail(programId, payloadFields
         tasks.push(
             sendEmail({
                 to,
-                subject: `New program application (${pid})`,
-                text: staffSummary,
+                subject: staffSubject,
+                text: staffText,
             })
         );
     }
@@ -2321,24 +2428,41 @@ export async function deleteArtistByIdStudio(artistId) {
 }
 
 /**
+ * @param {object} r
+ * @returns {object}
+ */
+function normalizeSubscriberRow(r) {
+    if (!r || typeof r !== 'object') return r;
+    return {
+        ...r,
+        audiences: Array.isArray(/** @type {Record<string, unknown>} */ (r).audiences)
+            ? /** @type {string[]} */ (/** @type {Record<string, unknown>} */ (r).audiences)
+            : [],
+    };
+}
+
+/**
  * Admin-only when live; empty in test mode.
  * @returns {Promise<object[]>}
  */
 export async function getSubscribers() {
     if (getDataSource() === 'test') {
         const rows = readStudioLs(LS_SUBSCRIBERS);
-        return Array.isArray(rows) ? rows : [];
+        const list = Array.isArray(rows) ? rows : [];
+        return list.map((r) => normalizeSubscriberRow(r));
     }
     const actor = await getStudioAuthenticatedActor();
     if (typeof actor.getSubscribers !== 'function') {
         throw new Error('getSubscribers missing — run dfx generate fusion-app-backend after backend changes.');
     }
     const rows = await actor.getSubscribers();
-    return Array.isArray(rows) ? rows : [];
+    return Array.isArray(rows) ? rows.map((r) => normalizeSubscriberRow(r)) : [];
 }
 
 /** Test overlay: email campaigns (`EmailCampaignRecord`-like plain objects). */
 const LS_EMAIL_CAMPAIGNS = `${LS_STUDIO_PREFIX}email-campaigns`;
+/** Test overlay: Resend segment name/id slots (max 5) for Services tab. */
+const LS_RESEND_SEGMENTS = `${LS_STUDIO_PREFIX}resend-segments`;
 
 /**
  * After changing `fusion-app-backend` Candid API (e.g. email campaigns), refresh JS bindings:
@@ -2375,7 +2499,94 @@ export async function getSubscribersForEmailStudio() {
         );
     }
     const rows = await actor.getSubscribersForEmailStudio();
-    return Array.isArray(rows) ? rows : [];
+    return Array.isArray(rows) ? rows.map((r) => normalizeSubscriberRow(r)) : [];
+}
+
+/**
+ * Resend named segment slots (max 5) for Studio Services + Email SYNC.
+ * @returns {Promise<Array<{ name: string, segmentId: string }>>}
+ */
+export async function getResendSegmentConfigFromCanister() {
+    if (getDataSource() === 'test') {
+        const raw = readStudioLs(LS_RESEND_SEGMENTS);
+        if (raw && Array.isArray(raw.slots)) return raw.slots;
+        return [];
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.getResendSegmentConfigForStudio !== 'function') {
+        throw new Error('getResendSegmentConfigForStudio missing — run dfx generate fusion-app-backend.');
+    }
+    const out = await actor.getResendSegmentConfigForStudio();
+    return Array.isArray(out) ? out : [];
+}
+
+/**
+ * @param {Array<{ name: string, segmentId: string }>} slots
+ */
+export async function setResendSegmentConfigOnCanister(slots) {
+    const list = Array.isArray(slots) ? slots.slice(0, 5) : [];
+    if (getDataSource() === 'test') {
+        writeStudioLs(LS_RESEND_SEGMENTS, { slots: list });
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.setResendSegmentConfigForStudio !== 'function') {
+        throw new Error('setResendSegmentConfigForStudio missing — run dfx generate fusion-app-backend.');
+    }
+    await actor.setResendSegmentConfigForStudio(
+        list.map((s) => ({ name: String(s?.name ?? ''), segmentId: String(s?.segmentId ?? '') })),
+    );
+}
+
+/**
+ * @param {string} email
+ * @param {string[]} audiences Resend segment UUIDs (replaces list)
+ */
+export async function setSubscriberAudiencesForStudio(email, audiences) {
+    const em = String(email || '').trim();
+    if (!em) throw new Error('email required');
+    const aud = Array.isArray(audiences) ? audiences : [];
+    if (getDataSource() === 'test') {
+        const cur = readStudioLs(LS_SUBSCRIBERS) || [];
+        const list = Array.isArray(cur) ? [...cur] : [];
+        const i = list.findIndex((r) => String(r.email).toLowerCase() === em.toLowerCase());
+        if (i < 0) throw new Error('subscriber not found');
+        const prev = list[i];
+        list[i] = { ...prev, email: em, audiences: aud };
+        writeStudioLs(LS_SUBSCRIBERS, list);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.setSubscriberAudiencesByEmailForStudio !== 'function') {
+        throw new Error('setSubscriberAudiencesByEmailForStudio missing — run dfx generate fusion-app-backend.');
+    }
+    await actor.setSubscriberAudiencesByEmailForStudio(em, aud);
+}
+
+/**
+ * @param {string} email
+ * @param {string} segmentId
+ */
+export async function appendSubscriberResendAudienceForStudio(email, segmentId) {
+    const em = String(email || '').trim();
+    const seg = String(segmentId || '').trim();
+    if (!em || !seg) return;
+    if (getDataSource() === 'test') {
+        const cur = readStudioLs(LS_SUBSCRIBERS) || [];
+        const list = Array.isArray(cur) ? [...cur] : [];
+        const i = list.findIndex((r) => String(r.email).toLowerCase() === em.toLowerCase());
+        if (i < 0) return;
+        const prev = normalizeSubscriberRow(list[i]);
+        if (prev.audiences.includes(seg)) return;
+        list[i] = { ...prev, audiences: [...prev.audiences, seg] };
+        writeStudioLs(LS_SUBSCRIBERS, list);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.appendSubscriberResendAudienceForStudio !== 'function') {
+        throw new Error('appendSubscriberResendAudienceForStudio missing — run dfx generate fusion-app-backend.');
+    }
+    await actor.appendSubscriberResendAudienceForStudio(em, seg);
 }
 
 /**
@@ -2414,7 +2625,8 @@ export async function getEmailCampaign(id) {
             'getEmailCampaign missing — run dfx generate fusion-app-backend after backend changes.',
         );
     }
-    return actor.getEmailCampaign(sid);
+    const raw = await actor.getEmailCampaign(sid);
+    return unwrapCandidOptionalRecord(raw);
 }
 
 /**
@@ -3589,13 +3801,14 @@ export async function getFeaturedArtists() {
  */
 export async function getSubscribersCsv() {
     const rows = await getSubscribers();
-    if (!rows.length) return 'email,category,fullName,intent,timestamp\n';
-    const header = 'email,category,fullName,intent,timestamp';
-    const lines = rows.map((r) =>
-        [r.email, r.category, r.fullName ?? '', r.intent ?? '', r.timestamp]
+    if (!rows.length) return 'email,category,fullName,intent,timestamp,resendSegmentIds\n';
+    const header = 'email,category,fullName,intent,timestamp,resendSegmentIds';
+    const lines = rows.map((r) => {
+        const aud = Array.isArray(r.audiences) && r.audiences.length ? r.audiences.join(';') : '';
+        return [r.email, r.category, r.fullName ?? '', r.intent ?? '', r.timestamp, aud]
             .map((c) => `"${String(c).replace(/"/g, '""')}"`)
-            .join(',')
-    );
+            .join(',');
+    });
     return `${header}\n${lines.join('\n')}`;
 }
 
@@ -3991,7 +4204,13 @@ export async function upsertSubscriberRow(row) {
         const cur = readStudioLs(LS_SUBSCRIBERS) || [];
         const list = Array.isArray(cur) ? [...cur] : [];
         const i = list.findIndex((r) => String(r.email).toLowerCase() === email.toLowerCase());
-        const rec = { email, category, fullName, intent, timestamp };
+        const prev = i >= 0 ? list[i] : null;
+        const aud = Array.isArray(row.audiences)
+            ? row.audiences
+            : prev && Array.isArray(prev.audiences)
+              ? prev.audiences
+              : [];
+        const rec = { email, category, fullName, intent, timestamp, audiences: aud };
         if (i >= 0) list[i] = rec;
         else list.push(rec);
         writeStudioLs(LS_SUBSCRIBERS, list);
@@ -4045,6 +4264,7 @@ export async function bulkUpsertSubscribersStudio(rows) {
                 fullName: String(row.fullName ?? ''),
                 intent: String(row.intent ?? ''),
                 timestamp: String(row.timestamp || new Date().toISOString()),
+                audiences: Array.isArray(row.audiences) ? row.audiences : [],
             });
             n += 1;
         }
@@ -4061,6 +4281,7 @@ export async function bulkUpsertSubscribersStudio(rows) {
                 timestamp: String(r.timestamp || new Date().toISOString()),
                 fullName: String(r.fullName ?? ''),
                 intent: String(r.intent ?? ''),
+                audiences: Array.isArray(r.audiences) ? r.audiences : [],
             }));
         return Number(await actor.bulkUpsertSubscribers(motokoRows));
     }

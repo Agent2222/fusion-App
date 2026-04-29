@@ -8,7 +8,8 @@ import { DEFAULT_SIGNATURE_HTML } from './emailHtml.js';
  * @typedef {{ id: string, name: string, defaultSubject: string, defaultPreview: string, bodyHtml: string, notes?: string }} EmailTemplateDef
  */
 
-const LOGO_URL = 'https://fusionart.world/email/Fusion-Logo-Sig-1.png';
+/** Public asset URL (served from `public/email/` after build / deploy) */
+const LOGO_URL = 'https://fusionart.world/email/Fusion-X-logo-02.png';
 
 /**
  * @param {string} innerHtml
@@ -17,10 +18,20 @@ const LOGO_URL = 'https://fusionart.world/email/Fusion-Logo-Sig-1.png';
  */
 export function wrapEmailHtml(innerHtml, opts = {}) {
     const sig = opts.includeSignature !== false ? DEFAULT_SIGNATURE_HTML : '';
-    return `<div style="font-family:system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;padding:32px 24px;background:#fff;color:#111">
-<div style="text-align:center;margin-bottom:24px"><img src="${LOGO_URL}" alt="Fusion" width="120" height="auto" style="display:inline-block;border:0" /></div>
+    return `<div style="font-family:system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;padding:40px 28px 44px;background:#fff;color:#111;line-height:1.5">
+<div style="text-align:center;margin:0 0 36px;padding:0 0 8px">
+<img src="${LOGO_URL}" alt="Fusion" width="220" height="auto" style="display:inline-block;max-width:100%;height:auto;border:0" />
+</div>
+<div style="margin:0 0 40px;padding:0">
 ${innerHtml}
+</div>
+${
+        sig
+            ? `<div style="margin:0;padding:40px 0 0;border-top:1px solid #e5e2df">
 ${sig}
+</div>`
+            : ''
+    }
 </div>`;
 }
 

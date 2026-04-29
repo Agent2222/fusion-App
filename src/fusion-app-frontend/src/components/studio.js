@@ -17,6 +17,7 @@ import {
     setStudioWorkspaceSectionTitle,
 } from './studio/studioWorkspaceChrome.js';
 import { refreshStudioShellAccessState } from '../utils/database.js';
+import { getAuthSnapshot, loginInternetIdentity } from '../utils/icAuth.js';
 import {
     getStudioShellGate,
     isStudioSectionNavAllowed,
@@ -172,6 +173,24 @@ export function render() {
                     </div>
                 </div>
             </div>
+            <div
+                class="studio-auth-gate"
+                id="studioAuthGate"
+                hidden
+                aria-hidden="true"
+            >
+                <div class="studio-auth-gate__scrim" aria-hidden="true"></div>
+                <div
+                    class="studio-auth-gate__panel"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="studioAuthGateTitle"
+                >
+                    <h2 id="studioAuthGateTitle" class="studio-auth-gate__title">Fusion Studio</h2>
+                    <p class="studio-auth-gate__text">Sign in with Internet Identity to continue.</p>
+                    <button type="button" class="studio-btn-primary" id="studioAuthGateLogin">Log in</button>
+                </div>
+            </div>
         </div>
     `;
 }
@@ -198,6 +217,8 @@ let _studioShellRefreshHandler = null;
 let _studioAccountOverlayInited = false;
 /** @type {((e: KeyboardEvent) => void) | null} */
 let _studioAccountOverlayKeydown = null;
+/** @type {(() => void) | null} */
+let _studioAuthChangeHandler = null;
 
 export default function initStudio() {
     const root = document.getElementById('studioRoot');
@@ -399,7 +420,45 @@ export default function initStudio() {
     };
     window.addEventListener('hashchange', _studioHashChangeHandler);
 
-    void refreshShellAndNav();
+    const authGate = document.getElementById('studioAuthGate');
+    const applyAuthGate = async () => {
+        const snap = await getAuthSnapshot();
+        if (authGate) {
+            const show = !snap.authenticated;
+            authGate.hidden = !show;
+            authGate.setAttribute('aria-hidden', show ? 'false' : 'true');
+        }
+        if (root) {
+            if (snap.authenticated) {
+                root.removeAttribute('data-studio-anonymous');
+            } else {
+                root.setAttribute('data-studio-anonymous', 'true');
+            }
+        }
+    };
+
+    document.getElementById('studioAuthGateLogin')?.addEventListener('click', () => {
+        void loginInternetIdentity().catch(() => {});
+    });
+
+    if (_studioAuthChangeHandler) {
+        window.removeEventListener('fusion-auth-change', _studioAuthChangeHandler);
+    }
+    _studioAuthChangeHandler = () => {
+        void (async () => {
+            await applyAuthGate();
+            const snap = await getAuthSnapshot();
+            if (snap.authenticated) {
+                await refreshShellAndNav();
+            }
+        })();
+    };
+    window.addEventListener('fusion-auth-change', _studioAuthChangeHandler);
+
+    void (async () => {
+        await applyAuthGate();
+        await refreshShellAndNav();
+    })();
 
     const publicLink = document.querySelector('.studio-back');
     publicLink?.addEventListener('click', (e) => {
