@@ -1273,7 +1273,7 @@ app.post('/resend/broadcasts', requireApiKey, async (req, res) => {
             return res.status(400).json({ error: 'JSON body required' });
         }
         if (!guardResendJsonBody(req, res, b)) return;
-        if (resend.broadcasts && typeof resend.broadcasts.create === 'function') {
+        {
             const fromOverride = typeof b.from === 'string' ? b.from.trim() : '';
             const fromAddr = (fromOverride && fromOverride.includes('@') ? fromOverride : resendFrom) || resendFrom;
             if (!fromAddr) {
@@ -1296,25 +1296,32 @@ app.post('/resend/broadcasts', requireApiKey, async (req, res) => {
             const text = typeof b.text === 'string' ? b.text : undefined;
             const name = typeof b.name === 'string' ? b.name : undefined;
             const sendNow = b.send === true;
-            const payload = {
-                segmentId,
-                /** Some Resend API/SDK paths expect snake_case on the wire. */
+            /**
+             * `resend` npm v4 `broadcasts.create` only serializes `audienceId` → `audience_id` and
+             * drops `segmentId`, so the API returns "Missing segment_id or audience_id". It also
+             * omits `send` / `scheduled_at` on the wire. POST the REST body directly.
+             * @type {Record<string, unknown>}
+             */
+            const broadcastBody = {
                 segment_id: segmentId,
                 from: fromAddr,
                 subject: subject.slice(0, 998),
                 html,
-                ...(name ? { name: name.slice(0, 200) } : {}),
-                ...(text ? { text } : {}),
-                ...(sendNow ? { send: true } : {}),
             };
-            if (b.scheduledAt) payload.scheduledAt = String(b.scheduledAt);
-            const { data, error } = await resend.broadcasts.create(/** @type {any} */ (payload));
-            if (error) {
-                return res.status(502).json({ error: error.message || 'Resend broadcast error' });
+            if (name) broadcastBody.name = name.slice(0, 200);
+            if (text) broadcastBody.text = text;
+            if (sendNow) broadcastBody.send = true;
+            if (b.scheduledAt) broadcastBody.scheduled_at = String(b.scheduledAt);
+            const out = await resendRestJson('/broadcasts', { method: 'POST', body: broadcastBody });
+            if (!out.ok) {
+                const errMsg =
+                    typeof out.json?.error === 'string' ? out.json.error : 'Resend broadcast error';
+                const status = out.status >= 400 && out.status < 600 ? out.status : 502;
+                return res.status(status).json({ error: errMsg });
             }
-            return res.json({ ok: true, id: data?.id, data });
+            const created = out.json && typeof out.json === 'object' ? out.json : {};
+            return res.json({ ok: true, id: created.id, data: created });
         }
-        return res.status(501).json({ error: 'Resend Node SDK has no broadcasts.create — upgrade resend' });
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         return res.status(500).json({ error: msg });
