@@ -4,7 +4,7 @@ import { metaTrack } from "../../utils/metaPixel.js";
 
 /**
  * Join FUSION — band + multi-stage modal (`data-modal-type`: membership | access | apply).
- * Copy: `testData.joinNetworkFlow`; legacy `context` maps to modal type. Optional `payment.planKey` (e.g. `bi_monthly`) drives PostHog `payment_plan` on `membership_payment_completed`. See plan: join network modal flow.
+ * Copy: `testData.joinNetworkFlow`; legacy `context` maps to modal type. Value step: two subscription cards (`planBimonthly` / `planAnnual`); payment summary uses `payment.bimonthly` / `payment.annual` overrides. `planKey` / tier drives PostHog on completion.
  *
  * Vertical spacing (host margins), any CSS length (e.g. `48px`, `3rem`):
  * - `data-margin-top`, `data-margin-bottom` (preferred)
@@ -12,6 +12,7 @@ import { metaTrack } from "../../utils/metaPixel.js";
  */
 import { DEV_MODE, getHost } from "../../config.js";
 import {
+  getApplicationPaymentGlobal,
   getContentBundleForStudio,
   subscribeDataSource,
 } from "../../utils/database.js";
@@ -66,6 +67,27 @@ function parseMoneyToCents(raw) {
   const n = parseFloat(t);
   if (!Number.isFinite(n) || n <= 0) return 5000;
   return Math.round(n * 100);
+}
+
+/**
+ * @param {unknown} o
+ * @returns {Record<string, unknown>}
+ */
+function asRecord(o) {
+  return o && typeof o === "object" && !Array.isArray(o)
+    ? /** @type {Record<string, unknown>} */ (o)
+    : {};
+}
+
+/**
+ * @param {unknown} raw
+ * @param {string} key
+ * @returns {string}
+ */
+function strField(raw, key) {
+  const o = asRecord(raw);
+  const v = o[key];
+  return typeof v === "string" ? v.trim() : "";
 }
 
 /** @typedef {'membership'|'access'|'apply'} ModalType */
@@ -169,6 +191,8 @@ class JoinNetworkComponent extends HTMLElement {
     this._formLastName = "";
     /** Skip value + payment; complete with II + `registerWithJoinAccessCode`. */
     this._joinExemptCodePath = false;
+    /** Blocks re-entrant exempt redemption when `dispatchFusionAuthChange` runs mid-flow. */
+    this._exemptAccessCodeJoinInFlight = false;
     this._formEmail = "";
     /** @type {string} */
     this._lastFocused = null;
@@ -190,6 +214,16 @@ class JoinNetworkComponent extends HTMLElement {
     this._paymentPlanKey = /** @type {string | null} */ (null);
     /** Non-PII display label (e.g. `value.periodLabel`) for `payment_plan_label` on successful payment. */
     this._paymentPlanLabel = /** @type {string | null} */ (null);
+    /** Selected subscription tier from value-step cards (`null` until user picks). Resubscribe flow leaves this unset. */
+    this._joinSubscriptionTier = /** @type {null | 'bimonthly' | 'annual'} */ (null);
+    /** Parsed per-tier payment copy from CMS (`joinNetworkFlow.*.payment`). */
+    this._joinPaymentTierSlices = /** @type {{ bimonthly: Record<string, string>, annual: Record<string, string> } | null} */ (
+      null
+    );
+    /** Last merged `value` slice — plan-specific what's included + hydration. */
+    this._joinValueMergedCache = /** @type {Record<string, unknown> | null} */ (null);
+    /** Global bullets from site `applicationPaymentGlobal` (same source as program application form). */
+    this._joinWhatsIncludedGlobalBullets = /** @type {string[]} */ ([]);
     /** @type {Record<string, unknown> | null} */
     this._joinNetworkFlow = null;
     /** @type {Record<string, unknown> | null} */
@@ -365,6 +399,26 @@ class JoinNetworkComponent extends HTMLElement {
         : null;
     this._fillBandCopy();
     this._fillDialogCopy();
+    void getApplicationPaymentGlobal()
+      .then((g) => {
+        const loc = this._getLocale();
+        const pick =
+          g && typeof g === "object"
+            ? /** @type {Record<string, unknown>} */ (g)[loc] ||
+              /** @type {Record<string, unknown>} */ (g).en
+            : null;
+        const bullets = pick && Array.isArray(pick.whatsIncludedBullets)
+          ? pick.whatsIncludedBullets
+          : [];
+        this._joinWhatsIncludedGlobalBullets = bullets
+          .map((x) => String(x ?? "").trim())
+          .filter(Boolean);
+        this._hydrateJoinWhatsIncluded();
+      })
+      .catch(() => {
+        this._joinWhatsIncludedGlobalBullets = [];
+        this._hydrateJoinWhatsIncluded();
+      });
     void this._syncBandOpenButtonAuth();
   }
 
@@ -479,6 +533,344 @@ class JoinNetworkComponent extends HTMLElement {
     }
   }
 
+  /**
+   * @param {'bimonthly' | 'annual'} tier
+   * @param {Record<string, unknown>} payment
+   * @param {'en' | 'ja'} loc
+   * @returns {{ finalPaymentPrice: string, finalPaymentStatement: string, amount: string, planKey: string, footerNote: string, footerNote2: string }}
+   */
+  _mergePaymentTierSlice(payment, tier, loc) {
+    const pr = asRecord(payment);
+    const nested = asRecord(pr[tier]);
+    const flatAmount = String(pr.amount ?? "").trim();
+    const flatFinal = String(pr.finalPaymentPrice ?? "").trim();
+    const flatStmt = String(pr.finalPaymentStatement ?? "").trim();
+    const flatPlanKey = String(pr.planKey ?? "").trim();
+    const flatFoot1 = String(pr.footerNote ?? "").trim();
+    const flatFoot2 = String(pr.footerNote2 ?? "").trim();
+    const hasNested =
+      nested &&
+      Object.keys(nested).some((k) => {
+        const v = nested[k];
+        return v != null && String(v).trim() !== "";
+      });
+
+    if (tier === "bimonthly" && !hasNested) {
+      return {
+        finalPaymentPrice: flatFinal || "$50",
+        finalPaymentStatement:
+          flatStmt || (loc === "ja" ? "2か月ごと" : "every 2 months"),
+        amount: flatAmount || "$50.00",
+        planKey: flatPlanKey || "bi_monthly",
+        footerNote: flatFoot1,
+        footerNote2: flatFoot2,
+      };
+    }
+
+    if (tier === "annual" && !hasNested) {
+      return {
+        finalPaymentPrice: "$260",
+        finalPaymentStatement: loc === "ja" ? "年間" : "per year",
+        amount: "$260.00",
+        planKey: "annual",
+        footerNote:
+          loc === "ja" ? "本日のお支払い" : "First payment today",
+        footerNote2:
+          loc === "ja"
+            ? "年ごとに更新 — プロフィールから解約できます"
+            : "Renews annually — cancel anytime from your profile",
+      };
+    }
+
+    return {
+      finalPaymentPrice: String(nested.finalPaymentPrice ?? flatFinal).trim(),
+      finalPaymentStatement: String(
+        nested.finalPaymentStatement ?? flatStmt,
+      ).trim(),
+      amount: String(nested.amount ?? flatAmount).trim(),
+      planKey: String(
+        nested.planKey ??
+          (tier === "annual" ? "annual" : flatPlanKey || "bi_monthly"),
+      ).trim(),
+      footerNote: String(nested.footerNote ?? flatFoot1).trim(),
+      footerNote2: String(nested.footerNote2 ?? flatFoot2).trim(),
+    };
+  }
+
+  /**
+   * @param {'en' | 'ja'} loc
+   * @returns {{ title: string, displayPrice: string, every: string, subtext: string, subtext2: string, discount: string }}
+   */
+  _defaultAnnualPlanCard(loc) {
+    return {
+      title: loc === "ja" ? "年間メンバーシップ" : "Annual membership",
+      displayPrice: "$260",
+      discount: loc === "ja" ? "（10%割引）" : "(10% discount)",
+      subtext:
+        loc === "ja" ? "お得な1年プラン" : "Best value — one year of full access",
+      subtext2: loc === "ja" ? "年ごとに更新" : "Renews every year",
+      every: "",
+    };
+  }
+
+  /**
+   * @param {Record<string, unknown>} valueMerged
+   * @param {'bimonthly' | 'annual'} tier
+   * @param {'en' | 'ja'} loc
+   */
+  _mergePlanCardCopy(valueMerged, tier, loc) {
+    const vr = valueMerged;
+    const price = String(vr.price ?? "").trim() || "$50";
+    const renew = String(vr.renewLine ?? "").trim();
+    const period = String(vr.periodLabel ?? "").trim();
+    if (tier === "bimonthly") {
+      const pb = asRecord(vr.planBimonthly);
+      return {
+        title:
+          strField(pb, "title") ||
+          (loc === "ja" ? "一般メンバーシップ" : "General membership"),
+        displayPrice: strField(pb, "displayPrice") || price,
+        every:
+          strField(pb, "every") ||
+          (loc === "ja" ? "2か月ごと" : "every 2 months"),
+        subtext: strField(pb, "subtext") || renew,
+        subtext2: strField(pb, "subtext2"),
+        discount: strField(pb, "discount"),
+      };
+    }
+    const pa = asRecord(vr.planAnnual);
+    const def = this._defaultAnnualPlanCard(loc);
+    return {
+      title: strField(pa, "title") || def.title,
+      displayPrice: strField(pa, "displayPrice") || def.displayPrice,
+      every: strField(pa, "every"),
+      subtext: strField(pa, "subtext") || def.subtext,
+      subtext2: strField(pa, "subtext2") || def.subtext2,
+      discount: strField(pa, "discount") || def.discount,
+    };
+  }
+
+  /**
+   * @param {Record<string, unknown>} valueMerged
+   * @param {'en' | 'ja'} loc
+   */
+  _fillJoinPlanCards(valueMerged, loc) {
+    const root = this.shadowRoot;
+    if (!root) return;
+    const vr = valueMerged;
+    const gl = this.shadowRoot?.querySelector("#jnPlanGroupLabel");
+    if (gl) {
+      const g = String(vr.planGroupLabel ?? "").trim();
+      gl.textContent =
+        g || (loc === "ja" ? "メンバーシップを選択" : "Choose your membership");
+    }
+
+    const bi = this._mergePlanCardCopy(vr, "bimonthly", loc);
+    const an = this._mergePlanCardCopy(vr, "annual", loc);
+
+    const set = (sel, text) => {
+      const n = root.querySelector(sel);
+      if (n) n.textContent = text ?? "";
+    };
+    set("#jnPlanBimonthlyTitle", bi.title);
+    set("#jnPlanBimonthlyPrice", bi.displayPrice);
+    const biEvery = root.querySelector("#jnPlanBimonthlyEvery");
+    if (biEvery) biEvery.textContent = bi.every;
+    set("#jnPlanBimonthlySub1", bi.subtext);
+    set("#jnPlanBimonthlySub2", bi.subtext2);
+
+    set("#jnPlanAnnualTitle", an.title);
+    set("#jnPlanAnnualPrice", an.displayPrice);
+    const anDisc = root.querySelector("#jnPlanAnnualDiscount");
+    if (anDisc instanceof HTMLElement) {
+      const d = String(an.discount ?? "").trim();
+      anDisc.textContent = d;
+      anDisc.hidden = !d;
+    }
+    set("#jnPlanAnnualSub1", an.subtext);
+    set("#jnPlanAnnualSub2", an.subtext2);
+
+    const badge = root.querySelector("#jnPlanBimonthlyBadge");
+    if (badge instanceof HTMLElement) {
+      badge.textContent =
+        loc === "ja" ? "おすすめ" : "Popular";
+    }
+
+    this._syncJoinPlanSelectionUi();
+  }
+
+  /** Build tier slices from CMS if missing (e.g. race before `payment` block ran). */
+  _ensureJoinPaymentTierSlices() {
+    if (this._joinPaymentTierSlices) return;
+    const flow = this._joinNetworkFlow;
+    if (!flow || typeof flow !== "object") return;
+    const payment = getFlowSlice(
+      flow,
+      this._modalType,
+      "payment",
+      this._getLocale(),
+    );
+    if (!payment || typeof payment !== "object") return;
+    const pObj = /** @type {Record<string, unknown>} */ (payment);
+    const loc = this._getLocale();
+    this._joinPaymentTierSlices = {
+      bimonthly: this._mergePaymentTierSlice(pObj, "bimonthly", loc),
+      annual: this._mergePaymentTierSlice(pObj, "annual", loc),
+    };
+  }
+
+  /** Apply tier-specific strings to the payment summary (before Stripe mounts). */
+  _applyPaymentCopyForTier(tier) {
+    const root = this.shadowRoot;
+    if (!root) return;
+    this._ensureJoinPaymentTierSlices();
+    const slices = this._joinPaymentTierSlices;
+    if (!slices) return;
+    const sl = tier === "annual" ? slices.annual : slices.bimonthly;
+    if (!sl) return;
+
+    const set = (sel, text) => {
+      const n = root.querySelector(sel);
+      if (n) n.textContent = text ?? "";
+    };
+    const price =
+      String(sl.finalPaymentPrice ?? "").trim() ||
+      (tier === "annual" ? "$260" : "$50");
+    const stmt =
+      String(sl.finalPaymentStatement ?? "").trim() ||
+      (this._getLocale() === "ja"
+        ? tier === "annual"
+          ? "年間"
+          : "2か月ごと"
+        : tier === "annual"
+          ? "per year"
+          : "every 2 months");
+    set("#jnFinalPaymentPrice", price);
+    set("#final-payment-statement", stmt);
+    set("#jnPayFooter", sl.footerNote);
+    const pf2 = root.querySelector("#jnPayFooter2");
+    if (pf2) {
+      pf2.textContent = sl.footerNote2;
+      pf2.hidden = !String(sl.footerNote2 || "").trim();
+    }
+    this._paymentAmountCents = parseMoneyToCents(
+      String(sl.amount ?? "").trim() || (tier === "annual" ? "260" : "50"),
+    );
+    if (sl.planKey) this._paymentPlanKey = sl.planKey;
+    const lbl =
+      tier === "annual"
+        ? stmt || "annual"
+        : stmt || "bimonthly";
+    this._paymentPlanLabel = lbl;
+  }
+
+  /** What's included (global + plan) — mirrors program application `details` pattern. */
+  _hydrateJoinWhatsIncluded() {
+    const root = this.shadowRoot;
+    if (!root) return;
+    const loc = this._getLocale();
+    const vr = this._joinValueMergedCache;
+    const L =
+      loc === "ja"
+        ? {
+            summary: "メンバーシップに含まれるもの",
+            globalHead: "すべてのプランに共通",
+            planHead: "このプランに含まれるもの",
+            pickPlan:
+              "プラン固有の内容を表示するには、上で支払いプランを選んでください。",
+            globalEmpty:
+              "（グローバル項目は Studio → Services → Subscription で設定できます。）",
+          }
+        : {
+            summary: "What's included in your membership",
+            globalHead: "Included with every plan",
+            planHead: "Included with this plan",
+            pickPlan: "Select a payment plan above to see plan-specific items.",
+            globalEmpty:
+              "(No global items yet — configure under Studio → Services → Subscription.)",
+          };
+
+    const sum = root.querySelector("#jnWhatsIncludedSummary");
+    if (sum) sum.textContent = L.summary;
+    const gh = root.querySelector("#jnWhatsIncludedGlobalHead");
+    if (gh) gh.textContent = L.globalHead;
+    const ph = root.querySelector("#jnWhatsIncludedPlanHead");
+    if (ph) ph.textContent = L.planHead;
+
+    const gUl = root.querySelector("#jnWhatsIncludedGlobalUl");
+    const pUl = root.querySelector("#jnWhatsIncludedPlanUl");
+    const planBlock = root.querySelector("#jnWhatsIncludedPlanBlock");
+
+    const globalBullets = this._joinWhatsIncludedGlobalBullets || [];
+    if (gUl) {
+      gUl.innerHTML = "";
+      if (globalBullets.length === 0) {
+        const li = document.createElement("li");
+        li.className = "jn-whats-included-empty";
+        li.textContent = L.globalEmpty;
+        gUl.appendChild(li);
+      } else {
+        for (const t of globalBullets) {
+          const li = document.createElement("li");
+          li.textContent = t;
+          gUl.appendChild(li);
+        }
+      }
+    }
+
+    const tier = this._joinSubscriptionTier;
+    /** @type {string[]} */
+    let planBullets = [];
+    if (tier && vr) {
+      const pk = tier === "annual" ? "planAnnual" : "planBimonthly";
+      const po = asRecord(vr[pk]);
+      const ib = po.includedBullets;
+      if (Array.isArray(ib) && ib.length > 0) {
+        planBullets = ib.map((x) => String(x ?? "").trim()).filter(Boolean);
+      } else if (Array.isArray(vr.includes)) {
+        planBullets = vr.includes.map((x) => String(x ?? "").trim()).filter(Boolean);
+      }
+    }
+
+    if (pUl && planBlock) {
+      pUl.innerHTML = "";
+      if (!tier) {
+        planBlock.hidden = false;
+        const li = document.createElement("li");
+        li.className = "jn-whats-included-empty";
+        li.textContent = L.pickPlan;
+        pUl.appendChild(li);
+      } else if (planBullets.length === 0) {
+        planBlock.hidden = true;
+      } else {
+        planBlock.hidden = false;
+        for (const t of planBullets) {
+          const li = document.createElement("li");
+          li.textContent = t;
+          pUl.appendChild(li);
+        }
+      }
+    }
+  }
+
+  _syncJoinPlanSelectionUi() {
+    const root = this.shadowRoot;
+    if (!root) return;
+    const tier = this._joinSubscriptionTier;
+    root.querySelectorAll("[data-jn-subscription-tier]").forEach((el) => {
+      if (!(el instanceof HTMLElement)) return;
+      const t = el.getAttribute("data-jn-subscription-tier");
+      const on = tier != null && t === tier;
+      el.classList.toggle("jn-plan-card--selected", on);
+      el.setAttribute("aria-checked", on ? "true" : "false");
+    });
+    const vc = root.querySelector("#jnValueContinue");
+    if (vc instanceof HTMLButtonElement) {
+      vc.disabled = tier == null;
+    }
+    this._hydrateJoinWhatsIncluded();
+  }
+
   _fillDialogCopy() {
     this._modalType = resolveModalType(this);
     this._paymentPlanKey = null;
@@ -551,21 +943,19 @@ class JoinNetworkComponent extends HTMLElement {
     }
 
     if (value) {
-      set("#jnValueTitle", value.title);
-      set("#jnValueLead", value.lead);
-      set("#jnPriceAmount", value.price);
-      set("#jnPeriodLabel", value.periodLabel);
-      set("#jnIncludesTitle", value.includesTitle);
-      set("#jnRenewLine", value.renewLine);
+      const vo = /** @type {Record<string, unknown>} */ (value);
+      this._joinValueMergedCache = vo;
+      set("#jnValueTitle", vo.title);
+      set("#jnValueLead", vo.lead);
       const ev = this.shadowRoot?.querySelector("#jnValueEvolving");
       const evo =
-        typeof value.evolvingLine === "string" ? value.evolvingLine.trim() : "";
+        typeof vo.evolvingLine === "string" ? vo.evolvingLine.trim() : "";
       if (ev) {
         ev.textContent = evo;
         ev.hidden = !evo;
       }
-      let d1 = value.disclaimer ?? "";
-      let d2 = value.disclaimerFee ?? "";
+      let d1 = vo.disclaimer ?? "";
+      let d2 = vo.disclaimerFee ?? "";
       if (!String(d2).trim() && String(d1).includes("Program fee")) {
         const idx = d1.indexOf("Program fee");
         if (idx > 0) {
@@ -581,31 +971,33 @@ class JoinNetworkComponent extends HTMLElement {
       const feeEl = this.shadowRoot?.querySelector("#jnValueDisclaimerFee");
       if (feeEl) feeEl.hidden = !String(d2 || "").trim();
       const vc = this.shadowRoot?.querySelector("#jnValueContinue");
-      if (vc) vc.textContent = value.continueLabel || "Continue";
+      if (vc) vc.textContent = vo.continueLabel || "Continue";
       const vb = this.shadowRoot?.querySelector("#jnValueBack");
-      if (vb) vb.textContent = value.backLabel || "← Back";
-      const ul = this.shadowRoot?.querySelector("#jnIncludesList");
-      if (ul && Array.isArray(value.includes)) {
-        ul.innerHTML = value.includes
-          .map((line) => `<li>${String(line)}</li>`)
-          .join("");
-      }
+      if (vb) vb.textContent = vo.backLabel || "← Back";
+      this._fillJoinPlanCards(vo, loc);
       {
-        const pl = String(/** @type {Record<string, unknown>} */ (value).periodLabel ?? "").trim();
+        const pl = String(vo.periodLabel ?? "").trim();
         if (pl) this._paymentPlanLabel = pl;
       }
+    } else {
+      this._joinValueMergedCache = null;
     }
 
     if (payment) {
+      const pObj = /** @type {Record<string, unknown>} */ (payment);
+      this._joinPaymentTierSlices = {
+        bimonthly: this._mergePaymentTierSlice(pObj, "bimonthly", loc),
+        annual: this._mergePaymentTierSlice(pObj, "annual", loc),
+      };
       {
-        const pk = payment && "planKey" in payment
-          ? /** @type {Record<string, unknown>} */ (payment).planKey
-          : "";
+        const pk =
+          payment && "planKey" in payment
+            ? /** @type {Record<string, unknown>} */ (payment).planKey
+            : "";
         if (typeof pk === "string" && pk.trim()) {
           this._paymentPlanKey = pk.trim();
         }
       }
-      this._paymentAmountCents = parseMoneyToCents(payment.amount);
       this._paymentCompleteLabel = payment.completeLabel || "Secure Access";
       this._paymentProcessingLabel =
         typeof payment.processingLabel === "string"
@@ -616,34 +1008,51 @@ class JoinNetworkComponent extends HTMLElement {
       set("#jnOrderBrand", payment.orderLabel);
       const brandEl = this.shadowRoot?.querySelector("#jnOrderBrand");
       if (brandEl) brandEl.hidden = !String(payment.orderLabel ?? "").trim();
-      const priceStr =
-        typeof payment.finalPaymentPrice === "string" &&
-        payment.finalPaymentPrice.trim()
-          ? payment.finalPaymentPrice.trim()
-          : typeof payment.amount === "string"
-            ? payment.amount.replace(/\.00(?=\s*$)/, "").trim()
-            : "";
-      const stmtStr =
-        typeof payment.finalPaymentStatement === "string" &&
-        payment.finalPaymentStatement.trim()
-          ? payment.finalPaymentStatement.trim()
-          : String(payment.lineRenew || payment.line3Months || "").trim();
-      set("#jnFinalPaymentPrice", priceStr);
-      set("#final-payment-statement", stmtStr);
       set("#jnPayComplete", payment.completeLabel);
-      set("#jnPayFooter", payment.footerNote ?? "");
-      const pf2 = this.shadowRoot?.querySelector("#jnPayFooter2");
-      if (pf2) {
-        const t2 = payment.footerNote2 ?? "";
-        pf2.textContent = t2;
-        pf2.hidden = !String(t2).trim();
-      }
       const devSkip = this.shadowRoot?.querySelector("#jnPayDevSkip");
       if (devSkip && payment.devCompleteLabel) {
         devSkip.textContent = payment.devCompleteLabel;
       }
       const pb = this.shadowRoot?.querySelector("#jnPayBack");
       if (pb) pb.textContent = payment.backLabel || "← Back";
+
+      if (this._joinMode === "resubscribe") {
+        this._paymentAmountCents = parseMoneyToCents(payment.amount);
+        const priceStr =
+          typeof payment.finalPaymentPrice === "string" &&
+          payment.finalPaymentPrice.trim()
+            ? payment.finalPaymentPrice.trim()
+            : typeof payment.amount === "string"
+              ? payment.amount.replace(/\.00(?=\s*$)/, "").trim()
+              : "";
+        const stmtStr =
+          typeof payment.finalPaymentStatement === "string" &&
+          payment.finalPaymentStatement.trim()
+            ? payment.finalPaymentStatement.trim()
+            : String(payment.lineRenew || payment.line3Months || "").trim();
+        set("#jnFinalPaymentPrice", priceStr);
+        set("#final-payment-statement", stmtStr);
+        set("#jnPayFooter", payment.footerNote ?? "");
+        const pf2 = this.shadowRoot?.querySelector("#jnPayFooter2");
+        if (pf2) {
+          const t2 = payment.footerNote2 ?? "";
+          pf2.textContent = t2;
+          pf2.hidden = !String(t2).trim();
+        }
+      } else if (this._joinSubscriptionTier) {
+        this._applyPaymentCopyForTier(this._joinSubscriptionTier);
+      } else {
+        set("#jnFinalPaymentPrice", "—");
+        set("#final-payment-statement", "");
+        set("#jnPayFooter", "");
+        const pf2e = this.shadowRoot?.querySelector("#jnPayFooter2");
+        if (pf2e) {
+          pf2e.textContent = "";
+          pf2e.hidden = true;
+        }
+      }
+    } else {
+      this._joinPaymentTierSlices = null;
     }
 
     {
@@ -783,7 +1192,18 @@ class JoinNetworkComponent extends HTMLElement {
       const panel = root.querySelector(`[data-jn-panel="${s}"]`);
       if (panel) panel.hidden = s !== stage;
     });
+    if (stage === "value") {
+      this._syncJoinPlanSelectionUi();
+    }
     if (stage === "payment") {
+      if (
+        this._joinMode !== "resubscribe" &&
+        this._joinSubscriptionTier &&
+        (this._joinSubscriptionTier === "bimonthly" ||
+          this._joinSubscriptionTier === "annual")
+      ) {
+        this._applyPaymentCopyForTier(this._joinSubscriptionTier);
+      }
       const payEmailWrap = root.querySelector("#jnPayEmailWrap");
       if (payEmailWrap) {
         payEmailWrap.hidden = this._joinMode !== "resubscribe";
@@ -811,7 +1231,11 @@ class JoinNetworkComponent extends HTMLElement {
 
   _computeStripePrepareKeySync() {
     const email = this._getEmailForSubscription();
-    return `${this._joinMode}|${this._modalType}|${email}`;
+    const tierPart =
+      this._joinMode === "resubscribe"
+        ? "resubscribe"
+        : this._joinSubscriptionTier || "";
+    return `${this._joinMode}|${this._modalType}|${email}|${tierPart}`;
   }
 
   /** Email for Stripe customer + metadata (entry field or resubscribe-only `#jnPayEmail`). */
@@ -972,6 +1396,8 @@ class JoinNetworkComponent extends HTMLElement {
           "Missing or invalid access code. Close and start again from step 1.";
       return;
     }
+    if (this._exemptAccessCodeJoinInFlight) return;
+    this._exemptAccessCodeJoinInFlight = true;
     try {
       const { getIdentityIfAuthenticated } =
         await import("../../utils/icAuth.js");
@@ -997,7 +1423,7 @@ class JoinNetworkComponent extends HTMLElement {
         const map = {
           invalidCode: "This access code is not valid.",
           wrongRole:
-            "This code does not match the role you selected. For staff or collaborator team invites, pick Staff or Collaborator here (or use /join-fusion). Other invite types must match Gallery, Curator, or Collector.",
+            "This code does not match the role you selected. Choose the role your invite was issued for (Artist, Gallery, Curator, or Collector). Team invites use the dedicated join page.",
           artistAlreadyLinked: "This artist profile is already linked to another account.",
           accountExists: "This Internet Identity already has a Fusion account.",
           inviteInactive: "This invite code has already been used or is inactive.",
@@ -1053,6 +1479,8 @@ class JoinNetworkComponent extends HTMLElement {
             ? e.message
             : "Could not complete registration. Try again.";
       }
+    } finally {
+      this._exemptAccessCodeJoinInFlight = false;
     }
   }
 
@@ -1313,6 +1741,16 @@ class JoinNetworkComponent extends HTMLElement {
       if (myGen !== this._stripePrepareGen || this._stage !== "payment") return;
 
       // Load Stripe.js and create Subscription (first invoice PaymentIntent) in parallel.
+      /** @type {'bimonthly' | 'annual' | undefined} */
+      let subscriptionTier;
+      if (this._joinMode === "resubscribe") {
+        subscriptionTier = undefined;
+      } else if (this._joinSubscriptionTier === "annual") {
+        subscriptionTier = "annual";
+      } else {
+        subscriptionTier = "bimonthly";
+      }
+
       const [{ loadStripe }, subRes] = await Promise.all([
         import("@stripe/stripe-js"),
         createSubscription({
@@ -1321,6 +1759,7 @@ class JoinNetworkComponent extends HTMLElement {
           ...(this._joinMode === "resubscribe" && principalOpt
             ? { principal: principalOpt }
             : {}),
+          ...(subscriptionTier ? { subscriptionTier } : {}),
           metadata: {
             category: cat || "",
             intent: this._modalType,
@@ -1634,20 +2073,13 @@ class JoinNetworkComponent extends HTMLElement {
                 #jnRoleGroups {
                     width: 100%;
                 }
-                #jnRoleRow,
-                #jnRoleRowTeam {
+                #jnRoleRow {
                     display: flex;
                     flex-wrap: wrap;
                     column-gap: 0.8rem;
                     row-gap: 0.4rem;
                     justify-content: center;
                     margin-bottom: 0.5rem;
-                }
-                .jn-role-team-hint {
-                    font-size: clamp(0.75rem, 0.9vw, 0.85rem);
-                    margin: 0.5rem 0 0.35rem;
-                    font-variation-settings: var(--fv-caption);
-                    color: color-mix(in srgb, var(--jn-c2) 80%, var(--jn-bg));
                 }
                 /* Match app-feed-filter filterButton: outline chip, sharp corners, opacity hover */
                 .categoryButton {
@@ -1700,39 +2132,179 @@ class JoinNetworkComponent extends HTMLElement {
                     color: var(--jn-c2);
                     font-family: inherit;
                 }
-                .jn-value-price {
-                    text-align: center;
-                    margin: 1rem 0;
-                }
-                #jnPriceAmount {
-                    font-size: clamp(2rem, 4vw, 2.75rem);
-                    font-variation-settings: var(--fv-headline);
-                    color: var(--jn-c2);
-                }
-                #jnPeriodLabel {
-                    display: block;
-                    font-size: 1rem;
-                    font-variation-settings: var(--fv-subtitle);
-                    margin-top: 0.25rem;
-                    color: var(--jn-c2);
-                }
-                #jnIncludesTitle {
-                    font-size: 0.92rem;
+                .jn-plan-group-label {
+                    font-size: 0.88rem;
                     font-variation-settings: var(--fv-label-strong);
-                    margin: 0.5rem 0 0.25rem;
+                    margin: 0.75rem 0 0.5rem;
                     color: var(--jn-c2);
                 }
-                #jnIncludesList {
-                    text-align: left;
-                    padding-left: 1.25rem;
-                    margin: 0.5rem 0 0.75rem;
-                    font-size: 0.9rem;
+                .jn-plan-grid {
+                    display: grid;
+                    grid-template-columns: 1fr;
+                    gap: 0.75rem;
+                    margin: 0.35rem 0 0.85rem;
+                    width: 100%;
+                }
+                @media (min-width: 520px) {
+                    .jn-plan-grid {
+                        grid-template-columns: 1fr 1fr;
+                        align-items: stretch;
+                    }
+                }
+                .jn-plan-wrap {
+                    position: relative;
+                    display: flex;
+                    flex-direction: column;
+                    min-height: 100%;
+                    min-width: 0;
+                }
+                .jn-plan-wrap--suggested {
+                    padding-top: 0.65rem;
+                }
+                .jn-plan-suggested-badge {
+                    position: absolute;
+                    top: 0;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    z-index: 1;
+                    padding: 0.2rem 0.55rem;
+                    border-radius: 999px;
+                    font-size: clamp(0.65rem, 0.75vw, 0.72rem);
+                    font-variation-settings: var(--fv-caption);
+                    letter-spacing: 0.04em;
+                    text-transform: uppercase;
+                    background: #2e7d4a;
+                    color: var(--jn-c3);
+                    white-space: nowrap;
+                }
+                .jn-whats-included-details {
+                    margin: 0 0 1rem;
+                    border: 1px solid rgba(0, 0, 0, 0.12);
+                    padding: 0.5rem 0.75rem;
+                    background: var(--jn-c3);
+                }
+                .jn-whats-included-details summary {
+                    cursor: pointer;
+                    font-size: clamp(0.88rem, 1.05vw, 0.98rem);
                     font-variation-settings: var(--fv-body-wide);
-                    line-height: 1.5;
+                    color: var(--jn-c2);
+                    letter-spacing: 0.02em;
+                }
+                .jn-whats-included-body {
+                    margin: 0.5rem 0 0;
+                    font-size: clamp(0.86rem, 1vw, 0.95rem);
+                    font-variation-settings: var(--fv-body-wide);
+                    line-height: 1.55;
                     color: var(--jn-c2);
                 }
-                #jnValueDisclaimer,
-                #jnRenewLine {
+                .jn-whats-included-subhead {
+                    margin: 0.65rem 0 0.2rem;
+                    font-size: clamp(0.8rem, 0.95vw, 0.9rem);
+                    font-variation-settings: var(--fv-label);
+                    letter-spacing: 0.02em;
+                    opacity: 0.88;
+                }
+                .jn-whats-included-subhead:first-child {
+                    margin-top: 0;
+                }
+                .jn-whats-included-body ul {
+                    margin: 0.25rem 0 0.5rem;
+                    padding-left: 1.25rem;
+                }
+                .jn-whats-included-empty {
+                    list-style: none;
+                    margin-left: 0;
+                    padding-left: 0;
+                    opacity: 0.82;
+                }
+                .jn-plan-card {
+                    width: 100%;
+                    box-sizing: border-box;
+                    display: flex;
+                    align-items: flex-start;
+                    gap: 0.5rem;
+                    text-align: left;
+                    min-height: 3.25rem;
+                    padding: 0.65rem 0.75rem;
+                    font-family: inherit;
+                    font-size: clamp(0.78rem, 1vw, 0.88rem);
+                    font-variation-settings: var(--fv-body);
+                    line-height: 1.35;
+                    cursor: pointer;
+                    border: 1px solid var(--jn-c2);
+                    border-radius: 0;
+                    background: transparent;
+                    color: var(--jn-c2);
+                    transition: opacity 0.15s ease, background-color 0.15s ease;
+                }
+                .jn-plan-card:hover:not(.jn-plan-card--selected) {
+                    opacity: 0.92;
+                    background: color-mix(in srgb, var(--jn-c2) 6%, transparent);
+                }
+                .jn-plan-card:focus-visible {
+                    outline: 2px solid var(--jn-c2);
+                    outline-offset: 2px;
+                }
+                .jn-plan-card--selected {
+                    background-color: var(--jn-c2);
+                    color: var(--jn-c3);
+                    opacity: 1;
+                }
+                .jn-plan-card--selected .jn-plan-discount {
+                    color: color-mix(in srgb, var(--jn-c3) 88%, var(--jn-c2));
+                }
+                .jn-plan-radio {
+                    flex-shrink: 0;
+                    width: 1rem;
+                    height: 1rem;
+                    margin-top: 0.15rem;
+                    border-radius: 50%;
+                    border: 2px solid currentColor;
+                    box-sizing: border-box;
+                    position: relative;
+                }
+                .jn-plan-card--selected .jn-plan-radio::after {
+                    content: "";
+                    position: absolute;
+                    inset: 3px;
+                    border-radius: 50%;
+                    background: currentColor;
+                }
+                .jn-plan-card-body {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0.25rem;
+                    flex: 1;
+                    min-width: 0;
+                }
+                .jn-plan-title {
+                    font-variation-settings: var(--fv-subtitle);
+                    font-size: 0.92rem;
+                }
+                .jn-plan-price-row {
+                    display: flex;
+                    flex-wrap: wrap;
+                    align-items: baseline;
+                    gap: 0.35rem 0.5rem;
+                }
+                .jn-plan-price {
+                    font-variation-settings: var(--fv-headline);
+                    font-size: clamp(1.2rem, 2.5vw, 1.5rem);
+                    letter-spacing: 0.02em;
+                }
+                .jn-plan-every,
+                .jn-plan-discount {
+                    font-size: 0.78rem;
+                    font-variation-settings: var(--fv-caption);
+                    opacity: 0.95;
+                }
+                .jn-plan-sub {
+                    font-size: 0.78rem;
+                    font-variation-settings: var(--fv-caption);
+                    line-height: 1.4;
+                    opacity: 0.95;
+                }
+                #jnValueDisclaimer {
                     font-size: clamp(0.82rem, 1vw, 0.9rem);
                     font-variation-settings: var(--fv-caption);
                     text-align: center;
@@ -2019,11 +2591,6 @@ class JoinNetworkComponent extends HTMLElement {
                                 <button type="button" class="categoryButton" data-role="Curator">Curator</button>
                                 <button type="button" class="categoryButton" data-role="Collector">Collector</button>
                 </div>
-                            <p class="jn-role-team-hint" id="jnRoleTeamHint">Team access code (from a Fusion admin):</p>
-                            <div id="jnRoleRowTeam">
-                                <button type="button" class="categoryButton" data-role="Staff">Staff</button>
-                                <button type="button" class="categoryButton" data-role="Collaborator">Collaborator</button>
-                </div>
                 </div>
                             <p id="jnRenewHint"></p>
                             <button type="button" class="jn-btn-primary" id="jnEntryContinue">Continue</button>
@@ -2036,17 +2603,51 @@ class JoinNetworkComponent extends HTMLElement {
                                 <h2 id="jnValueTitle"></h2>
                                 <p id="jnValueLead"></p>
                             </div>
-                            <div class="jn-value-price">
-                                <span id="jnPriceAmount"></span>
-                                <span id="jnPeriodLabel"></span>
+                            <p class="jn-plan-group-label" id="jnPlanGroupLabel"></p>
+                            <div class="jn-plan-grid" id="jnPlanGrid" role="radiogroup" aria-labelledby="jnPlanGroupLabel">
+                                <div class="jn-plan-wrap jn-plan-wrap--suggested">
+                                    <span class="jn-plan-suggested-badge" id="jnPlanBimonthlyBadge" aria-hidden="true">Popular</span>
+                                    <button type="button" class="jn-plan-card" id="jnPlanBimonthly" data-jn-subscription-tier="bimonthly" role="radio" aria-checked="false">
+                                        <span class="jn-plan-radio" aria-hidden="true"></span>
+                                        <span class="jn-plan-card-body">
+                                            <span class="jn-plan-title" id="jnPlanBimonthlyTitle"></span>
+                                            <span class="jn-plan-price-row">
+                                                <span class="jn-plan-price" id="jnPlanBimonthlyPrice"></span>
+                                                <span class="jn-plan-every" id="jnPlanBimonthlyEvery"></span>
+                                            </span>
+                                            <span class="jn-plan-sub" id="jnPlanBimonthlySub1"></span>
+                                            <span class="jn-plan-sub" id="jnPlanBimonthlySub2"></span>
+                                        </span>
+                                    </button>
+                                </div>
+                                <button type="button" class="jn-plan-card" id="jnPlanAnnual" data-jn-subscription-tier="annual" role="radio" aria-checked="false">
+                                    <span class="jn-plan-radio" aria-hidden="true"></span>
+                                    <span class="jn-plan-card-body">
+                                        <span class="jn-plan-title" id="jnPlanAnnualTitle"></span>
+                                        <span class="jn-plan-price-row">
+                                            <span class="jn-plan-price" id="jnPlanAnnualPrice"></span>
+                                            <span class="jn-plan-discount" id="jnPlanAnnualDiscount"></span>
+                                        </span>
+                                        <span class="jn-plan-sub" id="jnPlanAnnualSub1"></span>
+                                        <span class="jn-plan-sub" id="jnPlanAnnualSub2"></span>
+                                    </span>
+                                </button>
                             </div>
-                            <div id="jnIncludesTitle"></div>
-                            <ul id="jnIncludesList"></ul>
-                            <p id="jnRenewLine"></p>
+                            <details id="jnWhatsIncludedDetails" class="jn-whats-included-details">
+                                <summary id="jnWhatsIncludedSummary"></summary>
+                                <div class="jn-whats-included-body">
+                                    <p class="jn-whats-included-subhead" id="jnWhatsIncludedGlobalHead"></p>
+                                    <ul id="jnWhatsIncludedGlobalUl"></ul>
+                                    <div id="jnWhatsIncludedPlanBlock">
+                                        <p class="jn-whats-included-subhead" id="jnWhatsIncludedPlanHead"></p>
+                                        <ul id="jnWhatsIncludedPlanUl"></ul>
+                                    </div>
+                                </div>
+                            </details>
                             <p id="jnValueEvolving" class="jn-value-evolving"></p>
                             <p id="jnValueDisclaimer"></p>
                             <p id="jnValueDisclaimerFee"></p>
-                            <button type="button" class="jn-btn-primary" id="jnValueContinue">Continue</button>
+                            <button type="button" class="jn-btn-primary" id="jnValueContinue" disabled>Continue</button>
                             <button type="button" class="jn-btn-back" id="jnValueBack">← Back</button>
                         </div>
 
@@ -2191,6 +2792,7 @@ class JoinNetworkComponent extends HTMLElement {
       } else {
         this._joinExemptCodePath = false;
         this._joinMode = "full";
+        this._joinSubscriptionTier = null;
         this._stage = "entry";
         const dbg = (this.getAttribute("stage") || "").trim().toLowerCase();
         if (STAGES.includes(/** @type {FlowStage} */ (dbg))) {
@@ -2366,7 +2968,17 @@ class JoinNetworkComponent extends HTMLElement {
       this._showStage("value");
     });
 
+    root.querySelector("#jnPlanGrid")?.addEventListener("click", (e) => {
+      const btn = e.target?.closest?.("[data-jn-subscription-tier]");
+      if (!(btn instanceof HTMLButtonElement)) return;
+      const t = btn.getAttribute("data-jn-subscription-tier");
+      if (t !== "bimonthly" && t !== "annual") return;
+      this._joinSubscriptionTier = t;
+      this._syncJoinPlanSelectionUi();
+    });
+
     root.querySelector("#jnValueContinue")?.addEventListener("click", () => {
+      if (!this._joinSubscriptionTier) return;
       prefetchFusionBackendActor();
       // Warm Stripe.js module while the user reads the payment step (overlaps with paint).
       void import("@stripe/stripe-js");

@@ -223,6 +223,7 @@ export function renderProgramLocaleFormHtml(escapeHtml, enRaw, jaRaw) {
   ${row2(escapeHtml, 'Card id', 'id', en, ja)}
   ${row2(escapeHtml, 'imageSrc (card / list)', 'imageSrc', en, ja)}
   ${row2(escapeHtml, 'Hero / view media URL (detail page)', 'heroMediaSrc', en, ja)}
+  ${row2(escapeHtml, 'Lightbox video URL (fullscreen on hero tap; sound on)', 'programPage.lightboxHeroSrc', en, ja)}
   ${row2(escapeHtml, 'focus', 'focus', en, ja)}
   ${row2(escapeHtml, 'imageAlt', 'imageAlt', en, ja)}
   ${row2(escapeHtml, 'location', 'location', en, ja)}

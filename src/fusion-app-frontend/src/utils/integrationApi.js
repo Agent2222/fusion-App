@@ -815,3 +815,45 @@ export async function presignUpload(key, contentType) {
     }
     return res.json();
 }
+
+/**
+ * @param {{ contentId?: string, fileName: string, contentType: string }} opts
+ * @returns {Promise<{ putUrl: string, key: string, fileName: string, expiresIn: number }>}
+ */
+export async function presignPrivateVideoUpload(opts) {
+    const base = getIntegrationBaseUrl();
+    if (!base) {
+        throw new Error('Integration API URL not configured.');
+    }
+    const res = await fetch(`${base}/storage/private-video/presign-upload`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify(opts),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Private video presign HTTP ${res.status}`);
+    }
+    return res.json();
+}
+
+/**
+ * @param {{ key: string, principal: string }} opts
+ * @returns {Promise<{ url: string, expiresAt: string }>}
+ */
+export async function signPrivateVideoPlayback(opts) {
+    const base = getIntegrationBaseUrl();
+    if (!base) {
+        throw new Error('Integration API URL not configured.');
+    }
+    const res = await fetch(`${base}/storage/private-video/sign-playback`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify(opts),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Private video playback HTTP ${res.status}`);
+    }
+    return res.json();
+}

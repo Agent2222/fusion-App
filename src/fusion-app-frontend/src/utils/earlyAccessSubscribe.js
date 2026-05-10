@@ -3,10 +3,12 @@
  */
 import {
     DEV_MODE,
+    IC_CONFIG,
     createICActor,
     createAuthenticatedICActor,
     getHost,
     resolveFusionBackendCanisterId,
+    shouldQueryMainnetBackend,
 } from '../config.js';
 
 let _resolvedActor = null;
@@ -45,8 +47,11 @@ export async function getAuthenticatedFusionBackendActor() {
             _decl = await import('declarations/fusion-app-backend');
         }
         if (!_decl?.canisterId || !_decl?.idlFactory) return null;
-        const cid = resolveFusionBackendCanisterId(_decl.canisterId);
-        const actor = await createAuthenticatedICActor(_decl.idlFactory, cid, identity);
+        const actor = await createAuthenticatedICActor(
+            _decl.idlFactory,
+            _decl.canisterId,
+            identity,
+        );
         _authenticatedActor = actor;
         _authenticatedActorPrincipalText = pid;
         return actor;
@@ -76,12 +81,21 @@ export async function getFusionBackendActor() {
                     _decl = await import('declarations/fusion-app-backend');
                 }
                 if (_decl?.canisterId && _decl?.idlFactory) {
-                    const cid = resolveFusionBackendCanisterId(_decl.canisterId);
                     if (DEV_MODE) {
-                        console.log('[EarlyAccess] backend canisterId (resolved):', cid);
-                        console.log('[EarlyAccess] IC host:', getHost());
+                        console.log(
+                            '[EarlyAccess] backend canisterId (resolved):',
+                            resolveFusionBackendCanisterId(_decl.canisterId, {
+                                authenticated: false,
+                            }),
+                        );
+                        console.log(
+                            '[EarlyAccess] IC host:',
+                            shouldQueryMainnetBackend()
+                                ? IC_CONFIG.live.host
+                                : getHost(),
+                        );
                     }
-                    return await createICActor(_decl.idlFactory, cid);
+                    return await createICActor(_decl.idlFactory, _decl.canisterId);
                 }
             } catch (err) {
                 if (DEV_MODE) {
@@ -131,4 +145,11 @@ export async function upsertEarlyAccessSubscriber(email, category, opts = {}) {
     const fullName = typeof opts.fullName === 'string' ? opts.fullName : '';
     const intent = typeof opts.intent === 'string' ? opts.intent : '';
     return submitEarlyAccessToCanister(email, category, fullName, intent);
+}
+
+if (typeof window !== 'undefined') {
+    window.addEventListener('fusion-data-source-change', () => {
+        clearFusionBackendActorCache();
+        clearAuthenticatedFusionBackendActorCache();
+    });
 }

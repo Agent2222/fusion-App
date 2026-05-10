@@ -160,6 +160,36 @@ export const PROGRAM_DETAILS_PENDING_WRAPPER_STYLES = `
                 }
 `;
 
+/** `app-journal-row` / `app-audio-row` while CMS / journal list is loading. */
+export const FEED_ROW_PENDING_WRAPPER_STYLES = `
+                .feed-row-pending-loader {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 100%;
+                    min-height: clamp(12rem, 36vh, 30rem);
+                    box-sizing: border-box;
+                    padding: 2rem 1rem 2.5rem;
+                }
+                :host {
+                    display: block;
+                    width: 100%;
+                    box-sizing: border-box;
+                }
+`;
+
+/**
+ * Spinner shell for journal/audio row shadow roots (same SVG as program hero).
+ * @param {{ ariaLabel?: string }} [opts]
+ * @returns {string}
+ */
+export function feedRowLoaderHtml(opts = {}) {
+    return programHeroLoaderHtml({
+        wrapperClass: 'feed-row-pending-loader',
+        ariaLabel: opts.ariaLabel != null ? opts.ariaLabel : 'Loading',
+    });
+}
+
 /** `app-confirmed-artists-feed` while `setConfirmedArtistsFeed` not yet called. */
 export const CONFIRMED_ARTISTS_PENDING_WRAPPER_STYLES = `
                 .confirmed-artists-pending-loader {

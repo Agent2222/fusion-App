@@ -9,6 +9,7 @@ import {
     shouldShowUploadButton,
 } from '../../utils/studioFieldRegistry.js';
 import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
+import { assetUrlCandidates } from '../../utils/assetDistribution.js';
 
 /**
  * @param {HTMLElement} fieldsEl
@@ -42,21 +43,38 @@ function updateMediaPreview(previewEl, url, kind) {
         return;
     }
     if (kind === 'audioUrl' || /\.(mp3|wav|ogg|m4a)(\?|$)/i.test(u)) {
+        const candidates = assetUrlCandidates(u);
         const a = document.createElement('audio');
         a.controls = true;
         a.className = 'studio-content-preview-audio';
-        a.src = u;
+        a.src = candidates[0] || u;
         a.preload = 'metadata';
+        if (candidates.length > 1) {
+            a.addEventListener(
+                'error',
+                () => {
+                    a.src = candidates[1];
+                },
+                { once: true },
+            );
+        }
         previewEl.appendChild(a);
         return;
     }
+    const candidates = assetUrlCandidates(u);
     const img = document.createElement('img');
     img.className = 'studio-content-preview-img';
     img.alt = withSeoImageAlt('Content image preview');
     img.referrerPolicy = 'no-referrer';
     img.loading = 'lazy';
-    img.src = u;
+    img.src = candidates[0] || u;
+    let triedFallback = false;
     img.addEventListener('error', () => {
+        if (!triedFallback && candidates.length > 1) {
+            triedFallback = true;
+            img.src = candidates[1];
+            return;
+        }
         previewEl.innerHTML = `<p class="studio-muted studio-content-preview-placeholder">Could not load image</p>`;
     });
     previewEl.appendChild(img);

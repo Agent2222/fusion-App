@@ -183,8 +183,13 @@ function renderIntroSlot(escapeHtml, loc, world, slotIndex) {
  */
 export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
     const isTest = Boolean(opts.isTest);
+    const genCodeBtn = isTest
+        ? ''
+        : `<button type="button" class="studio-btn-secondary" id="studio-art-gen-access-code">Generate new code</button>`;
     const a = artist && typeof artist === 'object' ? artist : {};
     const localesRaw = a.locales && typeof a.locales === 'object' ? a.locales : {};
+    /** Studio-controlled audio bites are opt-in per artist. */
+    const audioDisplayForArtist = localesRaw.audioDisplayForArtist === true;
     const en = asObj(localesRaw.en);
     const ja = asObj(localesRaw.ja);
     const filter = a.filter && typeof a.filter === 'object' ? a.filter : {};
@@ -274,8 +279,12 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
           </label>
           <label class="studio-field"><span>imported</span><input name="art-imported" class="studio-input" readonly value="${esc(escapeHtml, a.imported ? 'yes' : 'no')}" /></label>
           <label class="studio-field studio-field--grow"><span>Contact email (Studio / email blast)</span><input name="art-contact-email" type="email" class="studio-input" placeholder="artist@example.com" autocomplete="off" value="${esc(escapeHtml, String(a.contactEmail ?? ''))}" title="Roster contact — not shown on the public site" /></label>
-          <label class="studio-field"><span>accessCode</span><input name="art-accessCode" class="studio-input" readonly value="${esc(escapeHtml, String(a.accessCode ?? ''))}" /></label>
         </div>
+        <div class="studio-modal-fields-row" style="align-items:flex-end;flex-wrap:wrap;gap:0.5rem">
+          <label class="studio-field studio-field--grow"><span>accessCode (8 digits)</span><input name="art-accessCode" id="studio-art-access-code" class="studio-input" inputmode="numeric" autocomplete="off" maxlength="8" value="${esc(escapeHtml, String(a.accessCode ?? ''))}" title="Roster claim code — cleared on the canister after a successful artist link. Generate a new code if empty." /></label>
+          ${genCodeBtn}
+        </div>
+        <p class="studio-muted" style="margin:0 0 0.75rem;font-size:0.85rem">If this screen stayed open while the code was redeemed, close and reopen Manage (or reload the roster) before saving so you do not write back an old code.</p>
         <h4 class="studio-prog-subhead">Feed filter defaults</h4>
         <div class="studio-modal-fields-row">
           <label class="studio-field"><span>connection</span><input name="art-filter-connection" class="studio-input" value="${esc(escapeHtml, String(filter.connection ?? ''))}" /></label>
@@ -340,7 +349,7 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
       </div>
 
       <div id="studio-art-panel-new-world" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-art-tab-new-world" hidden>
-        <p class="studio-modal-hint">LLM‑refined copy (optional). Not rendered on the public profile until the site uses <code>worldNew</code>.</p>
+        <p class="studio-modal-hint">LLM‑refined copy (optional). Public profiles prefer <code>worldNew</code> when present unless the artist sets their profile to prefer Story &amp; World (<code>world</code>) in member settings.</p>
         <div class="studio-prog-locale-form">
           <div class="studio-prog-col-headers" aria-hidden="true">
             <span class="studio-prog-grid-label"></span>
@@ -359,6 +368,10 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
       <div id="studio-art-panel-media" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-art-tab-media" hidden>
         <p class="studio-modal-hint">Intro gallery (three slots per locale). Use Upload with Studio → Services → S3 configured.</p>
         <h4 class="studio-prog-subhead">Shared artist audio bite (not localized)</h4>
+        <label class="studio-field studio-field--checkbox studio-field--full" style="margin-bottom:0.5rem">
+          <input type="checkbox" name="art-audio-display-for-artist" id="studio-art-audio-display-for-artist" ${audioDisplayForArtist ? 'checked' : ''} />
+          <span>Display for artist (show audio bite on the member profile dashboard for this artist to view and edit)</span>
+        </label>
         <div class="studio-modal-fields-row">
           <label class="studio-field studio-field--grow"><span>Audio URL</span><input type="text" class="studio-input" name="art-audio-url" id="studio-art-audio-url" value="${esc(escapeHtml, String(a.audioUrl ?? ''))}" /></label>
           <label class="studio-file-label studio-btn-ghost studio-field--shrink">
@@ -522,6 +535,9 @@ export function collectArtistRecordFromForm(root, baseArtist) {
     locales.ja = ja;
 
     const normalized = normalizeLocalesWorldForStorage(/** @type {Record<string, unknown>} */ (locales));
+    const audioDisplayCb = form.querySelector('#studio-art-audio-display-for-artist');
+    normalized.audioDisplayForArtist =
+        audioDisplayCb instanceof HTMLInputElement && audioDisplayCb.checked;
 
     const id = String(fd.get('art-id') || base.id || '').trim();
     const slug = String(fd.get('art-slug') || base.slug || '').trim();
@@ -568,7 +584,11 @@ export function collectArtistRecordFromForm(root, baseArtist) {
         galleryFilter,
         locales: normalized,
         imported: Boolean(base.imported),
-        accessCode: String(base.accessCode ?? ''),
+        accessCode: (() => {
+            const fromForm = String(fd.get('art-accessCode') ?? '').trim();
+            if (/^\d{8}$/.test(fromForm)) return fromForm;
+            return String(base.accessCode ?? '');
+        })(),
         _featuredFlags,
     };
 }

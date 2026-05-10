@@ -104,6 +104,53 @@ export function readLinksFromContainer(containerSel) {
 }
 
 /**
+ * Read the single visible profile form into a locale block. This is intentionally
+ * locale-agnostic; save orchestration decides whether this draft is EN, JA, or
+ * another source language and then writes both public locale blocks.
+ *
+ * @param {(id: string) => string | undefined} val - getElementById value
+ * @returns {Record<string, unknown>}
+ */
+export function readProfileDraftFromDom(val) {
+    const fn = String(val('mpd_first_name') ?? '').trim();
+    const ln = String(val('mpd_last_name') ?? '').trim();
+    const w = {
+        practice: val('mpd_w_practice') ?? '',
+        perspective: textareaToWorldArray(val('mpd_w_perspective') ?? ''),
+        vision: textareaToWorldArray(val('mpd_w_vision') ?? ''),
+        constructing: textareaToWorldArray(val('mpd_w_constructing') ?? ''),
+        context: textareaToWorldArray(val('mpd_w_context') ?? ''),
+        quote: val('mpd_w_quote') ?? '',
+    };
+    const slots = [];
+    for (let i = 0; i < 3; i++) {
+        slots.push({
+            src: val(`mpd_intro_${i}_src`) ?? '',
+            alt: val(`mpd_intro_${i}_alt`) ?? '',
+            caption: val(`mpd_intro_${i}_caption`) ?? '',
+        });
+    }
+    w.introGallery = introSlotsToGallery(slots);
+    return {
+        firstName: fn,
+        lastName: ln,
+        name: [fn, ln].filter(Boolean).join(' '),
+        discipline: val('mpd_discipline') ?? '',
+        bio: val('mpd_bio') ?? '',
+        bioLong: '',
+        status: val('mpd_status') ?? '',
+        location: {
+            city: val('mpd_loc_city') ?? '',
+            state: val('mpd_loc_state') ?? '',
+            country: val('mpd_loc_country') ?? '',
+            display: val('mpd_loc_display') ?? '',
+        },
+        world: w,
+        links: readLinksFromContainer('#mpd-links'),
+    };
+}
+
+/**
  * Merge active locale from DOM into a copy of `prev` (other locale unchanged).
  * @param {Record<string, unknown>} prev
  * @param {'en'|'ja'} active
@@ -121,7 +168,7 @@ export function readLocalesFromDom(prev, active, val) {
     nb.name = [fn, ln].filter(Boolean).join(' ');
     nb.discipline = val('mpd_discipline') ?? '';
     nb.bio = val('mpd_bio') ?? '';
-    nb.bioLong = val('mpd_bioLong') ?? '';
+    nb.bioLong = '';
     nb.status = val('mpd_status') ?? '';
     nb.location = {
         city: val('mpd_loc_city') ?? '',
@@ -151,6 +198,10 @@ export function readLocalesFromDom(prev, active, val) {
     nb.world = w;
     nb.links = readLinksFromContainer('#mpd-links');
     out[active] = nb;
+    const srcPick = val('mpd_public_world_source');
+    if (srcPick === 'world' || srcPick === 'newWorld') {
+        out.publicWorldSource = srcPick;
+    }
     return normalizeLocalesWorldForStorage(/** @type {Record<string, unknown>} */ (out));
 }
 

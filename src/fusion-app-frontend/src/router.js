@@ -74,7 +74,7 @@ function applyRouterSeo(path, route) {
 const routes = {
     '/': {
         loader: () => import('./components/home.js'),
-        title: 'Fusion — Japan artist residencies & art platform',
+        title: 'Fusion | Japan Artist Residency & Art Platform',
         description:
             'Fusion connects artists with curated Japan artist residency programs, editions, and editorial context. A premium art platform for place-based practice.',
         contentGenerator: 'generateHomeContent',
@@ -82,7 +82,7 @@ const routes = {
     },
     '/artists': {
         loader: () => import('./components/artists.js'),
-        title: 'Artists on Fusion — curated network',
+        title: 'Artists on Fusion | Curated Network',
         description:
             'Discover artists working through Fusion’s Japan-based programs and progressive art platform.',
         contentGenerator: 'generateArtistsContent',
@@ -90,14 +90,14 @@ const routes = {
     },
     '/programs': {
         loader: () => import('./components/programs.js'),
-        title: 'Japan artist residency programs · Fusion',
+        title: 'Japan Artist Residency Programs | Fusion',
         description:
             'Curated artist residencies and programs across Japan — explore Fusion’s place-based opportunities.',
         contentGenerator: 'generateProgramsContent',
     },
     '/program-view': {
         loader: () => import('./components/programView.js'),
-        title: 'Program · Fusion',
+        title: 'Program | Fusion',
         description:
             'Artist residency program details, schedule, and application information on Fusion.',
         contentGenerator: 'generateProgramViewContent',
@@ -105,21 +105,21 @@ const routes = {
     },
     '/gallery-access': {
         loader: () => import('./components/gallery-access.js'),
-        title: 'Gallery access · Fusion',
+        title: 'Gallery access | Fusion',
         description:
             'Curated gallery access and artist introductions through Fusion’s network.',
         contentGenerator: 'generateGalleryAccessContent'
     },
     '/editions': {
         loader: () => import('./components/editions.js'),
-        title: 'Editions & objects · Fusion',
+        title: 'Editions & objects | Fusion',
         description:
             'Prints, objects, and works released through Fusion artists and partners.',
         contentGenerator: 'generateEditionsContent',
     },
     '/journal': {
         loader: () => import('./components/journal.js'),
-        title: 'Journal — editorial & field notes · Fusion',
+        title: 'Journal | Editorial & Field Notes | Fusion',
         description:
             'Editorial writing, documentation, and perspectives from Fusion’s art platform.',
         contentGenerator: 'generateJournalContent',
@@ -127,13 +127,13 @@ const routes = {
     },
     '/community': {
         loader: () => import('./components/community.js'),
-        title: 'Community · Fusion',
+        title: 'Community | Fusion',
         description: 'Fusion’s artist community and membership programs.',
         contentGenerator: 'generateCommunityContent'
     },
     '/context': {
         loader: () => import('./components/context.js'),
-        title: 'Context — mission & ecosystem · Fusion',
+        title: 'Context | Mission & Ecosystem | Fusion',
         description:
             'Why Fusion exists: mission, ecosystem, and Japan artist residency focus for our art platform.',
         contentGenerator: 'generateContextContent',
@@ -141,55 +141,55 @@ const routes = {
     },
     '/sign-in': {
         loader: () => import('./components/navPages.js'),
-        title: 'Sign in · Fusion',
+        title: 'Sign in | Fusion',
         description: 'Sign in to your Fusion member account.',
         contentGenerator: 'generateSignInContent'
     },
     '/register': {
         loader: () => import('./components/settingsProfile.js'),
-        title: 'Account · Fusion',
+        title: 'Account | Fusion',
         description: 'Create or manage your Fusion member profile and account.',
         contentGenerator: 'generateSettingsProfileContent',
     },
     '/contact': {
         loader: () => import('./components/contact.js'),
-        title: 'Contact Fusion',
+        title: 'Contact | Fusion',
         description: 'Contact the Fusion team — partnerships, programs, and general inquiries.',
         contentGenerator: 'generateContactContent',
     },
     '/join-fusion': {
         loader: () => import('./components/joinFusion.js'),
-        title: 'Join Fusion team',
+        title: 'Join Fusion team | Fusion',
         description: 'Onboard to Fusion with a staff or collaborator invite code.',
         contentGenerator: 'generateJoinFusionContent',
     },
     '/profile': {
         loader: () => import('./components/profile.js'),
-        title: 'Artist profile · Fusion',
+        title: 'Artist profile | Fusion',
         description: 'Artist profiles on Fusion’s Japan artist residency and programs platform.',
         contentGenerator: 'generateProfileContent',
     },
     '/edition-view': {
         loader: () => import('./components/editionView.js'),
-        title: 'Edition · Fusion',
+        title: 'Edition | Fusion',
         description: 'Edition details, images, and release information on Fusion.',
         contentGenerator: 'generateEditionViewContent',
     },
     '/journal-entry-view': {
         loader: () => import('./components/journalEntry.js'),
-        title: 'Journal entry · Fusion',
+        title: 'Journal entry | Fusion',
         description: 'Journal editorial entry on Fusion’s art platform.',
         contentGenerator: 'generateJournalEntryContent',
     },
     '/event-view': {
         loader: () => import('./components/event.js'),
-        title: 'Event · Fusion',
+        title: 'Event | Fusion',
         description: 'Events, talks, and gatherings on Fusion.',
         contentGenerator: 'generateEventContent',
     },
     '/studio': {
         loader: () => import('./components/studio.js'),
-        title: 'Fusion Studio',
+        title: 'Fusion Studio | Fusion',
         description: 'Content and program administration for Fusion (members only).',
         isFullPage: true,
         /** Skip auto-injected public header/footer — studio is a separate shell. */
@@ -197,13 +197,13 @@ const routes = {
     },
     '/settings/profile': {
         loader: () => import('./components/settingsProfile.js'),
-        title: 'Profile settings · Fusion',
+        title: 'Profile settings | Fusion',
         description: 'Edit your public artist profile and account settings on Fusion.',
         contentGenerator: 'generateSettingsProfileContent',
     },
     '/404': {
         loader: () => import('./components/notFound.js'),
-        title: 'Page not found · Fusion',
+        title: 'Page not found | Fusion',
         description: 'The page you are looking for is not available on Fusion.',
         contentGenerator: 'generateNotFoundContent'
     }
@@ -332,6 +332,18 @@ class Router {
             ls.visible = false;
             ls.style.zIndex = '';
         }
+    }
+
+    /**
+     * Settings routes bypass the loadscreen enter animation, so direct loads must
+     * activate the injected public chrome explicitly after it exists.
+     * @param {string} path
+     */
+    activateChromeForSettingsPath(path) {
+        if (!path.startsWith('/settings')) return;
+        document.getElementById('header')?.setAttribute('active', 'true');
+        document.getElementById('footer')?.setAttribute('active', 'true');
+        headerAndFooterActive = true;
     }
 
     /**
@@ -504,6 +516,7 @@ class Router {
                 }
 
                 this.activateDeactivate(path);
+                this.activateChromeForSettingsPath(path);
                 this.scrollRouteContainersToTop();
 
                 const isEditionDetail =
@@ -654,6 +667,7 @@ class Router {
 
             // Apply active-section classes after the DOM update.
             this.activateDeactivate(path);
+            this.activateChromeForSettingsPath(path);
 
             this.scrollRouteContainersToTop();
 

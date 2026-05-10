@@ -3,6 +3,7 @@
  */
 
 import {
+    assertProgramApplicationSubmissionReady,
     defaultApplicationPaymentGlobal,
     ensureMyLinkedArtistProfile,
     getMembershipAccessForCaller,
@@ -1045,6 +1046,24 @@ class ApplicationFormComponent extends HTMLElement {
         const L = this._labels();
         const root = this.shadowRoot;
         const statusEl = root?.querySelector('#app-form-status');
+        try {
+            await assertProgramApplicationSubmissionReady();
+        } catch (preErr) {
+            const code = preErr && typeof preErr === 'object' && 'code' in preErr
+                ? String(/** @type {{ code?: unknown }} */ (preErr).code ?? '')
+                : '';
+            let line = L.submitError;
+            if (code === PROGRAM_APPLICATION_ERROR_CODE.NO_ACCOUNT) {
+                line = L.submitNoAccount;
+            } else if (code === PROGRAM_APPLICATION_ERROR_CODE.NO_LINKED_ARTIST) {
+                line = L.submitNoLinkedArtist;
+            }
+            if (statusEl) {
+                statusEl.textContent = line;
+                statusEl.classList.add('is-error');
+            }
+            return;
+        }
         if (!this._paymentPlan) {
             if (statusEl) {
                 statusEl.textContent = L.selectPaymentPlanFirst;

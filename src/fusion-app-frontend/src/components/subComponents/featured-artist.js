@@ -290,6 +290,7 @@ class FeaturedArtistComponent extends HTMLElement {
                 .artist-card-content {
                     width: 100%;
                     height: 100%;
+                    min-height: 6rem;
                     display: flex;
                     flex-direction: column;
                     align-items: center;

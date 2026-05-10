@@ -7,7 +7,12 @@ import { enumerateJsonPaths } from './testdataCoverageWalk.js';
 const REGISTRY_ROOTS = [...new Set(CONTENT_PAGE_REGISTRY.map((e) => e.testKey))];
 
 /** Roots edited outside Content (entity tabs) + derived slices. */
-const ENTITY_TAB_ROOTS = ['allArtists', 'featuredArtist'];
+const ENTITY_TAB_ROOTS = [
+    'allArtists',
+    'featuredArtist',
+    'applicationPaymentGlobal',
+    'currentProgramSeason',
+];
 
 const ALLOWED_ROOTS = new Set([...REGISTRY_ROOTS, ...ENTITY_TAB_ROOTS]);
 

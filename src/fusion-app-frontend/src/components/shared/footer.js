@@ -111,6 +111,13 @@ class FooterComponent extends HTMLElement {
         this._setFooterScrollVisible(this._isScrolledToBottom(el));
     }
 
+    _handleWindowScrollEvent() {
+        if (this.getAttribute('active') !== 'true') return;
+        const doc = document.scrollingElement || document.documentElement;
+        if (!(doc instanceof HTMLElement)) return;
+        this._setFooterScrollVisible(this._isScrolledToBottom(doc));
+    }
+
     syncFooterVisibilityFromScroll() {
         if (this.getAttribute('active') !== 'true') return;
         const targets = this._scrollTargetsAttached;
@@ -129,7 +136,13 @@ class FooterComponent extends HTMLElement {
 
     attachScrollRevealBehavior() {
         this.detachScrollRevealBehavior();
-        this._onScrollBound = (e) => this._handleScrollEvent(/** @type {HTMLElement} */ (e.currentTarget));
+        this._onScrollBound = (e) => {
+            if (e.currentTarget === window) {
+                this._handleWindowScrollEvent();
+                return;
+            }
+            this._handleScrollEvent(/** @type {HTMLElement} */ (e.currentTarget));
+        };
         this._onRouteChangeBound = () => {
             this.bindScrollTargets();
             this.syncFooterVisibilityFromScroll();
@@ -153,10 +166,14 @@ class FooterComponent extends HTMLElement {
             document.getElementById('editionsMainContent'),
             document.getElementById('galleryAccessMainContent'),
             document.getElementById('journalMainContent'),
+            document.getElementById('settingsMainContent'),
         ].filter(Boolean);
         for (const el of targets) {
             el.addEventListener('scroll', this._onScrollBound, { passive: true });
             this._scrollTargetsAttached.push(el);
+        }
+        if (window.location.pathname.startsWith('/settings')) {
+            window.addEventListener('scroll', this._onScrollBound, { passive: true });
         }
     }
 
@@ -169,6 +186,7 @@ class FooterComponent extends HTMLElement {
             for (const el of this._scrollTargetsAttached) {
                 el.removeEventListener('scroll', this._onScrollBound);
             }
+            window.removeEventListener('scroll', this._onScrollBound);
         }
         this._scrollTargetsAttached = [];
         this._onScrollBound = null;

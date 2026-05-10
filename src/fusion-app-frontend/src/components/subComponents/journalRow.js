@@ -8,6 +8,11 @@ import { navigate } from '../../router.js';
 import { mergeLocaleDeep, firstNonEmptyString } from '../../utils/localeFallback.js';
 import { escapeHtml, previewPlainText } from '../../utils/textPreview.js';
 import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
+import {
+    FEED_ROW_PENDING_WRAPPER_STYLES,
+    PH_LOADER_BASE_STYLES,
+    feedRowLoaderHtml,
+} from '../../utils/programHeroLoader.js';
 
 class JournalRowComponent extends HTMLElement {
     constructor() {
@@ -20,6 +25,8 @@ class JournalRowComponent extends HTMLElement {
         /** @type {(() => void) | null} */
         this._unsubData = null;
         this._onLocaleChange = () => this.render();
+        /** Until first (or refreshed) `getJournalEntries` completes */
+        this._journalListPending = true;
     }
 
     get active() {
@@ -54,7 +61,12 @@ class JournalRowComponent extends HTMLElement {
     connectedCallback() {
         window.addEventListener('fusion-localechange', this._onLocaleChange);
         if (this._unsubData) this._unsubData();
-        this._unsubData = subscribeDataSource(() => void this._loadJournals());
+        this._unsubData = subscribeDataSource(() => {
+            this._journalListPending = true;
+            this.render();
+            void this._loadJournals();
+        });
+        this.render();
         void this._loadJournals();
         if (!this._journalNavBound) {
             this._journalNavBound = true;
@@ -76,8 +88,26 @@ class JournalRowComponent extends HTMLElement {
     }
 
     async _loadJournals() {
-        this._journalsList = await getJournalEntries();
-        this.render();
+        try {
+            this._journalsList = await getJournalEntries();
+        } catch {
+            this._journalsList = [];
+        } finally {
+            this._journalListPending = false;
+            this.render();
+        }
+    }
+
+    _renderLoading() {
+        this.style.display = '';
+        this.shadow.innerHTML = `
+            <style>
+                :host { display: block; }
+                ${PH_LOADER_BASE_STYLES}
+                ${FEED_ROW_PENDING_WRAPPER_STYLES}
+            </style>
+            ${feedRowLoaderHtml({ ariaLabel: 'Loading journal' })}
+        `;
     }
 
     _getJournalId() {
@@ -108,6 +138,11 @@ class JournalRowComponent extends HTMLElement {
     }
 
     render() {
+        if (this._journalListPending) {
+            this._renderLoading();
+            return;
+        }
+
         const entry = this._resolveEntry();
         const locale = typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
 

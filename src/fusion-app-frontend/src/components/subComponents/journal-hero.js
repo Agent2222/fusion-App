@@ -212,7 +212,7 @@ class JournalHeroComponent extends HTMLElement {
 
                 .journal-hero {
                     width: 100%;
-                    height: calc(100vh - 150px);
+                    height: calc(100vh - 55px);
                     display: grid;
                     grid-template-columns: 1fr;
                     grid-template-rows: 8% 84% 8%;

@@ -108,6 +108,153 @@ export function isVideoUrl(url) {
   return /\.(mp4|webm|ogg)$/i.test(u);
 }
 
+/** Fullscreen lightbox default when Studio omits `programPage.lightboxHeroSrc`. */
+const PROGRAM_VIEW_HERO_LIGHTBOX_DEFAULT =
+  "https://fusionart-bucket.s3.us-east-2.amazonaws.com/uploads/platform-assets/Fusion.mp4";
+
+/**
+ * Resolved per program in {@link applyProgramToDom} — overlay reads this when opening.
+ * @type {string}
+ */
+let programViewResolvedLightboxSrc = PROGRAM_VIEW_HERO_LIGHTBOX_DEFAULT;
+
+/** @type {HTMLElement | null} */
+let programHeroVideoOverlayEl = null;
+let programHeroOverlayEscapeInstalled = false;
+
+function ensureProgramHeroVideoOverlay() {
+  if (programHeroVideoOverlayEl && document.body.contains(programHeroVideoOverlayEl)) {
+    return programHeroVideoOverlayEl;
+  }
+  const existing = document.getElementById("programHeroVideoOverlay");
+  if (existing instanceof HTMLElement) {
+    programHeroVideoOverlayEl = existing;
+    return programHeroVideoOverlayEl;
+  }
+
+  const root = document.createElement("div");
+  root.id = "programHeroVideoOverlay";
+  root.className = "program-hero-video-overlay";
+  root.hidden = true;
+  root.setAttribute("role", "dialog");
+  root.setAttribute("aria-modal", "true");
+  root.setAttribute("aria-label", "Program video");
+
+  root.innerHTML = `
+    <div class="program-hero-video-overlay__backdrop" tabindex="-1" aria-hidden="true"></div>
+    <div class="program-hero-video-overlay__panel">
+      <button type="button" class="program-hero-video-overlay__close" aria-label="Close video">×</button>
+      <video
+        class="program-hero-video-overlay__video"
+        controls
+        playsinline
+        preload="metadata"
+        src="${PROGRAM_VIEW_HERO_LIGHTBOX_DEFAULT}"
+      ></video>
+    </div>
+  `;
+
+  const backdrop = root.querySelector(".program-hero-video-overlay__backdrop");
+  const closeBtn = root.querySelector(".program-hero-video-overlay__close");
+  backdrop?.addEventListener("click", () => closeProgramHeroVideoOverlay());
+  closeBtn?.addEventListener("click", () => closeProgramHeroVideoOverlay());
+
+  document.body.appendChild(root);
+  programHeroVideoOverlayEl = root;
+
+  if (!programHeroOverlayEscapeInstalled) {
+    programHeroOverlayEscapeInstalled = true;
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      const el = document.getElementById("programHeroVideoOverlay");
+      if (!el || el.hidden) return;
+      closeProgramHeroVideoOverlay();
+    });
+  }
+
+  return root;
+}
+
+function openProgramHeroVideoOverlay() {
+  const root = ensureProgramHeroVideoOverlay();
+  const video = /** @type {HTMLVideoElement | null} */ (
+    root.querySelector(".program-hero-video-overlay__video")
+  );
+  const url =
+    (typeof programViewResolvedLightboxSrc === "string" &&
+      programViewResolvedLightboxSrc.trim()) ||
+    PROGRAM_VIEW_HERO_LIGHTBOX_DEFAULT;
+  if (video) {
+    video.src = url;
+    video.load();
+    video.muted = false;
+  }
+  root.hidden = false;
+  document.body.style.overflow = "hidden";
+  if (video) {
+    try {
+      video.currentTime = 0;
+    } catch {
+      /* ignore */
+    }
+    void video.play().catch(() => {});
+  }
+  const closeBtn = root.querySelector(".program-hero-video-overlay__close");
+  if (closeBtn instanceof HTMLElement) {
+    closeBtn.focus();
+  }
+}
+
+function closeProgramHeroVideoOverlay() {
+  const root =
+    programHeroVideoOverlayEl ||
+    document.getElementById("programHeroVideoOverlay");
+  if (!root) return;
+  const video = /** @type {HTMLVideoElement | null} */ (
+    root.querySelector(".program-hero-video-overlay__video")
+  );
+  if (video) {
+    video.pause();
+  }
+  root.hidden = true;
+  document.body.style.overflow = "";
+}
+
+function stripProgramHeroLightboxAttrs(container) {
+  container.classList.remove("program-detail-hero-media--has-video");
+  container.removeAttribute("role");
+  container.removeAttribute("tabindex");
+  container.removeAttribute("aria-label");
+}
+
+/**
+ * Hero strip is clickable only when it shows a video (not a still-only image).
+ * @param {HTMLElement} container `#programDetailHeroMedia`
+ */
+function wireProgramHeroVideoLightbox(container) {
+  container.classList.add("program-detail-hero-media--has-video");
+  container.setAttribute("role", "button");
+  container.setAttribute("tabindex", "0");
+  container.setAttribute(
+    "aria-label",
+    "Play full program video with sound",
+  );
+
+  const onActivate = (e) => {
+    if (e instanceof MouseEvent && e.button !== 0) return;
+    e.preventDefault();
+    openProgramHeroVideoOverlay();
+  };
+
+  container.addEventListener("click", onActivate);
+  container.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      openProgramHeroVideoOverlay();
+    }
+  });
+}
+
 /**
  * @param {HTMLElement | null} container
  * @param {string} url Hero media URL (image or video).
@@ -116,6 +263,7 @@ export function isVideoUrl(url) {
  */
 function setProgramHeroMedia(container, url, alt, posterStillUrl) {
   if (!container) return;
+  stripProgramHeroLightboxAttrs(container);
   const u = String(url || "").trim();
   container.classList.remove("program-detail-hero-media--pending");
   container.replaceChildren();
@@ -162,6 +310,7 @@ function setProgramHeroMedia(container, url, alt, posterStillUrl) {
 
     container.appendChild(posterImg);
     container.appendChild(v);
+    wireProgramHeroVideoLightbox(container);
     return;
   }
   const img = document.createElement("img");
@@ -388,6 +537,11 @@ async function applyProgramToDom(programPair) {
     current?.programPage && typeof current.programPage === "object"
       ? /** @type {Record<string, unknown>} */ (current.programPage)
       : {};
+  const lightboxHeroRaw = programPage.lightboxHeroSrc;
+  programViewResolvedLightboxSrc =
+    typeof lightboxHeroRaw === "string" && lightboxHeroRaw.trim()
+      ? lightboxHeroRaw.trim()
+      : PROGRAM_VIEW_HERO_LIGHTBOX_DEFAULT;
   const recordDeposit = String(
     /** @type {Record<string, unknown>} */ (current)?.depositAmountDisplay ?? "",
   ).trim();

@@ -2,6 +2,7 @@ import { getSoundEnvironmentPublic, getJournalEntries } from '../../utils/databa
 import { artistLocaleBlock, artistDisplayName } from '../../utils/artistSlug.js';
 import { escapeHtml } from '../../utils/textPreview.js';
 import { navigate } from '../../router.js';
+import { assetUrlCandidates } from '../../utils/assetDistribution.js';
 
 const LS = 'fusion-sound-env-v1';
 const DUCK = 0.45;
@@ -83,18 +84,24 @@ class SoundEnvironment extends HTMLElement {
         this._voicePoolSig = '';
         /** Set once: `_bindUi` is only attached from `_renderShell` (not again after async `_boot`). */
         this._uiListenersBound = false;
+        this._atmoSourceCandidates = [];
+        this._atmoFallbackTried = false;
         /** Fires when `#header[active]` is set after this component mounts (SPA remount; `fusion-site-entered` already ran). */
         this._headerActiveObserver = null;
+        this._boundRouteSync = () => this._syncRouteSuppression();
     }
 
     connectedCallback() {
         this._renderShell();
+        window.addEventListener('routeChange', this._boundRouteSync);
         void this._boot();
+        this._syncRouteSuppression();
     }
 
     disconnectedCallback() {
         this._stopSchedule();
         window.removeEventListener('fusion-site-entered', this._boundEnter);
+        window.removeEventListener('routeChange', this._boundRouteSync);
         this._detachMediaLabelListeners();
         this._teardownHeaderActiveObserver();
     }
@@ -116,7 +123,7 @@ class SoundEnvironment extends HTMLElement {
             this.setAttribute('hidden', '');
             return;
         }
-        this.removeAttribute('hidden');
+        this._syncRouteSuppression();
         this._hasLearnMoreLink = false;
         this._learnHref = '';
         const id = cfg.learnMoreJournalEntryId ? String(cfg.learnMoreJournalEntryId) : '';
@@ -134,10 +141,27 @@ class SoundEnvironment extends HTMLElement {
         this._setHeadTitle();
         this._fillSlidersFromConfig();
         this._applyLocalMix();
+        this._syncRouteSuppression();
         this._updateLearnLink();
         this._syncSoundHeadLabel();
         this._ensureHeaderActiveObserver();
         this._enterIfHeaderReady();
+    }
+
+    _isSuppressedForCurrentRoute() {
+        const path = typeof window !== 'undefined' ? String(window.location?.pathname || '/') : '/';
+        return path === '/studio' || path.startsWith('/settings') || path === '/profile' || path.startsWith('/profile/');
+    }
+
+    _syncRouteSuppression() {
+        if (this._isSuppressedForCurrentRoute()) {
+            this.setAttribute('hidden', '');
+            this.setMasterEnabled(false);
+            return;
+        }
+        if (this._config && this._config.enabled !== false) {
+            this.removeAttribute('hidden');
+        }
     }
 
     _teardownHeaderActiveObserver() {
@@ -188,9 +212,12 @@ class SoundEnvironment extends HTMLElement {
 
     _buildAudio(cfg) {
         this._detachMediaLabelListeners();
-        this._atmo = new Audio(String(cfg.atmosphereAudioUrl || ''));
+        this._atmoSourceCandidates = assetUrlCandidates(cfg.atmosphereAudioUrl);
+        this._atmoFallbackTried = false;
+        this._atmo = new Audio(String(this._atmoSourceCandidates[0] || ''));
         this._atmo.loop = true;
         this._atmo.preload = 'auto';
+        this._atmo.addEventListener('error', () => this._tryAtmoFallback());
         this._voice = new Audio('');
         this._voice.preload = 'auto';
         this._voice.addEventListener('ended', () => {
@@ -271,6 +298,10 @@ class SoundEnvironment extends HTMLElement {
         }
     }
 
+    _syncEqIcons() {
+        this._syncSoundHeadLabel();
+    }
+
     async _playAtmo() {
         if (!this._atmo?.src) return;
         const vol = this._pctToGain(Number(this._getUiAtmoVol()));
@@ -281,6 +312,15 @@ class SoundEnvironment extends HTMLElement {
             /* autoplay blocked */
         } finally {
             this._syncSoundHeadLabel();
+        }
+    }
+
+    _tryAtmoFallback() {
+        if (this._atmoFallbackTried || !this._atmo || this._atmoSourceCandidates.length < 2) return;
+        this._atmoFallbackTried = true;
+        this._atmo.src = this._atmoSourceCandidates[1];
+        if (this._entered && this._masterOn && this.getAttribute('hidden') == null) {
+            void this._playAtmo();
         }
     }
 
@@ -492,18 +532,25 @@ class SoundEnvironment extends HTMLElement {
     async _playVoiceUrl(url, artistId, name, href, artist) {
         if (!this._voice || !url) return;
         this._stopVoice();
-        this._voice.src = url;
-        this._voice.volume = this._pctToGain(this._getUiVoiceVol());
-        this._duckAtmo();
-        this._setCurrentVoiceLine(name, href, artistId, artist);
-        this._updateCurrentVoiceRowVisibility();
-        try {
-            await this._voice.play();
-        } catch {
-            this._unduckAtmo();
-        } finally {
-            this._syncSoundHeadLabel();
+        const candidates = assetUrlCandidates(url);
+        for (let i = 0; i < candidates.length; i += 1) {
+            this._voice.src = candidates[i];
+            this._voice.volume = this._pctToGain(this._getUiVoiceVol());
+            this._duckAtmo();
+            this._setCurrentVoiceLine(name, href, artistId, artist);
             this._updateCurrentVoiceRowVisibility();
+            try {
+                await this._voice.play();
+                return;
+            } catch {
+                this._unduckAtmo();
+                if (i >= candidates.length - 1) {
+                    break;
+                }
+            } finally {
+                this._syncSoundHeadLabel();
+                this._updateCurrentVoiceRowVisibility();
+            }
         }
     }
 

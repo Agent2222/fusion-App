@@ -1,3 +1,8 @@
+import {
+    getPublicWorldSourceFromLocales,
+    pickPublicWorldField,
+} from './worldPublicPick.js';
+
 /**
  * Stable URL segment for an artist, derived from canonical English name.
  * @param {string} name
@@ -78,7 +83,7 @@ export function artistDisplayName(artist, locale) {
 }
 
 /**
- * Short line under name: `discipline` or `world.practice` when present in locale JSON.
+ * Short line under name: `discipline` or public practice line from Story & World / New World (per `publicWorldSource`).
  * @param {object | null | undefined} artist
  * @param {string} [locale]
  */
@@ -86,10 +91,13 @@ export function artistDisplayDiscipline(artist, locale) {
     const loc = artistLocaleBlock(artist, locale ?? 'en');
     if (!loc || typeof loc !== 'object') return '';
     if (loc.discipline != null && String(loc.discipline).trim()) return String(loc.discipline).trim();
-    const w = loc.world;
-    if (w && typeof w === 'object' && w.practice != null && String(w.practice).trim()) {
-        return String(w.practice).trim();
-    }
+    const root =
+        artist && typeof artist === 'object' && artist.locales && typeof artist.locales === 'object'
+            ? /** @type {Record<string, unknown>} */ (artist.locales)
+            : {};
+    const src = getPublicWorldSourceFromLocales(root);
+    const pr = pickPublicWorldField(/** @type {Record<string, unknown>} */ (loc), 'practice', src);
+    if (pr != null && String(pr).trim()) return String(pr).trim();
     return '';
 }
 

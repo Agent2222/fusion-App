@@ -74,7 +74,7 @@ class CommunityConnect extends HTMLElement {
                 .cc-head {
                     display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between;
                     gap: 1rem;
-                    max-width: 1400px; margin: 0 auto; padding: 2rem 0 1rem;
+                    max-width: 100%; margin: 0 auto; padding: 2rem 0 1rem;
                     box-sizing: border-box;
                 }
                 .cc-title {
@@ -92,7 +92,7 @@ class CommunityConnect extends HTMLElement {
                     display: grid;
                     grid-template-columns: repeat(3, 1fr);
                     gap: 1.5rem;
-                    max-width: 1400px;
+                    max-width: 100%;
                     margin: 0 auto;
                     padding: 0;
                     align-items: start;
@@ -111,7 +111,7 @@ class CommunityConnect extends HTMLElement {
                     margin: 0;
                     opacity: 0.92;
                 }
-                .cc-actions { max-width: 1400px; margin: 0 auto; padding: 1.5rem 0 2.5rem; display: flex; justify-content: flex-end; }
+                .cc-actions { max-width: 100%; margin: 0 auto; padding: 1.5rem 0 2.5rem; display: flex; justify-content: flex-end; }
                 .cc-browse {
                     padding: 0.75rem 1.35rem;
                     border: 1.5px solid var(--c2, #000);

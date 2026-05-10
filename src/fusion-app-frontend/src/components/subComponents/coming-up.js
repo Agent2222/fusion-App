@@ -196,7 +196,7 @@ class ComingUpComponent extends HTMLElement {
 
                 .coming-up {
                     width: 100%;
-                    height: calc(84vh - 100px);
+                    height: calc(110vh);
                     display: grid;
                     grid-template-columns: 1fr;
                     grid-template-rows: 8% 92%;

@@ -840,6 +840,11 @@ class HeaderComponent extends HTMLElement {
         if (!(host instanceof HTMLElement)) {
             return;
         }
+        if (typeof window !== 'undefined' && window.location.pathname.startsWith('/settings')) {
+            host.hidden = true;
+            host.innerHTML = '';
+            return;
+        }
         const ui = this._authUi;
         if (!ui || ui.kind !== 'member' || ui.needsProfileCompletion) {
             host.hidden = true;
@@ -1285,6 +1290,27 @@ class HeaderComponent extends HTMLElement {
                     box-sizing: border-box;
                 }
 
+                .header-sound-row app-sound-environment[hidden] {
+                    display: none !important;
+                }
+
+                .header-utility-stack {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: stretch;
+                    gap: 0.42rem;
+                    width: min(17rem, calc(100% - 2rem));
+                    margin-top: 15px;
+                    margin-left: auto;
+                    margin-right: clamp(0.5rem, 2vw, 1.25rem);
+                    box-sizing: border-box;
+                    pointer-events: none;
+                }
+
+                .header-utility-stack > * {
+                    pointer-events: auto;
+                }
+
                 :host-context(html[data-fusion-page="profile"]) .header-sound-row app-sound-environment {
                     margin-left: auto;
                     align-self: flex-end;
@@ -1611,14 +1637,17 @@ class HeaderComponent extends HTMLElement {
                     box-sizing: border-box;
                     width: 100%;
                     position: relative;
-                    z-index: 9;
-                    background: var(--c1, #f4f4f0);
-                    border-bottom: 1px solid var(--c2, #000);
-                    padding: 0.4rem 2% 0.5rem;
-                    font-size: clamp(0.72rem, 0.88vw, 0.86rem);
-                    color: var(--c2, #000);
+                    z-index: 35;
+                    margin: 0;
+                    padding: 0.48rem 0.65rem 0.5rem;
+                    background: var(--c1, #c12525);
+                    border: 1px solid var(--c1, #c12525);
+                    color: var(--bg, #faf3f4);
                     font-family: 'momochidori-variable', sans-serif;
-                    font-variation-settings: var(--fv-nav);
+                    font-size: clamp(0.64rem, 0.74vw, 0.76rem);
+                    line-height: 1.25;
+                    font-variation-settings: 'wght' 560;
+                    pointer-events: auto;
                 }
 
                 #headerRosterVisBanner[hidden] {
@@ -1627,27 +1656,27 @@ class HeaderComponent extends HTMLElement {
 
                 .header-roster-vis-inner {
                     display: flex;
-                    flex-wrap: wrap;
                     align-items: center;
-                    gap: 0.5rem 0.75rem;
-                    justify-content: center;
-                    max-width: 90rem;
-                    margin: 0 auto;
+                    justify-content: space-between;
+                    gap: 0.45rem;
+                    margin: 0;
                 }
 
                 .header-roster-vis-text {
-                    flex: 1 1 12rem;
+                    flex: 1 1 auto;
+                    min-width: 0;
                 }
 
                 .header-roster-vis-cta {
-                    padding: 0.22rem 0.65rem;
+                    flex: 0 0 auto;
+                    padding: 0.16rem 0.42rem;
                     font: inherit;
+                    font-size: 0.66rem;
                     font-variation-settings: var(--fv-nav-active);
-                    border: 1.5px solid var(--c2, #000);
+                    border: 1px solid var(--bg, #faf3f4);
                     background: transparent;
-                    color: var(--c2, #000);
+                    color: var(--bg, #faf3f4);
                     cursor: pointer;
-                    border-radius: 2px;
                 }
 
                 .header-roster-vis-cta:hover {
@@ -1820,6 +1849,20 @@ class HeaderComponent extends HTMLElement {
                         width: min(92vw, 360px);
                     }
 
+                    #headerRosterVisBanner {
+                        width: 100%;
+                    }
+
+                    .header-utility-stack {
+                        width: calc(100% - 2rem);
+                        margin-left: 1rem;
+                        margin-right: 1rem;
+                    }
+
+                    .header-roster-vis-inner {
+                        flex-wrap: wrap;
+                    }
+
                     #headerDrawerBackdrop {
                         display: block;
                         position: fixed;
@@ -1867,9 +1910,11 @@ class HeaderComponent extends HTMLElement {
                 </div>
             </header>
             <div class="header-sound-row">
-            <app-sound-environment id="headerSoundEnv" aria-label="Site sound environment"></app-sound-environment>
+                <app-sound-environment id="headerSoundEnv" aria-label="Site sound environment"></app-sound-environment>
+                <div class="header-utility-stack" aria-live="polite">
+                    <div id="headerRosterVisBanner" class="header-roster-vis-banner" hidden></div>
+                </div>
             </div>
-            <div id="headerRosterVisBanner" class="header-roster-vis-banner" hidden></div>
             <div id="headerDrawerBackdrop" class="header-drawer-backdrop" aria-hidden="true"></div>
             <div id="logoHeader">
                 <div id="logoHeaderInner">

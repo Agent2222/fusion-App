@@ -1,6 +1,6 @@
 import { html, render } from 'lit-html';
 import logo from './logo2.svg';
-import { createICActor, resolveFusionBackendCanisterId } from './config.js';
+import { createICActor } from './config.js';
 import { withSeoImageAlt } from './utils/mediaAltSeo.js';
 
 class App {
@@ -16,8 +16,10 @@ class App {
     // Lazy-load declarations so we don't create an actor (and call fetchRootKey)
     // during initial page load.
     const fusionAppBackendDecl = await import('declarations/fusion-app-backend');
-    const cid = resolveFusionBackendCanisterId(fusionAppBackendDecl.canisterId);
-    const actor = await createICActor(fusionAppBackendDecl.idlFactory, cid);
+    const actor = await createICActor(
+      fusionAppBackendDecl.idlFactory,
+      fusionAppBackendDecl.canisterId,
+    );
     this.greeting = await actor.greet(name);
     this.#render();
   };

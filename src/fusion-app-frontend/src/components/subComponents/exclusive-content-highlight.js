@@ -64,7 +64,7 @@ class ExclusiveContentHighlight extends HTMLElement {
                 }
                 .ech-head {
                     display: flex; align-items: baseline; justify-content: space-between;
-                    max-width: 1400px; margin: 0 auto; padding: 0 0 1rem;
+                    max-width: 100%; margin: 0 auto; padding: 0 0 1rem;
                     box-sizing: border-box;
                 }
                 .ech-title {
@@ -82,7 +82,7 @@ class ExclusiveContentHighlight extends HTMLElement {
                     display: grid;
                     grid-template-columns: repeat(3, 1fr);
                     gap: 1rem;
-                    max-width: 1400px;
+                    max-width: 100%;
                     margin: 0 auto;
                     padding: 0 0 3rem;
                     box-sizing: border-box;

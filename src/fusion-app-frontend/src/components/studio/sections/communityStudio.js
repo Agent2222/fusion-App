@@ -5,8 +5,10 @@ import {
     adminGetCommunityPageStudio,
     adminSetCommunityPageStudio,
 } from '../../../utils/database.js';
+import { presignPrivateVideoUpload } from '../../../utils/integrationApi.js';
 import { uploadBlobToS3 } from '../../../utils/studioS3Upload.js';
 import { studioPageHeaderHtml } from '../../../utils/studioCategoryLayout.js';
+import { studioFeatureAccess } from '../../../utils/studioShellState.js';
 
 function escapeHtml(s) {
     return String(s ?? '')
@@ -31,7 +33,7 @@ export function renderCommunitySection() {
                 <section class="studio-community__section" aria-labelledby="studio-community-hero-title">
                     <div class="studio-community__section-head">
                         <h3 id="studio-community-hero-title" class="studio-subheading">Hero</h3>
-                        <p class="studio-muted">Primary video and CTA copy shown on `/community`.</p>
+                        <p class="studio-muted">Primary video and CTA copy shown on <code>/community</code>.</p>
                     </div>
                     <div id="studio-com-form-hero" class="studio-community__form"></div>
                 </section>
@@ -77,8 +79,11 @@ function renderHeroForm(bundle) {
             <input type="text" id="${id}" class="studio-input" value="${escapeHtml(String(val ?? ''))}" />
         </label>`;
     return `
-        <p class="studio-muted">Primary CTA on the public site switches between <strong>Join</strong> and <strong>Watch</strong> based on membership — labels below are used for those modes.</p>
-        ${field('st-com-hero-video', 'Video URL (mp4)', h.videoUrl)}
+        <p class="studio-muted">Primary CTA on the public site switches between <strong>Join</strong> and <strong>Watch</strong> based on membership. Public previews can use CloudFront; full videos are stored privately under <code>fusionMedia/private-video</code>.</p>
+        ${field('st-com-hero-preview-video', 'Public preview video URL', h.previewVideoUrl)}
+        ${field('st-com-hero-full-key', 'Members-only full video key', h.fullVideoKey)}
+        ${field('st-com-hero-full-name', 'Members-only full video file name', h.fullVideoFileName)}
+        ${field('st-com-hero-video', 'Legacy public video URL', h.videoUrl)}
         ${field('st-com-hero-poster', 'Poster image URL', h.posterUrl)}
         ${field('st-com-hero-ov-title', 'Overlay — line 1 (e.g. In Conversation)', h.overlayTitle)}
         ${field('st-com-hero-ov-guests', 'Overlay — guests', h.overlayGuests)}
@@ -96,6 +101,14 @@ function renderHeroForm(bundle) {
         <label class="studio-file-label studio-btn-ghost">
             <input type="file" id="st-com-hero-poster-file" accept="image/*" class="studio-file-input" />
             Upload poster to S3
+        </label>
+        <label class="studio-file-label studio-btn-ghost">
+            <input type="file" id="st-com-hero-preview-file" accept="video/*,.mp4,.webm,.mov" class="studio-file-input" />
+            Upload public preview video
+        </label>
+        <label class="studio-file-label studio-btn-ghost">
+            <input type="file" id="st-com-hero-full-file" accept="video/*,.mp4,.webm,.mov" class="studio-file-input" />
+            Upload members-only full video
         </label>
     `;
 }
@@ -238,6 +251,12 @@ export async function initCommunitySection(mainEl) {
         msg.className = `studio-banner studio-banner--${kind}`;
     };
 
+    const perm = studioFeatureAccess('community');
+    if (!perm.canEdit) {
+        show('You do not have permission to edit Community.', 'warn');
+        return;
+    }
+
     /** @type {Record<string, unknown>} */
     let bundle = {};
 
@@ -268,6 +287,9 @@ export async function initCommunitySection(mainEl) {
 
         const hero = {
             videoUrl: val('st-com-hero-video'),
+            previewVideoUrl: val('st-com-hero-preview-video'),
+            fullVideoKey: val('st-com-hero-full-key'),
+            fullVideoFileName: val('st-com-hero-full-name'),
             posterUrl: val('st-com-hero-poster'),
             overlayTitle: val('st-com-hero-ov-title'),
             overlayGuests: val('st-com-hero-ov-guests'),
@@ -421,6 +443,47 @@ export async function initCommunitySection(mainEl) {
             t.value = '';
             return;
         }
+        if (t.id === 'st-com-hero-preview-file') {
+            try {
+                const previewIn = /** @type {HTMLInputElement | null} */ (mainEl.querySelector('#st-com-hero-preview-video'));
+                const url = await uploadBlobToS3(f, previewIn, {
+                    area: 'studio/community',
+                    entityType: 'community',
+                    entityId: 'hero',
+                    fieldKey: 'preview-video',
+                });
+                if (previewIn) previewIn.value = url;
+                show('Public preview video uploaded.', 'info');
+            } catch (err) {
+                show(err instanceof Error ? err.message : String(err), 'warn');
+            }
+            t.value = '';
+            return;
+        }
+        if (t.id === 'st-com-hero-full-file') {
+            try {
+                const keyIn = /** @type {HTMLInputElement | null} */ (mainEl.querySelector('#st-com-hero-full-key'));
+                const nameIn = /** @type {HTMLInputElement | null} */ (mainEl.querySelector('#st-com-hero-full-name'));
+                const signed = await presignPrivateVideoUpload({
+                    contentId: 'community-hero',
+                    fileName: f.name,
+                    contentType: f.type || 'application/octet-stream',
+                });
+                const put = await fetch(signed.putUrl, {
+                    method: 'PUT',
+                    body: f,
+                    headers: { 'Content-Type': f.type || 'application/octet-stream' },
+                });
+                if (!put.ok) throw new Error(`Private video upload failed: HTTP ${put.status}`);
+                if (keyIn) keyIn.value = signed.key;
+                if (nameIn) nameIn.value = signed.fileName || f.name;
+                show('Members-only full video uploaded.', 'info');
+            } catch (err) {
+                show(err instanceof Error ? err.message : String(err), 'warn');
+            }
+            t.value = '';
+            return;
+        }
         const m = /^st-com-ex-(\d+)-file$/.exec(t.id || '');
         if (m) {
             const i = Number(m[1]);
@@ -446,7 +509,11 @@ export async function initCommunitySection(mainEl) {
         bundle = {};
     }
 
-    fillForms();
+    try {
+        fillForms();
+    } catch (e) {
+        show(e instanceof Error ? e.message : String(e), 'warn');
+    }
 
     mainEl.querySelector('#studio-community-save')?.addEventListener('click', async () => {
         try {

@@ -1,12 +1,23 @@
 /**
- * Studio “Send blast” — filters, transactional Resend batch, LLM quick draft (plain text).
+ * Studio “Send blast” — filters, transactional Resend batch, LLM quick draft (plain text), optional HTML templates.
  */
 import { getDataSource, studioReinterpretWithPrompt } from '../../utils/database.js';
 import { openStudioModal } from '../../utils/studioModal.js';
 import { sendEmail, sendEmailBatch } from '../../utils/integrationApi.js';
 import { DEFAULT_SIGNATURE_HTML } from '../../utils/emailHtml.js';
+import {
+    EMAIL_CAMPAIGN_TEMPLATES,
+    getEmailTemplateById,
+    interpolateRosterBlastTemplate,
+} from '../../utils/emailCampaignTemplates.js';
 
 const LLM_COMBINED_MAX = 12000;
+
+const TEMPLATE_BODY_HINT =
+    'This layout is sent as HTML from the selected template (same list as Studio → Email). Edit templates there if needed.';
+
+const BLAST_TEMPLATE_NOTE =
+    'Templated blasts use each template’s own layout and footer — the signature block below applies only to custom plain-text messages.';
 
 /**
  * @param {unknown} row
@@ -87,6 +98,15 @@ function plainBodyToEmailHtml(plain) {
 export function openSendBlastModal(opts) {
     const { getArtistsRows, onRefresh } = opts;
 
+    const templateOptionsHtml =
+        `<option value="">— Custom message (plain text) —</option>` +
+        Object.keys(EMAIL_CAMPAIGN_TEMPLATES)
+            .map(
+                (k) =>
+                    `<option value="${escapeAttr(k)}">${escapeHtmlText(EMAIL_CAMPAIGN_TEMPLATES[k].name)}</option>`,
+            )
+            .join('');
+
     const inner = `
 <p class="studio-muted" style="margin:0 0 0.75rem">Only send to artists who have agreed to be contacted. Staff are responsible for compliance with applicable law.</p>
 <div class="studio-send-blast-toolbar">
@@ -104,9 +124,15 @@ export function openSendBlastModal(opts) {
 <p class="studio-muted" id="studio-send-blast-overview" style="margin:0.5rem 0">Loading…</p>
 <label class="studio-field" style="margin-top:0.5rem"><span>Subject</span>
   <input type="text" class="studio-input" id="studio-send-blast-subject" maxlength="998" placeholder="Email subject" /></label>
-<label class="studio-field"><span>Message (plain text — line breaks kept)</span>
+<label class="studio-field"><span>Template</span>
+  <select class="studio-input" id="studio-send-blast-template">${templateOptionsHtml}</select>
+</label>
+<p class="studio-muted" id="studio-send-blast-template-note" style="margin:-0.35rem 0 0.5rem">${escapeHtmlText(
+        BLAST_TEMPLATE_NOTE,
+    )}</p>
+<label class="studio-field"><span id="studio-send-blast-body-label">Message (plain text — line breaks kept)</span>
   <textarea class="studio-textarea studio-send-blast-body" id="studio-send-blast-body" rows="8" spellcheck="true" placeholder="Write your message…"></textarea></label>
-<div class="studio-modal-fields-row" style="align-items:flex-end;flex-wrap:wrap;gap:0.5rem">
+<div class="studio-modal-fields-row studio-send-blast-llm-wrap" id="studio-send-blast-llm-wrap" style="align-items:flex-end;flex-wrap:wrap;gap:0.5rem">
   <label class="studio-field"><span>Quick draft tone</span>
     <select class="studio-input" id="studio-send-blast-tone">
       <option value="Professional and warm">Professional and warm</option>
@@ -117,7 +143,7 @@ export function openSendBlastModal(opts) {
   </label>
   <button type="button" class="studio-btn-secondary" id="studio-send-blast-llm">Quick draft</button>
 </div>
-<div class="studio-field studio-send-blast-sig-block">
+<div class="studio-field studio-send-blast-sig-block" id="studio-send-blast-sig-block">
   <div class="studio-send-blast-sig-row">
     <span>Signature</span>
     <button type="button" class="studio-btn-ghost" id="studio-send-blast-sig-toggle" aria-expanded="false">Edit signature</button>
@@ -213,9 +239,68 @@ export function openSendBlastModal(opts) {
     const cohortsEl = root.querySelector('#studio-send-blast-cohorts');
     const subjectEl = root.querySelector('#studio-send-blast-subject');
     const bodyEl = root.querySelector('#studio-send-blast-body');
+    const templateSel = root.querySelector('#studio-send-blast-template');
+    const templateNoteEl = root.querySelector('#studio-send-blast-template-note');
+    const bodyLabelEl = root.querySelector('#studio-send-blast-body-label');
+    const llmWrapEl = root.querySelector('#studio-send-blast-llm-wrap');
+    const sigBlockEl = root.querySelector('#studio-send-blast-sig-block');
     const testToEl = root.querySelector('#studio-send-blast-test-to');
     const statusEl = root.querySelector('#studio-send-blast-status');
     const sendBtn = root.querySelector('#studio-send-blast-send');
+
+    /** Plain-text body backup when switching into HTML template mode. */
+    let customBodyBackup = '';
+    /** Previous template select value (including empty), for mode transitions. */
+    let lastTemplateId = '';
+
+    const getSelectedTemplateId = () =>
+        templateSel instanceof HTMLSelectElement ? templateSel.value.trim() : '';
+
+    const syncBlastTemplateMode = () => {
+        const tid = getSelectedTemplateId();
+        const tpl = tid ? getEmailTemplateById(tid) : null;
+        const prevTid = lastTemplateId;
+        lastTemplateId = tid;
+
+        if (!(bodyEl instanceof HTMLTextAreaElement)) return;
+
+        if (!tid) {
+            if (prevTid) {
+                bodyEl.value = customBodyBackup;
+            }
+            bodyEl.disabled = false;
+            bodyEl.readOnly = false;
+            bodyEl.placeholder = 'Write your message…';
+            if (bodyLabelEl) {
+                bodyLabelEl.textContent = 'Message (plain text — line breaks kept)';
+            }
+            if (llmWrapEl instanceof HTMLElement) llmWrapEl.hidden = false;
+            if (sigBlockEl instanceof HTMLElement) sigBlockEl.hidden = false;
+            if (templateNoteEl instanceof HTMLElement) templateNoteEl.style.display = '';
+        } else {
+            if (!prevTid) {
+                customBodyBackup = bodyEl.value;
+            }
+            if (tpl && subjectEl instanceof HTMLInputElement) {
+                subjectEl.value = tpl.defaultSubject;
+            }
+            bodyEl.value = TEMPLATE_BODY_HINT;
+            bodyEl.disabled = true;
+            bodyEl.readOnly = true;
+            bodyEl.placeholder = '';
+            if (bodyLabelEl) {
+                bodyLabelEl.textContent = 'Message (HTML template — not editable here)';
+            }
+            if (llmWrapEl instanceof HTMLElement) llmWrapEl.hidden = true;
+            if (sigBlockEl instanceof HTMLElement) sigBlockEl.hidden = true;
+            if (templateNoteEl instanceof HTMLElement) templateNoteEl.style.display = 'none';
+        }
+    };
+
+    templateSel?.addEventListener('change', () => {
+        syncBlastTemplateMode();
+    });
+    syncBlastTemplateMode();
 
     /** @type {object[]} */
     let allRows = [];
@@ -255,13 +340,32 @@ export function openSendBlastModal(opts) {
         }, 1600);
     };
 
-    const fullHtml = () => {
+    const fullHtmlCustom = () => {
         const bodyPlain = bodyEl instanceof HTMLTextAreaElement ? bodyEl.value : '';
         const bodyHtml = plainBodyToEmailHtml(bodyPlain);
         const sig = sigTextarea instanceof HTMLTextAreaElement ? sigTextarea.value : '';
         const sigTrim = sig.trim();
         if (!sigTrim) return bodyHtml;
         return `${bodyHtml}<div style="margin:36px 0 0;padding:40px 0 0;border-top:1px solid #e5e2df">${sigTrim}</div>`;
+    };
+
+    /**
+     * @param {object | null} row
+     */
+    const htmlForTemplateRow = (row) => {
+        const tid = getSelectedTemplateId();
+        const tpl = tid ? getEmailTemplateById(tid) : null;
+        if (!tpl) return fullHtmlCustom();
+        const name = row ? displayNameEn(row) : 'Artist';
+        const code = row ? String(row.accessCode ?? '').trim() : '00000000';
+        return interpolateRosterBlastTemplate(tpl.bodyHtml, { artistName: name, accessCode: code });
+    };
+
+    const firstSelectedArtistRow = () => {
+        for (const r of allRows) {
+            if (selected.has(String(r.id ?? '').trim())) return r;
+        }
+        return null;
     };
 
     const recomputeSendEnabled = () => {
@@ -417,6 +521,10 @@ export function openSendBlastModal(opts) {
 
     root.querySelector('#studio-send-blast-llm')?.addEventListener('click', async () => {
         if (!(bodyEl instanceof HTMLTextAreaElement)) return;
+        if (getSelectedTemplateId()) {
+            alert('Quick draft applies to custom plain-text messages only. Clear the template to use it.');
+            return;
+        }
         const btn = root.querySelector('#studio-send-blast-llm');
         const tone =
             (root.querySelector('#studio-send-blast-tone') instanceof HTMLSelectElement
@@ -479,9 +587,18 @@ export function openSendBlastModal(opts) {
         setStatus('Test email: sending…');
         let ok = false;
         try {
-            await sendEmail({ to, subject: subj, html: fullHtml() });
+            const tid = getSelectedTemplateId();
+            const sampleRow = firstSelectedArtistRow();
+            const html = tid ? htmlForTemplateRow(sampleRow) : fullHtmlCustom();
+            await sendEmail({ to, subject: subj, html });
             ok = true;
-            setStatus(`Test email: sent to ${to}.`);
+            const extra =
+                tid && !sampleRow
+                    ? ' (sample placeholders — select an artist for name/code preview.)'
+                    : tid && sampleRow
+                      ? ` (sample: ${displayNameEn(sampleRow)}.)`
+                      : '';
+            setStatus(`Test email: sent to ${to}.${extra}`);
         } catch (e) {
             alert(e instanceof Error ? e.message : String(e));
             setStatus('');
@@ -509,7 +626,8 @@ export function openSendBlastModal(opts) {
             alert('Subject is required.');
             return;
         }
-        const html = fullHtml();
+        const tid = getSelectedTemplateId();
+        const tpl = tid ? getEmailTemplateById(tid) : null;
         const recipients = [];
         const seen = new Set();
         for (const r of allRows) {
@@ -526,19 +644,57 @@ export function openSendBlastModal(opts) {
             alert('No selected artists with a valid contact email.');
             return;
         }
+
+        /** @type {{ to: string, subject: string, html: string }[]} */
+        let batchPayload = [];
+        /** @type {string[]} */
+        let skipped = [];
+        if (!tpl) {
+            const html = fullHtmlCustom();
+            batchPayload = recipients.map((x) => ({ to: x.to, subject: subj, html }));
+        } else {
+            const requireCode = tpl.requiresRosterPlaceholders === true;
+            skipped = [];
+            for (const x of recipients) {
+                const code = String(x.row.accessCode ?? '').trim();
+                if (requireCode && !/^\d{8}$/.test(code)) {
+                    skipped.push(displayNameEn(x.row));
+                    continue;
+                }
+                const html = interpolateRosterBlastTemplate(tpl.bodyHtml, {
+                    artistName: displayNameEn(x.row),
+                    accessCode: code,
+                });
+                batchPayload.push({ to: x.to, subject: subj, html });
+            }
+            if (!batchPayload.length) {
+                alert(
+                    requireCode
+                        ? 'No recipients with a valid 8-digit roster access code. Generate codes in Artists → Manage, or pick another template.'
+                        : 'No messages to send.',
+                );
+                return;
+            }
+            if (skipped.length) {
+                setStatus(
+                    `Skipped ${skipped.length} without 8-digit access code: ${skipped.slice(0, 8).join(', ')}${skipped.length > 8 ? '…' : ''}. Sending ${batchPayload.length}…`,
+                );
+            }
+        }
+
         sendBtn.disabled = true;
-        setStatus(`Sending ${recipients.length} message(s)…`);
+        if (!tpl || !skipped.length) {
+            setStatus(`Sending ${batchPayload.length} message(s)…`);
+        }
         try {
-            const result = await sendEmailBatch(
-                recipients.map((x) => ({
-                    to: x.to,
-                    subject: subj,
-                    html,
-                })),
-            );
+            const result = await sendEmailBatch(batchPayload);
             const ok = result?.okCount ?? result?.ok ?? 0;
             const fail = result?.failCount ?? result?.failed ?? 0;
-            setStatus(`Done. Ok: ${ok}, failed: ${fail}.`);
+            const skipNote =
+                tpl?.requiresRosterPlaceholders && skipped.length
+                    ? ` Skipped (no code): ${skipped.length}.`
+                    : '';
+            setStatus(`Done. Ok: ${ok}, failed: ${fail}.${skipNote}`);
             if (onRefresh) await onRefresh();
         } catch (e) {
             alert(e instanceof Error ? e.message : String(e));

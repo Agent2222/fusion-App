@@ -2,12 +2,16 @@
  * Default `/community` landing payload (merged with canister JSON).
  * Text fields split EN/JA; URLs are locale-agnostic.
  */
+import { distributeUploadedAssetUrls } from './assetDistribution.js';
 
 /** @returns {Record<string, unknown>} */
 export function defaultCommunityPage() {
     return {
         hero: {
             videoUrl: '',
+            previewVideoUrl: '',
+            fullVideoKey: '',
+            fullVideoFileName: '',
             posterUrl: '',
             overlayTitle: '',
             overlayGuests: '',
@@ -96,7 +100,7 @@ export function normalizeCommunityPage(raw) {
     );
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return base;
     const o = /** @type {Record<string, unknown>} */ (raw);
-    return deepMergeCommunity(base, o);
+    return /** @type {Record<string, unknown>} */ (distributeUploadedAssetUrls(deepMergeCommunity(base, o)));
 }
 
 /**
@@ -122,3 +126,4 @@ function deepMergeCommunity(base, patch) {
     }
     return base;
 }
+

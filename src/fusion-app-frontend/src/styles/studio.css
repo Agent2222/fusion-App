@@ -4318,7 +4318,7 @@ a.studio-app-payload-link:hover {
 }
 
 .studio-workspace:has([data-studio-artist-manage]) .studio-topbar {
-  border-bottom-color: #dedbd8;
+  border-bottom-color: var(--bg);
 }
 
 .studio-workspace:has([data-studio-artist-manage]) .studio-workspace-rail {

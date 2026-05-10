@@ -56,6 +56,7 @@
     .studio-btn-ghost,
     .studio-btn-primary,
     .studio-ec__subtab,
+    .studio-ec__main-tab,
     .studio-ec__camp,
     .studio-ec__preview-open,
     .studio-ec__tbt,
@@ -145,9 +146,9 @@
 
 .studio-ec__layout {
   display: grid;
-  grid-template-columns: minmax(240px, 0.88fr) minmax(0, 1.5fr) minmax(240px, 300px);
+  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr) minmax(260px, 340px);
   gap: 0;
-  min-height: 760px;
+  min-height: min(72vh, 780px);
   background: #ffffff;
   border: 1px solid var(--ec-border);
   border-radius: var(--ec-radius-lg);
@@ -474,13 +475,123 @@
   gap: 0.35rem;
 }
 
-/* ---- Center editor column ---- */
+/* ---- Center editor column (subject + message body) ---- */
 .studio-ec__col--editor {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
+  flex: 1;
   background: #fff;
-  padding: 1.5rem 1.5rem 0.75rem;
+  padding: 1.15rem 1.35rem 0.65rem;
+}
+
+/* Top horizontal tabs (e.g. legacy); stacked variant lives in settings rail */
+.studio-ec__main-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0;
+  min-height: 48px;
+  border-bottom: 1px solid var(--ec-border);
+  background: #fff;
+  margin: 0.35rem -0.15rem 0;
+}
+
+.studio-ec__main-tab {
+  flex: 1;
+  min-width: 0;
+  padding: 0.45rem 0.35rem;
+  font-size: 0.78rem;
+  font-weight: normal;
+  font-variation-settings: var(--fv-label);
+  border: none;
+  background: none;
+  color: var(--ec-ink-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: rgba(17, 17, 17, 0.1);
+  appearance: none;
+}
+
+.studio-ec__main-tab.is-active {
+  color: var(--ec-ink);
+  font-variation-settings: var(--fv-title);
+  border-bottom-color: #111111;
+  background: transparent;
+}
+
+.studio-ec__main-tab:hover:not(.is-active) {
+  color: #111111;
+  background: #f2efed;
+}
+
+.studio-ec__main-tab:active {
+  color: #111111;
+  background: #ece8e5;
+}
+
+/* Right rail: vertical Campaign | Audience | Review */
+.studio-ec__main-tabs--stacked {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 0.35rem;
+  min-height: 0;
+  border-bottom: 1px solid var(--ec-border);
+  margin: 0 0 0.65rem;
+  padding-bottom: 0.65rem;
+}
+
+.studio-ec__main-tabs--stacked .studio-ec__main-tab {
+  flex: 0 0 auto;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-sm);
+  margin-bottom: 0;
+  padding: 0.5rem 0.65rem;
+  font-size: 0.8rem;
+}
+
+.studio-ec__main-tabs--stacked .studio-ec__main-tab.is-active {
+  border-color: #111111;
+  border-bottom-color: #111111;
+}
+
+.studio-ec__main-panels {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-top: 0.35rem;
+}
+
+.studio-ec__main-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.studio-ec__main-panel--message {
+  overflow: hidden;
+}
+
+.studio-ec__main-panel--scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 0.35rem;
+  max-height: min(52vh, 560px);
+}
+
+.studio-ec__main-panel--scroll .studio-ec__settings-section:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
 }
 
 .studio-ec__eyebrow {
@@ -494,24 +605,31 @@
 
 .studio-ec__title {
   margin: 0 0 0.1rem;
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   font-weight: normal;
   font-variation-settings: var(--fv-title);
   color: var(--ec-ink);
 }
 
 .studio-ec__lede {
-  min-height: 1.1rem;
-  font-size: 0.8rem;
+  min-height: 1rem;
+  font-size: 0.78rem;
   color: #16a34a;
-  margin: 0 0 0.5rem;
+  margin: 0 0 0.35rem;
 }
 
 .studio-ec__row-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  margin-bottom: 0.4rem;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.35rem;
+  align-items: start;
+}
+
+@container (max-width: 720px) {
+  .studio-ec__row-fields {
+    grid-template-columns: 1fr;
+  }
 }
 
 .studio-field--row .studio-ec__lhead {
@@ -568,7 +686,7 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-height: 200px;
+  min-height: 220px;
 }
 
 .studio-ec__toolbar {
@@ -616,7 +734,9 @@
 /* White “paper” email body */
 .studio-ec__card {
   flex: 1;
-  min-height: 180px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--ec-border);
   border-top: 1px solid var(--ec-border);
   border-radius: 0 0 var(--ec-radius-md) var(--ec-radius-md);
@@ -625,10 +745,11 @@
 }
 
 .studio-ec__body {
-  min-height: 200px;
-  max-height: min(48vh, 480px);
+  flex: 1;
+  min-height: 180px;
+  max-height: none;
   padding: 0.85rem 1rem 3rem;
-  overflow: auto;
+  overflow-y: auto;
   line-height: 1.55;
   font-size: 0.9rem;
   color: var(--ec-ink);
@@ -724,13 +845,33 @@
   box-sizing: border-box;
 }
 
-/* ---- Right settings ---- */
+/* ---- Right settings rail (Campaign | Audience | Review) ---- */
 .studio-ec__col--settings {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   background: #ffffff;
-  padding: 1.25rem 1.25rem 1rem;
-  overflow: auto;
-  max-height: min(88vh, 920px);
+  padding: 1rem 1.1rem 1rem;
+  overflow: hidden;
   gap: 0;
+}
+
+.studio-ec__main-panels--settings-rail {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-top: 0;
+}
+
+.studio-ec__col--settings .studio-ec__main-panel--scroll {
+  max-height: none;
+  flex: 1;
+  min-height: 0;
+}
+
+.studio-ec__main-panel--scroll .studio-ec__settings-section {
+  padding-right: 0.25rem;
 }
 
 .studio-ec__settings-section {
@@ -755,7 +896,10 @@
 
 .studio-ec__col--settings .studio-input,
 .studio-ec__col--settings .studio-select,
-.studio-ec__col--settings .studio-textarea {
+.studio-ec__col--settings .studio-textarea,
+.studio-ec__main-panel--scroll .studio-input,
+.studio-ec__main-panel--scroll .studio-select,
+.studio-ec__main-panel--scroll .studio-textarea {
   background: #fff;
   color: var(--ec-ink);
   border: 1px solid var(--ec-border);
@@ -926,21 +1070,45 @@
 
 @media (max-width: 1180px) {
   .studio-ec__layout {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .studio-ec__col--assist {
-    max-height: 280px;
-  }
-
-  .studio-ec__col--editor,
-  .studio-ec__col--settings {
-    grid-column: 1 / -1;
+    max-height: min(280px, 38vh);
+    border-right: none;
+    border-bottom: 1px solid var(--ec-border);
   }
 
   .studio-ec__col--editor {
-    min-height: 400px;
-    order: 3;
+    min-height: min(420px, 52vh);
+    border-right: none;
+  }
+
+  .studio-ec__col--settings {
+    max-height: min(360px, 40vh);
+    border-right: none;
+    border-top: 1px solid var(--ec-border);
+    overflow: auto;
+  }
+
+  .studio-ec__col--settings .studio-ec__main-tabs--stacked {
+    flex-direction: row;
+    flex-wrap: wrap;
+    padding-bottom: 0.5rem;
+  }
+
+  .studio-ec__col--settings .studio-ec__main-tabs--stacked .studio-ec__main-tab {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: center;
+  }
+
+  .studio-ec__main-panel--scroll {
+    max-height: min(46vh, 480px);
+  }
+
+  .studio-ec__col--settings .studio-ec__main-panel--scroll {
+    max-height: min(36vh, 360px);
   }
 }
 
@@ -1033,6 +1201,30 @@
 }
 
 .studio-app .studio-ec button.studio-ec__subtab:active {
+  color: #111111 !important;
+  background: #ece8e5 !important;
+  filter: none !important;
+}
+
+.studio-app .studio-ec button.studio-ec__main-tab:not(.is-active) {
+  color: #6f6f6f !important;
+  background: transparent !important;
+  filter: none !important;
+}
+
+.studio-app .studio-ec button.studio-ec__main-tab.is-active {
+  color: #111111 !important;
+  background: transparent !important;
+  filter: none !important;
+}
+
+.studio-app .studio-ec button.studio-ec__main-tab:hover:not(.is-active) {
+  color: #111111 !important;
+  background: #f2efed !important;
+  filter: none !important;
+}
+
+.studio-app .studio-ec button.studio-ec__main-tab:active {
   color: #111111 !important;
   background: #ece8e5 !important;
   filter: none !important;

@@ -148,7 +148,7 @@ class ProgramHeroComponent extends HTMLElement {
 
                 .program-hero {
                     width: 100%;
-                    height: calc(100vh - 350px);
+                    height: calc(100vh - 285px);
                     display: grid;
                     grid-template-columns: 55% 45%;
                     grid-template-rows: 1fr;

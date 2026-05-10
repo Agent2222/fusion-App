@@ -1,7 +1,6 @@
 /**
- * Header CTA helpers: map `UserAccount` from the canister to profile routes.
+ * Header CTA helpers: map `UserAccount` from the canister to account routes.
  */
-import { getArtists } from './database.js';
 
 /**
  * Account has on-chain `UserRole` that uses Studio (no public artist profile required).
@@ -51,16 +50,6 @@ export async function resolveProfilePathForAccount(account) {
     if (role && typeof role === 'object') {
         if ('admin' in role || 'staff' in role || 'collaborator' in role) return '/studio';
     }
-    const linked = unwrapOpt(account.linkedArtistId ?? account.linked_artist_id);
-    const linkedId = linked != null ? String(linked) : '';
-    if (linkedId && role && typeof role === 'object' && 'artist' in role) {
-        try {
-            const artists = await getArtists();
-            const row = artists.find((a) => a && String(a.id) === linkedId);
-            if (row?.slug) return `/profile/${encodeURIComponent(String(row.slug))}`;
-        } catch (_) {
-            /* fallback */
-        }
-    }
+    // Header "PROFILE" is the member dashboard, not the public artist profile.
     return '/settings/profile';
 }

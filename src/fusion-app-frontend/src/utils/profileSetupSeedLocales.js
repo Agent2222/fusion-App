@@ -26,6 +26,20 @@ function localesNameDataEmpty(localesState) {
 }
 
 /**
+ * Candid optional text can arrive as `string`, `[string]`, or empty array.
+ * @param {unknown} raw
+ * @returns {string}
+ */
+function unwrapOptText(raw) {
+  if (typeof raw === 'string') return raw;
+  if (Array.isArray(raw)) {
+    if (!raw.length) return '';
+    return typeof raw[0] === 'string' ? raw[0] : String(raw[0] ?? '');
+  }
+  return '';
+}
+
+/**
  * Idempotent: no-op if draft has no full name, no record, or locales already have name data.
  * @returns {Promise<void>}
  */
@@ -38,12 +52,13 @@ export async function maybeSeedLocalesFromProfileSetupDraftIfEmpty() {
   if (!rec || typeof rec !== 'object') return;
 
   const ljRaw = rec.locales_json ?? rec.localesJson;
-  const json = typeof ljRaw === 'string' ? ljRaw : '';
+  const json = unwrapOptText(ljRaw);
   /** @type {Record<string, unknown>} */
   let localesState;
   try {
     localesState = json ? JSON.parse(json) : { en: {}, ja: {} };
   } catch {
+    if (String(json).trim()) return;
     localesState = { en: {}, ja: {} };
   }
   if (!localesState || typeof localesState !== 'object')

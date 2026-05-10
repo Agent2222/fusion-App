@@ -1,4 +1,13 @@
 import { navigate } from '../../router.js';
+
+/** Open artist profile in a new tab (program page stays open). */
+function openArtistProfileInNewTab(slug) {
+    const s = String(slug ?? '').trim();
+    if (!s || typeof window === 'undefined') return;
+    const url = new URL(`/profile/${encodeURIComponent(s)}`, window.location.origin).href;
+    const win = window.open(url, '_blank');
+    if (win) win.opener = null;
+}
 import { artistDisplayDiscipline, artistDisplayName } from '../../utils/artistSlug.js';
 import { applyArtistCardImage } from '../../utils/artistCardPlaceholder.js';
 import { getArtistCardProfileUrl } from '../../utils/artistCardImageMode.js';
@@ -94,7 +103,7 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
         card.addEventListener('click', (e) => {
             e.stopPropagation();
             const slug = String(artist?.slug ?? '').trim();
-            if (slug) navigate(`/profile/${encodeURIComponent(slug)}`);
+            if (slug) openArtistProfileInNewTab(slug);
         });
 
         card.innerHTML = `
@@ -688,7 +697,7 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
 
                 @container confirmed-artists (max-width: 520px) {
                     .confirmed-grid:not(.confirmed-grid--phantom) {
-                        grid-template-columns: 1fr;
+                        grid-template-columns: 1fr 1fr;
                     }
 
                     .confirmed-grid.confirmed-grid--phantom {

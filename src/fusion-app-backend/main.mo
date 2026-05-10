@@ -40,6 +40,8 @@ persistent actor {
 
   /// Stripe + membership flags (parallel to `accountsStable`).
   stable var membershipByPrincipalStable : [(Principal, Types.MembershipFields)] = [];
+  /// Principal -> trial window seconds (`startedAtSec`, `endsAtSec`) for access-code trials.
+  stable var membershipTrialWindowStable : [(Principal, Types.TrialMembershipWindow)] = [];
 
   /// ISO 8601 renewal end from Stripe (`current_period_end`) — separate map so `MembershipFields` stays upgrade-compatible.
   stable var membershipStripePeriodEndStable : [(Principal, Text)] = [];
@@ -65,6 +67,8 @@ persistent actor {
 
   /// Join invite codes (8-digit) — admin-generated; deactivated after first successful redemption.
   stable var joinInvitesStable : [(Text, Types.JoinInviteRecord)] = [];
+  /// Join invite code -> trial month duration (only present for trial invites).
+  stable var joinInviteTrialMonthsStable : [(Text, Nat)] = [];
 
   /// Composite key: `artistId|programId` → JSON `{"submittedAt":...,"payload":...}` (one entry per program).
   stable var applicationByArtistProgramStable : [(Text, Text)] = [];
@@ -134,6 +138,12 @@ persistent actor {
       Principal.equal,
       Principal.hash
     );
+  transient var membershipTrialWindowByPrincipal : _HashMap.HashMap<Principal, Types.TrialMembershipWindow> =
+    _HashMap.HashMap<Principal, Types.TrialMembershipWindow>(
+      membershipTrialWindowStable.size(),
+      Principal.equal,
+      Principal.hash
+    );
 
   transient var membershipStripePeriodEndByPrincipal : _HashMap.HashMap<Principal, Text> =
     _HashMap.HashMap<Principal, Text>(
@@ -198,6 +208,8 @@ persistent actor {
 
   transient var joinInvitesByCode : _HashMap.HashMap<Text, Types.JoinInviteRecord> =
     _HashMap.HashMap<Text, Types.JoinInviteRecord>(0, Text.equal, Text.hash);
+  transient var joinInviteTrialMonthsByCode : _HashMap.HashMap<Text, Nat> =
+    _HashMap.HashMap<Text, Nat>(0, Text.equal, Text.hash);
 
   transient var studioPermissionDefaultsByCategory : _HashMap.HashMap<Text, Types.StudioPermissionMatrix> =
     _HashMap.HashMap<Text, Types.StudioPermissionMatrix>(0, Text.equal, Text.hash);
@@ -290,6 +302,9 @@ persistent actor {
   for (entry in membershipByPrincipalStable.vals()) {
     membershipByPrincipal.put(entry.0, entry.1);
   };
+  for (entry in membershipTrialWindowStable.vals()) {
+    membershipTrialWindowByPrincipal.put(entry.0, entry.1);
+  };
 
   for (entry in membershipStripePeriodEndStable.vals()) {
     membershipStripePeriodEndByPrincipal.put(entry.0, entry.1);
@@ -344,6 +359,9 @@ persistent actor {
 
   for (entry in joinInvitesStable.vals()) {
     joinInvitesByCode.put(entry.0, entry.1);
+  };
+  for (entry in joinInviteTrialMonthsStable.vals()) {
+    joinInviteTrialMonthsByCode.put(entry.0, entry.1);
   };
   for (entry in artistMediaStable.vals()) {
     artistMediaByArtistId.put(entry.0, entry.1);
@@ -410,6 +428,9 @@ persistent actor {
     "home",
     "subscribers",
     "applicants",
+    "schedule",
+    "finance",
+    "travel",
     "artists",
     "programs",
     "products",
@@ -661,6 +682,8 @@ persistent actor {
           stripeSubscriptionStatus = m.stripeSubscriptionStatus;
           stripeCurrentPeriodEnd = periodEnd;
           membershipExemptManual = m.membershipExemptManual;
+          trialStartedAtSec = switch (membershipTrialWindowByPrincipal.get(p)) { case null { null }; case (?w) { ?w.startedAtSec } };
+          trialEndsAtSec = switch (membershipTrialWindowByPrincipal.get(p)) { case null { null }; case (?w) { ?w.endsAtSec } };
         };
       };
     };
@@ -770,6 +793,31 @@ persistent actor {
     };
     putUserAccountParts(core, m, p);
     putStripePeriodEndForPrincipal(p, u.stripeCurrentPeriodEnd);
+    switch (u.trialEndsAtSec) {
+      case null {
+        ignore membershipTrialWindowByPrincipal.remove(p);
+      };
+      case (?ends) {
+        let started = switch (u.trialStartedAtSec) {
+          case null { nowSec() };
+          case (?s) { s };
+        };
+        membershipTrialWindowByPrincipal.put(p, { startedAtSec = started; endsAtSec = ends });
+      };
+    };
+  };
+
+  private let trialDurationSecPerMonth : Nat = 30 * 24 * 60 * 60;
+
+  private func nowSec() : Nat {
+    Int.abs(Time.now() / 1_000_000_000);
+  };
+
+  private func trialIsActive(p : Principal) : Bool {
+    switch (membershipTrialWindowByPrincipal.get(p)) {
+      case null { false };
+      case (?w) { nowSec() <= w.endsAtSec };
+    };
   };
 
   /// Program application exists for this artist and program `studioStatus` is active or completed.
@@ -893,6 +941,9 @@ persistent actor {
         let st = switch (m.stripeSubscriptionStatus) {
           case null { "" };
           case (?s) { s };
+        };
+        if (trialIsActive(p)) {
+          return #ok;
         };
         if (st == "active" or st == "trialing") {
           return #ok;
@@ -1020,6 +1071,7 @@ persistent actor {
     subscribersStable := [];
     accountsStable := _Iter.toArray(accountsByPrincipal.entries());
     membershipByPrincipalStable := _Iter.toArray(membershipByPrincipal.entries());
+    membershipTrialWindowStable := _Iter.toArray(membershipTrialWindowByPrincipal.entries());
     membershipStripePeriodEndStable := _Iter.toArray(membershipStripePeriodEndByPrincipal.entries());
     artistsStable := _Iter.toArray(artistsById.entries());
     programsStable := _Iter.toArray(programsById.entries());
@@ -1034,6 +1086,7 @@ persistent actor {
     artistFeaturedFeaturableIdsStable := featurableIdsSorted();
     artistFeaturedManualIdsStable := Buffer.toArray(manualFeaturedArtistIds);
     joinInvitesStable := _Iter.toArray(joinInvitesByCode.entries());
+    joinInviteTrialMonthsStable := _Iter.toArray(joinInviteTrialMonthsByCode.entries());
     artistMediaStable := _Iter.toArray(artistMediaByArtistId.entries());
     studioPermissionDefaultsStable := _Iter.toArray(studioPermissionDefaultsByCategory.entries());
     studioPermissionOverridesStable := _Iter.toArray(studioPermissionOverridesByPrincipal.entries());
@@ -1087,6 +1140,16 @@ persistent actor {
     };
     membershipByPrincipalStable := [];
 
+    membershipTrialWindowByPrincipal := _HashMap.HashMap<Principal, Types.TrialMembershipWindow>(
+      membershipTrialWindowStable.size(),
+      Principal.equal,
+      Principal.hash
+    );
+    for (entry in membershipTrialWindowStable.vals()) {
+      membershipTrialWindowByPrincipal.put(entry.0, entry.1);
+    };
+    membershipTrialWindowStable := [];
+
     membershipStripePeriodEndByPrincipal := _HashMap.HashMap<Principal, Text>(
       membershipStripePeriodEndStable.size(),
       Principal.equal,
@@ -1120,6 +1183,16 @@ persistent actor {
       joinInvitesByCode.put(entry.0, entry.1);
     };
     joinInvitesStable := [];
+
+    joinInviteTrialMonthsByCode := _HashMap.HashMap<Text, Nat>(
+      joinInviteTrialMonthsStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in joinInviteTrialMonthsStable.vals()) {
+      joinInviteTrialMonthsByCode.put(entry.0, entry.1);
+    };
+    joinInviteTrialMonthsStable := [];
 
     artistMediaByArtistId := _HashMap.HashMap<Text, Types.ArtistMedia>(
       artistMediaStable.size(),
@@ -1395,6 +1468,7 @@ persistent actor {
       subscribersStable = _Iter.toArray(subscribersByEmail.entries());
       accountsStable = _Iter.toArray(accountsByPrincipal.entries());
       membershipByPrincipalStable = _Iter.toArray(membershipByPrincipal.entries());
+      membershipTrialWindowStable = ?(_Iter.toArray(membershipTrialWindowByPrincipal.entries()));
       membershipStripePeriodEndStable = _Iter.toArray(membershipStripePeriodEndByPrincipal.entries());
       artistFilterCohortYearsStable = _Iter.toArray(artistFilterCohortYearsById.entries());
       artistHeroProfileImageStable = ?(_Iter.toArray(artistHeroProfileImageById.entries()));
@@ -1410,6 +1484,7 @@ persistent actor {
       artistFeaturedFeaturableIdsStable = featurableIdsSorted();
       artistFeaturedManualIdsStable = Buffer.toArray(manualFeaturedArtistIds);
       joinInvitesStable = _Iter.toArray(joinInvitesByCode.entries());
+      joinInviteTrialMonthsStable = ?(_Iter.toArray(joinInviteTrialMonthsByCode.entries()));
       studioPermissionDefaultsStable = _Iter.toArray(studioPermissionDefaultsByCategory.entries());
       studioPermissionOverridesStable = _Iter.toArray(studioPermissionOverridesByPrincipal.entries());
       superStaffPrincipalsStable = superStaffPrincipalsAsArray();
@@ -1430,6 +1505,10 @@ persistent actor {
     subscribersStable := [];
     accountsStable := snapshot.accountsStable;
     membershipByPrincipalStable := snapshot.membershipByPrincipalStable;
+    membershipTrialWindowStable := switch (snapshot.membershipTrialWindowStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
     membershipStripePeriodEndStable := snapshot.membershipStripePeriodEndStable;
     artistFilterCohortYearsStable := snapshot.artistFilterCohortYearsStable;
     artistHeroProfileImageStable := switch (snapshot.artistHeroProfileImageStable) {
@@ -1448,6 +1527,10 @@ persistent actor {
     artistFeaturedFeaturableIdsStable := snapshot.artistFeaturedFeaturableIdsStable;
     artistFeaturedManualIdsStable := snapshot.artistFeaturedManualIdsStable;
     joinInvitesStable := snapshot.joinInvitesStable;
+    joinInviteTrialMonthsStable := switch (snapshot.joinInviteTrialMonthsStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
     studioPermissionDefaultsStable := snapshot.studioPermissionDefaultsStable;
     studioPermissionOverridesStable := snapshot.studioPermissionOverridesStable;
     superStaffPrincipalsStable := snapshot.superStaffPrincipalsStable;
@@ -1467,6 +1550,12 @@ persistent actor {
   /// Billing / access for the logged-in principal (join gate + resubscribe).
   public shared query (msg) func getMembershipAccessForCaller() : async Types.MembershipAccessResult {
     membershipAccessForPrincipal(msg.caller);
+  };
+
+  /// Integration API: check the same membership gate for a viewer before signing private media URLs.
+  public shared query (msg) func integrationGetMembershipAccessForPrincipal(p : Principal) : async Types.MembershipAccessResult {
+    assertIntegrationCaller(msg.caller);
+    membershipAccessForPrincipal(p);
   };
 
   /// Admin-only: set full account for any principal (e.g. promote staff).
@@ -1548,20 +1637,36 @@ persistent actor {
     };
   };
 
-  /// Caller registers or updates a non-privileged role; stored as #pending until admin activates.
+  /// Caller registers or updates a non-privileged role. New principals get `#pending`; existing rows
+  /// preserve `linkedArtistId`, `linkedOrgId`, and `status` so later calls cannot unlink (e.g. after
+  /// roster access-code registration or admin activation).
   public shared (msg) func registerOrUpdateAccount(role : Types.UserRole) : async () {
     if (roleIsPrivileged(role)) {
       Debug.trap("Cannot self-request staff or admin");
     };
     let now = "1970-01-01T00:00:00.000Z";
-    let acc : Types.UserAccountCore = {
-      role = role;
-      status = #pending;
-      linkedArtistId = null;
-      linkedOrgId = null;
-      updatedAt = now;
+    switch (accountsByPrincipal.get(msg.caller)) {
+      case null {
+        let acc : Types.UserAccountCore = {
+          role = role;
+          status = #pending;
+          linkedArtistId = null;
+          linkedOrgId = null;
+          updatedAt = now;
+        };
+        accountsByPrincipal.put(msg.caller, acc);
+      };
+      case (?existing) {
+        let acc : Types.UserAccountCore = {
+          role = role;
+          status = existing.status;
+          linkedArtistId = existing.linkedArtistId;
+          linkedOrgId = existing.linkedOrgId;
+          updatedAt = now;
+        };
+        accountsByPrincipal.put(msg.caller, acc);
+      };
     };
-    accountsByPrincipal.put(msg.caller, acc);
     switch (membershipByPrincipal.get(msg.caller)) {
       case null { membershipByPrincipal.put(msg.caller, defaultMembership()) };
       case (?_) {};
@@ -1585,6 +1690,7 @@ persistent actor {
           createdAt = now;
         };
         joinInvitesByCode.put(cand, rec);
+        ignore joinInviteTrialMonthsByCode.remove(cand);
         return cand;
       };
       attempts += 1;
@@ -1596,6 +1702,40 @@ persistent actor {
   public shared query (msg) func adminListJoinInvites() : async [(Text, Types.JoinInviteRecord)] {
     assertAdmin(msg.caller);
     return _Iter.toArray(joinInvitesByCode.entries());
+  };
+
+  /// Admin: list trial windows keyed by principal for Studio Users.
+  public shared query (msg) func adminListTrialMembershipWindows() : async [(Principal, Types.TrialMembershipWindow)] {
+    assertAdmin(msg.caller);
+    _Iter.toArray(membershipTrialWindowByPrincipal.entries());
+  };
+
+  /// Admin: create a single-use 8-digit trial invite. Trial starts at redemption and expires after `trialMonths`.
+  public shared (msg) func adminCreateTrialJoinInviteCode(role : Types.UserRole, trialMonths : Nat) : async Text {
+    assertAdmin(msg.caller);
+    if (not roleAllowedForJoinInvite(role)) {
+      Debug.trap("Invalid role for join invite");
+    };
+    if (trialMonths == 0) {
+      Debug.trap("trialMonths must be >= 1");
+    };
+    let now = "1970-01-01T00:00:00.000Z";
+    var attempts : Nat = 0;
+    while (attempts < 50) {
+      let cand = randomEightDigitCandidate();
+      if (not isJoinInviteCodeTaken(cand)) {
+        let rec : Types.JoinInviteRecord = {
+          role = role;
+          active = true;
+          createdAt = now;
+        };
+        joinInvitesByCode.put(cand, rec);
+        joinInviteTrialMonthsByCode.put(cand, trialMonths);
+        return cand;
+      };
+      attempts += 1;
+    };
+    Debug.trap("Could not allocate trial join code");
   };
 
   private func assertContactFieldLen(t : Text) {
@@ -1659,8 +1799,22 @@ persistent actor {
           updatedAt = now;
         };
         let dm = defaultMembership();
-        let m : Types.MembershipFields = {
-          dm with membershipExemptManual = true;
+        let m : Types.MembershipFields = switch (joinInviteTrialMonthsByCode.get(code)) {
+          case (?months) {
+            let startSec = nowSec();
+            let endSec = startSec + (months * trialDurationSecPerMonth);
+            membershipTrialWindowByPrincipal.put(msg.caller, { startedAtSec = startSec; endsAtSec = endSec });
+            {
+              dm with
+              membershipExemptManual = false;
+            };
+          };
+          case null {
+            ignore membershipTrialWindowByPrincipal.remove(msg.caller);
+            {
+              dm with membershipExemptManual = true;
+            };
+          };
         };
         putUserAccountParts(core, m, msg.caller);
         accountContactByPrincipal.put(msg.caller, contact);
@@ -1668,6 +1822,7 @@ persistent actor {
           inv with active = false;
         };
         joinInvitesByCode.put(code, invDone);
+        ignore joinInviteTrialMonthsByCode.remove(code);
         return #ok;
       };
       case null {};
@@ -2187,9 +2342,14 @@ persistent actor {
                 } else {
                   rec.profile.updatedAt;
                 };
+                let nextVisibility : Text = if (visibility == "public" and rec.profile.visibility != "public") {
+                  "pending";
+                } else {
+                  visibility;
+                };
                 let newProfile : Types.ArtistCore = {
                   rec.profile with
-                  visibility = visibility;
+                  visibility = nextVisibility;
                   updatedAt = newUpdated;
                 };
                 putArtistRecord({ rec with profile = newProfile });
@@ -2877,6 +3037,29 @@ persistent actor {
     assertStudioLlmField(englishText);
     let instruction = "Translate the following English to Japanese. Output only the Japanese translation, with no surrounding quotes or commentary.\n\n";
     await Llm.prompt(#Llama3_1_8B, instruction # englishText);
+  };
+
+  public shared (msg) func memberTranslateText(sourceText : Text, targetLocale : Text, sourceLocaleHint : Text) : async Text {
+    assertCallerCanUseMemberWorldLlm(msg.caller);
+    assertStudioLlmField(sourceText);
+    if (Text.size(targetLocale) > 32) {
+      Debug.trap("targetLocale too long");
+    };
+    if (Text.size(sourceLocaleHint) > 32) {
+      Debug.trap("sourceLocaleHint too long");
+    };
+    let targetLabel = if (targetLocale == "ja") {
+      "Japanese";
+    } else {
+      "English";
+    };
+    let sourceLabel = if (sourceLocaleHint == "" or sourceLocaleHint == "auto") {
+      "the detected source language";
+    } else {
+      sourceLocaleHint;
+    };
+    let instruction = "Translate the following text from " # sourceLabel # " to " # targetLabel # ". Preserve names, URLs, line breaks, and meaning. Output only the translated text, with no surrounding quotes or commentary.\n\n";
+    await Llm.prompt(#Llama3_1_8B, instruction # sourceText);
   };
 
   public shared (msg) func memberReinterpretWithPrompt(prompt : Text, sourceText : Text, localeTag : Text) : async Text {

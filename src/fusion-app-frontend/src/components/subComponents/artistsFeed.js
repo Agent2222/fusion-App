@@ -220,6 +220,7 @@ class ArtistsFeedElement extends HTMLElement {
                 }
 
                 .artist-card-content {
+                    min-height: 4rem;
                     display: flex;
                     flex-direction: column;
                     align-items: center;

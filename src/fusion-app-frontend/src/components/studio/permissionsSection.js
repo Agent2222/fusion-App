@@ -29,7 +29,9 @@ function escapeHtml(s) {
  * @param {Map<string, { visible: boolean, canEdit: boolean }>} map
  */
 function matrixTableHtml(map) {
-    const rows = STUDIO_PERMISSION_FEATURE_ROWS.map((row) => {
+    /** Only show rows for keys the canister returned — avoids sending newer keys (e.g. `sound`) to older deployments. */
+    const rows = STUDIO_PERMISSION_FEATURE_ROWS.filter((row) => map.has(row.id))
+        .map((row) => {
         const acc = map.get(row.id) ?? { visible: true, canEdit: true };
         return `
             <tr data-perm-row="${escapeHtml(row.id)}">
@@ -52,7 +54,8 @@ function matrixTableHtml(map) {
                 </td>
             </tr>
         `;
-    }).join('');
+        })
+        .join('');
     return `
         <div class="studio-table-wrap">
             <table class="studio-table studio-perm-matrix">
@@ -77,10 +80,11 @@ function readMatrixFromDom(root) {
     const map = new Map();
     for (const row of STUDIO_PERMISSION_FEATURE_ROWS) {
         const vis = root.querySelector(`.studio-perm-visible[data-feature="${row.id}"]`);
+        if (!(vis instanceof HTMLInputElement)) continue;
         const ed = root.querySelector(`.studio-perm-edit[data-feature="${row.id}"]`);
         map.set(row.id, {
-            visible: Boolean(vis && /** @type {HTMLInputElement} */ (vis).checked),
-            canEdit: Boolean(ed && /** @type {HTMLInputElement} */ (ed).checked),
+            visible: Boolean(vis.checked),
+            canEdit: Boolean(ed instanceof HTMLInputElement && ed.checked),
         });
     }
     return map;
@@ -91,7 +95,7 @@ function readMatrixFromDom(root) {
  * @returns {Array<[string, { visible: boolean, canEdit: boolean }]>}
  */
 function matrixToCandidTuples(map) {
-    return STUDIO_PERMISSION_FEATURE_ROWS.map((row) => {
+    return STUDIO_PERMISSION_FEATURE_ROWS.filter((row) => map.has(row.id)).map((row) => {
         const v = map.get(row.id) ?? { visible: true, canEdit: true };
         return [row.id, { visible: v.visible, canEdit: v.canEdit }];
     });
@@ -227,9 +231,6 @@ export async function initPermissions(mainEl) {
                 }
             }
         }
-        for (const row of STUDIO_PERMISSION_FEATURE_ROWS) {
-            if (!m.has(row.id)) m.set(row.id, { visible: true, canEdit: true });
-        }
         return m;
     };
 
@@ -354,9 +355,6 @@ export async function initPermissions(mainEl) {
                             });
                         }
                     }
-                }
-                for (const row of STUDIO_PERMISSION_FEATURE_ROWS) {
-                    if (!m.has(row.id)) m.set(row.id, { visible: true, canEdit: true });
                 }
                 loadMatrixIntoDom(m);
                 showBanner('');

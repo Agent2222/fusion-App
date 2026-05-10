@@ -1,4 +1,5 @@
 import { presignUpload } from './integrationApi.js';
+import { toCloudFrontAssetUrl } from './assetDistribution.js';
 
 /**
  * Logical prefixes for S3 object keys (after server `S3_KEY_PREFIX`, usually `uploads/`).
@@ -124,6 +125,7 @@ export async function uploadBlobToS3(file, inputEl, options = {}) {
     if (!res.ok) {
         throw new Error(`S3 upload failed: HTTP ${res.status}`);
     }
-    if (inputEl) inputEl.value = publicUrl;
-    return publicUrl;
+    const distributedUrl = toCloudFrontAssetUrl(publicUrl);
+    if (inputEl) inputEl.value = distributedUrl;
+    return distributedUrl;
 }

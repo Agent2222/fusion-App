@@ -66,6 +66,18 @@ export function normalizeLocalesWorldForStorage(locales) {
     if (!locales || typeof locales !== 'object') return {};
     /** @type {Record<string, unknown>} */
     const out = { ...locales };
+    const pws = out.publicWorldSource;
+    if (pws === 'world' || pws === 'newWorld') {
+        out.publicWorldSource = pws;
+    } else {
+        delete out.publicWorldSource;
+    }
+    const ad = out.audioDisplayForArtist;
+    if (ad === true || ad === false) {
+        out.audioDisplayForArtist = ad;
+    } else {
+        delete out.audioDisplayForArtist;
+    }
     for (const code of ['en', 'ja']) {
         if (!Object.prototype.hasOwnProperty.call(out, code)) continue;
         const block = out[code];

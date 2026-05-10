@@ -63,7 +63,7 @@ class CommunityNetworkCards extends HTMLElement {
                     overflow-x: auto;
                     scroll-snap-type: x mandatory;
                     padding: 1rem 0 2rem;
-                    max-width: 1400px;
+                    max-width: 100%;
                     margin: 0 auto;
                     box-sizing: border-box;
                     -webkit-overflow-scrolling: touch;

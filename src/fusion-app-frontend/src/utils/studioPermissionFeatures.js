@@ -1,12 +1,17 @@
 /**
  * Studio permission matrix rows — ids must match Motoko `studioFeatureKeys` in `main.mo`
  * and sidebar section ids (`STUDIO_NAV` + `dashboard`).
+ * The Permissions UI only sends rows returned by `adminGetStudioPermissionDefaults`, so older
+ * canisters without newer keys (e.g. `sound`) do not receive unknown keys on save.
  */
 export const STUDIO_PERMISSION_FEATURE_ROWS = [
     { id: 'dashboard', label: 'Dashboard' },
     { id: 'home', label: 'Home' },
     { id: 'subscribers', label: 'Subscribers' },
     { id: 'applicants', label: 'Applicants' },
+    { id: 'schedule', label: 'Schedule' },
+    { id: 'finance', label: 'Finance' },
+    { id: 'travel', label: 'Travel' },
     // Roster + Send blast: Studio gates blast on canEdit for this id (no extra Motoko key).
     { id: 'artists', label: 'Artists' },
     { id: 'programs', label: 'Programs' },

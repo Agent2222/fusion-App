@@ -1,12 +1,13 @@
 /**
- * Studio batch: generate Kamauu-style `locales.*.world` from bio/discipline via IC LLM
- * (`studioReinterpretWithPrompt` + `studioTranslateEnToJa`).
+ * Studio batch / member tools: generate Kamauu-style `locales.*.worldNew` from bio/discipline
+ * (plus English Story & World when present) via IC LLM (`studioReinterpretWithPrompt` + `studioTranslateEnToJa`).
  */
 
 import {
     normalizeWorldBlockForStorage,
     worldTextToParagraphs,
 } from './worldNormalize.js';
+import { worldFieldToTextarea } from './memberProfileForm.js';
 
 /** Max artists per batch run (Select all + staging cap). */
 export const STUDIO_WORLD_BATCH_MAX = 25;
@@ -129,6 +130,96 @@ function extractJsonObjectLoose(s) {
     return s.slice(a, b + 1);
 }
 
+const WORLD_JSON_KEYS = ['practice', 'perspective', 'vision', 'constructing', 'context', 'quote'];
+
+/**
+ * @param {string} s
+ */
+function quoteBareJsonKeys(s) {
+    return String(s).replace(
+        /([{,]\s*)(practice|perspective|vision|constructing|context|quote)(\s*:)/g,
+        '$1"$2"$3',
+    );
+}
+
+/**
+ * Last-resort parse for LLM output that has the right fields but slightly invalid
+ * JSON, usually from unquoted keys or a stray unescaped quote in prose.
+ * @param {string} raw
+ * @returns {Record<string, unknown> | null}
+ */
+function parseKnownWorldFieldsLoose(raw) {
+    const s = extractJsonObjectLoose(raw);
+    /** @type {Array<{ key: string; index: number; valueStart: number }>} */
+    const hits = [];
+    for (const key of WORLD_JSON_KEYS) {
+        const re = new RegExp(`["']?${key}["']?\\s*:`, 'i');
+        const m = re.exec(s);
+        if (m && m.index >= 0) hits.push({ key, index: m.index, valueStart: m.index + m[0].length });
+    }
+    if (hits.length !== WORLD_JSON_KEYS.length) return null;
+    hits.sort((a, b) => a.index - b.index);
+    /** @type {Record<string, unknown>} */
+    const out = {};
+    for (let i = 0; i < hits.length; i += 1) {
+        const cur = hits[i];
+        const next = hits[i + 1];
+        const end = next ? next.index : s.lastIndexOf('}') >= 0 ? s.lastIndexOf('}') : s.length;
+        const rawValue = s
+            .slice(cur.valueStart, end)
+            .trim()
+            .replace(/,\s*$/, '')
+            .trim();
+        out[cur.key] = parseLooseWorldValue(rawValue);
+    }
+    return out;
+}
+
+/**
+ * @param {string} rawValue
+ * @returns {unknown}
+ */
+function parseLooseWorldValue(rawValue) {
+    const v = stripTrailingCommasFromJson(rawValue.trim());
+    if (!v) return '';
+    for (const cand of [v, quoteBareJsonKeys(v)]) {
+        try {
+            return JSON.parse(cand);
+        } catch {
+            /* try looser handling below */
+        }
+    }
+    if (v.startsWith('[')) {
+        /** @type {string[]} */
+        const strings = [];
+        const re = /"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'/g;
+        let m;
+        while ((m = re.exec(v))) {
+            strings.push(unescapeLooseJsonString(m[1] ?? m[2] ?? ''));
+        }
+        if (strings.length) return strings;
+        return v
+            .replace(/^\[/, '')
+            .replace(/\]$/, '')
+            .split(',')
+            .map((item) => item.trim().replace(/^["']|["']$/g, ''))
+            .filter(Boolean);
+    }
+    return unescapeLooseJsonString(v.replace(/^["']|["']$/g, ''));
+}
+
+/**
+ * @param {string} s
+ */
+function unescapeLooseJsonString(s) {
+    return String(s)
+        .replace(/\\"/g, '"')
+        .replace(/\\n/g, '\n')
+        .replace(/\\r/g, '\r')
+        .replace(/\\t/g, '\t')
+        .trim();
+}
+
 /**
  * @param {string} raw
  * @returns {Record<string, unknown>}
@@ -141,6 +232,8 @@ export function parseWorldJsonResponse(raw) {
         if (!c) continue;
         variants.push(c);
         variants.push(stripTrailingCommasFromJson(c));
+        variants.push(quoteBareJsonKeys(c));
+        variants.push(stripTrailingCommasFromJson(quoteBareJsonKeys(c)));
     }
     /** @type {Error[]} */
     const errors = [];
@@ -154,6 +247,10 @@ export function parseWorldJsonResponse(raw) {
         } catch (e) {
             errors.push(e instanceof Error ? e : new Error(String(e)));
         }
+    }
+    for (const cand of variants) {
+        const loose = parseKnownWorldFieldsLoose(cand);
+        if (loose) return loose;
     }
     const msg = errors[0] ? errors[0].message : 'Invalid JSON';
     throw new Error(`Could not parse LLM JSON: ${msg}`);
@@ -313,6 +410,42 @@ function compactCurrentWorkForSource(cw) {
  * @param {Record<string, unknown>} loc
  * @returns {Record<string, unknown>}
  */
+const STORY_WORLD_FIELD_CAP = 900;
+
+/**
+ * @param {string} s
+ * @param {number} max
+ */
+function capField(s, max) {
+    const t = String(s ?? '').trim();
+    if (t.length <= max) return t;
+    return `${t.slice(0, max - 1)}…`;
+}
+
+/**
+ * English Story & World (`locales.en.world`) for LLM context — trimmed per field.
+ * @param {Record<string, unknown>} loc
+ */
+function compactStoryWorldFromEnLocale(loc) {
+    const w0 = loc.world && typeof loc.world === 'object' && !Array.isArray(loc.world) ? loc.world : {};
+    const w = /** @type {Record<string, unknown>} */ (w0);
+    /** @type {Record<string, unknown>} */
+    const story = {};
+    const practice = capField(String(w.practice ?? ''), STORY_WORLD_FIELD_CAP);
+    if (practice) story.practice = practice;
+    const perspective = capField(worldFieldToTextarea(w.perspective), STORY_WORLD_FIELD_CAP);
+    if (perspective) story.perspective = perspective;
+    const vision = capField(worldFieldToTextarea(w.vision), STORY_WORLD_FIELD_CAP);
+    if (vision) story.vision = vision;
+    const constructing = capField(worldFieldToTextarea(w.constructing), STORY_WORLD_FIELD_CAP);
+    if (constructing) story.constructing = constructing;
+    const context = capField(worldFieldToTextarea(w.context), STORY_WORLD_FIELD_CAP);
+    if (context) story.context = context;
+    const quote = capField(String(w.quote ?? ''), STORY_WORLD_FIELD_CAP);
+    if (quote) story.quote = quote;
+    return story;
+}
+
 export function buildSourcePayloadFromEnLocale(loc) {
     if (!loc || typeof loc !== 'object') return {};
     const o = /** @type {Record<string, unknown>} */ (loc);
@@ -322,6 +455,7 @@ export function buildSourcePayloadFromEnLocale(loc) {
     const programs = Array.isArray(o.programs)
         ? o.programs.map((x) => String(x).trim()).filter(Boolean)
         : [];
+    const storyWorldFromArtist = compactStoryWorldFromEnLocale(o);
     return {
         name: String(o.name ?? '').trim(),
         firstName: String(o.firstName ?? '').trim(),
@@ -337,7 +471,38 @@ export function buildSourcePayloadFromEnLocale(loc) {
         masterPortfolio: compactMasterPortfolioForSource(o.masterPortfolio),
         currentWork: compactCurrentWorkForSource(o.currentWork),
         notes: compactNotesForSource(o.notes),
+        ...(Object.keys(storyWorldFromArtist).length
+            ? { storyWorldFromArtist }
+            : {}),
     };
+}
+
+/**
+ * True only when there is real artist/context material worth sending to the LLM.
+ * Name, slug, status, and directory filters are not enough to "convert" into New World copy.
+ * @param {object} artistRow
+ */
+export function hasUsableWorldLlmSourceInput(artistRow) {
+    const loc =
+        artistRow?.locales && typeof artistRow.locales === 'object'
+            ? /** @type {Record<string, unknown>} */ (artistRow.locales).en
+            : null;
+    const source = buildSourcePayloadFromEnLocale(
+        loc && typeof loc === 'object' ? /** @type {Record<string, unknown>} */ (loc) : {},
+    );
+    const textKeys = ['discipline', 'bio', 'bioLong', 'location', 'wordsFromArtist'];
+    if (textKeys.some((key) => String(source[key] ?? '').trim())) return true;
+    for (const key of ['programs', 'events', 'masterPortfolio', 'currentWork', 'notes']) {
+        const arr = source[key];
+        if (Array.isArray(arr) && arr.some((x) => String(x ?? '').trim())) return true;
+    }
+    const story =
+        source.storyWorldFromArtist &&
+        typeof source.storyWorldFromArtist === 'object' &&
+        !Array.isArray(source.storyWorldFromArtist)
+            ? /** @type {Record<string, unknown>} */ (source.storyWorldFromArtist)
+            : {};
+    return Object.values(story).some((value) => String(value ?? '').trim());
 }
 
 /**

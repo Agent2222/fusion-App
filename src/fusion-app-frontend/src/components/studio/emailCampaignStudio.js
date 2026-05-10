@@ -1,5 +1,5 @@
 /**
- * Studio → Email — three-column campaign workspace (compose, preview, send).
+ * Studio → Email — three-column campaign workspace (assist | message | settings).
  */
 import '../../styles/studioEmailCampaign.css';
 import { openStudioModal } from '../../utils/studioModal.js';
@@ -333,80 +333,97 @@ export function renderEmailCampaignStudio() {
           <input type="text" class="studio-input" id="studio-ec-preview" maxlength="200" placeholder="Shown in inbox preheader" />
         </label>
       </div>
-      <div class="studio-ec__edtabs studio-ec__edtabs--bodybar" role="group" aria-label="Message body">
-        <span class="studio-ec__body-tab-label" id="studio-ec-body-label">Body</span>
-        <button type="button" class="studio-btn-secondary studio-ec__preview-open" id="studio-ec-open-preview" title="Open rendered preview in a window">Preview</button>
-      </div>
-      <div class="studio-ec__editor-wrap" id="studio-ec-editor-surface">
-        <div class="studio-ec__toolbar" id="studio-ec-toolbar" role="toolbar" aria-label="Message formatting">
-          <button type="button" class="studio-ec__tbt" data-cmd="bold" title="Bold"><span class="studio-sr-only">Bold</span><b>B</b></button>
-          <button type="button" class="studio-ec__tbt" data-cmd="italic" title="Italic"><i>I</i></button>
-          <span class="studio-ec__tsep" aria-hidden="true"></span>
-          <button type="button" class="studio-ec__tbt" data-cmd="link" title="Link">Link</button>
-          <button type="button" class="studio-ec__tbt" data-cmd="ul" title="List">List</button>
-          <span class="studio-ec__tsep" aria-hidden="true"></span>
-          <button type="button" class="studio-ec__tbt" id="studio-ec-image" title="Image">Image</button>
-          <span class="studio-ec__tsep" aria-hidden="true"></span>
-          <button type="button" class="studio-ec__tbt" id="studio-ec-edit-html" title="Edit raw HTML">&lt;/&gt; HTML</button>
-          <input type="file" id="studio-ec-image-file" accept="image/*" class="studio-sr-only" aria-hidden="true" />
-        </div>
-        <div class="studio-ec__card">
-          <div id="studio-ec-body" class="studio-ec__body" contenteditable="true" spellcheck="true" data-placeholder="Type your message, or use Generate in the left panel."></div>
-        </div>
-        <div class="studio-ec__aibar" id="studio-ec-selbar" role="toolbar" aria-label="Text assistance">
-          <span class="studio-ec__aibar-label" id="studio-ec-selbar-label">Content assist</span>
-          <button type="button" class="studio-ec__aib" id="studio-ec-sel-refine">Refine</button>
-          <button type="button" class="studio-ec__aib" id="studio-ec-ai-expand">Expand</button>
-          <button type="button" class="studio-ec__aib" id="studio-ec-ai-shorten">Shorten</button>
-          <button type="button" class="studio-ec__aib" id="studio-ec-sel-ja">To Japanese</button>
+      <div class="studio-ec__main-panels">
+        <div id="studio-ec-panel-m-message" class="studio-ec__main-panel studio-ec__main-panel--message" role="region" aria-label="Message body">
+          <div class="studio-ec__edtabs studio-ec__edtabs--bodybar" role="group" aria-label="Message body">
+            <span class="studio-ec__body-tab-label" id="studio-ec-body-label">Body</span>
+            <button type="button" class="studio-btn-secondary studio-ec__preview-open" id="studio-ec-open-preview" title="Open rendered preview in a window">Preview</button>
+          </div>
+          <div class="studio-ec__editor-wrap" id="studio-ec-editor-surface">
+            <div class="studio-ec__toolbar" id="studio-ec-toolbar" role="toolbar" aria-label="Message formatting">
+              <button type="button" class="studio-ec__tbt" data-cmd="bold" title="Bold"><span class="studio-sr-only">Bold</span><b>B</b></button>
+              <button type="button" class="studio-ec__tbt" data-cmd="italic" title="Italic"><i>I</i></button>
+              <span class="studio-ec__tsep" aria-hidden="true"></span>
+              <button type="button" class="studio-ec__tbt" data-cmd="link" title="Link">Link</button>
+              <button type="button" class="studio-ec__tbt" data-cmd="ul" title="List">List</button>
+              <span class="studio-ec__tsep" aria-hidden="true"></span>
+              <button type="button" class="studio-ec__tbt" id="studio-ec-image" title="Image">Image</button>
+              <span class="studio-ec__tsep" aria-hidden="true"></span>
+              <button type="button" class="studio-ec__tbt" id="studio-ec-edit-html" title="Edit raw HTML">&lt;/&gt; HTML</button>
+              <input type="file" id="studio-ec-image-file" accept="image/*" class="studio-sr-only" aria-hidden="true" />
+            </div>
+            <div class="studio-ec__card">
+              <div id="studio-ec-body" class="studio-ec__body" contenteditable="true" spellcheck="true" data-placeholder="Type your message, or use Generate in the left panel."></div>
+            </div>
+            <div class="studio-ec__aibar" id="studio-ec-selbar" role="toolbar" aria-label="Text assistance">
+              <span class="studio-ec__aibar-label" id="studio-ec-selbar-label">Content assist</span>
+              <button type="button" class="studio-ec__aib" id="studio-ec-sel-refine">Refine</button>
+              <button type="button" class="studio-ec__aib" id="studio-ec-ai-expand">Expand</button>
+              <button type="button" class="studio-ec__aib" id="studio-ec-ai-shorten">Shorten</button>
+              <button type="button" class="studio-ec__aib" id="studio-ec-sel-ja">To Japanese</button>
+            </div>
+          </div>
         </div>
       </div>
     </section>
-    <aside class="studio-ec__col studio-ec__col--settings" aria-label="Campaign and audience">
-      <div class="studio-ec__settings-section">
-        <h3 class="studio-ec__sh">Campaign</h3>
-        <label class="studio-field">
-          <span>Internal title</span>
-          <input type="text" class="studio-input" id="studio-ec-title" maxlength="200" placeholder="Optional" />
-        </label>
-        <p class="studio-ec__st"><span>Status</span> <span class="studio-ec__st-dot" aria-hidden="true"></span> <strong id="studio-ec-status-val">draft</strong></p>
-        <div class="studio-ec__delete-wrap">
-          <button type="button" class="studio-btn-ghost studio-ec__delete" id="studio-ec-delete" disabled>Delete campaign</button>
-          <p class="studio-ec__delete-hint" id="studio-ec-delete-hint" hidden></p>
-        </div>
+    <aside class="studio-ec__col studio-ec__col--settings" aria-label="Campaign, audience, and review">
+      <div class="studio-ec__main-tabs studio-ec__main-tabs--stacked" role="tablist" aria-label="Campaign settings">
+        <button type="button" class="studio-ec__main-tab is-active" id="studio-ec-mtab-cam" data-ec-mtab="campaign" role="tab" aria-selected="true">Campaign</button>
+        <button type="button" class="studio-ec__main-tab" id="studio-ec-mtab-aud" data-ec-mtab="audience" role="tab" aria-selected="false">Audience</button>
+        <button type="button" class="studio-ec__main-tab" id="studio-ec-mtab-rev" data-ec-mtab="review" role="tab" aria-selected="false">Review</button>
       </div>
-      <div class="studio-ec__settings-section">
-        <h3 class="studio-ec__sh">Audience</h3>
-        <label class="studio-field">
-          <span>Recipients <em class="studio-ec__est" id="studio-ec-recipient-est">—</em></span>
-          <select class="studio-select" id="studio-ec-audience"></select>
-        </label>
-        <label class="studio-field">
-          <span>Broadcast segment (Resend)</span>
-          <div class="studio-ec-segment-row">
-            <select class="studio-select" id="studio-ec-segment-preset" aria-label="Segment from canister">
-              <option value="">— Configured in Services → Resend —</option>
-            </select>
-            <input type="text" class="studio-input" id="studio-ec-segment" placeholder="Segment UUID" autocomplete="off" />
-            <button type="button" class="studio-resend-sync studio-resend-sync--ready" id="studio-ec-sync-audience">READY</button>
+      <div class="studio-ec__main-panels studio-ec__main-panels--settings-rail">
+        <div id="studio-ec-panel-m-campaign" class="studio-ec__main-panel studio-ec__main-panel--scroll" role="tabpanel" aria-labelledby="studio-ec-mtab-cam">
+          <div class="studio-ec__settings-section">
+            <h3 class="studio-ec__sh">Campaign</h3>
+            <label class="studio-field">
+              <span>Internal title</span>
+              <input type="text" class="studio-input" id="studio-ec-title" maxlength="200" placeholder="Optional" />
+            </label>
+            <p class="studio-ec__st"><span>Status</span> <span class="studio-ec__st-dot" aria-hidden="true"></span> <strong id="studio-ec-status-val">draft</strong></p>
+            <div class="studio-ec__delete-wrap">
+              <button type="button" class="studio-btn-ghost studio-ec__delete" id="studio-ec-delete" disabled>Delete campaign</button>
+              <p class="studio-ec__delete-hint" id="studio-ec-delete-hint" hidden></p>
+            </div>
           </div>
-          <p class="studio-muted" id="studio-ec-sync-hint" style="margin:0.35rem 0 0;font-size:0.85rem"></p>
-        </label>
-      </div>
-      <div class="studio-ec__settings-section">
-        <h3 class="studio-ec__sh">Test email</h3>
-        <label class="studio-field">
-          <span>Address</span>
-          <input type="email" class="studio-input" id="studio-ec-test-to" placeholder="you@example.com" autocomplete="email" />
-        </label>
-      </div>
-      <div class="studio-ec__settings-section">
-        <h3 class="studio-ec__sh">Internal notes</h3>
-        <textarea class="studio-textarea" id="studio-ec-notes" rows="3" placeholder="Not sent to subscribers"></textarea>
-      </div>
-      <div class="studio-ec__settings-links">
-        <button type="button" class="studio-btn-ghost" id="studio-ec-history">Campaign history</button>
-        <button type="button" class="studio-btn-ghost" id="studio-ec-csv">Download subscriber CSV</button>
+        </div>
+        <div id="studio-ec-panel-m-audience" class="studio-ec__main-panel studio-ec__main-panel--scroll" role="tabpanel" aria-labelledby="studio-ec-mtab-aud" hidden>
+          <div class="studio-ec__settings-section">
+            <h3 class="studio-ec__sh">Audience</h3>
+            <label class="studio-field">
+              <span>Recipients <em class="studio-ec__est" id="studio-ec-recipient-est">—</em></span>
+              <select class="studio-select" id="studio-ec-audience"></select>
+            </label>
+            <label class="studio-field">
+              <span>Broadcast segment (Resend)</span>
+              <div class="studio-ec-segment-row">
+                <select class="studio-select" id="studio-ec-segment-preset" aria-label="Segment from canister">
+                  <option value="">— Configured in Services → Resend —</option>
+                </select>
+                <input type="text" class="studio-input" id="studio-ec-segment" placeholder="Segment UUID" autocomplete="off" />
+                <button type="button" class="studio-resend-sync studio-resend-sync--ready" id="studio-ec-sync-audience">READY</button>
+              </div>
+              <p class="studio-muted" id="studio-ec-sync-hint" style="margin:0.35rem 0 0;font-size:0.85rem"></p>
+            </label>
+          </div>
+        </div>
+        <div id="studio-ec-panel-m-review" class="studio-ec__main-panel studio-ec__main-panel--scroll" role="tabpanel" aria-labelledby="studio-ec-mtab-rev" hidden>
+          <div class="studio-ec__settings-section">
+            <h3 class="studio-ec__sh">Test email</h3>
+            <label class="studio-field">
+              <span>Address</span>
+              <input type="email" class="studio-input" id="studio-ec-test-to" placeholder="you@example.com" autocomplete="email" />
+            </label>
+          </div>
+          <div class="studio-ec__settings-section">
+            <h3 class="studio-ec__sh">Internal notes</h3>
+            <textarea class="studio-textarea" id="studio-ec-notes" rows="4" placeholder="Not sent to subscribers"></textarea>
+          </div>
+          <div class="studio-ec__settings-links">
+            <button type="button" class="studio-btn-ghost" id="studio-ec-history">Campaign history</button>
+            <button type="button" class="studio-btn-ghost" id="studio-ec-csv">Download subscriber CSV</button>
+          </div>
+        </div>
       </div>
     </aside>
   </div>
@@ -590,6 +607,31 @@ export async function initEmailCampaignStudio(mainEl) {
             if (k === 'gen' && assistPrompt instanceof HTMLTextAreaElement) assistPrompt.focus();
         });
     });
+
+    const panelCampaign = root.querySelector('#studio-ec-panel-m-campaign');
+    const panelAudience = root.querySelector('#studio-ec-panel-m-audience');
+    const panelReview = root.querySelector('#studio-ec-panel-m-review');
+
+    const setMainTab = (k) => {
+        const key = k || 'campaign';
+        if (panelCampaign) panelCampaign.toggleAttribute('hidden', key !== 'campaign');
+        if (panelAudience) panelAudience.toggleAttribute('hidden', key !== 'audience');
+        if (panelReview) panelReview.toggleAttribute('hidden', key !== 'review');
+        root.querySelectorAll('[data-ec-mtab]').forEach((b) => {
+            if (b instanceof HTMLButtonElement) {
+                const on = b.getAttribute('data-ec-mtab') === key;
+                b.classList.toggle('is-active', on);
+                b.setAttribute('aria-selected', on ? 'true' : 'false');
+            }
+        });
+    };
+    root.querySelectorAll('[data-ec-mtab]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const k = btn.getAttribute('data-ec-mtab') || 'campaign';
+            setMainTab(k);
+        });
+    });
+    setMainTab('campaign');
 
     root.querySelector('#studio-ec-goto-templates')?.addEventListener('click', () => setLeftSubtab('tpl'));
     root.querySelector('#studio-ec-focus-body')?.addEventListener('click', () => {

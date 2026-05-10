@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { findArtistForConfirmedListLabel } from './artistSlug.js';
+import { artistDisplayDiscipline, findArtistForConfirmedListLabel } from './artistSlug.js';
 
 describe('findArtistForConfirmedListLabel', () => {
     const pool = [
@@ -30,5 +30,42 @@ describe('findArtistForConfirmedListLabel', () => {
     it('matches slug prefix for disambiguated slugs', () => {
         const r = findArtistForConfirmedListLabel('zac-foster', pool);
         expect(r?.id).toBe('a1');
+    });
+});
+
+describe('artistDisplayDiscipline', () => {
+    it('uses discipline when set', () => {
+        const a = {
+            locales: {
+                en: { discipline: 'Video', world: { practice: 'W' }, worldNew: { practice: 'N' } },
+            },
+        };
+        expect(artistDisplayDiscipline(a, 'en')).toBe('Video');
+    });
+
+    it('prefers worldNew practice when publicWorldSource is newWorld', () => {
+        const a = {
+            locales: {
+                publicWorldSource: 'newWorld',
+                en: {
+                    world: { practice: 'W' },
+                    worldNew: { practice: 'N' },
+                },
+            },
+        };
+        expect(artistDisplayDiscipline(a, 'en')).toBe('N');
+    });
+
+    it('prefers world practice when publicWorldSource is world', () => {
+        const a = {
+            locales: {
+                publicWorldSource: 'world',
+                en: {
+                    world: { practice: 'W' },
+                    worldNew: { practice: 'N' },
+                },
+            },
+        };
+        expect(artistDisplayDiscipline(a, 'en')).toBe('W');
     });
 });

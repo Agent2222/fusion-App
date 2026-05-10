@@ -18,24 +18,29 @@ import {
   normalizeArtistRosterVisibility,
   getPrograms,
   generateAndUpdateMyArtistWorldFromBio,
+  memberTranslateText,
   artistRowFromMyArtistRecord,
+  hasUsableWorldLlmSourceInput,
   normalizeProgramVisibility,
   unwrapOpt,
   getApplicationPaymentGlobal,
 } from "../utils/database.js";
 import { withSeoImageAlt } from "../utils/mediaAltSeo.js";
 import {
-  copyIntroGalleryEnToJa,
   introSlotsFromWorld,
   localeBlock,
+  readProfileDraftFromDom,
   readLinksFromContainer,
-  readLocalesFromDom,
   safeJsonStringify,
-  syncIntroGalleryToAllLocales,
   worldFieldToTextarea,
 } from "../utils/memberProfileForm.js";
 import { publicSlugFromEnglishFirstLast } from "../utils/artistSlug.js";
 import { normalizeLocalesWorldForStorage } from "../utils/worldNormalize.js";
+import {
+  getPublicWorldSourceFromLocales,
+  needsInitialWorldNew,
+  worldFieldHasContent,
+} from "../utils/worldPublicPick.js";
 import { getAuthSnapshot } from "../utils/icAuth.js";
 import { DEV_MODE } from "../config.js";
 import { uploadBlobToS3 } from "../utils/studioS3Upload.js";
@@ -48,6 +53,24 @@ import {
   isRealAdminCaller,
 } from "../utils/adminPerspective.js";
 import { firstNonEmptyString } from "../utils/localeFallback.js";
+import { studioIconHref } from "../utils/studioIconRegistry.js";
+
+function mpdEscapeAttr(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function mpdNavIconHtml(iconKey) {
+  const icon = studioIconHref(iconKey);
+  return `<span class="studio-nav-item__icon" aria-hidden="true">${
+    icon
+      ? `<img src="${mpdEscapeAttr(icon)}" alt="" />`
+      : '<span class="studio-nav-item__icon-fallback">•</span>'
+  }</span>`;
+}
 
 function applySettingsProfileDocumentSeo(dashTitle) {
   applyDocumentSeo({
@@ -67,6 +90,22 @@ export const MPD_MAX_IMAGE_BYTES = 1 * 1024 * 1024;
 
 const MPD_IMAGE_LIMIT_NOTICE =
   "Each image must be 1 MB or smaller. Use JPEG or WebP for best results.";
+const PROFILE_EDIT_LOCALE = "en";
+const MPD_WORLD_TEXT_FIELDS = /** @type {const} */ ([
+  "practice",
+  "perspective",
+  "vision",
+  "constructing",
+  "context",
+  "quote",
+]);
+/** @type {'world' | 'newWorld'} */
+let mpdStoryWorldDisplaySource = "world";
+/** @type {Record<string, unknown> | null} */
+let mpdStoryWorldDraft = null;
+let mpdStoryWorldNewAvailable = false;
+/** @type {'inactive' | 'pending' | 'private' | 'public'} */
+let mpdBackendRosterVisibility = "inactive";
 
 /**
  * Panel-specific shout (HTML allowed) and plain hint for `#settingsProfileHint`.
@@ -86,9 +125,9 @@ const MPD_PANEL_CHROME = {
   },
   story: {
     shoutHtml:
-      "We're building new interactions between artists and patrons—your story is the bridge.",
+      "Clarify the core of your work.",
     hint:
-      "An extended gallery profile page is coming soon. Craft your narrative here first.",
+      "Your practice, perspective, vision, and how you are constructing the world  you want to create.",
   },
   links: {
     shoutHtml: "Your presence beyond Fusion.",
@@ -129,6 +168,19 @@ function mpdAccountStringField(acc, ...keys) {
     }
   }
   return "";
+}
+
+/**
+ * Candid optional text can hydrate as either a string (test/local shapes) or
+ * `[string]` (generated actor shapes). Treat both as the saved locales JSON.
+ * @param {Record<string, unknown> | null | undefined} record
+ */
+function mpdLocalesJsonFromRecord(record) {
+  if (!record || typeof record !== "object") return "";
+  const raw = record.locales_json ?? record.localesJson;
+  if (typeof raw === "string") return raw;
+  const unwrapped = Array.isArray(raw) ? unwrapOpt(raw) : raw;
+  return typeof unwrapped === "string" ? unwrapped : "";
 }
 
 /** @param {string} st */
@@ -251,6 +303,13 @@ function setVal(id, v) {
   if (n && "value" in n) n.value = v;
 }
 
+function getMpdProfileQuoteForSave() {
+  if (mpdStoryWorldDisplaySource === "newWorld" && mpdStoryWorldDraft) {
+    return String(mpdStoryWorldDraft.quote ?? "").trim();
+  }
+  return getVal("mpd_w_quote").trim();
+}
+
 /**
  * @param {boolean} visible
  */
@@ -283,6 +342,407 @@ function setIntroSpinnerVisible(i, visible) {
 }
 
 /**
+ * @param {string} key
+ * @param {{ hasMedia?: boolean; hasPreview?: boolean }} state
+ */
+function setMpdMediaSurfaceState(key, state) {
+  const surface = document.querySelector(`[data-mpd-media-surface="${key}"]`);
+  if (!surface) return;
+  const hasPreview = Boolean(state.hasPreview ?? state.hasMedia);
+  surface.classList.toggle("has-media", Boolean(state.hasMedia));
+  surface.classList.toggle("has-preview", hasPreview);
+}
+
+function updateHeroProfileCardCopy() {
+  const nameNode = document.getElementById("mpd_hero_profile_card_name");
+  const disciplineNode = document.getElementById("mpd_hero_profile_card_discipline");
+  const name = [getVal("mpd_first_name"), getVal("mpd_last_name")]
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(" ");
+  const discipline = getVal("mpd_discipline").trim();
+  if (nameNode) nameNode.textContent = name || "Artist Name";
+  if (disciplineNode) disciplineNode.textContent = discipline || "Discipline";
+}
+
+let mpdUploadOverlayCount = 0;
+
+/**
+ * @param {string} message
+ */
+function showMpdUploadOverlay(message) {
+  mpdUploadOverlayCount += 1;
+  const overlay = document.getElementById("mpd_upload_overlay");
+  const label = document.getElementById("mpd_upload_overlay_label");
+  if (label) label.textContent = message || "Uploading image...";
+  if (!overlay) return;
+  overlay.hidden = false;
+  overlay.setAttribute("aria-hidden", "false");
+}
+
+function hideMpdUploadOverlay() {
+  mpdUploadOverlayCount = Math.max(0, mpdUploadOverlayCount - 1);
+  if (mpdUploadOverlayCount > 0) return;
+  const overlay = document.getElementById("mpd_upload_overlay");
+  if (!overlay) return;
+  overlay.hidden = true;
+  overlay.setAttribute("aria-hidden", "true");
+}
+
+/**
+ * Preview only: keep stored S3 URLs clean while forcing the browser to fetch
+ * an overwritten object whose public URL did not change.
+ * @param {string} url
+ */
+function cacheBustMpdPreviewUrl(url) {
+  const raw = String(url || "").trim();
+  if (!raw || typeof window === "undefined") return raw;
+  try {
+    const u = new URL(raw, window.location.origin);
+    u.searchParams.set("mpdPreview", String(Date.now()));
+    return u.href;
+  } catch {
+    const sep = raw.includes("?") ? "&" : "?";
+    return `${raw}${sep}mpdPreview=${Date.now()}`;
+  }
+}
+
+/**
+ * @param {'idle'|'saving'|'saved'|'error'} state
+ * @param {string} [message]
+ * @param {{ operation?: string; detail?: string }} [meta]
+ */
+function dispatchProfileSaveStatus(state, message = "", meta = {}) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent("fusion-profile-save-status", {
+      detail: {
+        state,
+        message,
+        operation: meta.operation || "",
+        detail: meta.detail || "",
+      },
+    }),
+  );
+}
+
+/** @param {unknown} value */
+function cloneMpdValue(value) {
+  try {
+    return JSON.parse(JSON.stringify(value ?? null));
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * @param {Record<string, unknown> | null | undefined} locales
+ * @param {'en' | 'ja'} active
+ * @param {'world' | 'worldNew'} which
+ * @returns {Record<string, unknown>}
+ */
+function mpdWorldBlockFromLocales(locales, active, which) {
+  const b = localeBlock(
+    locales && typeof locales === "object" ? locales : {},
+    active,
+  );
+  const raw = b[which];
+  return raw && typeof raw === "object" && !Array.isArray(raw)
+    ? /** @type {Record<string, unknown>} */ (raw)
+    : {};
+}
+
+/** @param {Record<string, unknown>} world */
+function mpdStoryTextBlockFromWorld(world) {
+  /** @type {Record<string, unknown>} */
+  const out = {};
+  for (const key of MPD_WORLD_TEXT_FIELDS) out[key] = world[key];
+  return out;
+}
+
+/** @param {Record<string, unknown>} block */
+function mpdStoryTextBlockHasContent(block) {
+  return MPD_WORLD_TEXT_FIELDS.some((key) => worldFieldHasContent(block[key]));
+}
+
+function readMpdStoryWorldTextDraftFromDom() {
+  const draft = readProfileDraftFromDom(getVal);
+  const world =
+    draft.world && typeof draft.world === "object" && !Array.isArray(draft.world)
+      ? /** @type {Record<string, unknown>} */ (draft.world)
+      : {};
+  return mpdStoryTextBlockFromWorld(world);
+}
+
+/** @returns {Record<string, unknown>} */
+function readMpdProfileDraftForSave() {
+  const draft = readProfileDraftFromDom(getVal);
+  if (mpdStoryWorldDisplaySource === "world") {
+    mpdStoryWorldDraft = readMpdStoryWorldTextDraftFromDom();
+    return draft;
+  }
+  if (!mpdStoryWorldDraft) return draft;
+  const world =
+    draft.world && typeof draft.world === "object" && !Array.isArray(draft.world)
+      ? /** @type {Record<string, unknown>} */ (draft.world)
+      : {};
+  return {
+    ...draft,
+    world: {
+      ...world,
+      .../** @type {Record<string, unknown>} */ (cloneMpdValue(mpdStoryWorldDraft)),
+    },
+  };
+}
+
+/** @param {Record<string, unknown>} world */
+function setMpdStoryFieldsFromWorld(world) {
+  setVal("mpd_w_practice", String(world.practice ?? ""));
+  setVal("mpd_w_perspective", worldFieldToTextarea(world.perspective));
+  setVal("mpd_w_vision", worldFieldToTextarea(world.vision));
+  setVal("mpd_w_constructing", worldFieldToTextarea(world.constructing));
+  setVal("mpd_w_context", worldFieldToTextarea(world.context));
+  setVal("mpd_w_quote", String(world.quote ?? ""));
+}
+
+/** @param {boolean} readonly */
+function setMpdStoryFieldsReadonly(readonly) {
+  const story = document.getElementById("mpd-story");
+  if (story) story.classList.toggle("mpd-story--readonly", readonly);
+  document.querySelectorAll(".mpd-story-input").forEach((elNode) => {
+    if (
+      elNode instanceof HTMLInputElement ||
+      elNode instanceof HTMLTextAreaElement
+    ) {
+      elNode.readOnly = readonly;
+      elNode.setAttribute("aria-readonly", readonly ? "true" : "false");
+    }
+  });
+  document.querySelectorAll(".mpd-story-edit-btn").forEach((btn) => {
+    if (!(btn instanceof HTMLButtonElement)) return;
+    btn.disabled = readonly;
+    btn.setAttribute("aria-hidden", readonly ? "true" : "false");
+  });
+}
+
+/**
+ * @param {'world' | 'newWorld'} source
+ * @param {boolean} newWorldAvailable
+ */
+function renderPublicWorldSourceToggle(source, newWorldAvailable) {
+  const resolved = source === "newWorld" && newWorldAvailable ? "newWorld" : "world";
+  const hidden = /** @type {HTMLInputElement | null} */ (
+    document.getElementById("mpd_public_world_source")
+  );
+  if (hidden) hidden.value = resolved;
+  const note = document.getElementById("mpd_public_world_source_note");
+  if (note) {
+    note.textContent = `${resolved === "newWorld" ? "New World" : "World"} will display on your profile.`;
+  }
+  document.querySelectorAll("[data-mpd-world-source]").forEach((btn) => {
+    if (!(btn instanceof HTMLButtonElement)) return;
+    const buttonSource = btn.getAttribute("data-mpd-world-source");
+    const isNewWorld = buttonSource === "newWorld";
+    const active = buttonSource === resolved;
+    btn.classList.toggle("is-active", active);
+    btn.classList.toggle("is-disabled", isNewWorld && !newWorldAvailable);
+    btn.setAttribute("aria-pressed", active ? "true" : "false");
+    btn.disabled = Boolean(isNewWorld && !newWorldAvailable);
+    if (isNewWorld && !newWorldAvailable) {
+      btn.setAttribute("aria-disabled", "true");
+      btn.title = "New World will unlock after generated copy is available.";
+    } else {
+      btn.removeAttribute("aria-disabled");
+      btn.removeAttribute("title");
+    }
+  });
+}
+
+/**
+ * @param {Record<string, unknown>} locales
+ * @param {'en' | 'ja'} active
+ * @param {unknown} requested
+ * @param {boolean} [captureCurrent]
+ */
+function applyMpdStoryWorldDisplay(locales, active, requested, captureCurrent = true) {
+  if (captureCurrent && mpdStoryWorldDisplaySource === "world") {
+    mpdStoryWorldDraft = readMpdStoryWorldTextDraftFromDom();
+  }
+  const world = mpdWorldBlockFromLocales(locales, active, "world");
+  const worldNew = mpdWorldBlockFromLocales(locales, active, "worldNew");
+  mpdStoryWorldNewAvailable = mpdStoryTextBlockHasContent(worldNew);
+  const source =
+    requested === "newWorld" && mpdStoryWorldNewAvailable ? "newWorld" : "world";
+  if (source === "newWorld") {
+    setMpdStoryFieldsFromWorld(worldNew);
+    setMpdStoryFieldsReadonly(true);
+  } else {
+    setMpdStoryFieldsFromWorld(
+      mpdStoryWorldDraft ||
+        mpdStoryTextBlockFromWorld(world),
+    );
+    setMpdStoryFieldsReadonly(false);
+  }
+  mpdStoryWorldDisplaySource = source;
+  renderPublicWorldSourceToggle(source, mpdStoryWorldNewAvailable);
+}
+
+/** @param {unknown} raw */
+function mpdTextList(raw) {
+  if (raw == null) return [];
+  if (Array.isArray(raw)) return raw.flatMap((item) => mpdTextList(item));
+  if (typeof raw === "object") {
+    return Object.values(/** @type {Record<string, unknown>} */ (raw)).flatMap((item) =>
+      mpdTextList(item),
+    );
+  }
+  const s = String(raw).trim();
+  return s ? [s] : [];
+}
+
+/** @param {Record<string, unknown>} block */
+function inferProfileDraftLanguage(block) {
+  const w = block.world && typeof block.world === "object" ? block.world : {};
+  const sample = [
+    block.discipline,
+    block.bio,
+    ...mpdTextList(w),
+  ].join("\n");
+  if (!sample.trim()) return "en";
+  if (/[\u3040-\u30ff\u3400-\u9fff]/.test(sample)) return "ja";
+  if (/[A-Za-z]/.test(sample) && !/[^\x00-\x7F]/.test(sample)) return "en";
+  return "other";
+}
+
+/** @param {Record<string, unknown>} block */
+function mpdBlockHasProfileContent(block) {
+  return mpdTextList({
+    firstName: block.firstName,
+    lastName: block.lastName,
+    name: block.name,
+    discipline: block.discipline,
+    bio: block.bio,
+    world: block.world,
+  }).some(Boolean);
+}
+
+/** @param {Record<string, unknown>} locales */
+function localesForSingleProfileForm(locales) {
+  const en = localeBlock(locales, "en");
+  if (mpdBlockHasProfileContent(en)) return locales;
+  const ja = localeBlock(locales, "ja");
+  if (!mpdBlockHasProfileContent(ja)) return locales;
+  return { ...locales, en: cloneMpdValue(ja) };
+}
+
+/**
+ * @param {unknown} raw
+ * @param {'en'|'ja'} targetLocale
+ * @param {string} sourceLocaleHint
+ */
+async function translateMpdTextValue(raw, targetLocale, sourceLocaleHint) {
+  if (raw == null) return "";
+  if (Array.isArray(raw)) {
+    const out = [];
+    for (const item of raw) {
+      out.push(await translateMpdTextValue(item, targetLocale, sourceLocaleHint));
+    }
+    return out;
+  }
+  const text = String(raw ?? "").trim();
+  if (!text) return "";
+  return (await memberTranslateText(text, targetLocale, sourceLocaleHint)).trim();
+}
+
+/**
+ * @param {Record<string, unknown>} sourceBlock
+ * @param {'en'|'ja'} targetLocale
+ * @param {string} sourceLocaleHint
+ */
+async function translateProfileDraftBlock(sourceBlock, targetLocale, sourceLocaleHint) {
+  const out = /** @type {Record<string, unknown>} */ (cloneMpdValue(sourceBlock) || {});
+  out.discipline = await translateMpdTextValue(sourceBlock.discipline, targetLocale, sourceLocaleHint);
+  out.bio = await translateMpdTextValue(sourceBlock.bio, targetLocale, sourceLocaleHint);
+  out.bioLong = "";
+  const w0 =
+    sourceBlock.world && typeof sourceBlock.world === "object" && !Array.isArray(sourceBlock.world)
+      ? /** @type {Record<string, unknown>} */ (sourceBlock.world)
+      : {};
+  const w = /** @type {Record<string, unknown>} */ (cloneMpdValue(w0) || {});
+  w.practice = await translateMpdTextValue(w0.practice, targetLocale, sourceLocaleHint);
+  w.perspective = await translateMpdTextValue(w0.perspective, targetLocale, sourceLocaleHint);
+  w.vision = await translateMpdTextValue(w0.vision, targetLocale, sourceLocaleHint);
+  w.constructing = await translateMpdTextValue(w0.constructing, targetLocale, sourceLocaleHint);
+  w.context = await translateMpdTextValue(w0.context, targetLocale, sourceLocaleHint);
+  w.quote = await translateMpdTextValue(w0.quote, targetLocale, sourceLocaleHint);
+  const gallery = Array.isArray(w0.introGallery)
+    ? /** @type {Array<Record<string, unknown>>} */ (cloneMpdValue(w0.introGallery))
+    : [];
+  w.introGallery = [];
+  for (const item of gallery) {
+    if (!item || typeof item !== "object") continue;
+    w.introGallery.push({
+      ...item,
+      alt: await translateMpdTextValue(item.alt, targetLocale, sourceLocaleHint),
+      caption: await translateMpdTextValue(item.caption, targetLocale, sourceLocaleHint),
+    });
+  }
+  out.world = w;
+  return out;
+}
+
+/**
+ * @param {Record<string, unknown>} prev
+ * @param {Record<string, unknown>} draft
+ * @param {(id: string) => string | undefined} val
+ * @param {{ translate?: boolean }} [options]
+ */
+async function buildSmartProfileLocales(prev, draft, val, options = {}) {
+  const out = /** @type {Record<string, unknown>} */ (
+    cloneMpdValue(prev && typeof prev === "object" ? prev : { en: {}, ja: {} }) || {}
+  );
+  /** @param {'en' | 'ja'} code */
+  const preserveWorldNew = (code) => {
+    const prevBlock = localeBlock(prev, code);
+    const nextBlock = localeBlock(out, code);
+    const prevWorldNew = prevBlock.worldNew;
+    if (
+      nextBlock &&
+      typeof nextBlock === "object" &&
+      prevWorldNew &&
+      typeof prevWorldNew === "object" &&
+      !Array.isArray(prevWorldNew)
+    ) {
+      nextBlock.worldNew = cloneMpdValue(prevWorldNew);
+      out[code] = nextBlock;
+    }
+  };
+  if (options.translate === false) {
+    out.en = cloneMpdValue(draft);
+    out.ja = cloneMpdValue(draft);
+  } else {
+    const source = inferProfileDraftLanguage(draft);
+    if (source === "ja") {
+      out.ja = cloneMpdValue(draft);
+      out.en = await translateProfileDraftBlock(draft, "en", "ja");
+    } else if (source === "en") {
+      out.en = cloneMpdValue(draft);
+      out.ja = await translateProfileDraftBlock(draft, "ja", "en");
+    } else {
+      out.en = await translateProfileDraftBlock(draft, "en", "auto");
+      out.ja = await translateProfileDraftBlock(draft, "ja", "auto");
+    }
+  }
+  preserveWorldNew("en");
+  preserveWorldNew("ja");
+  const srcPick = val("mpd_public_world_source");
+  if (srcPick === "world" || srcPick === "newWorld") {
+    out.publicWorldSource = srcPick;
+  }
+  return normalizeLocalesWorldForStorage(out);
+}
+
+/**
  * @param {Record<string, unknown>} locales
  * @param {'en' | 'ja'} active
  */
@@ -304,16 +764,9 @@ function fillFormFromLocales(locales, active) {
     setVal("mpd_last_name", parts.length > 1 ? parts.slice(1).join(" ") : "");
   }
   setVal("mpd_discipline", String(b.discipline ?? ""));
-  setVal("mpd_bio", String(b.bio ?? ""));
-  setVal("mpd_bioLong", String(b.bioLong ?? ""));
-  const st = String(b.status ?? "");
-  const sel = /** @type {HTMLSelectElement | null} */ (
-    document.getElementById("mpd_status")
-  );
-  if (sel)
-    sel.value = ["studio", "prep", "showing", "available"].includes(st)
-      ? st
-      : "studio";
+  updateHeroProfileCardCopy();
+  setVal("mpd_bio", String(b.bio ?? b.bioLong ?? ""));
+  setMpdStatusToggle(b.status);
   const loc =
     b.location && typeof b.location === "object" && !Array.isArray(b.location)
       ? b.location
@@ -322,12 +775,7 @@ function fillFormFromLocales(locales, active) {
   setVal("mpd_loc_state", String(loc.state ?? ""));
   setVal("mpd_loc_country", String(loc.country ?? ""));
   setVal("mpd_loc_display", String(loc.display ?? ""));
-  setVal("mpd_w_practice", String(w.practice ?? ""));
-  setVal("mpd_w_perspective", worldFieldToTextarea(w.perspective));
-  setVal("mpd_w_vision", worldFieldToTextarea(w.vision));
-  setVal("mpd_w_constructing", worldFieldToTextarea(w.constructing));
-  setVal("mpd_w_context", worldFieldToTextarea(w.context));
-  setVal("mpd_w_quote", String(w.quote ?? ""));
+  mpdStoryWorldDraft = mpdStoryTextBlockFromWorld(w);
   const slots = introSlotsFromWorld(w);
   for (let i = 0; i < 3; i++) {
     const s = slots[i] || { src: "", alt: "", caption: "" };
@@ -338,6 +786,10 @@ function fillFormFromLocales(locales, active) {
       document.getElementById(`mpd_intro_${i}_thumb`)
     );
     if (!im) continue;
+    setMpdMediaSurfaceState(`intro-${i}`, {
+      hasMedia: Boolean(s.src),
+      hasPreview: Boolean(s.src),
+    });
     if (s.src) {
       setIntroSpinnerVisible(i, true);
       im.style.display = "none";
@@ -370,6 +822,86 @@ function fillFormFromLocales(locales, active) {
   );
   if (devTa && DEV_MODE) devTa.value = safeJsonStringify(locales);
   renderLinkRows(Array.isArray(b.links) ? b.links : []);
+  applyMpdStoryWorldDisplay(
+    locales,
+    active,
+    getPublicWorldSourceFromLocales(locales),
+    false,
+  );
+  syncMpdAudioSectionVisibility(locales);
+}
+
+/**
+ * Hide audio bite controls when Studio set `locales_json.audioDisplayForArtist` to false.
+ * @param {Record<string, unknown>} locales
+ */
+function syncMpdAudioSectionVisibility(locales) {
+  const wrap = document.getElementById("mpd_audio_section");
+  if (!wrap) return;
+  const root = locales && typeof locales === "object" ? locales : {};
+  const show = root.audioDisplayForArtist !== false;
+  wrap.hidden = !show;
+  wrap.setAttribute("aria-hidden", show ? "false" : "true");
+  wrap.classList.toggle("mpd-audio-section--hidden", !show);
+  wrap.querySelectorAll("input, textarea").forEach((el) => {
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+      el.disabled = !show;
+    }
+  });
+  const audioLab = document.querySelector('label[for="mpd_audio_file"]');
+  if (audioLab instanceof HTMLLabelElement) {
+    if (!show) {
+      audioLab.setAttribute("aria-disabled", "true");
+      audioLab.style.pointerEvents = "none";
+      audioLab.style.opacity = "0.45";
+    } else {
+      audioLab.removeAttribute("aria-disabled");
+      audioLab.style.pointerEvents = "";
+      audioLab.style.opacity = "";
+    }
+  }
+}
+
+/**
+ * @param {unknown} value
+ */
+function setMpdStatusToggle(value) {
+  const raw = String(value ?? "").trim();
+  const status = ["studio", "prep", "showing", "available"].includes(raw)
+    ? raw
+    : "studio";
+  const hidden = /** @type {HTMLInputElement | null} */ (
+    document.getElementById("mpd_status")
+  );
+  if (hidden) hidden.value = status;
+  document.querySelectorAll("[data-mpd-status]").forEach((btn) => {
+    const active = btn.getAttribute("data-mpd-status") === status;
+    btn.classList.toggle("is-active", active);
+    btn.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+}
+
+/**
+ * @param {unknown} value
+ */
+function setMpdVisibilityToggle(value) {
+  const visibility = normalizeArtistRosterVisibility(value);
+  const uiVisibility = visibility === "pending" ? "public" : visibility;
+  const hidden = /** @type {HTMLInputElement | null} */ (
+    document.getElementById("mpd_profile_visibility")
+  );
+  if (hidden) hidden.value = uiVisibility;
+  document.querySelectorAll("[data-mpd-visibility]").forEach((btn) => {
+    const active = btn.getAttribute("data-mpd-visibility") === uiVisibility;
+    btn.classList.toggle("is-active", active);
+    btn.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+  const reviewNotice = document.getElementById("mpd_profile_visibility_review_notice");
+  if (reviewNotice) {
+    const showReviewNotice = visibility === "pending";
+    reviewNotice.hidden = !showReviewNotice;
+    reviewNotice.setAttribute("aria-hidden", showReviewNotice ? "false" : "true");
+  }
 }
 
 /**
@@ -509,7 +1041,7 @@ function renderLinkRows(links) {
   for (let idx = 0; idx < rows.length; idx++) {
     const item = rows[idx] && typeof rows[idx] === "object" ? rows[idx] : {};
     const row = document.createElement("div");
-    row.className = "mpd-link-row studio-form-grid";
+    row.className = "mpd-link-row studio-form-grid mpd-editorial-grid mpd-editorial-grid--links";
     row.innerHTML = `
             <label class="studio-field"><span>Type</span>
                 <select class="studio-input mpd-link-type">
@@ -522,7 +1054,7 @@ function renderLinkRows(links) {
                 <input type="url" class="studio-input mpd-link-url" placeholder="https://" value="" />
             </label>
             <label class="studio-field studio-field--full"><span>Label</span>
-                <input type="text" class="studio-input mpd-link-label" value="" />
+                <input type="text" class="studio-input mpd-link-label" placeholder="Portfolio, Instagram, gallery..." value="" />
             </label>
         `;
     const typeSel = row.querySelector(".mpd-link-type");
@@ -542,6 +1074,11 @@ function escapeHtmlMpd(s) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+/** @param {unknown} value */
+function detailIsObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function openMpdResidencyComingSoonModal() {
@@ -572,6 +1109,60 @@ function closeMpdMembershipCancelModal() {
   if (!modal) return;
   modal.hidden = true;
   modal.setAttribute("aria-hidden", "true");
+}
+
+function openMpdSaveChoiceModal() {
+  const modal = document.getElementById("mpdSaveChoiceModal");
+  if (!modal) return;
+  document.body.appendChild(modal);
+  modal.hidden = false;
+  modal.setAttribute("aria-hidden", "false");
+}
+
+function closeMpdSaveChoiceModal() {
+  const modal = document.getElementById("mpdSaveChoiceModal");
+  if (!modal) return;
+  modal.hidden = true;
+  modal.setAttribute("aria-hidden", "true");
+}
+
+function wireMpdSaveChoiceModal() {
+  const modal = document.getElementById("mpdSaveChoiceModal");
+  if (!modal || modal.dataset.mpdSaveChoiceModalWired === "1") return;
+  modal.dataset.mpdSaveChoiceModalWired = "1";
+  const scrim = modal.querySelector(".profile-gallery-access-modal__scrim");
+  const cancelBtn = modal.querySelector("#mpdSaveChoiceCancel");
+  const justSaveBtn = modal.querySelector("#mpdSaveChoiceJustSave");
+  const translateBtn = modal.querySelector("#mpdSaveChoiceTranslate");
+  const cancel = () => {
+    closeMpdSaveChoiceModal();
+    window.dispatchEvent(
+      new CustomEvent("fusion-settings-profile-save-choice", {
+        detail: { action: "cancel" },
+      }),
+    );
+  };
+  scrim?.addEventListener("click", cancel);
+  cancelBtn?.addEventListener("click", cancel);
+  justSaveBtn?.addEventListener("click", () => {
+    closeMpdSaveChoiceModal();
+    window.dispatchEvent(
+      new CustomEvent("fusion-settings-profile-save-choice", {
+        detail: { action: "save", translate: false },
+      }),
+    );
+  });
+  translateBtn?.addEventListener("click", () => {
+    closeMpdSaveChoiceModal();
+    window.dispatchEvent(
+      new CustomEvent("fusion-settings-profile-save-choice", {
+        detail: { action: "save", translate: true },
+      }),
+    );
+  });
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && modal && !modal.hidden) cancel();
+  });
 }
 
 function wireMpdMembershipCancelModal() {
@@ -856,28 +1447,44 @@ async function syncResidencyApplyCta() {
 
 export function generateSettingsProfileContent() {
   const cardFooter = `<div class="member-profile-dashboard__card-footer"><button type="button" class="mpd-section-save mpd-section-save--primary">Save</button></div>`;
+  const storyCardFooter = `<div class="member-profile-dashboard__card-footer"><button type="button" class="mpd-section-save mpd-section-save--primary" id="mpd_story_save">Save</button></div>`;
   const introSlotsHtml = [0, 1, 2]
-    .map(
-      (i) => `
-                        <div class="member-profile-dashboard__intro-slot">
+    .map((i) => {
+      const suggestedRatio = ["5:4", "1:1", "16:9"][i] || "5:4";
+      return `
+                        <div class="member-profile-dashboard__intro-slot member-profile-dashboard__intro-slot--${String(
+                          i + 1,
+                        )}">
                             <div class="member-profile-dashboard__intro-preview-col">
-                                <div class="member-profile-dashboard__intro-preview-wrap">
-                                    <div class="mpd-media-spinner" id="mpd_intro_${i}_spinner" hidden aria-hidden="true"></div>
-                                    <img id="mpd_intro_${i}_thumb" class="member-profile-dashboard__intro-thumb" alt="${withSeoImageAlt('Profile intro artwork preview')}" style="display:none" />
-                                </div>
                                 <input type="hidden" id="mpd_intro_${i}_src" />
                                 <input type="hidden" id="mpd_intro_${i}_alt" />
                                 <input type="hidden" id="mpd_intro_${i}_caption" />
                                 <input type="file" id="mpd_intro_${i}_file" class="mpd-file-input-hidden" accept="image/*" data-intro-slot="${String(
                                   i,
                                 )}" />
-                                <label for="mpd_intro_${i}_file" class="mpd-upload-btn">Upload image</label>
+                                <div class="member-profile-dashboard__intro-preview-wrap mpd-media-upload-surface" data-mpd-media-surface="intro-${i}">
+                                    <label for="mpd_intro_${i}_file" class="mpd-media-upload-label" aria-label="Upload introductory work image ${String(
+                                      i + 1,
+                                    )}">
+                                        <div class="mpd-media-spinner" id="mpd_intro_${i}_spinner" hidden aria-hidden="true"></div>
+                                        <img id="mpd_intro_${i}_thumb" class="member-profile-dashboard__intro-thumb" alt="${withSeoImageAlt('Profile intro artwork preview')}" style="display:none" />
+                                        <span class="mpd-media-placeholder" aria-hidden="true">Image ${String(i + 1)}</span>
+                                        <span class="mpd-media-overlay" aria-hidden="true">
+                                            <span class="mpd-media-overlay__empty">Upload</span>
+                                            <span class="mpd-media-overlay__filled">Replace</span>
+                                            <small class="mpd-media-overlay__ratio">Suggested ${suggestedRatio}</small>
+                                        </span>
+                                    </label>
+                                    <button type="button" class="mpd-media-delete" data-mpd-media-delete="intro-${i}">Delete</button>
+                                </div>
                             </div>
-                        </div>`,
-    )
+                        </div>`;
+    })
     .join("");
   const devNavBtn = DEV_MODE
-    ? `<button type="button" class="studio-nav-item mpd-nav-btn" data-mpd-panel="dev">Developer</button>`
+    ? `<button type="button" class="studio-nav-item mpd-nav-btn" data-mpd-panel="dev">${mpdNavIconHtml(
+        "artist-system-info",
+      )}<span class="studio-nav-item__label">Developer</span></button>`
     : "";
   const devPanel = DEV_MODE
     ? `<div class="mpd-panel" id="mpd-panel-dev" data-mpd-panel="dev" hidden>
@@ -890,9 +1497,20 @@ export function generateSettingsProfileContent() {
                     </section>
                 </div>`
     : "";
+  const storyEditIcon = studioIconHref("assist-refine");
+  const storyEditIconHtml = storyEditIcon
+    ? `<img src="${mpdEscapeAttr(storyEditIcon)}" alt="" />`
+    : '<span aria-hidden="true">✎</span>';
 
   return `
         <div class="page settings-profile-page">
+            <app-profile-save-status id="settingsProfileFloatingSaveStatus" hidden aria-hidden="true"></app-profile-save-status>
+            <div id="mpd_upload_overlay" class="mpd-upload-overlay" hidden aria-hidden="true">
+                <div class="mpd-upload-overlay__panel" role="status" aria-live="polite">
+                    <div class="mpd-upload-overlay__spinner" aria-hidden="true"></div>
+                    <p id="mpd_upload_overlay_label">Uploading image...</p>
+                </div>
+            </div>
             <main id="settingsMain" class="main-cont">
                 <div id="settingsMainContent" class="feed-container">
         <div class="studio-app settings-profile-studio" id="mpd_root">
@@ -901,12 +1519,21 @@ export function generateSettingsProfileContent() {
                 <button type="button" class="studio-wordmark studio-wordmark-btn" id="settingsProfileWordmark" aria-label="Fusion home">Fusion</button>
                 <p class="settings-profile-slug-line" id="mpd_sidebar_slug">—</p>
                 <nav class="studio-nav" id="settingsProfileNav" aria-label="Profile sections">
-                    <button type="button" class="studio-nav-item mpd-nav-btn is-active" data-mpd-panel="overview">Overview</button>
-                    <button type="button" class="studio-nav-item mpd-nav-btn" data-mpd-panel="location">Status</button>
-                    <button type="button" class="studio-nav-item mpd-nav-btn" data-mpd-panel="story">Story &amp; world</button>
-                    <button type="button" class="studio-nav-item mpd-nav-btn" data-mpd-panel="links">Digital Footprint</button>
-                    <button type="button" class="studio-nav-item mpd-nav-btn" data-mpd-panel="programs">Programs</button>
-                    <button type="button" class="studio-nav-item mpd-nav-btn" data-mpd-panel="membership">Membership</button>
+                    <button type="button" class="studio-nav-item mpd-nav-btn is-active" data-mpd-panel="overview">${mpdNavIconHtml(
+                      "artist-overview",
+                    )}<span class="studio-nav-item__label">Overview</span></button>
+                    <button type="button" class="studio-nav-item mpd-nav-btn" data-mpd-panel="location">${mpdNavIconHtml(
+                      "nav-status",
+                    )}<span class="studio-nav-item__label">Status</span></button>
+                    <button type="button" class="studio-nav-item mpd-nav-btn" data-mpd-panel="story">${mpdNavIconHtml(
+                      "assist-context",
+                    )}<span class="studio-nav-item__label">Story &amp; world</span></button>
+                    <button type="button" class="studio-nav-item mpd-nav-btn" data-mpd-panel="programs">${mpdNavIconHtml(
+                      "nav-programs",
+                    )}<span class="studio-nav-item__label">Programs</span></button>
+                    <button type="button" class="studio-nav-item mpd-nav-btn" data-mpd-panel="membership">${mpdNavIconHtml(
+                      "nav-subscribers",
+                    )}<span class="studio-nav-item__label">Membership</span></button>
                     ${devNavBtn}
                     <div class="studio-nav-contact mpd-sidebar-contact" id="settingsProfileNavContact">
                         <p class="studio-nav-contact__headline">
@@ -919,10 +1546,14 @@ export function generateSettingsProfileContent() {
                             placeholder="Your message"
                             aria-label="Message to Fusion"
                         ></textarea>
-                        <button type="button" class="studio-btn-primary studio-nav-contact__send" id="settingsProfileNavContactSend">
+                        <button type="button" class="studio-btn-primary studio-nav-contact__send" id="settingsProfileNavContactSend" style="justify-content: end;">
                             Send
                         </button>
                         <p id="settingsProfileNavContactStatus" class="studio-nav-contact__status" role="status"></p>
+                    </div>
+                    <div class="mpd-sidebar-cta-row" aria-label="Profile quick actions">
+                        <a class="program-intro-cta mpd-program-intro-cta mpd-sidebar-cta" id="mpd_view_profile" href="#" target="_blank" rel="noopener noreferrer">View public profile</a>
+                        <button type="button" class="program-intro-cta mpd-program-intro-cta mpd-sidebar-cta" id="mpd_apply_residency" data-program-path="${MPD_APPLY_PROGRAM_PATH}" data-apply-open="true">Apply to Residency</button>
                     </div>
                 </nav>
                 <div class="studio-sidebar-footer">
@@ -939,12 +1570,13 @@ export function generateSettingsProfileContent() {
                         <span class="studio-menu-btn__bars" aria-hidden="true"></span>
                     </button>
                     <h1 id="settingsProfileHeading">User Profile</h1>
-                    <div class="studio-topbar-actions">
-                        <button type="button" class="studio-topbar-account-btn" id="settingsProfileBackBtn">Return to Fusion</button>
-                    </div>
                 </header>
                 <div class="studio-main settings-profile-main" id="settingsProfileScrollMain">
                 <p id="settingsProfileStatus" class="member-profile-dashboard__status-line" role="status"></p>
+                <div id="settingsProfileInitialLoading" class="mpd-initial-loading" role="status" aria-live="polite">
+                    <div class="mpd-initial-loading__spinner" aria-hidden="true"></div>
+                    <p>Loading profile settings...</p>
+                </div>
                 <div class="mpd-settings-shout shoutHeadline" id="settingsProfileShout">
                     Your work exists in context.<br />This is where it begins.
                 </div>
@@ -959,88 +1591,106 @@ export function generateSettingsProfileContent() {
                     <select id="settingsTestArtistSelect" class="studio-input"></select>
                 </div>
                 <div id="settingsProfileFormWrap" hidden>
-                    <div class="member-profile-dashboard__locale-bar">
-                        <span class="studio-toolbar-label">Editing language</span>
-                        <button type="button" class="mpd-locale-tab is-active" data-locale="en">English</button>
-                        <button type="button" class="mpd-locale-tab" data-locale="ja">日本語</button>
-                        <button type="button" class="studio-btn-ghost" id="mpd_copy_intro_ja" title="Copy intro images from English">Copy intro from EN → JA</button>
-                    </div>
-
                     <div class="mpd-panels">
                         <div class="mpd-panel" id="mpd-panel-overview" data-mpd-panel="overview">
                             <section class="member-profile-dashboard__card" id="mpd-overview">
                                 <h2>Overview</h2>
-                                <p class="studio-muted">Quick actions and how you present on the public site for the selected language.</p>
-                                <div class="mpd-overview-cta-row">
-                                    <a class="program-intro-cta mpd-program-intro-cta" id="mpd_view_profile" href="#" target="_blank" rel="noopener noreferrer">View public profile</a>
-                                    <button type="button" class="program-intro-cta mpd-program-intro-cta" id="mpd_apply_residency" data-program-path="${MPD_APPLY_PROGRAM_PATH}" data-apply-open="true">Apply to Residency</button>
-                                </div>
-                                <label class="studio-field studio-field--full mpd-visibility-field">
+                                <div class="studio-field studio-field--full mpd-visibility-field mpd-visibility-source">
                                     <span>Artist profile visibility</span>
-                                    <select id="mpd_profile_visibility" class="studio-input" aria-describedby="mpd_profile_visibility_hint">
-                                        <option value="inactive">Inactive — profile not yet submitted for review</option>
-                                        <option value="pending">Pending — under review (you will be notified when public)</option>
-                                        <option value="private">Private — unlisted (direct link still works)</option>
-                                        <option value="public">Public — listed on artist feeds and directory</option>
-                                    </select>
-                                    <span id="mpd_profile_visibility_hint" class="mpd-field-hint">Only <strong>public</strong> appears on the public artist directory. When your roster state is <strong>inactive</strong>, saving your profile will move it to <strong>pending</strong> for staff review.</span>
-                                </label>
+                                    <input type="hidden" id="mpd_profile_visibility" value="inactive" />
+                                    <div class="mpd-visibility-toggle" role="group" aria-label="Artist profile visibility" aria-describedby="mpd_profile_visibility_hint">
+                                        <button type="button" class="mpd-visibility-toggle__btn is-active" data-mpd-visibility="inactive" aria-pressed="true">Inactive</button>
+                                        <button type="button" class="mpd-visibility-toggle__btn" data-mpd-visibility="private" aria-pressed="false">Private</button>
+                                        <button type="button" class="mpd-visibility-toggle__btn" data-mpd-visibility="public" aria-pressed="false">Public</button>
+                                    </div>
+                                    <span id="mpd_profile_visibility_review_notice" class="mpd-visibility-review-notice" hidden>Submitted for review</span>
+                                    <span id="mpd_profile_visibility_hint" class="mpd-field-hint">Choose <strong>Public</strong> to submit your profile for staff review. Approved public profiles stay public until changed to <strong>Private</strong> or <strong>Inactive</strong>.</span>
+                                </div>
                                 <p id="mpd_datasource_pill" class="member-profile-dashboard__pill" style="display:none;margin-top:0.75rem"></p>
 
                                 <h2 class="mpd-identity-h2">Identity &amp; presence</h2>
                                 <p class="studio-muted">Name, discipline, bios, and media — save when you are ready.</p>
                                 <h3 class="mpd-identity-subhead">Name &amp; discipline</h3>
-                                <div class="studio-form-grid">
+                                <div class="studio-form-grid mpd-editorial-grid">
                                     <label class="studio-field"><span>First name</span>
-                                        <input type="text" id="mpd_first_name" class="studio-input" autocomplete="given-name" />
+                                        <input type="text" id="mpd_first_name" class="studio-input" autocomplete="given-name" placeholder="First name" />
                                     </label>
                                     <label class="studio-field"><span>Last name</span>
-                                        <input type="text" id="mpd_last_name" class="studio-input" autocomplete="family-name" />
+                                        <input type="text" id="mpd_last_name" class="studio-input" autocomplete="family-name" placeholder="Last name" />
                                     </label>
                                     <label class="studio-field studio-field--full"><span>Discipline</span>
-                                        <input type="text" id="mpd_discipline" class="studio-input" />
+                                        <input type="text" id="mpd_discipline" class="studio-input" placeholder="Painting, sound, installation..." />
                                     </label>
                                 </div>
 
-                                <h3 class="mpd-identity-subhead">About</h3>
-                                <div class="studio-form-grid">
-                                    <label class="studio-field studio-field--full"><span>Short bio</span>
-                                        <textarea id="mpd_bio" class="studio-textarea" rows="3"></textarea>
-                                    </label>
-                                    <label class="studio-field studio-field--full"><span>Long bio</span>
-                                        <textarea id="mpd_bioLong" class="studio-textarea" rows="5"></textarea>
-                                    </label>
-                                    <label class="studio-field studio-field--full"><span>Profile quote (shared)</span>
-                                        <textarea id="mpd_profile_quote" class="studio-textarea" rows="2"></textarea>
+                                <div class="studio-form-grid mpd-editorial-grid">
+                                    <label class="studio-field studio-field--full"><span>Bio</span>
+                                        <textarea id="mpd_bio" class="studio-textarea" rows="5" placeholder="Tell the story behind your work..."></textarea>
                                     </label>
                                 </div>
 
-                                <h3 class="studio-subheading mpd-media-subhead">Hero image</h3>
-                                <p class="studio-muted mpd-media-helper">
-                                  Use a high-quality image of your work. A <strong>4:5</strong> aspect ratio
-                                  (portrait) is preferred. Max <strong>1 MB</strong> per file.
-                                </p>
-                                <div class="member-profile-dashboard__hero-preview-wrap">
-                                    <div class="mpd-media-spinner" id="mpd_hero_spinner" hidden aria-hidden="true"></div>
-                                    <img id="mpd_hero_preview" class="member-profile-dashboard__hero-preview" alt="${withSeoImageAlt('Profile hero image preview')}" />
-                                </div>
-                                <input type="hidden" id="mpd_hero_url" value="" />
-                                <input type="file" id="mpd_hero_file" class="mpd-file-input-hidden" accept="image/*" />
-                                <label for="mpd_hero_file" class="mpd-upload-btn">Upload hero image</label>
+                                <h3 class="mpd-identity-subhead">Digital Footprint</h3>
+                                <p class="studio-muted">Website, social, and other links that shape how people find you beyond this site.</p>
+                                <div id="mpd-links"></div>
+                                <button type="button" class="studio-btn-ghost" id="mpd_links_add">Add link</button>
 
-                                <h3 class="studio-subheading mpd-media-subhead">Hero profile image (card toggle)</h3>
-                                <p class="studio-muted mpd-media-helper">
-                                  Optional headshot or portrait for the <strong>Profile</strong> view on home, artists, and program cards.
-                                  Falls back to the hero image when empty. Max <strong>1 MB</strong> per file.
-                                </p>
-                                <div class="member-profile-dashboard__hero-preview-wrap">
-                                    <div class="mpd-media-spinner" id="mpd_hero_profile_spinner" hidden aria-hidden="true"></div>
-                                    <img id="mpd_hero_profile_preview" class="member-profile-dashboard__hero-preview" alt="${withSeoImageAlt('Profile headshot preview')}" />
-                                </div>
-                                <input type="hidden" id="mpd_hero_profile_url" value="" />
-                                <input type="file" id="mpd_hero_profile_file" class="mpd-file-input-hidden" accept="image/*" />
-                                <label for="mpd_hero_profile_file" class="mpd-upload-btn">Upload profile image</label>
+                                <div class="mpd-hero-media-row">
+                                    <div class="mpd-hero-media-row__main">
+                                        <h3 class="studio-subheading mpd-media-subhead">Main Artwork</h3>
+                                        <p class="studio-muted mpd-media-helper">
+                                          Use a high-quality image of your work. A <strong>5:4</strong> aspect ratio
+                                          is preferred. Max <strong>1 MB</strong> per file.
+                                        </p>
+                                        <input type="hidden" id="mpd_hero_url" value="" />
+                                        <input type="file" id="mpd_hero_file" class="mpd-file-input-hidden" accept="image/*" />
+                                        <div class="member-profile-dashboard__hero-preview-wrap mpd-media-upload-surface mpd-media-upload-surface--hero" data-mpd-media-surface="hero">
+                                            <label for="mpd_hero_file" class="mpd-media-upload-label" aria-label="Upload main artwork">
+                                                <div class="mpd-media-spinner" id="mpd_hero_spinner" hidden aria-hidden="true"></div>
+                                                <img id="mpd_hero_preview" class="member-profile-dashboard__hero-preview" alt="${withSeoImageAlt('Profile hero image preview')}" />
+                                                <span class="mpd-media-placeholder" aria-hidden="true">Main Artwork</span>
+                                                <span class="mpd-media-overlay" aria-hidden="true">
+                                                    <span class="mpd-media-overlay__empty">Upload</span>
+                                                    <span class="mpd-media-overlay__filled">Replace</span>
+                                                </span>
+                                            </label>
+                                            <button type="button" class="mpd-media-delete" data-mpd-media-delete="hero">Delete</button>
+                                        </div>
+                                    </div>
 
+                                    <div class="mpd-hero-media-row__profile">
+                                        <h3 class="studio-subheading mpd-media-subhead">Profile Card</h3>
+                                        <p class="studio-muted mpd-media-helper">
+                                          Optional portrait for your profile cards. Falls back to the main artwork when empty.
+                                          Max <strong>1 MB</strong> per file.
+                                        </p>
+                                        <input type="hidden" id="mpd_hero_profile_url" value="" />
+                                        <input type="file" id="mpd_hero_profile_file" class="mpd-file-input-hidden" accept="image/*" />
+                                        <div class="mpd-profile-card-upload mpd-media-upload-surface" data-mpd-media-surface="heroProfile">
+                                            <label for="mpd_hero_profile_file" class="mpd-profile-card-upload__label mpd-media-upload-label" aria-label="Upload profile card image">
+                                                <div class="mpd-profile-card-upload__image">
+                                                    <div class="mpd-media-spinner" id="mpd_hero_profile_spinner" hidden aria-hidden="true"></div>
+                                                    <img id="mpd_hero_profile_preview" class="member-profile-dashboard__hero-preview" alt="${withSeoImageAlt('Profile headshot preview')}" />
+                                                    <span class="mpd-media-placeholder" aria-hidden="true">Profile Card</span>
+                                                    <span class="mpd-media-overlay" aria-hidden="true">
+                                                        <span class="mpd-media-overlay__empty">Upload</span>
+                                                        <span class="mpd-media-overlay__filled">Replace</span>
+                                                    </span>
+                                                </div>
+                                                <div class="mpd-profile-card-upload__body" aria-hidden="true">
+                                                    <span id="mpd_hero_profile_card_name" class="mpd-profile-card-upload__name">Artist Name</span>
+                                                    <span id="mpd_hero_profile_card_discipline" class="mpd-profile-card-upload__discipline">Discipline</span>
+                                                </div>
+                                            </label>
+                                            <button type="button" class="mpd-media-delete" data-mpd-media-delete="heroProfile">Delete</button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <h3 class="studio-subheading mpd-media-subhead">Introductory Work</h3>
+                                <div class="member-profile-dashboard__intro-grid">
+                                    ${introSlotsHtml}
+                                </div>
+                                <div id="mpd_audio_section" class="mpd-audio-section">
                                 <h3 class="studio-subheading mpd-media-subhead">Audio bite</h3>
                                 <p class="studio-muted mpd-media-helper">Upload a short audio bite for journal audio rows.</p>
                                 <input type="hidden" id="mpd_audio_url" value="" />
@@ -1049,13 +1699,7 @@ export function generateSettingsProfileContent() {
                                 <label class="studio-field studio-field--full"><span>Audio title</span>
                                     <input type="text" id="mpd_audio_title" class="studio-input" />
                                 </label>
-
-                                <h3 class="studio-subheading mpd-media-subhead">Intro artwork (max 3)</h3>
-                                <p class="studio-muted mpd-media-helper">
-                                  Supporting images for your profile; same <strong>4:5</strong> ratio works well.
-                                  Max <strong>1 MB</strong> each.
-                                </p>
-                                ${introSlotsHtml}
+                                </div>
                                 ${cardFooter}
                             </section>
                         </div>
@@ -1064,23 +1708,25 @@ export function generateSettingsProfileContent() {
                             <section class="member-profile-dashboard__card" id="mpd-location">
                                 <h2>Status</h2>
                                 <p class="studio-muted">Status and location for the selected language.</p>
-                                <div class="studio-form-grid">
-                                    <label class="studio-field studio-field--full"><span>Status</span>
-                                        <select id="mpd_status" class="studio-input">
-                                            <option value="studio">In studio</option>
-                                            <option value="prep">Preparing for exhibition</option>
-                                            <option value="showing">Show in progress</option>
-                                            <option value="available">Available for commissions</option>
-                                        </select>
-                                    </label>
+                                <div class="studio-form-grid mpd-editorial-grid mpd-editorial-grid--status">
+                                    <div class="studio-field studio-field--full mpd-status-source">
+                                        <span>Status</span>
+                                        <input type="hidden" id="mpd_status" value="studio" />
+                                        <div class="mpd-status-toggle" role="group" aria-label="Artist status">
+                                            <button type="button" class="mpd-status-toggle__btn is-active" data-mpd-status="studio" aria-pressed="true">In studio</button>
+                                            <button type="button" class="mpd-status-toggle__btn" data-mpd-status="prep" aria-pressed="false">Preparing for exhibition</button>
+                                            <button type="button" class="mpd-status-toggle__btn" data-mpd-status="showing" aria-pressed="false">Show in progress</button>
+                                            <button type="button" class="mpd-status-toggle__btn" data-mpd-status="available" aria-pressed="false">Available for commissions</button>
+                                        </div>
+                                    </div>
                                     <label class="studio-field"><span>City</span>
-                                        <input type="text" id="mpd_loc_city" class="studio-input" />
+                                        <input type="text" id="mpd_loc_city" class="studio-input" placeholder="City" />
                                     </label>
                                     <label class="studio-field"><span>State / region</span>
-                                        <input type="text" id="mpd_loc_state" class="studio-input" />
+                                        <input type="text" id="mpd_loc_state" class="studio-input" placeholder="State or region" />
                                     </label>
                                     <label class="studio-field"><span>Country</span>
-                                        <input type="text" id="mpd_loc_country" class="studio-input" />
+                                        <input type="text" id="mpd_loc_country" class="studio-input" placeholder="Country" />
                                     </label>
                                     <label class="studio-field studio-field--full"><span>Display location (override)</span>
                                         <input type="text" id="mpd_loc_display" class="studio-input" placeholder="Optional single line for feeds" />
@@ -1092,54 +1738,66 @@ export function generateSettingsProfileContent() {
 
                         <div class="mpd-panel" id="mpd-panel-story" data-mpd-panel="story" hidden>
                             <section class="member-profile-dashboard__card" id="mpd-story">
-                                <h2>Story &amp; world</h2>
-                                <p class="studio-muted">Separate paragraphs with a blank line where noted. Text is stored in a consistent format for the site.</p>
-                                <div class="mpd-story-world-toolbar">
-                                    <button type="button" class="studio-btn-primary" id="mpd_gen_world_btn">
-                                        Generate from profile info
-                                    </button>
-                                    <label class="mpd-story-world-overwrite-label">
-                                        <input type="checkbox" id="mpd_gen_world_overwrite" />
-                                        Replace existing world fields
-                                    </label>
+                                <div class="mpd-story-public-source">
+                                    <input type="hidden" id="mpd_public_world_source" value="world" />
+                                    <div class="mpd-world-source-toggle" role="group" aria-label="Show on my public profile">
+                                        <button type="button" class="mpd-world-source-toggle__btn is-active" data-mpd-world-source="world" aria-pressed="true">World</button>
+                                        <button type="button" class="mpd-world-source-toggle__btn" data-mpd-world-source="newWorld" aria-pressed="false" disabled aria-disabled="true">New World</button>
+                                    </div>
+                                    <p class="mpd-world-source-note" id="mpd_public_world_source_note">World will display on your profile.</p>
                                 </div>
-                                <div class="studio-form-grid">
-                                    <label class="studio-field studio-field--full"><span>Practice</span>
-                                        <textarea id="mpd_w_practice" class="studio-textarea" rows="3"></textarea>
-                                        <span class="mpd-field-hint">Tell us more about the work you are currently pursuing.</span>
-                                    </label>
-                                    <label class="studio-field studio-field--full"><span>Perspective</span>
-                                        <textarea id="mpd_w_perspective" class="studio-textarea" rows="4" placeholder="Paragraph one&#10;&#10;Paragraph two"></textarea>
-                                        <span class="mpd-field-hint">How you see your practice in relation to the field — use a blank line between paragraphs.</span>
-                                    </label>
-                                    <label class="studio-field studio-field--full"><span>Vision</span>
-                                        <textarea id="mpd_w_vision" class="studio-textarea" rows="4"></textarea>
-                                        <span class="mpd-field-hint">Where you want the work to go — aims, horizons, and what you are building toward.</span>
-                                    </label>
-                                    <label class="studio-field studio-field--full"><span>Constructing</span>
-                                        <textarea id="mpd_w_constructing" class="studio-textarea" rows="3"></textarea>
-                                        <span class="mpd-field-hint">Materials, process, and what you are actively making right now.</span>
-                                    </label>
-                                    <label class="studio-field studio-field--full"><span>Context</span>
-                                        <textarea id="mpd_w_context" class="studio-textarea" rows="3"></textarea>
-                                        <span class="mpd-field-hint">Place, community, or history that situates the work.</span>
-                                    </label>
-                                    <label class="studio-field studio-field--full"><span>Quote</span>
-                                        <input type="text" id="mpd_w_quote" class="studio-input" />
-                                        <span class="mpd-field-hint">A single line visitors can read at a glance — optional, but memorable when it lands.</span>
-                                    </label>
+                                <h2>Story &amp; World</h2>
+                                <div class="mpd-story-dual-grid">
+                                    <div class="mpd-story-field-dual">
+                                        <div class="mpd-story-field-meta">
+                                            <span class="mpd-story-field-label">Practice</span>
+                                            <span class="mpd-field-hint">Tell us more about the work you are currently pursuing.</span>
+                                        </div>
+                                        <textarea id="mpd_w_practice" class="studio-textarea mpd-story-input" rows="2" placeholder="Describe what you are working on..."></textarea>
+                                        <button type="button" class="mpd-story-edit-btn" data-mpd-edit-target="mpd_w_practice" aria-label="Edit practice">${storyEditIconHtml}</button>
+                                    </div>
+                                    <div class="mpd-story-field-dual">
+                                        <div class="mpd-story-field-meta">
+                                            <span class="mpd-story-field-label">Perspective</span>
+                                            <span class="mpd-field-hint">How you see your practice in relation to the field — use a blank line between paragraphs.</span>
+                                        </div>
+                                        <textarea id="mpd_w_perspective" class="studio-textarea mpd-story-input" rows="3" placeholder="Share your point of view...&#10;&#10;Add another thought here..."></textarea>
+                                        <button type="button" class="mpd-story-edit-btn" data-mpd-edit-target="mpd_w_perspective" aria-label="Edit perspective">${storyEditIconHtml}</button>
+                                    </div>
+                                    <div class="mpd-story-field-dual">
+                                        <div class="mpd-story-field-meta">
+                                            <span class="mpd-story-field-label">Vision</span>
+                                            <span class="mpd-field-hint">Where you want the work to go — aims, horizons, and what you are building toward.</span>
+                                        </div>
+                                        <textarea id="mpd_w_vision" class="studio-textarea mpd-story-input" rows="3" placeholder="Where do you want the work to go?"></textarea>
+                                        <button type="button" class="mpd-story-edit-btn" data-mpd-edit-target="mpd_w_vision" aria-label="Edit vision">${storyEditIconHtml}</button>
+                                    </div>
+                                    <div class="mpd-story-field-dual">
+                                        <div class="mpd-story-field-meta">
+                                            <span class="mpd-story-field-label">Constructing</span>
+                                            <span class="mpd-field-hint">Materials, process, and what you are actively making right now.</span>
+                                        </div>
+                                        <textarea id="mpd_w_constructing" class="studio-textarea mpd-story-input" rows="2" placeholder="Materials, process, current experiments..."></textarea>
+                                        <button type="button" class="mpd-story-edit-btn" data-mpd-edit-target="mpd_w_constructing" aria-label="Edit constructing">${storyEditIconHtml}</button>
+                                    </div>
+                                    <div class="mpd-story-field-dual">
+                                        <div class="mpd-story-field-meta">
+                                            <span class="mpd-story-field-label">Context</span>
+                                            <span class="mpd-field-hint">Place, community, or history that situates the work.</span>
+                                        </div>
+                                        <textarea id="mpd_w_context" class="studio-textarea mpd-story-input" rows="2" placeholder="Place, community, history, or influences..."></textarea>
+                                        <button type="button" class="mpd-story-edit-btn" data-mpd-edit-target="mpd_w_context" aria-label="Edit context">${storyEditIconHtml}</button>
+                                    </div>
+                                    <div class="mpd-story-field-dual">
+                                        <div class="mpd-story-field-meta">
+                                            <span class="mpd-story-field-label">Quote</span>
+                                            <span class="mpd-field-hint">A single line visitors can read at a glance — optional, but memorable when it lands.</span>
+                                        </div>
+                                        <input type="text" id="mpd_w_quote" class="studio-input mpd-story-input" placeholder="A short line visitors can remember..." />
+                                        <button type="button" class="mpd-story-edit-btn" data-mpd-edit-target="mpd_w_quote" aria-label="Edit quote">${storyEditIconHtml}</button>
+                                    </div>
                                 </div>
-                                ${cardFooter}
-                            </section>
-                        </div>
-
-                        <div class="mpd-panel" id="mpd-panel-links" data-mpd-panel="links" hidden>
-                            <section class="member-profile-dashboard__card" id="mpd-links-card">
-                                <h2>Digital Footprint</h2>
-                                <p class="studio-muted">Website, social, and other links that shape how people find you beyond this site.</p>
-                                <div id="mpd-links"></div>
-                                <button type="button" class="studio-btn-ghost" id="mpd_links_add">Add link</button>
-                                ${cardFooter}
+                                ${storyCardFooter}
                             </section>
                         </div>
 
@@ -1272,6 +1930,42 @@ export function generateSettingsProfileContent() {
                     </div>
                 </div>
                 <div
+                    id="mpdSaveChoiceModal"
+                    class="profile-gallery-access-modal mpd-save-choice-modal"
+                    hidden
+                    aria-hidden="true"
+                >
+                    <div class="profile-gallery-access-modal__scrim" aria-hidden="true"></div>
+                    <div
+                        class="profile-gallery-access-modal__panel mpd-save-choice-modal__panel"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="mpdSaveChoiceTitle"
+                    >
+                        <h2 id="mpdSaveChoiceTitle" class="profile-gallery-access-modal__title">Save profile</h2>
+                        <div class="mpd-save-choice-modal__body">
+                            <p>
+                                Choose how you want to save this update. Translation creates English and Japanese profile copy
+                                during save, so it may take a little longer.
+                            </p>
+                            <p>
+                                Just save is faster and copies the visible text into both profile languages without translation.
+                            </p>
+                        </div>
+                        <div class="mpd-save-choice-modal__actions">
+                            <button type="button" class="studio-btn-primary" id="mpdSaveChoiceTranslate">
+                                Translate and save
+                            </button>
+                            <button type="button" class="mpd-membership-cancel-outline" id="mpdSaveChoiceJustSave">
+                                Just save
+                            </button>
+                            <button type="button" class="profile-gallery-access-modal__close" id="mpdSaveChoiceCancel">
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div
                     id="mpdMembershipCancelModal"
                     class="profile-gallery-access-modal mpd-membership-cancel-modal"
                     hidden
@@ -1338,6 +2032,8 @@ function snapshotState(locales, active, heroUrl, visibility, profileMedia = {}) 
 
 /** @type {((e: BeforeUnloadEvent) => void) | null} */
 let _mpdBeforeUnloadHandler = null;
+/** @type {((event: Event) => void) | null} */
+let _mpdSaveChoiceHandler = null;
 
 export default function initSettingsProfile() {
   document.querySelectorAll("#mpdResidencyComingSoonModal").forEach((m) => {
@@ -1348,11 +2044,16 @@ export default function initSettingsProfile() {
     const sm = document.getElementById("settingsMain");
     if (sm && !sm.contains(m)) m.remove();
   });
+  document.querySelectorAll("#mpdSaveChoiceModal").forEach((m) => {
+    const sm = document.getElementById("settingsMain");
+    if (sm && !sm.contains(m)) m.remove();
+  });
   wireMpdResidencyComingSoonModal();
+  wireMpdSaveChoiceModal();
   wireMpdMembershipCancelModal();
 
-  /** @type {'en'|'ja'} */
-  let activeLocale = "en";
+  /** @type {'en'|'ja'} Internal canonical form locale; public locales are generated on save. */
+  const activeLocale = PROFILE_EDIT_LOCALE;
   /** @type {Record<string, unknown> | null} */
   let localesState = null;
   let heroImageUrl = "";
@@ -1365,12 +2066,105 @@ export default function initSettingsProfile() {
   let profileSlug = "";
   /** @type {string} */
   let currentArtistId = "";
+  let profileSaveInFlight = false;
+  let mediaUploadRevision = 0;
+  let baselineMediaUploadRevision = 0;
 
   const statusEl = document.getElementById("settingsProfileStatus");
   const formWrap = document.getElementById("settingsProfileFormWrap");
+  const initialLoadingEl = document.getElementById("settingsProfileInitialLoading");
 
   const setStatus = (t) => {
     if (statusEl) statusEl.textContent = t || "";
+  };
+
+  const setInitialProfileLoading = (visible) => {
+    if (!initialLoadingEl) return;
+    initialLoadingEl.hidden = !visible;
+    initialLoadingEl.setAttribute("aria-hidden", visible ? "false" : "true");
+  };
+
+  /** @type {Map<string, { operation: string; detail: string; pendingMessage: string }>} */
+  const activeMpdOperations = new Map();
+
+  const syncMpdPendingControls = () => {
+    const busy = activeMpdOperations.size > 0;
+    document.querySelectorAll(".mpd-section-save").forEach((el) => {
+      if (!(el instanceof HTMLButtonElement)) return;
+      if (busy) {
+        el.setAttribute("aria-busy", "true");
+        el.disabled = true;
+      } else {
+        el.removeAttribute("aria-busy");
+        el.disabled = false;
+      }
+    });
+  };
+
+  const firstActiveMpdOperation = () =>
+    activeMpdOperations.values().next().value || null;
+
+  const reportActiveMpdOperation = () => {
+    const active = firstActiveMpdOperation();
+    if (!active) return false;
+    const msg =
+      active.pendingMessage ||
+      `Still ${String(active.detail || "working").toLowerCase()}...`;
+    setStatus(msg);
+    dispatchProfileSaveStatus("saving", msg, {
+      operation: active.operation,
+      detail: active.detail,
+    });
+    return true;
+  };
+
+  /**
+   * @param {string} key
+   * @param {{ operation: string; detail: string; message?: string; pendingMessage?: string }} config
+   */
+  const beginMpdOperation = (key, config) => {
+    if (activeMpdOperations.get(key) || reportActiveMpdOperation()) return false;
+    const op = {
+      operation: config.operation,
+      detail: config.detail,
+      pendingMessage:
+        config.pendingMessage ||
+        `Still ${String(config.detail || "working").toLowerCase()}...`,
+    };
+    activeMpdOperations.set(key, op);
+    syncMpdPendingControls();
+    const msg = config.message || config.detail || config.operation || "Working";
+    setStatus(msg);
+    dispatchProfileSaveStatus("saving", msg, {
+      operation: op.operation,
+      detail: op.detail,
+    });
+    return true;
+  };
+
+  /**
+   * @param {string} key
+   * @param {'idle'|'saved'|'error'} state
+   * @param {string} [message]
+   */
+  const finishMpdOperation = (key, state = "idle", message = "") => {
+    const op = activeMpdOperations.get(key);
+    activeMpdOperations.delete(key);
+    syncMpdPendingControls();
+    if (state === "idle") {
+      if (!activeMpdOperations.size && message) setStatus(message);
+      return;
+    }
+    const msg =
+      message ||
+      (state === "saved"
+        ? `${op?.operation || "Profile"} saved`
+        : `${op?.operation || "Operation"} failed`);
+    setStatus(msg);
+    dispatchProfileSaveStatus(state, msg, {
+      operation: op?.operation || "",
+      detail: op?.detail || "",
+    });
   };
 
   const setAdminBypassVisible = (visible) => {
@@ -1387,45 +2181,64 @@ export default function initSettingsProfile() {
 
   const bootstrapAdminPreviewForm = () => {
     localesState = { en: {}, ja: {} };
-    activeLocale = "en";
     heroImageUrl = "";
     heroProfileImageUrl = "";
     profileAudioUrl = "";
     profileSlug = "";
     currentArtistId = "";
+    mpdBackendRosterVisibility = "inactive";
     fillFormFromLocales(
       /** @type {Record<string, unknown>} */ (localesState),
       activeLocale,
     );
-    setVal("mpd_profile_visibility", "inactive");
+    setMpdVisibilityToggle("inactive");
     setVal("mpd_hero_url", "");
     setVal("mpd_hero_profile_url", "");
     setVal("mpd_audio_url", "");
     setVal("mpd_audio_title", "");
+    updateHeroPreview();
+    updateHeroProfilePreview();
     refreshBaseline();
+    setInitialProfileLoading(false);
     if (formWrap) formWrap.removeAttribute("hidden");
   };
 
-  let worldGenRunning = false;
-
   /**
-   * After-save: fill empty world fields only (live IC).
+   * After-save: fill empty New World only when nothing is there yet (live IC).
+   * @param {Record<string, unknown>} mergedSaved
+   * @returns {Promise<boolean>} false when generation failed after the profile itself saved.
    */
-  const runMemberWorldGenerationAfterSave = async () => {
+  const runMemberWorldGenerationAfterSave = async (mergedSaved) => {
     if (getDataSource() === "test") {
       setStatus("Saved.");
-      return;
+      return true;
     }
-    setStatus("Generating story & world…");
+    if (!needsInitialWorldNew(mergedSaved)) {
+      setStatus("Saved.");
+      return true;
+    }
     try {
       const rec = await getMyArtistRecord();
       const row = artistRowFromMyArtistRecord(rec);
       if (!row) throw new Error("Could not load profile for world generation.");
+      if (!hasUsableWorldLlmSourceInput(row)) {
+        setStatus("Saved.");
+        return true;
+      }
+      if (
+        !beginMpdOperation("new-world-generation", {
+          operation: "New World",
+          detail: "Generating New World",
+          message: "Generating New World…",
+          pendingMessage: "Still generating New World...",
+        })
+      ) {
+        return false;
+      }
       await generateAndUpdateMyArtistWorldFromBio(row, "fillEmpty");
       const fresh = await getMyArtistRecord();
       if (!fresh) throw new Error("Could not reload profile after world generation.");
-      const ljRaw = fresh.locales_json ?? fresh.localesJson;
-      const json = typeof ljRaw === "string" ? ljRaw : "";
+      const json = mpdLocalesJsonFromRecord(fresh);
       try {
         localesState = json ? JSON.parse(json) : { en: {}, ja: {} };
       } catch {
@@ -1438,60 +2251,27 @@ export default function initSettingsProfile() {
         activeLocale,
       );
       refreshBaseline();
+      finishMpdOperation("new-world-generation", "idle", "New World generated.");
       setStatus("Saved.");
+      return true;
     } catch (e) {
-      setStatus(
-        e instanceof Error ? e.message : String(e),
-      );
-    }
-  };
-
-  /**
-   * Story panel: manual generate (optional overwrite).
-   */
-  const runMemberWorldFromToolbar = async () => {
-    if (getDataSource() === "test") {
-      setStatus(
-        "World generation needs Live data (IC backend LLM). Switch data source or use a deployed build.",
-      );
-      return;
-    }
-    if (worldGenRunning) return;
-    const btn = document.getElementById("mpd_gen_world_btn");
-    const ov = /** @type {HTMLInputElement | null} */ (
-      document.getElementById("mpd_gen_world_overwrite")
-    );
-    worldGenRunning = true;
-    if (btn) btn.disabled = true;
-    setStatus("Generating story & world…");
-    try {
-      const rec = await getMyArtistRecord();
-      const row = artistRowFromMyArtistRecord(rec);
-      if (!row) throw new Error("Could not load profile for world generation.");
-      const mode = ov?.checked ? "overwrite" : "fillEmpty";
-      await generateAndUpdateMyArtistWorldFromBio(row, mode);
-      const fresh = await getMyArtistRecord();
-      if (!fresh) throw new Error("Could not reload profile after world generation.");
-      const ljRaw = fresh.locales_json ?? fresh.localesJson;
-      const json = typeof ljRaw === "string" ? ljRaw : "";
-      try {
-        localesState = json ? JSON.parse(json) : { en: {}, ja: {} };
-      } catch {
-        localesState = { en: {}, ja: {} };
+      console.error("New World generation failed after profile save.", e);
+      const friendly =
+        "Couldn’t generate New World. Your profile was saved with World. Please try saving again.";
+      if (localesState && typeof localesState === "object") {
+        /** @type {Record<string, unknown>} */ (localesState).publicWorldSource = "world";
       }
-      if (!localesState || typeof localesState !== "object")
-        localesState = { en: {}, ja: {} };
-      fillFormFromLocales(
-        /** @type {Record<string, unknown>} */ (localesState),
+      applyMpdStoryWorldDisplay(
+        /** @type {Record<string, unknown>} */ (localesState || mergedSaved),
         activeLocale,
+        "world",
       );
-      refreshBaseline();
-      setStatus("Story & world updated.");
-    } catch (e) {
-      setStatus(e instanceof Error ? e.message : String(e));
+      finishMpdOperation("new-world-generation", "error", friendly);
+      return false;
     } finally {
-      worldGenRunning = false;
-      if (btn) btn.disabled = false;
+      if (activeMpdOperations.has("new-world-generation")) {
+        finishMpdOperation("new-world-generation", "idle");
+      }
     }
   };
 
@@ -1752,7 +2532,7 @@ export default function initSettingsProfile() {
 
   const validMpdPanels = () => {
     /** @type {string[]} */
-    const keys = ["overview", "location", "story", "links", "programs", "membership"];
+    const keys = ["overview", "location", "story", "programs", "membership"];
     if (DEV_MODE) keys.push("dev");
     return keys;
   };
@@ -1813,7 +2593,7 @@ export default function initSettingsProfile() {
       "mpd-media": "overview",
       "mpd-basics": "location",
       "mpd-story": "story",
-      "mpd-links": "links",
+      "mpd-links": "overview",
       "mpd-seo": "overview",
       "mpd-programs": "programs",
       "mpd-membership": "membership",
@@ -1826,39 +2606,76 @@ export default function initSettingsProfile() {
 
   const isDirty = () => {
     if (!localesState) return false;
-    const merged = readLocalesFromDom(localesState, activeLocale, getVal);
+    const draft = readMpdProfileDraftForSave();
     const cur = snapshotState(
-      merged,
+      { draft },
       activeLocale,
       getVal("mpd_hero_url").trim(),
       normalizeArtistRosterVisibility(getVal("mpd_profile_visibility").trim() || "public"),
       {
-        profileQuote: getVal("mpd_profile_quote").trim(),
+        profileQuote: getMpdProfileQuoteForSave(),
         audioUrl: getVal("mpd_audio_url").trim(),
         audioTitle: getVal("mpd_audio_title").trim(),
         heroProfileUrl: getVal("mpd_hero_profile_url").trim(),
       },
     );
-    return cur !== baselineSnapshot;
+    return cur !== baselineSnapshot || mediaUploadRevision !== baselineMediaUploadRevision;
+  };
+
+  const shouldSkipProfileReload = () => {
+    if (!localesState) return false;
+    if (profileSaveInFlight) return true;
+    const wrapVisible = formWrap && !formWrap.hasAttribute("hidden");
+    return Boolean(wrapVisible && isDirty());
   };
 
   const refreshBaseline = () => {
     if (!localesState) return;
-    const merged = readLocalesFromDom(localesState, activeLocale, getVal);
+    const draft = readMpdProfileDraftForSave();
     heroImageUrl = getVal("mpd_hero_url").trim();
     heroProfileImageUrl = getVal("mpd_hero_profile_url").trim();
     const vis = normalizeArtistRosterVisibility(
       getVal("mpd_profile_visibility").trim() || "public",
     );
-    baselineSnapshot = snapshotState(merged, activeLocale, heroImageUrl, vis, {
-      profileQuote: getVal("mpd_profile_quote").trim(),
+    baselineSnapshot = snapshotState({ draft }, activeLocale, heroImageUrl, vis, {
+      profileQuote: getMpdProfileQuoteForSave(),
       audioUrl: getVal("mpd_audio_url").trim(),
       audioTitle: getVal("mpd_audio_title").trim(),
       heroProfileUrl: heroProfileImageUrl,
     });
+    baselineMediaUploadRevision = mediaUploadRevision;
   };
 
-  const saveProfileFromDom = async () => {
+  const setStoryPanelAsyncBusy = (busy) => {
+    document.querySelectorAll(".mpd-section-save").forEach((el) => {
+      if (!(el instanceof HTMLButtonElement)) return;
+      if (busy) {
+        el.setAttribute("aria-busy", "true");
+        el.disabled = true;
+      } else {
+        if (activeMpdOperations.size > 0) return;
+        el.removeAttribute("aria-busy");
+        el.disabled = false;
+      }
+    });
+  };
+
+  const flashMpdStorySaveOk = () => {
+    const s = document.getElementById("mpd_story_save");
+    if (!s) return;
+    s.classList.add("mp--async-ok");
+    window.setTimeout(() => {
+      s.classList.remove("mp--async-ok");
+    }, 1400);
+  };
+
+  /** @type {Element | undefined} */
+  let pendingProfileSaveButton;
+
+  /**
+   * @param {Element | undefined} [fromBtn]
+   */
+  const requestProfileSave = (fromBtn) => {
     if (adminPreviewBypassEnabled) {
       setStatus(
         "Admin preview bypass is active. This mode is view/edit preview only and cannot save to a linked profile.",
@@ -1866,22 +2683,53 @@ export default function initSettingsProfile() {
       return;
     }
     if (!localesState) return;
-    setStatus("Saving…");
+    if (reportActiveMpdOperation()) return;
+    pendingProfileSaveButton = fromBtn;
+    openMpdSaveChoiceModal();
+  };
+
+  /**
+   * @param {Element | undefined} [fromBtn]
+   * @param {{ translate?: boolean }} [options]
+   */
+  const saveProfileFromDom = async (fromBtn, options = {}) => {
+    if (adminPreviewBypassEnabled) {
+      setStatus(
+        "Admin preview bypass is active. This mode is view/edit preview only and cannot save to a linked profile.",
+      );
+      return;
+    }
+    if (!localesState) return;
+    const isStorySave =
+      fromBtn instanceof HTMLElement && fromBtn.id === "mpd_story_save";
+    const translate = options.translate !== false;
+    if (
+      !beginMpdOperation("profile-save", {
+        operation: "Profile",
+        detail: translate ? "Translating profile copy" : "Saving without translation",
+        message: translate ? "Saving profile with translation…" : "Saving profile without translation…",
+        pendingMessage: "Still saving profile...",
+      })
+    ) {
+      return;
+    }
+    /** @type {boolean} */
+    let willAutoGen = false;
+    profileSaveInFlight = true;
+    if (isStorySave) setStoryPanelAsyncBusy(true);
     try {
       const recBeforeSave = await getMyArtistRecord();
       const pBefore = recBeforeSave?.profile;
       const priorVis =
         pBefore && typeof pBefore === "object"
           ? normalizeArtistRosterVisibility(/** @type {Record<string, unknown>} */(pBefore).visibility)
-          : "inactive";
-      localesState = readLocalesFromDom(
+          : mpdBackendRosterVisibility;
+      const draft = readMpdProfileDraftForSave();
+      localesState = await buildSmartProfileLocales(
         /** @type {Record<string, unknown>} */ (localesState),
-        activeLocale,
+        draft,
         getVal,
-      );
-      localesState = syncIntroGalleryToAllLocales(
-        /** @type {Record<string, unknown>} */ (localesState),
-        activeLocale,
+        { translate },
       );
       const merged = normalizeLocalesWorldForStorage(
         /** @type {Record<string, unknown>} */ (localesState),
@@ -1890,26 +2738,36 @@ export default function initSettingsProfile() {
       const ts = new Date().toISOString();
       const heroUrl = getVal("mpd_hero_url").trim();
       const heroProfileUrl = getVal("mpd_hero_profile_url").trim();
-      const profileQuote = getVal("mpd_profile_quote").trim();
+      const profileQuote = getMpdProfileQuoteForSave();
       const audioUrl = getVal("mpd_audio_url").trim();
       const audioTitle = getVal("mpd_audio_title").trim();
+      const optionalSaveWarnings = [];
       await updateMyArtistLocalesJson(JSON.stringify(merged), ts);
       await updateMyArtistProfilePatch(heroUrl, ts);
-      await updateMyArtistHeroProfileImagePatch(heroProfileUrl, ts);
-      await updateMyArtistQuoteAudioPatch(
-        { quote: profileQuote, audioUrl, audioTitle },
-        ts,
-      );
+      try {
+        await updateMyArtistHeroProfileImagePatch(heroProfileUrl, ts);
+      } catch (mediaErr) {
+        optionalSaveWarnings.push(
+          `Profile image metadata was not saved: ${mediaErr instanceof Error ? mediaErr.message : String(mediaErr)}`,
+        );
+      }
+      try {
+        await updateMyArtistQuoteAudioPatch(
+          { quote: profileQuote, audioUrl, audioTitle },
+          ts,
+        );
+      } catch (mediaErr) {
+        optionalSaveWarnings.push(
+          `Quote/audio metadata was not saved: ${mediaErr instanceof Error ? mediaErr.message : String(mediaErr)}`,
+        );
+      }
       const visPicked = normalizeArtistRosterVisibility(
         getVal("mpd_profile_visibility").trim() || "public",
       );
-      const vis = priorVis === "inactive" ? "pending" : visPicked;
+      const vis = visPicked === "public" && priorVis !== "public" ? "pending" : visPicked;
       await updateMyArtistVisibility(vis, ts);
-      if (vis !== visPicked && visPicked === "inactive") {
-        setVal("mpd_profile_visibility", "pending");
-      } else {
-        setVal("mpd_profile_visibility", vis);
-      }
+      mpdBackendRosterVisibility = vis;
+      setMpdVisibilityToggle(vis);
       try {
         window.dispatchEvent(
           new CustomEvent("fusion-roster-visibility-updated", { detail: { visibility: vis } }),
@@ -1938,27 +2796,53 @@ export default function initSettingsProfile() {
           if (side) side.textContent = finalSlug ? `/${finalSlug}` : "—";
         } catch (slugErr) {
           slugSaveFailed = true;
-          setStatus(
-            `${slugErr instanceof Error ? slugErr.message : String(slugErr)} (Other changes were saved.)`,
-          );
+          const slugMessage = `${slugErr instanceof Error ? slugErr.message : String(slugErr)} (Other changes were saved.)`;
+          finishMpdOperation("profile-save", "error", slugMessage);
         }
       }
+      willAutoGen =
+        getDataSource() !== "test" &&
+        !slugSaveFailed &&
+        needsInitialWorldNew(merged);
+      if (willAutoGen && !isStorySave) setStoryPanelAsyncBusy(true);
       refreshBaseline();
       if (!slugSaveFailed) {
         posthog.capture("profile_settings_saved");
-        await runMemberWorldGenerationAfterSave();
+        finishMpdOperation("profile-save", "idle", "Profile saved.");
+        const worldGenerationOk = await runMemberWorldGenerationAfterSave(merged);
+        if (optionalSaveWarnings.length && (!statusEl || statusEl.textContent === "Saved.")) {
+          setStatus(`Saved. ${optionalSaveWarnings.join(" ")}`);
+        }
+        if (worldGenerationOk) {
+          dispatchProfileSaveStatus("saved", "Profile saved", {
+            operation: "Profile",
+            detail: "All changes saved",
+          });
+          if (isStorySave) flashMpdStorySaveOk();
+        }
       }
     } catch (e) {
-      setStatus(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      finishMpdOperation("profile-save", "error", message);
+    } finally {
+      profileSaveInFlight = false;
+      if (activeMpdOperations.has("profile-save")) {
+        finishMpdOperation("profile-save", "idle");
+      }
+      if (isStorySave || willAutoGen) setStoryPanelAsyncBusy(false);
     }
   };
 
-  const updateHeroPreview = () => {
+  const updateHeroPreview = (forceFresh = false) => {
     const u = getVal("mpd_hero_url").trim();
     const heroPrev = /** @type {HTMLImageElement | null} */ (
       document.getElementById("mpd_hero_preview")
     );
     if (!heroPrev) return;
+    setMpdMediaSurfaceState("hero", {
+      hasMedia: Boolean(u),
+      hasPreview: Boolean(u),
+    });
     if (!u) {
       setHeroSpinnerVisible(false);
       heroPrev.removeAttribute("src");
@@ -1978,7 +2862,7 @@ export default function initSettingsProfile() {
       heroPrev.onload = null;
       heroPrev.onerror = null;
     };
-    heroPrev.src = u;
+    heroPrev.src = forceFresh ? cacheBustMpdPreviewUrl(u) : u;
     if (heroPrev.complete && heroPrev.naturalHeight > 0) {
       setHeroSpinnerVisible(false);
       heroPrev.style.display = "block";
@@ -1987,13 +2871,20 @@ export default function initSettingsProfile() {
     }
   };
 
-  const updateHeroProfilePreview = () => {
+  const updateHeroProfilePreview = (forceFresh = false) => {
     const u = getVal("mpd_hero_profile_url").trim();
+    const fallbackUrl = getVal("mpd_hero_url").trim();
+    const displayUrl = u || fallbackUrl;
     const prev = /** @type {HTMLImageElement | null} */ (
       document.getElementById("mpd_hero_profile_preview")
     );
+    updateHeroProfileCardCopy();
     if (!prev) return;
-    if (!u) {
+    setMpdMediaSurfaceState("heroProfile", {
+      hasMedia: Boolean(u),
+      hasPreview: Boolean(displayUrl),
+    });
+    if (!displayUrl) {
       setHeroProfileSpinnerVisible(false);
       prev.removeAttribute("src");
       prev.style.display = "none";
@@ -2012,12 +2903,54 @@ export default function initSettingsProfile() {
       prev.onload = null;
       prev.onerror = null;
     };
-    prev.src = u;
+    prev.src = forceFresh ? cacheBustMpdPreviewUrl(displayUrl) : displayUrl;
     if (prev.complete && prev.naturalHeight > 0) {
       setHeroProfileSpinnerVisible(false);
       prev.style.display = "block";
       prev.onload = null;
       prev.onerror = null;
+    }
+  };
+
+  /** @param {string} key */
+  const clearMpdMediaSlot = (key) => {
+    if (key === "hero") {
+      setVal("mpd_hero_url", "");
+      heroImageUrl = "";
+      mediaUploadRevision += 1;
+      updateHeroPreview();
+      updateHeroProfilePreview();
+      setStatus("Hero image removed. Save to apply this change.");
+      return;
+    }
+    if (key === "heroProfile") {
+      setVal("mpd_hero_profile_url", "");
+      heroProfileImageUrl = "";
+      mediaUploadRevision += 1;
+      updateHeroProfilePreview();
+      setStatus("Profile image removed. Save to apply this change.");
+      return;
+    }
+    const introMatch = /^intro-(\d+)$/.exec(key);
+    if (introMatch) {
+      const i = Number(introMatch[1]);
+      if (!Number.isInteger(i) || i < 0 || i > 2) return;
+      setVal(`mpd_intro_${i}_src`, "");
+      setVal(`mpd_intro_${i}_alt`, "");
+      setVal(`mpd_intro_${i}_caption`, "");
+      mediaUploadRevision += 1;
+      setIntroSpinnerVisible(i, false);
+      setMpdMediaSurfaceState(`intro-${i}`, { hasMedia: false, hasPreview: false });
+      const thumb = /** @type {HTMLImageElement | null} */ (
+        document.getElementById(`mpd_intro_${i}_thumb`)
+      );
+      if (thumb) {
+        thumb.removeAttribute("src");
+        thumb.style.display = "none";
+        thumb.onload = null;
+        thumb.onerror = null;
+      }
+      setStatus("Introductory work removed. Save to apply this change.");
     }
   };
 
@@ -2038,15 +2971,30 @@ export default function initSettingsProfile() {
         /** @type {Element} */ (e.target).closest?.(".mpd-section-save");
       if (saveBtn && rootEl.contains(saveBtn)) {
         e.preventDefault();
-        void saveProfileFromDom();
+        requestProfileSave(saveBtn);
         return;
       }
-      const genWorldBtn = /** @type {Element | null} */ (
-        e.target && /** @type {Element} */ (e.target).closest?.("#mpd_gen_world_btn")
-      );
-      if (genWorldBtn && rootEl.contains(genWorldBtn)) {
+      const mediaDeleteBtn =
+        e.target &&
+        /** @type {Element} */ (e.target).closest?.("[data-mpd-media-delete]");
+      if (mediaDeleteBtn && rootEl.contains(mediaDeleteBtn)) {
         e.preventDefault();
-        void runMemberWorldFromToolbar();
+        e.stopPropagation();
+        clearMpdMediaSlot(mediaDeleteBtn.getAttribute("data-mpd-media-delete") || "");
+        return;
+      }
+      const storyEditBtn =
+        e.target &&
+        /** @type {Element} */ (e.target).closest?.("[data-mpd-edit-target]");
+      if (storyEditBtn && rootEl.contains(storyEditBtn)) {
+        e.preventDefault();
+        const targetId = storyEditBtn.getAttribute("data-mpd-edit-target") || "";
+        const input = document.getElementById(targetId);
+        if (input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement) {
+          input.focus();
+          const end = input.value.length;
+          input.setSelectionRange(end, end);
+        }
         return;
       }
       const t = e.target;
@@ -2059,6 +3007,33 @@ export default function initSettingsProfile() {
         }
         const path = btn.dataset.programPath || MPD_APPLY_PROGRAM_PATH;
         navigate(path.startsWith("/") ? path : `/${path}`);
+        return;
+      }
+      const worldSourceBtn =
+        e.target &&
+        /** @type {Element} */ (e.target).closest?.("[data-mpd-world-source]");
+      if (worldSourceBtn && rootEl.contains(worldSourceBtn)) {
+        e.preventDefault();
+        if (!localesState) return;
+        applyMpdStoryWorldDisplay(
+          /** @type {Record<string, unknown>} */ (localesState),
+          activeLocale,
+          worldSourceBtn.getAttribute("data-mpd-world-source"),
+        );
+        return;
+      }
+      const statusBtn =
+        e.target && /** @type {Element} */ (e.target).closest?.("[data-mpd-status]");
+      if (statusBtn && rootEl.contains(statusBtn)) {
+        e.preventDefault();
+        setMpdStatusToggle(statusBtn.getAttribute("data-mpd-status"));
+        return;
+      }
+      const visibilityBtn =
+        e.target && /** @type {Element} */ (e.target).closest?.("[data-mpd-visibility]");
+      if (visibilityBtn && rootEl.contains(visibilityBtn)) {
+        e.preventDefault();
+        setMpdVisibilityToggle(visibilityBtn.getAttribute("data-mpd-visibility"));
         return;
       }
       if (t && "id" in t && t.id === "mpd_links_add") {
@@ -2079,9 +3054,20 @@ export default function initSettingsProfile() {
           t.value = "";
           return;
         }
+        if (
+          !beginMpdOperation("hero-upload", {
+            operation: "Main artwork",
+            detail: "Uploading main artwork",
+            message: "Uploading main artwork…",
+            pendingMessage: "Still uploading main artwork...",
+          })
+        ) {
+          t.value = "";
+          return;
+        }
         setHeroSpinnerVisible(true);
+        showMpdUploadOverlay("Uploading main artwork...");
         try {
-          setStatus("Uploading hero…");
           const url = await uploadBlobToS3(f, null, {
             area: "account/profile",
             entityType: "artist",
@@ -2090,11 +3076,26 @@ export default function initSettingsProfile() {
           });
           setVal("mpd_hero_url", url);
           heroImageUrl = url;
-          updateHeroPreview();
-          setStatus("");
+          mediaUploadRevision += 1;
+          updateHeroPreview(true);
+          updateHeroProfilePreview(true);
+          finishMpdOperation(
+            "hero-upload",
+            "saved",
+            "Main artwork uploaded. Save to apply this change.",
+          );
         } catch (err) {
           setHeroSpinnerVisible(false);
-          setStatus(err instanceof Error ? err.message : String(err));
+          finishMpdOperation(
+            "hero-upload",
+            "error",
+            err instanceof Error ? err.message : String(err),
+          );
+        } finally {
+          if (activeMpdOperations.has("hero-upload")) {
+            finishMpdOperation("hero-upload", "idle");
+          }
+          hideMpdUploadOverlay();
         }
         t.value = "";
         return;
@@ -2108,9 +3109,20 @@ export default function initSettingsProfile() {
           t.value = "";
           return;
         }
+        if (
+          !beginMpdOperation("hero-profile-upload", {
+            operation: "Profile card",
+            detail: "Uploading profile card",
+            message: "Uploading profile card…",
+            pendingMessage: "Still uploading profile card...",
+          })
+        ) {
+          t.value = "";
+          return;
+        }
         setHeroProfileSpinnerVisible(true);
+        showMpdUploadOverlay("Uploading profile card...");
         try {
-          setStatus("Uploading profile image…");
           const url = await uploadBlobToS3(f, null, {
             area: "account/profile",
             entityType: "artist",
@@ -2119,19 +3131,43 @@ export default function initSettingsProfile() {
           });
           setVal("mpd_hero_profile_url", url);
           heroProfileImageUrl = url;
-          updateHeroProfilePreview();
-          setStatus("");
+          mediaUploadRevision += 1;
+          updateHeroProfilePreview(true);
+          finishMpdOperation(
+            "hero-profile-upload",
+            "saved",
+            "Profile card uploaded. Save to apply this change.",
+          );
         } catch (err) {
           setHeroProfileSpinnerVisible(false);
-          setStatus(err instanceof Error ? err.message : String(err));
+          finishMpdOperation(
+            "hero-profile-upload",
+            "error",
+            err instanceof Error ? err.message : String(err),
+          );
+        } finally {
+          if (activeMpdOperations.has("hero-profile-upload")) {
+            finishMpdOperation("hero-profile-upload", "idle");
+          }
+          hideMpdUploadOverlay();
         }
         t.value = "";
         return;
       }
       if (t.id === "mpd_audio_file" && t.files?.[0]) {
         const f = t.files[0];
+        if (
+          !beginMpdOperation("audio-upload", {
+            operation: "Audio bite",
+            detail: "Uploading audio bite",
+            message: "Uploading audio bite…",
+            pendingMessage: "Still uploading audio bite...",
+          })
+        ) {
+          t.value = "";
+          return;
+        }
         try {
-          setStatus("Uploading audio…");
           const url = await uploadBlobToS3(f, null, {
             area: "account/profile",
             entityType: "artist",
@@ -2140,9 +3176,21 @@ export default function initSettingsProfile() {
           });
           setVal("mpd_audio_url", url);
           profileAudioUrl = url;
-          setStatus("");
+          finishMpdOperation(
+            "audio-upload",
+            "saved",
+            "Audio bite uploaded. Save to apply this change.",
+          );
         } catch (err) {
-          setStatus(err instanceof Error ? err.message : String(err));
+          finishMpdOperation(
+            "audio-upload",
+            "error",
+            err instanceof Error ? err.message : String(err),
+          );
+        } finally {
+          if (activeMpdOperations.has("audio-upload")) {
+            finishMpdOperation("audio-upload", "idle");
+          }
         }
         t.value = "";
         return;
@@ -2158,9 +3206,22 @@ export default function initSettingsProfile() {
           t.value = "";
           return;
         }
+        const introKey = `intro-upload-${i}`;
+        const introLabel = `Introductory work ${i + 1}`;
+        if (
+          !beginMpdOperation(introKey, {
+            operation: introLabel,
+            detail: `Uploading ${introLabel.toLowerCase()}`,
+            message: `Uploading ${introLabel.toLowerCase()}…`,
+            pendingMessage: `Still uploading ${introLabel.toLowerCase()}...`,
+          })
+        ) {
+          t.value = "";
+          return;
+        }
         setIntroSpinnerVisible(i, true);
+        showMpdUploadOverlay(`Uploading ${introLabel.toLowerCase()}...`);
         try {
-          setStatus("Uploading…");
           const url = await uploadBlobToS3(f, null, {
             area: "account/profile",
             entityType: "artist",
@@ -2168,10 +3229,15 @@ export default function initSettingsProfile() {
             fieldKey: `intro-${i}`,
           });
           setVal(`mpd_intro_${i}_src`, url);
+          mediaUploadRevision += 1;
           const th = /** @type {HTMLImageElement | null} */ (
             document.getElementById(`mpd_intro_${i}_thumb`)
           );
           if (th) {
+            setMpdMediaSurfaceState(`intro-${i}`, {
+              hasMedia: true,
+              hasPreview: true,
+            });
             th.style.display = "none";
             th.onload = () => {
               setIntroSpinnerVisible(i, false);
@@ -2184,7 +3250,7 @@ export default function initSettingsProfile() {
               th.onload = null;
               th.onerror = null;
             };
-            th.src = url;
+            th.src = cacheBustMpdPreviewUrl(url);
             if (th.complete && th.naturalHeight > 0) {
               setIntroSpinnerVisible(i, false);
               th.style.display = "block";
@@ -2194,12 +3260,43 @@ export default function initSettingsProfile() {
           } else {
             setIntroSpinnerVisible(i, false);
           }
-          setStatus("");
+          finishMpdOperation(
+            introKey,
+            "saved",
+            `${introLabel} uploaded. Save to apply this change.`,
+          );
         } catch (err) {
           setIntroSpinnerVisible(i, false);
-          setStatus(err instanceof Error ? err.message : String(err));
+          finishMpdOperation(
+            introKey,
+            "error",
+            err instanceof Error ? err.message : String(err),
+          );
+        } finally {
+          if (activeMpdOperations.has(introKey)) {
+            finishMpdOperation(introKey, "idle");
+          }
+          hideMpdUploadOverlay();
         }
         t.value = "";
+      }
+    });
+    rootEl.addEventListener("input", (e) => {
+      const t = e.target;
+      if (!(t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement)) return;
+      if (
+        t.classList.contains("mpd-story-input") &&
+        mpdStoryWorldDisplaySource === "world"
+      ) {
+        mpdStoryWorldDraft = readMpdStoryWorldTextDraftFromDom();
+      }
+      if (!(t instanceof HTMLInputElement)) return;
+      if (
+        t.id === "mpd_first_name" ||
+        t.id === "mpd_last_name" ||
+        t.id === "mpd_discipline"
+      ) {
+        updateHeroProfileCardCopy();
       }
     });
   }
@@ -2250,12 +3347,6 @@ export default function initSettingsProfile() {
       ?.addEventListener("click", (e) => {
         e.preventDefault();
         navigate("/");
-      });
-    document
-      .getElementById("settingsProfileBackBtn")
-      ?.addEventListener("click", (e) => {
-        e.preventDefault();
-        window.location.assign("/");
       });
   }
 
@@ -2348,8 +3439,15 @@ export default function initSettingsProfile() {
       });
   }
 
-  const load = async () => {
+  /**
+   * @param {{ force?: boolean }} [opts]
+   */
+  const load = async (opts = {}) => {
+    if (opts.force !== true && shouldSkipProfileReload()) {
+      return;
+    }
     setStatus("");
+    setInitialProfileLoading(true);
     const membershipActionsEl = document.getElementById(
       "settingsProfileMembershipActions",
     );
@@ -2384,7 +3482,7 @@ export default function initSettingsProfile() {
       if (cur) testSelect.value = cur;
       testSelect.onchange = () => {
         setProfileSettingsDevArtistId(testSelect.value || null);
-        void load();
+        void load({ force: true });
       };
     } else if (testPicker) {
       testPicker.style.display = "none";
@@ -2409,6 +3507,7 @@ export default function initSettingsProfile() {
         hint.textContent =
           "Sign in with Internet Identity to edit your profile.";
       if (formWrap) formWrap.setAttribute("hidden", "");
+      setInitialProfileLoading(false);
       applySettingsProfileDocumentSeo(dashTitle);
       return;
     }
@@ -2442,6 +3541,7 @@ export default function initSettingsProfile() {
             "No member account found. You are signed in, so complete your profile setup, then return to this page.";
         }
         if (formWrap) formWrap.setAttribute("hidden", "");
+        setInitialProfileLoading(false);
         applySettingsProfileDocumentSeo(dashTitle);
         return;
       }
@@ -2457,6 +3557,7 @@ export default function initSettingsProfile() {
             membershipActionsEl.removeAttribute("hidden");
           }
           if (formWrap) formWrap.setAttribute("hidden", "");
+          setInitialProfileLoading(false);
           applySettingsProfileDocumentSeo(dashTitle);
           return;
         }
@@ -2493,9 +3594,11 @@ export default function initSettingsProfile() {
             "Admin preview bypass active. Fields are loaded without account/membership gating.",
           );
           applySettingsProfileDocumentSeo(dashTitle);
+          setInitialProfileLoading(false);
           return;
         }
         if (formWrap) formWrap.setAttribute("hidden", "");
+        setInitialProfileLoading(false);
         applySettingsProfileDocumentSeo(dashTitle);
         return;
       }
@@ -2504,6 +3607,7 @@ export default function initSettingsProfile() {
           "Your profile could not be loaded. Try refreshing the page. If you just subscribed, wait a moment and try again, or sign out and back in.";
       }
       if (formWrap) formWrap.setAttribute("hidden", "");
+      setInitialProfileLoading(false);
       applySettingsProfileDocumentSeo(dashTitle);
       return;
     }
@@ -2512,8 +3616,7 @@ export default function initSettingsProfile() {
       rec.profile && typeof rec.profile === "object" ? rec.profile : {};
     const p = /** @type {Record<string, unknown>} */ (prof);
     profileSlug = String(p.slug ?? "");
-    const ljRaw = rec.locales_json ?? rec.localesJson;
-    const json = typeof ljRaw === "string" ? ljRaw : "";
+    const json = mpdLocalesJsonFromRecord(rec);
     try {
       localesState = json ? JSON.parse(json) : { en: {}, ja: {} };
     } catch {
@@ -2568,11 +3671,11 @@ export default function initSettingsProfile() {
     setVal("mpd_hero_profile_url", heroProfileImageUrl);
     setVal("mpd_audio_url", profileAudioUrl);
     setVal("mpd_audio_title", String(p.audioTitle ?? ""));
-    setVal("mpd_profile_quote", String(p.quote ?? ""));
     updateHeroPreview();
     updateHeroProfilePreview();
 
-    setVal("mpd_profile_visibility", normalizeArtistRosterVisibility(p.visibility));
+    mpdBackendRosterVisibility = normalizeArtistRosterVisibility(p.visibility);
+    setMpdVisibilityToggle(mpdBackendRosterVisibility);
 
     const vu = document.getElementById("mpd_view_profile");
     if (vu && vu instanceof HTMLAnchorElement)
@@ -2581,6 +3684,7 @@ export default function initSettingsProfile() {
     const side = document.getElementById("mpd_sidebar_slug");
     if (side) side.textContent = profileSlug ? `/${profileSlug}` : "—";
 
+    setInitialProfileLoading(false);
     if (formWrap) formWrap.removeAttribute("hidden");
 
     const pill = document.getElementById("mpd_datasource_pill");
@@ -2591,16 +3695,21 @@ export default function initSettingsProfile() {
       pill.style.display = "none";
     }
 
-    document.querySelectorAll(".mpd-locale-tab").forEach((btn) => {
-      btn.classList.toggle(
-        "is-active",
-        btn.getAttribute("data-locale") === activeLocale,
-      );
-    });
     fillFormFromLocales(
-      /** @type {Record<string, unknown>} */ (localesState),
+      localesForSingleProfileForm(
+        /** @type {Record<string, unknown>} */ (localesState),
+      ),
       activeLocale,
     );
+    if (!String(mpdStoryWorldDraft?.quote ?? "").trim()) {
+      mpdStoryWorldDraft = {
+        ...(mpdStoryWorldDraft || {}),
+        quote: String(p.quote ?? ""),
+      };
+      if (mpdStoryWorldDisplaySource === "world") {
+        setVal("mpd_w_quote", String(p.quote ?? ""));
+      }
+    }
 
     refreshBaseline();
 
@@ -2617,64 +3726,6 @@ export default function initSettingsProfile() {
     applySettingsProfileDocumentSeo(dashTitle);
   };
 
-  document.querySelectorAll(".mpd-locale-tab").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      if (!localesState) return;
-      const next = /** @type {'en'|'ja'} */ (
-        btn.getAttribute("data-locale") === "ja" ? "ja" : "en"
-      );
-      localesState = readLocalesFromDom(
-        /** @type {Record<string, unknown>} */ (localesState),
-        activeLocale,
-        getVal,
-      );
-      activeLocale = next;
-      document.querySelectorAll(".mpd-locale-tab").forEach((b) => {
-        b.classList.toggle(
-          "is-active",
-          b.getAttribute("data-locale") === activeLocale,
-        );
-      });
-      fillFormFromLocales(
-        /** @type {Record<string, unknown>} */ (localesState),
-        activeLocale,
-      );
-      void (async () => {
-        const r = await getMyArtistRecord();
-        if (r && localesState)
-          await hydrateProgramsPanel(r, localesState, activeLocale);
-        await hydratePublicProgramDiscoveryCards();
-        await syncResidencyApplyCta();
-      })();
-    });
-  });
-
-  document
-    .getElementById("mpd_copy_intro_ja")
-    ?.addEventListener("click", () => {
-      if (!localesState) return;
-      localesState = readLocalesFromDom(
-        /** @type {Record<string, unknown>} */ (localesState),
-        activeLocale,
-        getVal,
-      );
-      localesState = /** @type {Record<string, unknown>} */ (
-        copyIntroGalleryEnToJa(localesState)
-      );
-      fillFormFromLocales(
-        /** @type {Record<string, unknown>} */ (localesState),
-        activeLocale,
-      );
-      void (async () => {
-        const r = await getMyArtistRecord();
-        if (r && localesState)
-          await hydrateProgramsPanel(r, localesState, activeLocale);
-        await hydratePublicProgramDiscoveryCards();
-        await syncResidencyApplyCta();
-      })();
-      setStatus("Intro images copied from English to Japanese.");
-    });
-
   window.addEventListener("hashchange", () => {
     showMpdPanel(panelKeyFromHash());
   });
@@ -2684,12 +3735,37 @@ export default function initSettingsProfile() {
     ?.addEventListener("click", () => {
       window.dispatchEvent(new CustomEvent("fusion-open-join-network", { detail: {} }));
     });
+  if (_mpdSaveChoiceHandler) {
+    window.removeEventListener("fusion-settings-profile-save-choice", _mpdSaveChoiceHandler);
+  }
+  _mpdSaveChoiceHandler = (event) => {
+    const detail =
+      event instanceof CustomEvent && detailIsObject(event.detail)
+        ? event.detail
+        : {};
+    const action = String(detail.action || "");
+    const fromBtn = pendingProfileSaveButton;
+    pendingProfileSaveButton = undefined;
+    if (action !== "save") return;
+    if (!fromBtn) return;
+    void saveProfileFromDom(fromBtn, { translate: detail.translate !== false });
+  };
+  window.addEventListener("fusion-settings-profile-save-choice", _mpdSaveChoiceHandler);
   document
     .getElementById("settingsProfileSyncSubscription")
     ?.addEventListener("click", async () => {
       const snap = await getAuthSnapshot();
       if (!snap.authenticated) return;
-      setStatus("Refreshing subscription status…");
+      if (
+        !beginMpdOperation("membership-sync", {
+          operation: "Membership",
+          detail: "Refreshing subscription",
+          message: "Refreshing subscription status…",
+          pendingMessage: "Still refreshing subscription status...",
+        })
+      ) {
+        return;
+      }
       try {
         const { syncSubscriptionFromStripe } = await import("../utils/integrationApi.js");
         await syncSubscriptionFromStripe(snap.principal.toText());
@@ -2697,25 +3773,42 @@ export default function initSettingsProfile() {
         posthog.capture("membership_subscription_sync_succeeded", {
           context: "settings_profile",
         });
-        setStatus("Done. Loading profile…");
+        finishMpdOperation("membership-sync", "saved", "Subscription refreshed. Loading profile…");
       } catch (e) {
-        setStatus(e instanceof Error ? e.message : String(e));
+        finishMpdOperation(
+          "membership-sync",
+          "error",
+          e instanceof Error ? e.message : String(e),
+        );
         return;
+      } finally {
+        if (activeMpdOperations.has("membership-sync")) {
+          finishMpdOperation("membership-sync", "idle");
+        }
       }
-      void load();
+      void load({ force: true });
     });
   document
     .getElementById("settingsProfileAdminBypass")
     ?.addEventListener("click", () => {
       adminPreviewBypassEnabled = true;
       setStatus("Admin preview bypass enabled. Loading fields…");
-      void load();
+      void load({ force: true });
     });
 
   const openMpdBillingPortal = async () => {
     const snap = await getAuthSnapshot();
     if (!snap.authenticated) return;
-    setStatus("Opening billing portal…");
+    if (
+      !beginMpdOperation("billing-portal", {
+        operation: "Billing",
+        detail: "Opening billing portal",
+        message: "Opening billing portal…",
+        pendingMessage: "Still opening billing portal...",
+      })
+    ) {
+      return;
+    }
     try {
       const { createBillingPortalSession } = await import("../utils/integrationApi.js");
       const href =
@@ -2726,9 +3819,18 @@ export default function initSettingsProfile() {
       posthog.capture("membership_billing_portal_opened", {
         context: "settings_profile",
       });
+      finishMpdOperation("billing-portal", "saved", "Opening billing portal…");
       window.location.assign(url);
     } catch (e) {
-      setStatus(e instanceof Error ? e.message : String(e));
+      finishMpdOperation(
+        "billing-portal",
+        "error",
+        e instanceof Error ? e.message : String(e),
+      );
+    } finally {
+      if (activeMpdOperations.has("billing-portal")) {
+        finishMpdOperation("billing-portal", "idle");
+      }
     }
   };
 
@@ -2751,7 +3853,16 @@ export default function initSettingsProfile() {
     const snap = await getAuthSnapshot();
     if (!snap.authenticated) return;
     closeMpdMembershipCancelModal();
-    setStatus("Scheduling cancellation…");
+    if (
+      !beginMpdOperation("membership-cancel", {
+        operation: "Membership",
+        detail: "Scheduling cancellation",
+        message: "Scheduling cancellation…",
+        pendingMessage: "Still scheduling cancellation...",
+      })
+    ) {
+      return;
+    }
     try {
       const { cancelSubscriptionAtPeriodEnd, syncSubscriptionFromStripe } =
         await import("../utils/integrationApi.js");
@@ -2760,10 +3871,22 @@ export default function initSettingsProfile() {
       posthog.capture("membership_cancel_scheduled", {
         context: "settings_profile",
       });
-      setStatus("Cancellation scheduled for the end of your billing period.");
       await hydrateMembershipPanel();
+      finishMpdOperation(
+        "membership-cancel",
+        "saved",
+        "Cancellation scheduled for the end of your billing period.",
+      );
     } catch (e) {
-      setStatus(e instanceof Error ? e.message : String(e));
+      finishMpdOperation(
+        "membership-cancel",
+        "error",
+        e instanceof Error ? e.message : String(e),
+      );
+    } finally {
+      if (activeMpdOperations.has("membership-cancel")) {
+        finishMpdOperation("membership-cancel", "idle");
+      }
     }
   });
 
@@ -2779,7 +3902,7 @@ export default function initSettingsProfile() {
   _mpdBeforeUnloadHandler = onBeforeUnload;
   window.addEventListener("beforeunload", onBeforeUnload);
 
-  void load();
+  void load({ force: true });
   window.addEventListener("fusion-auth-change", () => void load());
   window.addEventListener("fusion-admin-perspective-change", () => void load());
   window.addEventListener("fusion-data-source-change", () => void load());

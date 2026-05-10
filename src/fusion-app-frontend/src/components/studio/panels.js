@@ -42,6 +42,10 @@ import {
     setFeaturableForArtistStudio,
     setRandomFeaturedModeStudio,
     adminCreateJoinInviteCodeStudio,
+    adminListJoinInvitesStudio,
+    adminCreateTrialJoinInviteCodeStudio,
+    adminListAccountContactsForStudio,
+    adminCreateProgramApplicationAccessCodeStudio,
     adminGetJournalLayoutStudio,
     adminSetJournalLayoutStudio,
     adminGetSoundEnvironmentStudio,
@@ -133,7 +137,11 @@ import {
     initArtistManageTabs,
     renderArtistManageModalHtml,
 } from '../../utils/studioArtistForm.js';
-import { collectAccessCodesFromArtists, normalizeArtistImportRow } from '../../utils/studioBatchImport.js';
+import {
+    collectAccessCodesFromArtists,
+    nextUniqueAccessCode,
+    normalizeArtistImportRow,
+} from '../../utils/studioBatchImport.js';
 import { initArtistProgramsTab } from '../../utils/studioArtistPrograms.js';
 import {
     LS_APPLICATION_ADMIN_EMAILS,
@@ -169,7 +177,15 @@ export const STUDIO_NAV_GROUPS = [
         items: [
             { id: 'home', label: 'Home' },
             { id: 'subscribers', label: 'Subscribers' },
+        ],
+    },
+    {
+        label: 'Management',
+        items: [
             { id: 'applicants', label: 'Applicants' },
+            { id: 'schedule', label: 'Schedule' },
+            { id: 'finance', label: 'Finance' },
+            { id: 'travel', label: 'Travel' },
         ],
     },
     {
@@ -240,6 +256,21 @@ export function renderStudioMain(sectionId) {
             return renderSubscribers();
         case 'applicants':
             return renderApplicants();
+        case 'schedule':
+            return renderManagementPlaceholder(
+                'Schedule',
+                'Program calendars, artist timelines, and event scheduling tools will live here.'
+            );
+        case 'finance':
+            return renderManagementPlaceholder(
+                'Finance',
+                'Finance workflows, payment tracking, invoices, and revenue reporting will live here.'
+            );
+        case 'travel':
+            return renderManagementPlaceholder(
+                'Travel',
+                'Travel coordination, accommodation notes, and arrival details will live here.'
+            );
         case 'artists':
             return renderArtists();
         case 'pending-approval':
@@ -398,6 +429,9 @@ function renderApplicants() {
                 searchPlaceholder: 'Search email, name, program…',
             })}
             <div id="studio-applicants-banner" class="studio-banner studio-banner--info"></div>
+            <div class="studio-modal-actions" style="margin:0.25rem 0 0.5rem">
+                <button type="button" class="studio-btn-secondary" id="studio-applicants-generate-access-code">Generate access code</button>
+            </div>
             <div class="studio-applicant-add">
                 <h3 class="studio-subheading">Add applicant</h3>
                 <div class="studio-form-grid">
@@ -485,7 +519,7 @@ function renderArtists() {
                 <div class="studio-section-accordion__body">
                     <p class="studio-banner studio-banner--info">Admin roster: use <strong>Manage</strong> for structured editing (tabs: roster, identity, world, media, links/SEO). Batch JSON remains for bulk import. <strong>Advanced JSON</strong> in the manage surface applies <strong>test overlay</strong> only (localStorage).</p>
                     <p class="studio-muted">Batch upload: JSON array of artist rows (see <code>ArtistRecord</code> shape), or <code>{ "artists": [ … ] }</code>. Imported rows get an 8-digit access code for future account linking.</p>
-                    <p class="studio-muted">Per-artist <strong>access code</strong> in Manage is for claiming an existing roster profile. <strong>Generate artist join invite</strong> creates a separate single-use code for new members without a roster row (same 8-digit format).</p>
+                    <p class="studio-muted">Per-artist <strong>access code</strong> in Manage is for claiming an existing roster profile (use <strong>Generate new code</strong> there after a code is used, or save with an empty field to auto-assign). <strong>Generate artist join invite</strong> creates a separate single-use code for new members without a roster row (same 8-digit format).</p>
                     <div class="studio-subscribers-toolbar studio-subscribers-toolbar--artists">
                         <label class="studio-file-label studio-btn-ghost">
                             <input type="file" accept="application/json,.json" id="studio-artists-batch-json" class="studio-file-input" />
@@ -507,9 +541,9 @@ function renderArtists() {
                 <summary class="studio-section-accordion__summary">World copy generator</summary>
                 <div class="studio-section-accordion__body">
                     <p class="studio-muted">
-                        Generate <strong>Kamauu-style</strong> world copy (micro-bio, perspective, vision, constructing, context, quote) from English bio/discipline via the canister LLM. Japanese locales are filled by translation.
+                        Generate <strong>Kamauu-style</strong> <strong>New World</strong> copy (micro-bio, perspective, vision, constructing, context, quote) from English bio/discipline and Story &amp; World fields via the canister LLM. Output is written to <code>locales.*.worldNew</code> (artist-authored Story &amp; World in <code>world</code> stays manual unless they edit it). Japanese locales are filled by translation.
                     </p>
-                    <button type="button" class="studio-btn-secondary" id="studio-artists-world-batch-open">Generate world from bio (batch)…</button>
+                    <button type="button" class="studio-btn-secondary" id="studio-artists-world-batch-open">Generate New World from bio (batch)…</button>
                 </div>
             </details>
             <details class="studio-section-accordion studio-section-accordion--artists-comms">
@@ -1053,6 +1087,21 @@ function renderUsers() {
             </div>
             <div class="studio-toolbar-actions studio-users-sync-toolbar" style="margin:0.5rem 0 0.75rem;flex-wrap:wrap;gap:0.5rem;align-items:center">
                 <h3 class="studio-subheading" style="margin:0;width:100%">All accounts</h3>
+                <label class="studio-field">
+                    <span>Trial role</span>
+                    <select id="studio-users-trial-role" class="studio-select">
+                        <option value="artist">artist</option>
+                        <option value="gallery">gallery</option>
+                        <option value="curator">curator</option>
+                        <option value="collector">collector</option>
+                    </select>
+                </label>
+                <button type="button" class="studio-btn-ghost" id="studio-users-generate-trial-code">
+                    Generate access code
+                </button>
+                <button type="button" class="studio-btn-secondary" id="studio-users-view-access-codes">
+                    View access codes
+                </button>
                 <button type="button" class="studio-btn-primary" id="studio-users-sync-all" aria-busy="false">
                     Sync subscriptions
                 </button>
@@ -1060,8 +1109,8 @@ function renderUsers() {
             </div>
             <div class="studio-table-wrap studio-table-wrap--sticky-head">
                 <table class="studio-table studio-table--dense">
-                    <thead><tr><th><span class="studio-sr-only">Health</span></th><th>Identity</th><th>Role</th><th>Status</th><th>Membership</th><th>Renews</th><th>Linked artist</th><th>Org</th><th>Updated</th><th class="studio-td-actions">Actions</th></tr></thead>
-                    <tbody id="studio-users-tbody"><tr><td colspan="10">Loading…</td></tr></tbody>
+                    <thead><tr><th><span class="studio-sr-only">Health</span></th><th>Identity</th><th>Role</th><th>Status</th><th>Membership</th><th>Trial</th><th>Renews</th><th>Linked artist</th><th>Linked contact</th><th>Org</th><th>Updated</th><th class="studio-td-actions">Actions</th></tr></thead>
+                    <tbody id="studio-users-tbody"><tr><td colspan="12">Loading…</td></tr></tbody>
                 </table>
             </div>
         </div>
@@ -1345,6 +1394,22 @@ function renderFallback(sectionId) {
     `;
 }
 
+function renderManagementPlaceholder(title, copy) {
+    return `
+        <div class="studio-section-stack studio-category-page">
+            ${studioPageHeaderHtml({
+                title,
+                subtitle: 'Management workspace',
+            })}
+            <p class="studio-muted">${escapeHtml(copy)}</p>
+            <div class="studio-coming-soon">
+                <strong>${escapeHtml(title)}</strong>
+                Placeholder section. We will complete this workflow later.
+            </div>
+        </div>
+    `;
+}
+
 function pipelineCard(title) {
     return `
         <div class="studio-pipeline-card">
@@ -1521,6 +1586,24 @@ function openStudioArtistManageFromRow(tableRow, afterSave, hostEl, listSurface 
         initArtistManageTabs(root);
         void initArtistProgramsTab(root, full);
         initAssetPreviews();
+
+        root.querySelector('#studio-art-gen-access-code')?.addEventListener('click', async () => {
+            if (getDataSource() !== 'live') {
+                alert('Generate new code is available in Live data mode only.');
+                return;
+            }
+            const inp = root.querySelector('#studio-art-access-code');
+            try {
+                const rows = await getArtistsForStudio();
+                const pool = collectAccessCodesFromArtists(Array.isArray(rows) ? rows : []);
+                const code = nextUniqueAccessCode(pool);
+                if (inp instanceof HTMLInputElement) {
+                    inp.value = code;
+                }
+            } catch (e) {
+                alert(e instanceof Error ? e.message : String(e));
+            }
+        });
 
         root.querySelector('#studio-art-translate-to-new-world')?.addEventListener('click', async () => {
             const promptEl = root.querySelector('#studio-art-new-world-prompt');
@@ -1763,6 +1846,8 @@ function studioMembershipStatusLabel(st) {
 /** @param {{ membershipExemptManual?: boolean, stripeSubscriptionStatus?: string }} row */
 function studioMembershipDotClass(row) {
     if (row.membershipExemptManual) return 'studio-user-sub-dot--ok';
+    const trialState = studioTrialState(row);
+    if (trialState === 'active') return 'studio-user-sub-dot--ok';
     const s = String(row.stripeSubscriptionStatus || '').toLowerCase();
     if (s === 'active' || s === 'trialing') return 'studio-user-sub-dot--ok';
     return 'studio-user-sub-dot--err';
@@ -1772,8 +1857,34 @@ function studioMembershipDotClass(row) {
 function studioRowCanisterPaid(row) {
     if (!row || typeof row !== 'object') return false;
     if (row.membershipExemptManual) return true;
+    if (studioTrialState(row) === 'active') return true;
     const s = String(row.stripeSubscriptionStatus || '').toLowerCase();
     return s === 'active' || s === 'trialing';
+}
+
+/**
+ * @param {{ trialEndsAtSec?: string | number }} row
+ * @returns {'active' | 'expired' | 'none'}
+ */
+function studioTrialState(row) {
+    const raw = row?.trialEndsAtSec;
+    const endsAtSec = Number(raw);
+    if (!Number.isFinite(endsAtSec) || endsAtSec <= 0) return 'none';
+    const nowSec = Date.now() / 1000;
+    return nowSec <= endsAtSec ? 'active' : 'expired';
+}
+
+/**
+ * @param {{ trialStartedAtSec?: string | number, trialEndsAtSec?: string | number }} row
+ */
+function studioTrialStatusLabel(row) {
+    const state = studioTrialState(row);
+    if (state === 'none') return '—';
+    const started = Number(row?.trialStartedAtSec);
+    const ends = Number(row?.trialEndsAtSec);
+    const startTxt = Number.isFinite(started) ? new Date(started * 1000).toISOString().slice(0, 10) : '—';
+    const endTxt = Number.isFinite(ends) ? new Date(ends * 1000).toISOString().slice(0, 10) : '—';
+    return state === 'active' ? `Trial active (${startTxt} -> ${endTxt})` : `Trial expired (${endTxt})`;
 }
 
 /**
@@ -1930,7 +2041,7 @@ function wireArtistWorldBatchUI(mainEl, reloadArtistsTable) {
 ${notice}
 <label class="studio-field studio-field--row" style="margin:0.75rem 0;align-items:center;gap:0.5rem">
 <input type="checkbox" id="studio-world-batch-overwrite" />
-<span>Overwrite existing world fields (otherwise only fill empty fields)</span>
+<span>Overwrite existing <strong>New World</strong> fields (otherwise only fill empty <code>worldNew</code> fields)</span>
 </label>
 <div class="studio-world-batch-actions">
 <button type="button" class="studio-btn-ghost" id="studio-world-batch-select-all">Select all (up to ${max})</button>
@@ -1948,7 +2059,7 @@ ${notice}
 </div>`;
 
         const { root } = openStudioModal(inner, {
-            title: 'Generate world from bio (batch)',
+            title: 'Generate New World from bio (batch)',
             wide: true,
         });
 
@@ -2978,6 +3089,16 @@ async function initApplicants(mainEl) {
     searchInput?.addEventListener('input', () => {
         page = 0;
         renderPage();
+    });
+    mainEl.querySelector('#studio-applicants-generate-access-code')?.addEventListener('click', async () => {
+        try {
+            const code = await adminCreateProgramApplicationAccessCodeStudio();
+            alert(
+                `Generated application payment bypass access code: ${code}\n\nThis code is single-use. Share it with an applicant to skip payment and submit.`
+            );
+        } catch (e) {
+            alert(e instanceof Error ? e.message : String(e));
+        }
     });
 
     mainEl.querySelector('#studio-app-new-save')?.addEventListener('click', async () => {
@@ -5804,6 +5925,10 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
             role: { [roleKey]: null },
             status: { [statusKey]: null },
             membershipExemptManual: ex,
+            trialStartedAtSec:
+                workingRaw.trialStartedAtSec ?? workingRaw.trial_started_at_sec ?? [],
+            trialEndsAtSec:
+                workingRaw.trialEndsAtSec ?? workingRaw.trial_ends_at_sec ?? [],
             updatedAt: new Date().toISOString(),
         };
         if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = true;
@@ -5834,10 +5959,17 @@ async function initUsers(mainEl) {
     const statusFilter = mainEl.querySelector('#studio-users-filter-status');
     const countHeader = mainEl.querySelector('#studio-users-header-count');
     const syncAllBtn = mainEl.querySelector('#studio-users-sync-all');
+    const generateTrialBtn = mainEl.querySelector('#studio-users-generate-trial-code');
+    const viewCodesBtn = mainEl.querySelector('#studio-users-view-access-codes');
+    const trialRoleSel = mainEl.querySelector('#studio-users-trial-role');
     const syncMsg = mainEl.querySelector('#studio-users-sync-msg');
 
     /** @type {Awaited<ReturnType<typeof getAccountsForStudio>>} */
     let allPairs = [];
+    /** @type {Map<string, string>} */
+    let linkedArtistLabelById = new Map();
+    /** @type {Map<string, string>} */
+    let contactByPrincipal = new Map();
 
     const membershipCellHtml = (r) => {
         if (r.membershipExemptManual) {
@@ -5861,23 +5993,30 @@ async function initUsers(mainEl) {
                 allPairs.length === 0 && !wantRole && !wantSt
                     ? 'No accounts on this canister yet.'
                     : 'No accounts match filters.';
-            tbody.innerHTML = `<tr><td colspan="10">${emptyMsg}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="12">${emptyMsg}</td></tr>`;
             return;
         }
         tbody.innerHTML = rows
             .map(
-                (r) => `<tr>
+                (r) => {
+                    const aid = r.linkedArtistId ? String(r.linkedArtistId) : '';
+                    const linkedArtistLabel = aid ? linkedArtistLabelById.get(aid) || aid : '';
+                    const linkedContact = contactByPrincipal.get(String(r.principal || '')) || '';
+                    return `<tr>
                 <td><span class="studio-user-sub-dot ${studioMembershipDotClass(r)}" title="Subscription health" aria-hidden="true"></span></td>
                 <td><span class="studio-identity-short" title="${escapeHtml(r.principal)}">${escapeHtml(shortPrincipalDisplay(r.principal))}</span></td>
                 <td>${escapeHtml(r.role)}</td>
                 <td>${escapeHtml(r.status)}</td>
                 <td>${membershipCellHtml(r)}</td>
+                <td>${escapeHtml(studioTrialStatusLabel(r))}</td>
                 <td><span class="studio-muted" title="${escapeHtml(r.stripeCurrentPeriodEnd || '')}">${escapeHtml(formatSubscriptionPeriodEnd(r.stripeCurrentPeriodEnd))}</span></td>
-                <td>${r.linkedArtistId ? escapeHtml(String(r.linkedArtistId)) : '—'}</td>
+                <td>${linkedArtistLabel ? escapeHtml(linkedArtistLabel) : '—'}</td>
+                <td>${linkedContact ? escapeHtml(linkedContact) : '—'}</td>
                 <td>${r.linkedOrgId ? escapeHtml(String(r.linkedOrgId)) : '—'}</td>
                 <td><span class="studio-muted" title="${escapeHtml(r.updatedAt)}">${escapeHtml(r.updatedAt ? r.updatedAt.slice(0, 19) : '—')}</span></td>
                 <td><button type="button" class="studio-btn-primary studio-user-manage" data-principal="${escapeHtml(r.principal)}">Manage</button></td>
-            </tr>`
+            </tr>`;
+                }
             )
             .join('');
     };
@@ -5896,15 +6035,48 @@ async function initUsers(mainEl) {
         if (typeof actor.listAccounts !== 'function') {
             if (tbody) {
                 tbody.innerHTML =
-                    '<tr><td colspan="10">listAccounts missing from declarations — run <code>dfx generate fusion-app-backend</code>.</td></tr>';
+                    '<tr><td colspan="12">listAccounts missing from declarations — run <code>dfx generate fusion-app-backend</code>.</td></tr>';
             }
             return;
         }
         try {
             allPairs = await getAccountsForStudio();
+            try {
+                const artists = await getArtistsForStudio();
+                linkedArtistLabelById = new Map(
+                    (artists || []).map((a) => {
+                        const id = String(a?.id || '');
+                        const name = String(a?.name || '').trim();
+                        const email = String(a?.contactEmail || '').trim();
+                        const label = [name, email].filter(Boolean).join(' · ');
+                        return [id, label || id];
+                    })
+                );
+            } catch {
+                linkedArtistLabelById = new Map();
+            }
+            try {
+                const contacts = await adminListAccountContactsForStudio();
+                contactByPrincipal = new Map(
+                    (Array.isArray(contacts) ? contacts : []).map((row) => {
+                        const p =
+                            row && row[0] && typeof row[0] === 'object' && typeof row[0].toText === 'function'
+                                ? row[0].toText()
+                                : String(row?.[0] || '');
+                        const c = row?.[1] || {};
+                        const first = String(c.firstName || '').trim();
+                        const last = String(c.lastName || '').trim();
+                        const email = String(c.email || '').trim();
+                        const label = [String(`${first} ${last}`).trim(), email].filter(Boolean).join(' · ');
+                        return [p, label];
+                    })
+                );
+            } catch {
+                contactByPrincipal = new Map();
+            }
         } catch (listErr) {
             if (tbody) {
-                tbody.innerHTML = `<tr><td colspan="10">${escapeHtml(listErr instanceof Error ? listErr.message : String(listErr))}</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="12">${escapeHtml(listErr instanceof Error ? listErr.message : String(listErr))}</td></tr>`;
             }
             roleFilter?.addEventListener('change', renderTable);
             statusFilter?.addEventListener('change', renderTable);
@@ -5913,6 +6085,76 @@ async function initUsers(mainEl) {
         renderTable();
         roleFilter?.addEventListener('change', renderTable);
         statusFilter?.addEventListener('change', renderTable);
+
+        const trialBtn = generateTrialBtn instanceof HTMLButtonElement ? generateTrialBtn : null;
+        if (trialBtn) {
+            trialBtn.addEventListener('click', async () => {
+                const sel = trialRoleSel instanceof HTMLSelectElement ? trialRoleSel.value : 'artist';
+                const roleRec = { [sel]: null };
+                trialBtn.disabled = true;
+                try {
+                    const code = await adminCreateTrialJoinInviteCodeStudio(roleRec, 2);
+                    await studioAlertGeneratedJoinInviteCode(
+                        code,
+                        `Role: ${sel}\nTrial: 2 months from redemption\nUse in Join flow to create trial account.`
+                    );
+                    if (syncMsg) syncMsg.textContent = 'Trial access code generated.';
+                } catch (e) {
+                    if (syncMsg) syncMsg.textContent = e instanceof Error ? e.message : String(e);
+                } finally {
+                    trialBtn.disabled = false;
+                }
+            });
+        }
+        const codesBtn = viewCodesBtn instanceof HTMLButtonElement ? viewCodesBtn : null;
+        if (codesBtn) {
+            codesBtn.addEventListener('click', async () => {
+                codesBtn.disabled = true;
+                try {
+                    const rows = await adminListJoinInvitesStudio();
+                    /** @type {Array<{ code: string, role: string, active: boolean, createdAt: string }>} */
+                    const mapped = (Array.isArray(rows) ? rows : [])
+                        .map((r) => {
+                            const code = String(r?.[0] ?? '');
+                            const rec = r?.[1] || {};
+                            const roleObj = rec && typeof rec === 'object' ? rec.role : null;
+                            const role =
+                                roleObj && typeof roleObj === 'object' ? String(Object.keys(roleObj)[0] || '') : '';
+                            const active = Boolean(rec && typeof rec === 'object' ? rec.active : false);
+                            const createdAt = String(
+                                (rec && typeof rec === 'object' ? rec.createdAt ?? rec.created_at : '') || ''
+                            );
+                            return { code, role, active, createdAt };
+                        })
+                        .filter((x) => x.code);
+                    const pending = mapped.filter((x) => x.active);
+                    const redeemed = mapped.filter((x) => !x.active);
+                    const tableHtml = (list, emptyLabel) => {
+                        if (!list.length) return `<p class="studio-muted">${escapeHtml(emptyLabel)}</p>`;
+                        return `<div class="studio-table-wrap"><table class="studio-table studio-table--dense"><thead><tr><th>Code</th><th>Role</th><th>Created</th></tr></thead><tbody>${list
+                            .map(
+                                (x) =>
+                                    `<tr><td><code>${escapeHtml(x.code)}</code></td><td>${escapeHtml(x.role || '—')}</td><td>${escapeHtml(x.createdAt ? x.createdAt.slice(0, 19) : '—')}</td></tr>`
+                            )
+                            .join('')}</tbody></table></div>`;
+                    };
+                    openStudioModal(
+                        `<div class="studio-section-stack"><h3 class="studio-subheading" style="margin:0">Pending (generated, not redeemed)</h3>${tableHtml(
+                            pending,
+                            'No pending access codes.'
+                        )}<h3 class="studio-subheading" style="margin:0.5rem 0 0">Redeemed</h3>${tableHtml(
+                            redeemed,
+                            'No redeemed access codes.'
+                        )}</div>`,
+                        { title: 'Access Codes', compact: true }
+                    );
+                } catch (e) {
+                    if (syncMsg) syncMsg.textContent = e instanceof Error ? e.message : String(e);
+                } finally {
+                    codesBtn.disabled = false;
+                }
+            });
+        }
 
         if (tbody && !tbody.dataset.studioUserManageBound) {
             tbody.dataset.studioUserManageBound = '1';
@@ -5989,7 +6231,7 @@ async function initUsers(mainEl) {
         }
     } catch (e) {
         if (tbody) {
-            tbody.innerHTML = `<tr><td colspan="10">${escapeHtml(e instanceof Error ? e.message : String(e))}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="12">${escapeHtml(e instanceof Error ? e.message : String(e))}</td></tr>`;
         }
     }
 }
@@ -6283,7 +6525,7 @@ async function initServices(mainEl) {
             const fromOpt = (resendFrom?.value || '').trim();
             await sendEmail({
                 to,
-                subject: 'Fusion — Studio test email',
+                subject: 'Fusion | Studio test email',
                 text: 'If you received this, Resend + integration API are configured.',
                 ...(fromOpt && fromOpt.includes('@') ? { from: fromOpt } : {}),
             });

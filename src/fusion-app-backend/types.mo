@@ -192,6 +192,8 @@ module {
         stripeSubscriptionStatus : ?Text;
         stripeCurrentPeriodEnd : ?Text;
         membershipExemptManual : Bool;
+        trialStartedAtSec : ?Nat;
+        trialEndsAtSec : ?Nat;
     };
 
     /// Site access vs billing: used after login to gate paywall / join modal.
@@ -215,6 +217,11 @@ module {
         role : UserRole;
         active : Bool;
         createdAt : Text;
+    };
+
+    public type TrialMembershipWindow = {
+        startedAtSec : Nat;
+        endsAtSec : Nat;
     };
 
     /// Result of `registerWithJoinAccessCode` (Internet Identity required).
@@ -448,5 +455,7 @@ module {
         superStaffPrincipalsStable : [Principal];
         /// Join Fusion / team directory: principal → name + email (`null` in backups from before this field existed).
         accountContactStable : ?[(Principal, AccountContact)];
+        membershipTrialWindowStable : ?[(Principal, TrialMembershipWindow)];
+        joinInviteTrialMonthsStable : ?[(Text, Nat)];
     };
 };

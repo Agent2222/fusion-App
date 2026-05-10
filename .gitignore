@@ -12,6 +12,7 @@
 .dfx-cache/
 
 # local build / preview output (do not push)
+HACK_BECAUSE_OF_ALLOW_JS/
 src/fusion-app-frontend/dist_check/
 src/fusion-app-frontend/dist_live/
 

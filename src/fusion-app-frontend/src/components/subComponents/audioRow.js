@@ -4,6 +4,11 @@
  */
 import { getContentBundleForStudio, subscribeDataSource } from '../../utils/database.js';
 import { isJournalListingPage } from '../../utils/journalListingPage.js';
+import {
+    FEED_ROW_PENDING_WRAPPER_STYLES,
+    PH_LOADER_BASE_STYLES,
+    feedRowLoaderHtml,
+} from '../../utils/programHeroLoader.js';
 
 function escapeHtml(s) {
     return String(s)
@@ -30,6 +35,12 @@ class AudioRowComponent extends HTMLElement {
         this._audioList = null;
         /** @type {(() => void) | null} */
         this._unsubData = null;
+        /** True while CMS `audio` bundle loads (skipped when `data-audio-src` provides URL). */
+        this._audioListPending = false;
+    }
+
+    _needsAudioList() {
+        return !String(this.getAttribute('data-audio-src') || '').trim();
     }
 
     static get observedAttributes() {
@@ -45,7 +56,15 @@ class AudioRowComponent extends HTMLElement {
 
     connectedCallback() {
         if (this._unsubData) this._unsubData();
-        this._unsubData = subscribeDataSource(() => void this._loadAudioList());
+        this._unsubData = subscribeDataSource(() => {
+            if (this._needsAudioList()) {
+                this._audioListPending = true;
+                this.render();
+            }
+            void this._loadAudioList();
+        });
+        this._audioListPending = this._needsAudioList();
+        this.render();
         void this._loadAudioList();
     }
 
@@ -61,9 +80,33 @@ class AudioRowComponent extends HTMLElement {
     }
 
     async _loadAudioList() {
-        const raw = await getContentBundleForStudio('audio');
-        this._audioList = Array.isArray(raw) ? raw : null;
-        this.render();
+        if (!this._needsAudioList()) {
+            this._audioListPending = false;
+            this._audioList = null;
+            this.render();
+            return;
+        }
+        try {
+            const raw = await getContentBundleForStudio('audio');
+            this._audioList = Array.isArray(raw) ? raw : null;
+        } catch {
+            this._audioList = null;
+        } finally {
+            this._audioListPending = false;
+            this.render();
+        }
+    }
+
+    _renderLoading() {
+        this.style.display = '';
+        this.shadow.innerHTML = `
+            <style>
+                :host { display: block; }
+                ${PH_LOADER_BASE_STYLES}
+                ${FEED_ROW_PENDING_WRAPPER_STYLES}
+            </style>
+            ${feedRowLoaderHtml({ ariaLabel: 'Loading audio' })}
+        `;
     }
 
     _getAudioId() {
@@ -166,6 +209,11 @@ class AudioRowComponent extends HTMLElement {
         if (this._teardown) {
             this._teardown();
             this._teardown = null;
+        }
+
+        if (this._needsAudioList() && this._audioListPending) {
+            this._renderLoading();
+            return;
         }
 
         const entry = this._resolveEntry();

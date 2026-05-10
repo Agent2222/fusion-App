@@ -51,6 +51,7 @@ import "./components/subComponents/extendedNetworkFeed.js";
 import "./components/subComponents/objects-highlight.js";
 import "./components/subComponents/journal-hero.js";
 import "./components/subComponents/soundEnvironment.js";
+import "./components/subComponents/profileSaveStatus.js";
 import "./components/subComponents/artistCardImageToggle.js";
 import "./components/subComponents/confirmed-artists-feed.js";
 import "./components/subComponents/program-details.js";

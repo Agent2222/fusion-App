@@ -9,7 +9,7 @@ import express from 'express';
 import Stripe from 'stripe';
 import { Principal } from '@dfinity/principal';
 import { Resend } from 'resend';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getIntegrationActor, pushSubscriptionToCanister } from './canisterActor.js';
 
@@ -105,6 +105,13 @@ const s3PublicBase =
         ? `https://${s3Bucket}.s3.${awsRegion}.amazonaws.com`
         : '');
 const s3Prefix = (process.env.S3_KEY_PREFIX || 'uploads/').replace(/^\/+/, '');
+const privateVideoPrefix = (process.env.S3_PRIVATE_VIDEO_PREFIX || 'fusionMedia/private-video/')
+    .replace(/^\/+/, '')
+    .replace(/\/?$/, '/');
+const privateVideoSignedUrlTtlSec = Math.max(
+    60,
+    Math.min(3600, Number(process.env.S3_PRIVATE_VIDEO_SIGNED_URL_TTL_SEC || 900)),
+);
 
 /** On Render and most PaaS hosts there is no instance role — set AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY. Locally, omit them to use ~/.aws or env profile. */
 let s3Client = null;
@@ -230,6 +237,74 @@ function requireApiKey(req, res, next) {
         return res.status(401).json({ error: 'Unauthorized' });
     }
     return next();
+}
+
+/**
+ * @param {unknown} value
+ * @param {number} [max]
+ */
+function safePathPart(value, max = 96) {
+    return String(value ?? '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9._/-]+/g, '-')
+        .replace(/\/+/g, '/')
+        .replace(/^\/+|\/+$/g, '')
+        .replace(/-+/g, '-')
+        .slice(0, max);
+}
+
+/**
+ * @param {unknown} fileName
+ */
+function safePrivateVideoFileName(fileName) {
+    const raw = String(fileName ?? '').trim() || 'video.mp4';
+    const clean = raw.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/-+/g, '-');
+    return clean.slice(0, 120) || 'video.mp4';
+}
+
+/**
+ * @param {unknown} key
+ */
+function normalizePrivateVideoKey(key) {
+    const k = String(key ?? '').trim().replace(/^\/+/, '');
+    return k.startsWith(privateVideoPrefix) ? k : '';
+}
+
+/**
+ * @param {string} principalText
+ */
+async function hasActiveStripeMembershipForPrincipal(principalText) {
+    if (!stripe) return false;
+    try {
+        Principal.fromText(String(principalText || '').trim());
+    } catch {
+        return false;
+    }
+    const picked = await getStripeCustomerAndBestSubscription(stripe, String(principalText).trim());
+    if (!picked.ok) return false;
+    return picked.subscription.status === 'active' || picked.subscription.status === 'trialing';
+}
+
+/**
+ * @param {string} principalText
+ */
+async function hasPrivateMediaAccessForPrincipal(principalText) {
+    let p;
+    try {
+        p = Principal.fromText(String(principalText || '').trim());
+    } catch {
+        return false;
+    }
+    const actor = await getIntegrationActor();
+    if (actor && typeof actor.integrationGetMembershipAccessForPrincipal === 'function') {
+        const access = await actor.integrationGetMembershipAccessForPrincipal(p);
+        if (access && typeof access === 'object') {
+            if ('ok' in access || 'exempt' in access) return true;
+            if ('needsSubscription' in access || 'noAccount' in access) return false;
+        }
+    }
+    return hasActiveStripeMembershipForPrincipal(principalText);
 }
 
 app.get('/health', (_req, res) => {
@@ -1381,6 +1456,69 @@ app.post('/storage/presign', requireApiKey, async (req, res) => {
                 error:
                     'AWS credentials not available. On Render (and similar), set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY for an IAM user with s3:PutObject on this bucket. Locally you can use ~/.aws/credentials instead.',
             });
+        }
+        return res.status(500).json({ error: msg });
+    }
+});
+
+app.post('/storage/private-video/presign-upload', requireApiKey, async (req, res) => {
+    try {
+        if (!s3Client || !s3Bucket) {
+            return res.status(503).json({ error: 'S3 not configured' });
+        }
+        const contentType = req.body?.contentType;
+        if (
+            typeof contentType !== 'string' ||
+            (!/^video\//i.test(contentType) && contentType !== 'application/octet-stream')
+        ) {
+            return res.status(400).json({ error: 'Invalid contentType (video/* required)' });
+        }
+        const contentId = safePathPart(req.body?.contentId || 'community-hero', 80) || 'community-hero';
+        const fileName = safePrivateVideoFileName(req.body?.fileName);
+        const key = `${privateVideoPrefix}${contentId}/${randomUUID()}-${fileName}`;
+        const command = new PutObjectCommand({
+            Bucket: s3Bucket,
+            Key: key,
+            ContentType: contentType,
+        });
+        const putUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+        return res.json({ putUrl, key, fileName, expiresIn: 3600 });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/credentials|Could not load credentials/i.test(msg)) {
+            return res.status(503).json({ error: 'AWS credentials not available for private video upload.' });
+        }
+        return res.status(500).json({ error: msg });
+    }
+});
+
+app.post('/storage/private-video/sign-playback', requireApiKey, async (req, res) => {
+    try {
+        if (!s3Client || !s3Bucket) {
+            return res.status(503).json({ error: 'S3 not configured' });
+        }
+        const key = normalizePrivateVideoKey(req.body?.key);
+        if (!key) {
+            return res.status(400).json({ error: 'Invalid private video key' });
+        }
+        const principal = String(req.body?.principal ?? '').trim();
+        const allowed = await hasPrivateMediaAccessForPrincipal(principal);
+        if (!allowed) {
+            return res.status(403).json({ error: 'Membership required' });
+        }
+        const command = new GetObjectCommand({
+            Bucket: s3Bucket,
+            Key: key,
+        });
+        const url = await getSignedUrl(s3Client, command, { expiresIn: privateVideoSignedUrlTtlSec });
+        return res.json({
+            url,
+            expiresAt: new Date(Date.now() + privateVideoSignedUrlTtlSec * 1000).toISOString(),
+        });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/credentials|Could not load credentials/i.test(msg)) {
+            return res.status(503).json({ error: 'AWS credentials not available for private video playback.' });
         }
         return res.status(500).json({ error: msg });
     }

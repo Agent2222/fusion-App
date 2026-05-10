@@ -8,6 +8,10 @@ import { getArtistBySlug } from "../utils/database.js";
 import { applyDocumentSeo } from "../utils/documentSeo.js";
 import { SEO_MEDIA_DEFAULT, withSeoImageAlt } from "../utils/mediaAltSeo.js";
 import { worldTextParts } from "../utils/worldNormalize.js";
+import {
+  getPublicWorldSourceFromLocales,
+  pickPublicWorldField,
+} from "../utils/worldPublicPick.js";
 import posthog from "posthog-js";
 
 /**
@@ -179,36 +183,6 @@ function profileFirstNameForPlaceholders(loc, displayName) {
 }
 
 /**
- * Prefer `loc.world[key]`; if empty, use `loc.worldNew[key]` (per-section curated fallback).
- * @param {Record<string, unknown> | null | undefined} loc
- * @param {string} key
- * @returns {unknown}
- */
-function pickWorldOrWorldNew(loc, key) {
-  if (!loc || typeof loc !== "object") return undefined;
-  const w =
-    loc.world && typeof loc.world === "object" && !Array.isArray(loc.world)
-      ? /** @type {Record<string, unknown>} */ (loc.world)
-      : {};
-  const wn =
-    loc.worldNew &&
-    typeof loc.worldNew === "object" &&
-    !Array.isArray(loc.worldNew)
-      ? /** @type {Record<string, unknown>} */ (loc.worldNew)
-      : {};
-  const a = w[key];
-  const b = wn[key];
-  const hasContent = (v) => {
-    if (v == null || v === "") return false;
-    if (Array.isArray(v)) return v.some((x) => String(x).trim());
-    return String(v).trim() !== "";
-  };
-  if (hasContent(a)) return a;
-  if (hasContent(b)) return b;
-  return undefined;
-}
-
-/**
  * @param {string} firstName
  */
 function artistProfileWorldPlaceholders(firstName) {
@@ -239,6 +213,10 @@ export function generateProfileContent() {
                 <div id="profileMainContent" class="feed-container">
                     <div class="page-content profile-content">
                         <app-veteran-banner id="profileVeteranBanner" class="profile-veteran-banner"></app-veteran-banner>
+                        <div id="artistProfileLoading" class="artist-profile-loading" role="status" aria-live="polite">
+                            <div class="artist-profile-loading__spinner" aria-hidden="true"></div>
+                            <p>Loading artist profile...</p>
+                        </div>
                         <article class="artist-profile" id="artistProfile" hidden>
                             <div class="artist-profile-hero">
                                 <img id="artistProfileImage" src="" alt="${SEO_MEDIA_DEFAULT}"/>
@@ -324,6 +302,7 @@ export default function initProfile() {
   const notFound = document.getElementById("artistProfileNotFound");
   const indexHint = document.getElementById("artistProfileIndex");
   const imagesContainer = document.getElementById("profileImagesContainer");
+  const loadingEl = document.getElementById("artistProfileLoading");
 
   const show = (el, on) => {
     if (!el) return;
@@ -335,8 +314,27 @@ export default function initProfile() {
   const contextHeadingEl = document.getElementById("profileContextHeading");
   const artistLinksEl = document.getElementById("profileArtistLinks");
   const veteranBannerEl = document.getElementById("profileVeteranBanner");
+  const loadedContentEls = [
+    document.getElementById("profile-sight-words"),
+    document.getElementById("profile-constructing-words"),
+    document.getElementById("profileImagesContainer"),
+    document.getElementById("profileGalleryAccessButtonContainer"),
+    document.getElementById("profileContextContainer"),
+    document.getElementById("profileQuoteContainer"),
+    artistLinksEl,
+    veteranBannerEl,
+  ];
+
+  const setProfileLoading = (loading) => {
+    show(loadingEl, loading);
+    for (const el of loadedContentEls) show(el, !loading);
+    show(article, false);
+    show(notFound, false);
+    show(indexHint, false);
+  };
 
   if (!slug) {
+    setProfileLoading(false);
     if (contextContentEl) contextContentEl.replaceChildren();
     populateArtistLinks(artistLinksEl, null);
     if (veteranBannerEl) {
@@ -359,7 +357,9 @@ export default function initProfile() {
   }
 
   const applyArtist = (artist) => {
+    setProfileLoading(false);
     if (!artist) {
+      for (const el of loadedContentEls) show(el, false);
       if (contextContentEl) contextContentEl.replaceChildren();
       populateArtistLinks(artistLinksEl, null);
       if (veteranBannerEl) {
@@ -421,6 +421,22 @@ export default function initProfile() {
       return [fn, ln].filter(Boolean).join(" ");
     })();
 
+    const localesRoot =
+      artist &&
+      typeof artist === "object" &&
+      artist.locales &&
+      typeof artist.locales === "object"
+        ? /** @type {Record<string, unknown>} */ (artist.locales)
+        : {};
+    const publicWorldSource = getPublicWorldSourceFromLocales(localesRoot);
+    /** @param {string} key */
+    const pickWorld = (key) =>
+      pickPublicWorldField(
+        /** @type {Record<string, unknown>} */ (loc),
+        key,
+        publicWorldSource,
+      );
+
     const firstName = profileFirstNameForPlaceholders(loc, displayName);
     const worldPh = artistProfileWorldPlaceholders(firstName);
 
@@ -436,7 +452,7 @@ export default function initProfile() {
       img.alt = withSeoImageAlt(displayName);
     }
     if (nameEl) nameEl.textContent = displayName || "";
-    const practiceRaw = pickWorldOrWorldNew(loc, "practice");
+    const practiceRaw = pickWorld("practice");
     const practiceStr =
       practiceRaw != null ? String(practiceRaw).trim() : "";
     if (practiceEl) {
@@ -444,9 +460,7 @@ export default function initProfile() {
     }
     if (perspectiveEl) {
       perspectiveEl.replaceChildren();
-      const perspectiveParts = worldTextParts(
-        pickWorldOrWorldNew(loc, "perspective"),
-      );
+      const perspectiveParts = worldTextParts(pickWorld("perspective"));
       const texts = perspectiveParts.length
         ? perspectiveParts
         : [worldPh.perspective];
@@ -461,7 +475,7 @@ export default function initProfile() {
       contextHeadingEl.textContent = locale === "ja" ? "文脈" : "Context";
     if (contextContentEl) {
       contextContentEl.replaceChildren();
-      const contextParts = worldTextParts(pickWorldOrWorldNew(loc, "context"));
+      const contextParts = worldTextParts(pickWorld("context"));
       const ctxTexts = contextParts.length ? contextParts : worldPh.context;
       for (const text of ctxTexts) {
         const p = document.createElement("p");
@@ -498,7 +512,7 @@ export default function initProfile() {
     );
     if (sightWordsContainerEl) {
       sightWordsContainerEl.replaceChildren();
-      const visionParts = worldTextParts(pickWorldOrWorldNew(loc, "vision"));
+      const visionParts = worldTextParts(pickWorld("vision"));
       const visionLines = visionParts.length ? visionParts : worldPh.vision;
       const narrowSight =
         typeof window !== "undefined" &&
@@ -534,9 +548,7 @@ export default function initProfile() {
     );
     if (constructingWordsContainerEl) {
       constructingWordsContainerEl.replaceChildren();
-      const constructingParts = worldTextParts(
-        pickWorldOrWorldNew(loc, "constructing"),
-      );
+      const constructingParts = worldTextParts(pickWorld("constructing"));
       const conTexts = constructingParts.length
         ? constructingParts
         : [worldPh.constructing];
@@ -550,7 +562,7 @@ export default function initProfile() {
     const quoteContainerEl = document.getElementById("profileQuoteContainer");
     if (quoteContainerEl) {
       quoteContainerEl.replaceChildren();
-      const quoteRaw = pickWorldOrWorldNew(loc, "quote");
+      const quoteRaw = pickWorld("quote");
       const quote = String(quoteRaw ?? "").trim();
       const p = document.createElement("p");
       p.id = "profileQuote";
@@ -562,7 +574,7 @@ export default function initProfile() {
     populateArtistLinks(artistLinksEl, loc.links);
     populateIntroGallery(
       imagesContainer,
-      /** @type {unknown} */ (pickWorldOrWorldNew(loc, "introGallery")),
+      /** @type {unknown} */ (pickWorld("introGallery")),
     );
 
     const programIdsForBanner = artistProgramIds(artist);
@@ -591,8 +603,13 @@ export default function initProfile() {
   };
 
   const run = async () => {
-    const artist = await getArtistBySlug(slug);
-    applyArtist(artist);
+    setProfileLoading(true);
+    try {
+      const artist = await getArtistBySlug(slug);
+      applyArtist(artist);
+    } catch {
+      applyArtist(null);
+    }
   };
 
   void run();

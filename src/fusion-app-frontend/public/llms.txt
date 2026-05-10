@@ -1,4 +1,4 @@
-# Fusion — llms.txt
+# Fusion - llms.txt
 # Site: https://fusionart.world
 # Fusion is a premium art platform connecting artists with Japan artist residency programs, editions, and editorial content.
 

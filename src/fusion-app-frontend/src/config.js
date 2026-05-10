@@ -5,13 +5,15 @@
  *   the coming-soon / early-access column and hides the enter CTA.
  * - apiBaseUrl: base URL for API requests (e.g. '/api' or 'http://localhost:3000' in dev).
  * - testData: when true, prefer bundled fixtures when `fusion-data-source` is unset (see database.js).
- *   When false, prefer live canister data. Per-build override: `VITE_USE_TEST_DATA=true` in `.env`
- *   (checked in database.js; takes precedence over this flag).
- * - Mainnet backend id when `devMode` is false: see `MAINNET_FUSION_APP_BACKEND_CANISTER_ID` and
- *   `resolveFusionBackendCanisterId` (avoids local `dfx generate` id with mainnet host on Vite).
+ *   When false, prefer **live mainnet** canister data for **anonymous** queries even if `devMode` is true
+ *   (local asset canister / Vite still talks to `icp-api.io` for public reads). Per-build override:
+ *   `VITE_USE_TEST_DATA=true` in `.env` (same precedence as database.js).
+ * - **Authenticated** calls while `devMode` is true still use the **local** replica + local backend id so
+ *   Internet Identity principals from the replica match the canister (see `resolveFusionBackendCanisterId`).
+ * - Mainnet backend id: `MAINNET_FUSION_APP_BACKEND_CANISTER_ID` and `resolveFusionBackendCanisterId`.
  */
 export const config = {
-  devMode: false,
+  devMode: true,
   siteActive: true,
   apiBaseUrl: '/api',
   testData: false,
@@ -91,11 +93,46 @@ export const config = {
 // ============================================
 // IC / Network configuration
 // ============================================
-// Single switch: use `config.devMode` for both console noise and IC network.
-// - devMode true  → local replica / Vite (fetch root key, same-origin or proxy)
-// - devMode false → mainnet (no root key; host must match asset CSP connect-src)
+// `config.devMode` controls console noise, local II URLs, fetchRootKey for **local** agents, etc.
+// **Public (anonymous) backend reads** use mainnet (`icp-api.io` + mainnet canister id) whenever the
+// data source preference is **live** — same rules as `getDataSource()` in database.js — so local
+// deploys can render community/home against production data unless test mode is explicitly selected.
 
 export const DEV_MODE = config.devMode;
+
+/** Keep in sync with `database.js` (`getDataSource` / `setDataSource`). */
+export const FUSION_DATA_SOURCE_STORAGE_KEY = 'fusion-data-source';
+
+/**
+ * Mirrors `database.js` default + `localStorage` override (no import to avoid cycles).
+ * @returns {'test' | 'live'}
+ */
+export function getPublicDataSourcePreference() {
+    if (typeof window !== 'undefined') {
+        try {
+            const v = window.localStorage.getItem(FUSION_DATA_SOURCE_STORAGE_KEY);
+            if (v === 'live' || v === 'test') return v;
+        } catch {
+            /* ignore */
+        }
+    }
+    try {
+        if (import.meta.env && import.meta.env.VITE_USE_TEST_DATA === 'true') {
+            return 'test';
+        }
+    } catch {
+        /* ignore */
+    }
+    return config.testData ? 'test' : 'live';
+}
+
+/**
+ * When true, anonymous `createICActor` calls should use mainnet host + mainnet fusion-app-backend id.
+ * @returns {boolean}
+ */
+export function shouldQueryMainnetBackend() {
+    return getPublicDataSourcePreference() === 'live';
+}
 
 export const IC_CONFIG = {
   local: {
@@ -352,13 +389,16 @@ import { HttpAgent, Actor } from '@dfinity/agent';
 /**
  * Backend canister id for {@link createICActor} / {@link createAuthenticatedICActor}.
  * - Optional **`VITE_FUSION_BACKEND_CANISTER_ID`** wins (staging / custom mainnet).
- * - **`DEV_MODE` true:** use the id from generated declarations (local replica).
- * - **`DEV_MODE` false:** use {@link MAINNET_FUSION_APP_BACKEND_CANISTER_ID} so host (`icp-api.io`) and principal match.
+ * - **Anonymous + live data preference:** {@link MAINNET_FUSION_APP_BACKEND_CANISTER_ID} even when `DEV_MODE` is true.
+ * - **Authenticated + `DEV_MODE`:** local declarations id (replica II principals match local canister).
+ * - **Test data preference** (`testData` / `VITE_USE_TEST_DATA` / `localStorage` test): local id when `DEV_MODE`.
+ * - **`DEV_MODE` false:** mainnet id.
  *
  * @param {string} [declaredCanisterId] — from `declarations/fusion-app-backend`
+ * @param {{ authenticated?: boolean }} [options]
  * @returns {string}
  */
-export function resolveFusionBackendCanisterId(declaredCanisterId) {
+export function resolveFusionBackendCanisterId(declaredCanisterId, options = {}) {
     try {
         const v = trimEnv(import.meta.env?.VITE_FUSION_BACKEND_CANISTER_ID);
         if (v) return v;
@@ -366,39 +406,65 @@ export function resolveFusionBackendCanisterId(declaredCanisterId) {
         /* ignore */
     }
     const declared = typeof declaredCanisterId === 'string' ? declaredCanisterId.trim() : '';
-    if (DEV_MODE) return declared;
+    const authenticated = options.authenticated === true;
+
+    if (authenticated && DEV_MODE) {
+        return declared;
+    }
+
+    if (shouldQueryMainnetBackend()) {
+        return MAINNET_FUSION_APP_BACKEND_CANISTER_ID || declared;
+    }
+
+    if (DEV_MODE) {
+        return declared;
+    }
+
     return MAINNET_FUSION_APP_BACKEND_CANISTER_ID || declared;
 }
 
 /**
  * Create an anonymous (unauthenticated) IC actor.
- * Useful for query/update calls that don't require a signed identity.
+ * Uses **mainnet** (`icp-api.io`) when the data source preference is **live** so local / Vite builds
+ * still read production canister data; uses the **local** replica only in explicit **test** data mode.
  */
 export async function createICActor(idlFactory, canisterId, options = {}) {
-  const networkConfig = getNetworkConfig();
+  const resolvedCanisterId = resolveFusionBackendCanisterId(canisterId, {
+    authenticated: false,
+  });
+  const networkConfig = shouldQueryMainnetBackend()
+    ? IC_CONFIG.live
+    : getNetworkConfig();
 
-  const agent = options.agent || new HttpAgent({ host: networkConfig.host });
+  const agent =
+    options.agent ||
+    new HttpAgent({
+      host: networkConfig.host,
+    });
 
-  // Local replica: must await fetchRootKey() before any canister calls (mainnet root key is wrong locally).
   if (networkConfig.fetchRootKey) {
     await agent.fetchRootKey().catch(() => {
-      // Local development replica should be running; if not, we still let actor creation proceed.
+      /* local replica */
     });
   }
 
   return Actor.createActor(idlFactory, {
     agent,
-    canisterId,
+    canisterId: resolvedCanisterId,
     ...options.actorOptions,
   });
 }
 
 /**
  * Actor that sends the Internet Identity–derived caller principal (queries/updates).
+ * Always uses {@link getNetworkConfig} (replica when `DEV_MODE`) so local II sessions match the target replica.
  * @param {import('@dfinity/agent').Identity} identity
  */
 export async function createAuthenticatedICActor(idlFactory, canisterId, identity, options = {}) {
   const networkConfig = getNetworkConfig();
+  const resolvedCanisterId = resolveFusionBackendCanisterId(canisterId, {
+    authenticated: true,
+  });
 
   const agent =
     options.agent ||
@@ -413,7 +479,7 @@ export async function createAuthenticatedICActor(idlFactory, canisterId, identit
 
   return Actor.createActor(idlFactory, {
     agent,
-    canisterId,
+    canisterId: resolvedCanisterId,
     ...options.actorOptions,
   });
 }
