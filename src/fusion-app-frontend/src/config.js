@@ -13,7 +13,7 @@
  * - Mainnet backend id: `MAINNET_FUSION_APP_BACKEND_CANISTER_ID` and `resolveFusionBackendCanisterId`.
  */
 export const config = {
-  devMode: true,
+  devMode: false,
   siteActive: true,
   apiBaseUrl: '/api',
   testData: false,
@@ -486,14 +486,12 @@ export async function createAuthenticatedICActor(idlFactory, canisterId, identit
 
 /**
  * Canonical origin for OG URLs and `link[rel=canonical]` (no trailing slash).
- * In the browser, uses `window.location.origin` so local and staging hosts stay correct.
- * For SSR-less builds, override with `VITE_PUBLIC_SITE_ORIGIN`.
+ * Public pages should canonicalize to the apex domain even when reached via www,
+ * canister URLs, or preview hosts. Local replica/dev hosts keep their own origin.
+ * Override with `VITE_PUBLIC_SITE_ORIGIN` when deploying a separate staging domain.
  * Production custom domain: https://fusionart.world
  */
 export function getPublicSiteOrigin() {
-  if (typeof window !== "undefined" && window.location?.origin) {
-    return String(window.location.origin).replace(/\/$/, "");
-  }
   try {
     const v = import.meta.env && import.meta.env.VITE_PUBLIC_SITE_ORIGIN;
     if (typeof v === "string" && v.trim()) {
@@ -501,6 +499,18 @@ export function getPublicSiteOrigin() {
     }
   } catch (_) {
     /* ignore */
+  }
+  if (typeof window !== "undefined" && window.location?.origin) {
+    const { hostname, origin } = window.location;
+    const h = String(hostname || "").toLowerCase();
+    if (
+      h === "localhost" ||
+      h === "127.0.0.1" ||
+      h.endsWith(".localhost") ||
+      h.endsWith(".local")
+    ) {
+      return String(origin).replace(/\/$/, "");
+    }
   }
   return "https://fusionart.world";
 }

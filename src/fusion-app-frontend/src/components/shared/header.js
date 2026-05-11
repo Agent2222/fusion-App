@@ -169,6 +169,9 @@ class HeaderComponent extends HTMLElement {
             ease: 'power2.inOut',
             overwrite: 'auto',
         });
+        if (this._logoHeaderEl) {
+            gsap.set(this._logoHeaderEl, { opacity: 0, pointerEvents: 'none' });
+        }
     }
 
     hideHeader() {
@@ -180,6 +183,9 @@ class HeaderComponent extends HTMLElement {
             ease: 'power2.inOut',
             overwrite: 'auto',
         });
+        if (this._logoHeaderEl) {
+            gsap.set(this._logoHeaderEl, { opacity: 0, pointerEvents: 'none' });
+        }
     }
 
     /** Hide menu bar (scroll up or idle); slides up. */
@@ -1215,6 +1221,7 @@ class HeaderComponent extends HTMLElement {
             <style>
             :host {
                 display: block;
+                position: relative;
                 /* Let the logo paint outside the 50px header strip */
                 overflow: visible;
                 /* --bg, --c* inherit from document (html data-theme); do not override here */
@@ -1409,7 +1416,7 @@ class HeaderComponent extends HTMLElement {
                 }
 
                 /* Narrow hit box (logo width only); opacity + pointer-events driven by GSAP when bar hides */
-                #logoHeader {
+                .floating-logo-header {
                     box-sizing: border-box;
                     max-height: 150px;
                     width: max-content;
@@ -1431,7 +1438,7 @@ class HeaderComponent extends HTMLElement {
                     pointer-events: none;
                 }
 
-                #logoHeaderInner {
+                .floating-logo-header #logoHeaderInner {
                     width: 100%;
                     height: 100%;
                     min-width: 0;
@@ -1443,7 +1450,7 @@ class HeaderComponent extends HTMLElement {
                     pointer-events: inherit;
                 }
 
-                #logoHeader img {
+                .floating-logo-header img {
                     width: auto;
                     max-width: min(7.1rem, 100%);
                     max-height: none;
@@ -1916,12 +1923,12 @@ class HeaderComponent extends HTMLElement {
                 </div>
             </div>
             <div id="headerDrawerBackdrop" class="header-drawer-backdrop" aria-hidden="true"></div>
-            <div id="logoHeader">
+            <div id="headerProfileSetupPrompt" class="header-profile-setup-host" hidden></div>
+            </div>
+            <div id="logoHeader" class="floating-logo-header">
                 <div id="logoHeaderInner">
                     <img id="headerSymbolLogo" src="${SymbolLogo}" alt="${withSeoImageAlt('Fusion logo')}" loading="lazy">
                 </div>
-            </div>
-            <div id="headerProfileSetupPrompt" class="header-profile-setup-host" hidden></div>
             </div>
         `;
     }

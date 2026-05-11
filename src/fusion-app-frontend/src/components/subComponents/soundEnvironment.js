@@ -150,7 +150,13 @@ class SoundEnvironment extends HTMLElement {
 
     _isSuppressedForCurrentRoute() {
         const path = typeof window !== 'undefined' ? String(window.location?.pathname || '/') : '/';
-        return path === '/studio' || path.startsWith('/settings') || path === '/profile' || path.startsWith('/profile/');
+        return (
+            path === '/studio' ||
+            path === '/community' ||
+            path.startsWith('/settings') ||
+            path === '/profile' ||
+            path.startsWith('/profile/')
+        );
     }
 
     _syncRouteSuppression() {

@@ -7,7 +7,19 @@ import { distributeUploadedAssetUrls } from './assetDistribution.js';
 /** @returns {Record<string, unknown>} */
 export function defaultCommunityPage() {
     return {
+        sections: {
+            hero: true,
+            exclusive: true,
+            connect: true,
+            network: true,
+            sessions: true,
+            promo: true,
+            join: true,
+        },
         hero: {
+            imageUrl: '',
+            lineEn: 'VIDEO · Studio Visit · Artist · 18 min',
+            lineJa: '動画 · スタジオ訪問 · アーティスト · 18分',
             videoUrl: '',
             previewVideoUrl: '',
             fullVideoKey: '',
@@ -28,6 +40,8 @@ export function defaultCommunityPage() {
             ctaJoinLabelJa: 'コミュニティに参加',
             ctaWatchLabelEn: 'WATCH NOW',
             ctaWatchLabelJa: '視聴する',
+            chapters: [],
+            topics: [],
         },
         exclusive: [
             {
@@ -98,9 +112,133 @@ export function normalizeCommunityPage(raw) {
     const base = /** @type {Record<string, unknown>} */ (
         JSON.parse(JSON.stringify(defaultCommunityPage()))
     );
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return base;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        normalizeCommunityFeatureItems(base);
+        return base;
+    }
     const o = /** @type {Record<string, unknown>} */ (raw);
-    return /** @type {Record<string, unknown>} */ (distributeUploadedAssetUrls(deepMergeCommunity(base, o)));
+    const merged = deepMergeCommunity(base, o);
+    normalizeCommunityFeatureItems(merged);
+    return /** @type {Record<string, unknown>} */ (distributeUploadedAssetUrls(merged));
+}
+
+/**
+ * @param {Record<string, unknown>} bundle
+ */
+function normalizeCommunityFeatureItems(bundle) {
+    const hero = normalizeFeatureItem(bundle.hero, {});
+    bundle.hero = hero;
+    const rawExclusive = Array.isArray(bundle.exclusive) ? bundle.exclusive : [];
+    const fallbackItems = defaultCommunityPage().exclusive;
+    bundle.exclusive = rawExclusive.slice(0, 6).map((item, i) =>
+        normalizeFeatureItem(item, {
+            ...hero,
+            ...(fallbackItems[i] && typeof fallbackItems[i] === 'object' ? fallbackItems[i] : {}),
+        }),
+    );
+    while (bundle.exclusive.length < 3) {
+        const i = bundle.exclusive.length;
+        bundle.exclusive.push(
+            normalizeFeatureItem(fallbackItems[i] || {}, {
+                ...hero,
+                ...(fallbackItems[i] && typeof fallbackItems[i] === 'object' ? fallbackItems[i] : {}),
+            }),
+        );
+    }
+}
+
+/**
+ * @param {unknown} raw
+ * @param {Record<string, unknown>} fallback
+ * @returns {Record<string, unknown>}
+ */
+function normalizeFeatureItem(raw, fallback) {
+    const item = raw && typeof raw === 'object' && !Array.isArray(raw)
+        ? /** @type {Record<string, unknown>} */ (raw)
+        : {};
+    const text = (key, fb = '') => String(item[key] ?? fallback[key] ?? fb);
+    const imageUrl = text('imageUrl', text('posterUrl'));
+    const posterUrl = text('posterUrl', imageUrl);
+    return {
+        imageUrl,
+        lineEn: text('lineEn'),
+        lineJa: text('lineJa', text('lineEn')),
+        href: text('href', '#'),
+        videoUrl: text('videoUrl'),
+        previewVideoUrl: text('previewVideoUrl'),
+        fullVideoKey: text('fullVideoKey'),
+        fullVideoFileName: text('fullVideoFileName'),
+        posterUrl,
+        overlayTitle: text('overlayTitle'),
+        overlayGuests: text('overlayGuests'),
+        overlayDuration: text('overlayDuration'),
+        kickerEn: text('kickerEn'),
+        kickerJa: text('kickerJa', text('kickerEn')),
+        headlineEn: text('headlineEn'),
+        headlineJa: text('headlineJa', text('headlineEn')),
+        bodyEn: text('bodyEn'),
+        bodyJa: text('bodyJa', text('bodyEn')),
+        ctaJoinLabelEn: text('ctaJoinLabelEn', 'JOIN THE COMMUNITY'),
+        ctaJoinLabelJa: text('ctaJoinLabelJa', text('ctaJoinLabelEn', 'JOIN THE COMMUNITY')),
+        ctaWatchLabelEn: text('ctaWatchLabelEn', 'WATCH NOW'),
+        ctaWatchLabelJa: text('ctaWatchLabelJa', text('ctaWatchLabelEn', 'WATCH NOW')),
+        chapters: normalizeChapters(item.chapters ?? fallback.chapters),
+        topics: normalizeTopics(item.topics ?? fallback.topics),
+    };
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {Array<{ artistId: string, timestampSec: number }>}
+ */
+function normalizeChapters(raw) {
+    if (!Array.isArray(raw)) return [];
+    return raw
+        .map((chapter) => {
+            const c = chapter && typeof chapter === 'object' ? /** @type {Record<string, unknown>} */ (chapter) : {};
+            const artistId = String(c.artistId ?? c.artist_id ?? '').trim();
+            const timestampSec = toTimestampSec(c.timestampSec ?? c.timeSec ?? c.timestamp ?? c.time);
+            return artistId && timestampSec >= 0 ? { artistId, timestampSec } : null;
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.timestampSec - b.timestampSec);
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {Array<{ timestampSec: number, titleEn: string, titleJa: string, quoteEn: string, quoteJa: string }>}
+ */
+function normalizeTopics(raw) {
+    if (!Array.isArray(raw)) return [];
+    return raw
+        .map((topic) => {
+            const t = topic && typeof topic === 'object' ? /** @type {Record<string, unknown>} */ (topic) : {};
+            const timestampSec = toTimestampSec(t.timestampSec ?? t.timeSec ?? t.timestamp ?? t.time);
+            const titleEn = String(t.titleEn ?? t.title ?? '').trim();
+            const titleJa = String(t.titleJa ?? t.titleEn ?? t.title ?? '').trim();
+            const quoteEn = String(t.quoteEn ?? t.quote ?? t.bodyEn ?? '').trim();
+            const quoteJa = String(t.quoteJa ?? t.quoteEn ?? t.quote ?? t.bodyJa ?? '').trim();
+            return titleEn || titleJa || quoteEn || quoteJa
+                ? { timestampSec, titleEn, titleJa, quoteEn, quoteJa }
+                : null;
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.timestampSec - b.timestampSec);
+}
+
+/**
+ * @param {unknown} raw
+ */
+function toTimestampSec(raw) {
+    if (typeof raw === 'number' && Number.isFinite(raw)) return Math.max(0, Math.floor(raw));
+    const text = String(raw ?? '').trim();
+    if (!text) return 0;
+    if (/^\d+(\.\d+)?$/.test(text)) return Math.max(0, Math.floor(Number(text)));
+    const parts = text.split(':').map((part) => Number(part));
+    if (parts.some((part) => !Number.isFinite(part))) return 0;
+    if (parts.length === 2) return Math.max(0, Math.floor(parts[0] * 60 + parts[1]));
+    if (parts.length === 3) return Math.max(0, Math.floor(parts[0] * 3600 + parts[1] * 60 + parts[2]));
+    return 0;
 }
 
 /**

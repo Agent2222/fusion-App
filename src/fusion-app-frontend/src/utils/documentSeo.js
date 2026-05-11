@@ -79,6 +79,22 @@ function setJsonLdScript(id, data) {
 const DEFAULT_OG_IMAGE_PATH = "/og-default.png";
 
 /**
+ * @param {string} path
+ */
+function normalizeCanonicalPath(path) {
+  const raw = String(path || "/").trim() || "/";
+  let pathname = raw;
+  try {
+    pathname = new URL(raw, "https://fusionart.world").pathname;
+  } catch {
+    pathname = raw.split("?")[0].split("#")[0] || "/";
+  }
+  if (!pathname.startsWith("/")) pathname = `/${pathname}`;
+  if (pathname.length > 1) pathname = pathname.replace(/\/+$/, "");
+  return pathname || "/";
+}
+
+/**
  * @param {{
  *   title: string,
  *   description: string,
@@ -105,8 +121,8 @@ export function applyDocumentSeo(opts) {
         ? window.location.pathname
         : "/";
   const origin = getPublicSiteOrigin();
-  const pathOnly = path.startsWith("/") ? path : `/${path}`;
-  const normalizedCanonical = new URL(pathOnly || "/", origin).href;
+  const pathOnly = normalizeCanonicalPath(path);
+  const normalizedCanonical = new URL(pathOnly, origin).href;
 
   document.title = title;
 

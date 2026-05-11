@@ -55,6 +55,7 @@ html[data-theme="dark"] {
   --fv-headline: 'wght' 800, 'wdth' 110;
   --fv-headline-wide: 'wght' 800, 'wdth' 150;
   --fv-title: 'wght' 700, 'wdth' 150;
+  --fv-title-medium-wide: 'wght' 450, 'wdth' 130;
   --fv-subtitle: 'wght' 600, 'wdth' 120;
   --fv-emphasis: 'wght' 600, 'wdth' 150;
   --fv-body: 'wght' 400, 'wdth' 110;
@@ -83,6 +84,9 @@ html[data-theme="dark"] {
 }
 .fv-headline {
   font-variation-settings: var(--fv-headline);
+}
+.fv-title-medium-wide {
+  font-variation-settings: var(--fv-title-medium-wide);
 }
 .fv-headline-wide {
   font-variation-settings: var(--fv-headline-wide);
@@ -2235,7 +2239,7 @@ html[data-theme='dark'] .join-fusion-page__err {
   overflow-y: auto;
   overflow-x: hidden;
   gap: 0;
-  padding-top: 130px;
+  padding-top: 145px;
   padding-bottom: 250px;
 }
 
@@ -2665,12 +2669,6 @@ html[data-theme='dark'] .join-fusion-page__err {
   user-select: none;
 }
 
-/* Offering cards → fade gallery: keep bands from stacking / overlapping (all breakpoints). */
-.program-view-content #keyOfferingsSection {
-  /* padding-bottom: clamp(1rem, 2.5vw, 2rem);
-  margin-bottom: clamp(0.25rem, 1vw, 0.75rem); */
-}
-
 .program-view-content app-program-offering-cards {
   display: block;
   /* margin-bottom: clamp(0.75rem, 2vw, 1.5rem); */
@@ -2941,15 +2939,17 @@ html[data-theme='dark'] .join-fusion-page__err {
   overflow-y: auto;
   overflow-x: hidden;
   gap: 0;
-  padding-top: 130px;
+  padding-top: 145px;
   padding-bottom: 350px;
 }
 
 .community-content {
   width: 100%;
   box-sizing: border-box;
-  padding-left: clamp(0.5rem, 2vw, 1.25rem);
-  padding-right: clamp(0.5rem, 2vw, 1.25rem);
+  padding-left: clamp(1rem, 2.2vw, 1.45rem);
+  padding-right: clamp(1rem, 2.2vw, 1.45rem);
+  margin-bottom: 100px;
+  margin-top: 4rem;
 }
 
 .community-page #communityMainContent,
@@ -2989,7 +2989,7 @@ html[data-theme='dark'] .join-fusion-page__err {
   #programViewMainContent,
   #journalMainContent,
   #communityMainContent {
-    padding-top: clamp(5rem, 12vw, 8rem);
+    padding-top: clamp(9rem, 12vw, 8rem);
     padding-bottom: clamp(8rem, 20vw, 15rem);
   }
 

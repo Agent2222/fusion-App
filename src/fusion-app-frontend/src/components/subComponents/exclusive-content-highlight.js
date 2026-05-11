@@ -1,5 +1,3 @@
-import { navigate } from '../../router.js';
-
 function esc(s) {
     return String(s ?? '')
         .replace(/&/g, '&amp;')
@@ -14,6 +12,7 @@ class ExclusiveContentHighlight extends HTMLElement {
         this.shadow = this.attachShadow({ mode: 'open' });
         /** @type {Array<Record<string, unknown>>} */
         this._items = [];
+        this._activeIndex = -1;
     }
 
     connectedCallback() {
@@ -22,9 +21,19 @@ class ExclusiveContentHighlight extends HTMLElement {
 
     /**
      * @param {Array<Record<string, unknown>>} items — max 3
+     * @param {{ activeIndex?: number }} [opts]
      */
-    setData(items) {
+    setData(items, opts = {}) {
         this._items = Array.isArray(items) ? items.slice(0, 3) : [];
+        this._activeIndex = Number.isFinite(opts.activeIndex) ? Number(opts.activeIndex) : this._activeIndex;
+        this.render();
+    }
+
+    /**
+     * @param {number} index
+     */
+    setActiveIndex(index) {
+        this._activeIndex = Number(index);
         this.render();
     }
 
@@ -36,17 +45,26 @@ class ExclusiveContentHighlight extends HTMLElement {
         const blocks = cards
             .map((raw, i) => {
                 const imageUrl = String(raw?.imageUrl ?? '').trim();
+                const posterUrl = String(raw?.posterUrl ?? '').trim();
+                const displayImage = imageUrl || posterUrl;
                 const line =
                     loc === 'ja'
                         ? String(raw?.lineJa ?? raw?.lineEn ?? '')
                         : String(raw?.lineEn ?? '');
-                const href = String(raw?.href ?? '#').trim() || '#';
+                const title =
+                    loc === 'ja'
+                        ? String(raw?.headlineJa ?? raw?.headlineEn ?? line)
+                        : String(raw?.headlineEn ?? line);
+                const active = i === this._activeIndex;
                 return `
-                    <article class="ech-card" data-index="${i}">
-                        <div class="ech-media" style="${imageUrl ? `background-image:url(${esc(imageUrl)})` : ''}">
-                            ${imageUrl ? '' : '<span class="ech-ph">Image</span>'}
-                            <div class="ech-cap">${esc(line)}</div>
-                            <button type="button" class="ech-play" aria-label="Open" data-href="${esc(href)}">▶</button>
+                    <article class="ech-card ${active ? 'is-active' : ''}" data-index="${i}">
+                        <div class="ech-media" style="${displayImage ? `background-image:url(${esc(displayImage)})` : ''}">
+                            ${displayImage ? '' : '<span class="ech-ph">Image</span>'}
+                            <div class="ech-cap">
+                                <strong>${esc(title)}</strong>
+                                <span>${esc(line)}</span>
+                            </div>
+                            <button type="button" class="ech-play" aria-label="Select feature">▶</button>
                         </div>
                     </article>
                 `;
@@ -74,6 +92,7 @@ class ExclusiveContentHighlight extends HTMLElement {
                     font-variation-settings: var(--fv-label);
                 }
                 .ech-view {
+                    display: none;
                     font-size: clamp(0.78rem, 1vw, 0.88rem);
                     font-variation-settings: var(--fv-body);
                     text-decoration: underline; cursor: pointer; border: none; background: none; color: inherit;
@@ -88,6 +107,10 @@ class ExclusiveContentHighlight extends HTMLElement {
                     box-sizing: border-box;
                 }
                 .ech-card { min-width: 0; }
+                .ech-card.is-active .ech-media {
+                    outline: 1px solid var(--c2, #111);
+                    outline-offset: 4px;
+                }
                 .ech-media {
                     position: relative;
                     aspect-ratio: 4 / 5;
@@ -104,7 +127,12 @@ class ExclusiveContentHighlight extends HTMLElement {
                     font-variation-settings: var(--fv-caption);
                     background: linear-gradient(transparent, rgba(0,0,0,0.75));
                     color: #fff;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0.2rem;
                 }
+                .ech-cap strong { font-variation-settings: var(--fv-subtitle); }
+                .ech-cap span { opacity: 0.82; }
                 .ech-play {
                     position: absolute; bottom: 2.5rem; right: 0.75rem;
                     width: 2rem; height: 2rem;
@@ -127,20 +155,24 @@ class ExclusiveContentHighlight extends HTMLElement {
             <div class="ech-row">${blocks}</div>
         `;
 
-        const open = (href) => {
-            if (!href || href === '#') return;
-            if (href.startsWith('/') && !href.startsWith('//')) {
-                navigate(href);
-            } else {
-                window.open(href, '_blank', 'noopener,noreferrer');
-            }
+        const select = (idx) => {
+            if (!Number.isInteger(idx) || idx < 0) return;
+            this._activeIndex = idx;
+            this.render();
+            this.dispatchEvent(
+                new CustomEvent('fusion-community-feature-select', {
+                    bubbles: true,
+                    composed: true,
+                    detail: { index: idx, item: this._items[idx] },
+                }),
+            );
         };
 
         this.shadow.querySelectorAll('.ech-play').forEach((btn) => {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                const h = btn.getAttribute('data-href') || '';
-                open(h);
+                const card = btn.closest('.ech-card');
+                select(Number(card?.getAttribute('data-index') ?? -1));
             });
         });
 
@@ -148,16 +180,9 @@ class ExclusiveContentHighlight extends HTMLElement {
         if (row) {
             row.querySelectorAll('.ech-card').forEach((card, idx) => {
                 card.addEventListener('click', () => {
-                    const b = card.querySelector('.ech-play');
-                    const h = b?.getAttribute('data-href') || '';
-                    open(h);
+                    select(idx);
                 });
             });
-        }
-
-        const va = this.shadow.querySelector('#echViewAll');
-        if (va instanceof HTMLButtonElement) {
-            va.addEventListener('click', () => navigate('/journal'));
         }
     }
 }
