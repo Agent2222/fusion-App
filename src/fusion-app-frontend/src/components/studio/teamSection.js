@@ -5,6 +5,7 @@ import { studioPageHeaderHtml } from '../../utils/studioCategoryLayout.js';
 import { escapeHtml } from '../../utils/textPreview.js';
 import { shortPrincipalDisplay } from '../../utils/studioPlainForms.js';
 import { openStudioModal } from '../../utils/studioModal.js';
+import { formatStudioDate } from '../../utils/studioDateFormat.js';
 import {
     adminCreateJoinInviteCodeStudio,
     adminListAccountContactsForStudio,
@@ -180,7 +181,7 @@ async function renderPendingJoinInvitesTable(mainEl) {
             .map(({ code, rec }) => {
                 const r = /** @type {Record<string, unknown>} */ (rec);
                 const role = joinInviteRoleLabel(r.role);
-                const created = escapeHtml(String(r.createdAt ?? '—'));
+                const created = escapeHtml(formatStudioDate(r.createdAt));
                 return `<tr>
         <td><code style="user-select:all">${escapeHtml(code)}</code></td>
         <td>${escapeHtml(role)}</td>

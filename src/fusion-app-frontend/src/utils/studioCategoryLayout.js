@@ -26,7 +26,7 @@ export function studioPageHeaderHtml(opts) {
     <h2 class="studio-page-header__title">${esc(opts.title)}</h2>
     ${subtitle}
   </div>
-  <div class="studio-page-header__stat" aria-live="polite">
+  <div class="studio-page-header__stat" aria-live="polite" aria-label="${esc(countLabel)} count">
     <span class="studio-page-header__count" id="${esc(opts.countId)}">—</span>
     <span class="studio-page-header__count-label">${esc(countLabel)}</span>
   </div>
@@ -46,7 +46,7 @@ export function studioFilterBarHtml(opts) {
     <span class="studio-sr-only">Search</span>
     <input type="search" id="${esc(opts.searchId)}" class="studio-input studio-filter-bar__input" placeholder="${esc(ph)}" autocomplete="off" />
   </label>
-  ${extra}
+  ${extra ? `<div class="studio-filter-bar__extra">${extra}</div>` : ''}
 </div>`;
 }
 
@@ -58,7 +58,7 @@ export function studioDataTabsHtml(opts) {
     const buttons = opts.tabs
         .map((t) => {
             const active = t.active ? ' is-active' : '';
-            return `<button type="button" class="studio-data-tabs__tab${active}" data-tab-value="${esc(t.value)}" id="${esc(t.id)}">${esc(t.label)}</button>`;
+            return `<button type="button" class="studio-data-tabs__tab${active}" role="tab" aria-selected="${t.active ? 'true' : 'false'}" tabindex="${t.active ? '0' : '-1'}" data-tab-value="${esc(t.value)}" id="${esc(t.id)}">${esc(t.label)}</button>`;
         })
         .join('');
     return `
@@ -74,9 +74,9 @@ export function studioDataTabsHtml(opts) {
 export function studioPaginationBarHtml(opts) {
     return `
 <nav class="studio-pagination studio-pagination--full" id="${esc(opts.navId)}" aria-label="Pages">
-  <button type="button" class="studio-btn-ghost studio-pagination__prev" id="${esc(opts.prevId)}">Prev</button>
+  <button type="button" class="studio-btn-ghost studio-pagination__prev" id="${esc(opts.prevId)}" aria-label="Previous page">Prev</button>
   <div class="studio-pagination__numbers" id="${esc(opts.numbersId)}"></div>
   <span class="studio-pagination__label" id="${esc(opts.labelId)}"></span>
-  <button type="button" class="studio-btn-ghost studio-pagination__next" id="${esc(opts.nextId)}">Next</button>
+  <button type="button" class="studio-btn-ghost studio-pagination__next" id="${esc(opts.nextId)}" aria-label="Next page">Next</button>
 </nav>`;
 }

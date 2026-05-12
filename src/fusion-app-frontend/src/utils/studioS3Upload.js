@@ -21,6 +21,7 @@ export const S3_UPLOAD_AREAS = [
 ];
 
 const DEFAULT_UPLOAD_AREA = 'studio/misc';
+const COMMUNITY_MEDIA_ROOT_PREFIX = 'fusionMedia/uploads/';
 
 /**
  * @param {unknown} area
@@ -116,7 +117,8 @@ export async function uploadBlobToS3(file, inputEl, options = {}) {
     const deterministic = deterministicKey(area, file, options);
     const key = deterministic || `${area}/${shortId8()}-${truncatedSafeBase(file.name)}`;
     const ct = file.type || 'application/octet-stream';
-    const { putUrl, publicUrl } = await presignUpload(key, ct);
+    const rootPrefix = area === 'studio/community' ? COMMUNITY_MEDIA_ROOT_PREFIX : undefined;
+    const { putUrl, publicUrl } = await presignUpload(key, ct, { rootPrefix });
     const res = await fetch(putUrl, {
         method: 'PUT',
         body: file,

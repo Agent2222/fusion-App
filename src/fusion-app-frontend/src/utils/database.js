@@ -533,6 +533,14 @@ function defaultDataSourceFromConfig() {
     return config.testData ? 'test' : 'live';
 }
 
+function shouldUseCommunityTestData() {
+    return config.testData === true;
+}
+
+export function getCommunityDataMode() {
+    return shouldUseCommunityTestData() ? 'test' : 'live';
+}
+
 /**
  * @returns {DataSource}
  */
@@ -1116,10 +1124,7 @@ function getMergedTestArtists() {
 /**
  * @returns {Promise<object[]>}
  */
-export async function getArtists() {
-    if (getDataSource() === 'test') {
-        return getMergedTestArtists().filter((a) => artistRosterInPublicDirectory(a.visibility));
-    }
+async function getLivePublicArtists() {
     try {
         const actor = await getFusionBackendActor();
         if (typeof actor.listArtistRecordsPublic === 'function') {
@@ -1154,6 +1159,27 @@ export async function getArtists() {
     return dedupePublicArtistRows(
         rows.map((r) => mergeArtistFeaturedExtension(mapCanisterArtistRow(r, undefined, mediaMap), metaForMerge))
     );
+}
+
+/**
+ * @returns {Promise<object[]>}
+ */
+export async function getArtists() {
+    if (getDataSource() === 'test') {
+        return getMergedTestArtists().filter((a) => artistRosterInPublicDirectory(a.visibility));
+    }
+    return getLivePublicArtists();
+}
+
+/**
+ * Community should follow config.testData only, ignoring localStorage/Vite data-source overrides.
+ * @returns {Promise<object[]>}
+ */
+export async function getCommunityArtistsPublic() {
+    if (shouldUseCommunityTestData()) {
+        return getMergedTestArtists().filter((a) => artistRosterInPublicDirectory(a.visibility));
+    }
+    return getLivePublicArtists();
 }
 
 /**
@@ -1935,6 +1961,47 @@ export async function getAccountForCaller() {
 }
 
 /**
+ * Program payment state for the logged-in member dashboard.
+ * @returns {Promise<{ approvedPrograms: Array<Record<string, unknown>>, summaries: Array<Record<string, unknown>>, ledger: Array<Record<string, unknown>>, plans: Array<Record<string, unknown>> }>}
+ */
+export async function getMyProgramPayments() {
+    if (getDataSource() === 'test') {
+        return {
+            approvedPrograms: [
+                {
+                    applicationId: `${getProfileSettingsDevArtistId() || 'demo'}|fusionKaga`,
+                    programId: 'fusionKaga',
+                    status: 'accepted',
+                    email: 'demo.applicant@example.com',
+                    fullName: 'Demo Applicant',
+                    createdAt: '2026-01-15T12:00:00.000Z',
+                },
+            ],
+            summaries: [],
+            ledger: [],
+            plans: [],
+        };
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.getMyProgramPaymentsJson !== 'function') {
+        return { approvedPrograms: [], summaries: [], ledger: [], plans: [] };
+    }
+    const raw = await actor.getMyProgramPaymentsJson();
+    try {
+        const parsed = JSON.parse(String(raw || '{}'));
+        return {
+            approvedPrograms: Array.isArray(parsed.approvedPrograms) ? parsed.approvedPrograms : [],
+            summaries: Array.isArray(parsed.summaries) ? parsed.summaries : [],
+            ledger: Array.isArray(parsed.ledger) ? parsed.ledger : [],
+            plans: Array.isArray(parsed.plans) ? parsed.plans : [],
+        };
+    } catch {
+        return { approvedPrograms: [], summaries: [], ledger: [], plans: [] };
+    }
+}
+
+/**
  * Create a minimal linked roster row when membership allows (`#ok` / `#exempt`). Idempotent.
  * Test mode: creates a local overlay artist and selects it when none is selected.
  * @returns {Promise<'ok' | 'alreadyLinked' | 'needsSubscription' | 'noAccount'>}
@@ -2088,6 +2155,23 @@ export async function adminSetAccountContactForStudio(principalText, contact) {
         lastName: String(contact.lastName || ''),
         email: String(contact.email || ''),
     });
+}
+
+/**
+ * Save the signed-in user's own display contact. Returns false on older generated declarations.
+ * @param {{ firstName: string, lastName: string, email: string }} contact
+ * @returns {Promise<boolean>}
+ */
+export async function setMyAccountContactForCaller(contact) {
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.setMyAccountContact !== 'function') return false;
+    await actor.setMyAccountContact({
+        firstName: String(contact.firstName || ''),
+        lastName: String(contact.lastName || ''),
+        email: String(contact.email || ''),
+    });
+    return true;
 }
 
 export async function ensureMyLinkedArtistProfile() {
@@ -3287,7 +3371,7 @@ export async function adminSetSoundEnvironmentStudio(config) {
 /** @returns {Promise<Record<string, unknown>>} */
 export async function getCommunityPagePublic() {
     const { normalizeCommunityPage } = await import('./communityPageDefaults.js');
-    if (getDataSource() === 'test') {
+    if (shouldUseCommunityTestData()) {
         const raw = readStudioLs(LS_COMMUNITY_PAGE);
         if (raw != null && typeof raw === 'object' && !Array.isArray(raw)) {
             return normalizeCommunityPage(raw);
@@ -3322,9 +3406,10 @@ export async function getCommunityPagePublic() {
 /** @returns {Promise<Record<string, unknown>>} */
 export async function adminGetCommunityPageStudio() {
     const { normalizeCommunityPage } = await import('./communityPageDefaults.js');
-    if (getDataSource() === 'test') {
+    if (shouldUseCommunityTestData()) {
         return getCommunityPagePublic();
     }
+    let adminReadError = null;
     try {
         const actor = await getStudioAuthenticatedActor();
         if (actor && typeof actor.adminGetCommunityPage === 'function') {
@@ -3338,8 +3423,11 @@ export async function adminGetCommunityPageStudio() {
                 }
             }
         }
-    } catch {
-        /* fall through */
+    } catch (e) {
+        adminReadError = e;
+    }
+    if (adminReadError) {
+        throw adminReadError;
     }
     return getCommunityPagePublic();
 }
@@ -3348,16 +3436,19 @@ export async function adminGetCommunityPageStudio() {
  * @param {Record<string, unknown>} bundle
  */
 export async function adminSetCommunityPageStudio(bundle) {
-    const text = JSON.stringify(bundle);
-    if (getDataSource() === 'test') {
-        writeStudioLs(LS_COMMUNITY_PAGE, bundle && typeof bundle === 'object' ? bundle : {});
-        return;
+    const { normalizeCommunityPage } = await import('./communityPageDefaults.js');
+    const normalized = normalizeCommunityPage(bundle && typeof bundle === 'object' ? bundle : {});
+    const text = JSON.stringify(normalized);
+    if (shouldUseCommunityTestData()) {
+        writeStudioLs(LS_COMMUNITY_PAGE, normalized);
+        return { mode: 'test', bytes: text.length };
     }
     const actor = await getStudioAuthenticatedActor();
     if (!actor || typeof actor.adminSetCommunityPage !== 'function') {
         throw new Error('adminSetCommunityPage unavailable — run dfx generate fusion-app-backend from the project root.');
     }
     await actor.adminSetCommunityPage(text);
+    return { mode: 'live', bytes: text.length };
 }
 
 /**
@@ -4277,6 +4368,44 @@ export async function generateAndUpdateMyArtistWorldFromBio(artistRowLike, merge
 }
 
 /**
+ * Community Studio should follow config.testData only, matching Community public reads/saves.
+ * @returns {Promise<object[]>}
+ */
+export async function getCommunityArtistsForStudio() {
+    if (shouldUseCommunityTestData()) {
+        return getMergedTestArtists();
+    }
+    try {
+        const actor = await getStudioAuthenticatedActor();
+        if (actor && typeof actor.listArtistRecordsForStudio === 'function') {
+            const metaForMerge = await fetchFeaturedMergeMetaLive();
+            _lastFeaturedMergeMeta = metaForMerge;
+            const [rows, cohortMap, mediaMap, heroMap] = await Promise.all([
+                actor.listArtistRecordsForStudio(),
+                fetchArtistCohortMap(actor),
+                fetchArtistMediaMap(actor),
+                fetchArtistHeroProfileMap(actor),
+            ]);
+            if (Array.isArray(rows)) {
+                const mapped = rows
+                    .map((r) =>
+                        mergeArtistFeaturedExtension(
+                            mapStudioArtistFromFullRecord(r, cohortMap, mediaMap, heroMap),
+                            metaForMerge
+                        )
+                    )
+                    .filter((a) => String(a?.id ?? '').trim() !== '');
+                await mergeMostRecentProgramsFromCanister(actor, mapped);
+                return mapped;
+            }
+        }
+    } catch {
+        /* fall back to public artists */
+    }
+    return getLivePublicArtists();
+}
+
+/**
  * @param {string} slug
  * @param {unknown} bundle Full document (string patches applied in Studio — replaces stored bundle).
  */
@@ -4839,6 +4968,39 @@ function parsePrincipalAccountPair(pair) {
 }
 
 /**
+ * @param {unknown} raw
+ * @returns {string}
+ */
+function normalizeAccountDateText(raw) {
+    const text = String(raw ?? '').trim();
+    if (!text || /^1970-01-01T00:00:00(?:\.000)?Z$/i.test(text)) return '';
+    if (/^-?\d+$/.test(text)) {
+        try {
+            const n = BigInt(text);
+            const abs = n < 0n ? -n : n;
+            let ms;
+            if (abs > 100_000_000_000_000_000n) {
+                ms = Number(n / 1_000_000n);
+            } else if (abs > 100_000_000_000_000n) {
+                ms = Number(n / 1_000n);
+            } else if (abs > 100_000_000_000n) {
+                ms = Number(n);
+            } else {
+                ms = Number(n * 1_000n);
+            }
+            const d = new Date(ms);
+            if (Number.isNaN(d.getTime()) || d.getUTCFullYear() <= 1971) return '';
+            return d.toISOString();
+        } catch {
+            return '';
+        }
+    }
+    const d = new Date(text);
+    if (Number.isNaN(d.getTime()) || d.getUTCFullYear() <= 1971) return '';
+    return d.toISOString();
+}
+
+/**
  * @typedef {{
  *   principal: string,
  *   role: string,
@@ -4918,7 +5080,7 @@ export async function getAccountsForStudio() {
             status: a.status && typeof a.status === 'object' ? Object.keys(a.status)[0] : '',
             linkedArtistId: unwrapOpt(a.linkedArtistId ?? a.linked_artist_id),
             linkedOrgId: unwrapOpt(a.linkedOrgId ?? a.linked_org_id),
-            updatedAt: String(a.updated_at ?? a.updatedAt ?? ''),
+            updatedAt: normalizeAccountDateText(a.updated_at ?? a.updatedAt ?? ''),
             stripeSubscriptionStatus: unwrapOpt(a.stripeSubscriptionStatus ?? a.stripe_subscription_status),
             stripeCurrentPeriodEnd: unwrapOpt(a.stripeCurrentPeriodEnd ?? a.stripe_current_period_end),
             membershipExemptManual: Boolean(a.membershipExemptManual ?? a.membership_exempt_manual),

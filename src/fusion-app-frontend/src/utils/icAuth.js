@@ -15,6 +15,14 @@ import { clearAdminPerspective } from './adminPerspective.js';
 import { accountIsStudioTeamRole } from './authHeader.js';
 import posthog from 'posthog-js';
 
+function currentAuthDebugConfig(identityProvider, derivationOrigin) {
+    return {
+        pageOrigin: typeof window !== 'undefined' ? window.location.origin : '',
+        identityProvider,
+        derivationOrigin: derivationOrigin || null,
+    };
+}
+
 function linkedArtistIdFromAccount(acc) {
     if (!acc || typeof acc !== 'object') return '';
     const raw = acc.linkedArtistId ?? acc.linked_artist_id;
@@ -41,7 +49,7 @@ async function clearAuthActorCaches() {
 /** @type {Promise<AuthClient> | null} */
 let _authClientPromise = null;
 /** @type {string} */
-let _identityProviderUsed = '';
+let _authClientConfigKey = '';
 
 /**
  * Single AuthClient (idle delegation disabled — avoid surprise full-page reloads).
@@ -50,14 +58,27 @@ let _identityProviderUsed = '';
  */
 export async function getAuthClientSingleton() {
     const identityProvider = requireInternetIdentityUrl();
-    if (_authClientPromise && _identityProviderUsed !== identityProvider) {
+    const derivationOrigin = getInternetIdentityDerivationOrigin();
+    const configKey = `${identityProvider}|${derivationOrigin || ''}`;
+    if (_authClientPromise && _authClientConfigKey !== configKey) {
         _authClientPromise = null;
     }
     if (!_authClientPromise) {
-        _identityProviderUsed = identityProvider;
+        _authClientConfigKey = configKey;
+        const loginOptions = { identityProvider };
+        if (derivationOrigin) {
+            loginOptions.derivationOrigin = derivationOrigin;
+        }
+        if (shouldLogFusionIcAuthErrors()) {
+            const debugConfig = currentAuthDebugConfig(identityProvider, derivationOrigin);
+            if (typeof window !== 'undefined') {
+                window.__fusionIiConfig = debugConfig;
+            }
+            console.info('[Fusion] Internet Identity config', debugConfig);
+        }
         _authClientPromise = AuthClient.create({
             idleOptions: { disableIdle: true },
-            identityProvider,
+            loginOptions,
         });
     }
     return _authClientPromise;
@@ -106,6 +127,13 @@ export async function loginInternetIdentity() {
     const identityProvider = getInternetIdentityUrl();
 
     const derivationOrigin = getInternetIdentityDerivationOrigin();
+    if (shouldLogFusionIcAuthErrors()) {
+        const debugConfig = currentAuthDebugConfig(identityProvider, derivationOrigin);
+        if (typeof window !== 'undefined') {
+            window.__fusionIiConfig = debugConfig;
+        }
+        console.info('[Fusion] Internet Identity login attempt', debugConfig);
+    }
     await new Promise((resolve, reject) => {
         /** @type {import('@dfinity/auth-client').AuthClientLoginOptions} */
         const loginOpts = {

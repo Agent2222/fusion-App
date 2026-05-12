@@ -149,8 +149,14 @@ class SoundEnvironment extends HTMLElement {
     }
 
     _isSuppressedForCurrentRoute() {
-        const path = typeof window !== 'undefined' ? String(window.location?.pathname || '/') : '/';
+        const path = typeof window !== 'undefined'
+            ? String(window.location?.pathname || '/').replace(/\/+$/, '') || '/'
+            : '/';
+        const page = typeof document !== 'undefined'
+            ? String(document.documentElement.getAttribute('data-fusion-page') || '')
+            : '';
         return (
+            page === 'community' ||
             path === '/studio' ||
             path === '/community' ||
             path.startsWith('/settings') ||
@@ -162,9 +168,15 @@ class SoundEnvironment extends HTMLElement {
     _syncRouteSuppression() {
         if (this._isSuppressedForCurrentRoute()) {
             this.setAttribute('hidden', '');
+            this.style.opacity = '0';
+            this.style.pointerEvents = 'none';
+            this.style.visibility = 'hidden';
             this.setMasterEnabled(false);
             return;
         }
+        this.style.opacity = '';
+        this.style.pointerEvents = '';
+        this.style.visibility = '';
         if (this._config && this._config.enabled !== false) {
             this.removeAttribute('hidden');
         }

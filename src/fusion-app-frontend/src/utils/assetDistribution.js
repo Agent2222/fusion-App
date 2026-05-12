@@ -7,14 +7,18 @@ export const CLOUDFRONT_ASSET_ORIGIN = 'https://cdn.fusionart.world';
 function uploadedPathFromUrl(url) {
     const raw = String(url ?? '').trim();
     if (!raw) return '';
+    const pathFromRaw = (value) => {
+        const fusionMediaIndex = value.indexOf('/fusionMedia/uploads/');
+        if (fusionMediaIndex >= 0) return value.slice(fusionMediaIndex);
+        const uploadsIndex = value.indexOf('/uploads/');
+        return uploadsIndex < 0 ? '' : value.slice(uploadsIndex);
+    };
     if (/^https?:\/\//i.test(raw)) {
         const parsed = new URL(raw);
-        const uploadsIndex = parsed.pathname.indexOf('/uploads/');
-        if (uploadsIndex < 0) return '';
-        return `${parsed.pathname.slice(uploadsIndex)}${parsed.search}${parsed.hash}`;
+        const path = pathFromRaw(parsed.pathname);
+        return path ? `${path}${parsed.search}${parsed.hash}` : '';
     }
-    const uploadsIndex = raw.indexOf('/uploads/');
-    return uploadsIndex < 0 ? '' : raw.slice(uploadsIndex);
+    return pathFromRaw(raw);
 }
 
 /**

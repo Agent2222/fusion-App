@@ -428,9 +428,10 @@ class JoinNetworkComponent extends HTMLElement {
         const slice = block && block[key] ? block[key] : block?.home;
     const loc = this._getLocale();
         const row = slice ? slice[loc] || slice.en : null;
+        const en = slice ? slice.en : null;
         return {
-      title: row?.title || "",
-      description: row?.description || "",
+      title: String(row?.title || en?.title || "").trim(),
+      description: String(row?.description || en?.description || "").trim(),
     };
   }
 
@@ -1336,6 +1337,18 @@ class JoinNetworkComponent extends HTMLElement {
         await actor.registerOrUpdateAccount(categoryToUserRole(cat));
       }
       try {
+        const { setMyAccountContactForCaller } =
+          await import("../../utils/database.js");
+        await setMyAccountContactForCaller({
+          firstName: this._formFirstName,
+          lastName: this._formLastName,
+          email,
+        });
+      } catch (contactErr) {
+        if (DEV_MODE)
+          console.warn("[JoinNetwork] setMyAccountContact", contactErr);
+      }
+      try {
         const { ensureMyLinkedArtistProfile } =
           await import("../../utils/database.js");
         await ensureMyLinkedArtistProfile();
@@ -1581,6 +1594,18 @@ class JoinNetworkComponent extends HTMLElement {
           if (actor && typeof actor.registerOrUpdateAccount === "function") {
             await actor.registerOrUpdateAccount(categoryToUserRole(cat));
           }
+          try {
+            const { setMyAccountContactForCaller } =
+              await import("../../utils/database.js");
+            await setMyAccountContactForCaller({
+              firstName: this._formFirstName,
+              lastName: this._formLastName,
+              email,
+            });
+          } catch (contactErr) {
+            if (DEV_MODE)
+              console.warn("[JoinNetwork] setMyAccountContact", contactErr);
+          }
         }
       } catch (regErr) {
         if (DEV_MODE)
@@ -1763,6 +1788,9 @@ class JoinNetworkComponent extends HTMLElement {
           metadata: {
             category: cat || "",
             intent: this._modalType,
+            first_name: this._formFirstName || "",
+            last_name: this._formLastName || "",
+            full_name: this._concatProfileFullName(),
           },
         }),
       ]);
@@ -2751,6 +2779,7 @@ class JoinNetworkComponent extends HTMLElement {
       modal_type:
         this._modalType || this.getAttribute("data-modal-type") || "membership",
       mode: (detail && detail.mode) || "full",
+      page_context: String(this.getAttribute("context") || "home").trim() || "home",
     });
     const pendingRestore =
       (!detail || detail.mode !== "resubscribe") &&

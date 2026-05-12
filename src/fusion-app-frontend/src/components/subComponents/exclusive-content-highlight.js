@@ -1,9 +1,20 @@
+import { PH_LOADER_BASE_STYLES, programHeroLoaderHtml } from '../../utils/programHeroLoader.js';
+import { captureCommunityEvent } from '../../utils/communityPosthog.js';
+
 function esc(s) {
     return String(s ?? '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
+}
+
+function firstText(...values) {
+    for (const value of values) {
+        const text = String(value ?? '').trim();
+        if (text) return text;
+    }
+    return '';
 }
 
 class ExclusiveContentHighlight extends HTMLElement {
@@ -13,6 +24,7 @@ class ExclusiveContentHighlight extends HTMLElement {
         /** @type {Array<Record<string, unknown>>} */
         this._items = [];
         this._activeIndex = -1;
+        this._loaded = false;
     }
 
     connectedCallback() {
@@ -24,6 +36,7 @@ class ExclusiveContentHighlight extends HTMLElement {
      * @param {{ activeIndex?: number }} [opts]
      */
     setData(items, opts = {}) {
+        this._loaded = true;
         this._items = Array.isArray(items) ? items.slice(0, 3) : [];
         this._activeIndex = Number.isFinite(opts.activeIndex) ? Number(opts.activeIndex) : this._activeIndex;
         this.render();
@@ -38,6 +51,23 @@ class ExclusiveContentHighlight extends HTMLElement {
     }
 
     render() {
+        if (!this._loaded) {
+            this.shadow.innerHTML = `
+                <style>
+                    :host { display: block; width: 100%; }
+                    ${PH_LOADER_BASE_STYLES}
+                    .community-exclusive-pending-loader {
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        min-height: clamp(10rem, 20vw, 15rem);
+                        background: var(--bg, #f8f4f0);
+                    }
+                </style>
+                ${programHeroLoaderHtml({ wrapperClass: 'community-exclusive-pending-loader', ariaLabel: 'Loading exclusive content' })}
+            `;
+            return;
+        }
         const loc =
             typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
         const cards = (this._items.length ? this._items : [{}, {}, {}]).slice(0, 3);
@@ -49,12 +79,12 @@ class ExclusiveContentHighlight extends HTMLElement {
                 const displayImage = imageUrl || posterUrl;
                 const line =
                     loc === 'ja'
-                        ? String(raw?.lineJa ?? raw?.lineEn ?? '')
-                        : String(raw?.lineEn ?? '');
+                        ? firstText(raw?.lineJa, raw?.lineEn)
+                        : firstText(raw?.lineEn, raw?.lineJa);
                 const title =
                     loc === 'ja'
-                        ? String(raw?.headlineJa ?? raw?.headlineEn ?? line)
-                        : String(raw?.headlineEn ?? line);
+                        ? firstText(raw?.headlineJa, raw?.headlineEn, line)
+                        : firstText(raw?.headlineEn, raw?.headlineJa, line);
                 const active = i === this._activeIndex;
                 return `
                     <article class="ech-card ${active ? 'is-active' : ''}" data-index="${i}">
@@ -103,7 +133,7 @@ class ExclusiveContentHighlight extends HTMLElement {
                     gap: 1rem;
                     max-width: 100%;
                     margin: 0 auto;
-                    padding: 0 0 3rem;
+                    padding: 0 0 2.25rem;
                     box-sizing: border-box;
                 }
                 .ech-card { min-width: 0; }
@@ -113,28 +143,53 @@ class ExclusiveContentHighlight extends HTMLElement {
                 }
                 .ech-media {
                     position: relative;
-                    aspect-ratio: 4 / 5;
+                    aspect-ratio: 16 / 9;
                     background: #ddd center/cover no-repeat #e8e8e4;
+                    background-position: center center;
+                    background-size: cover;
                     border-radius: 2px;
                     overflow: hidden;
                 }
+                .ech-media::before {
+                    content: "";
+                    position: absolute;
+                    inset: 0;
+                    z-index: 0;
+                    pointer-events: none;
+                    background:
+                        linear-gradient(90deg, rgba(0,0,0,0.76) 0%, rgba(0,0,0,0.42) 34%, rgba(0,0,0,0) 72%),
+                        linear-gradient(0deg, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.34) 36%, rgba(0,0,0,0) 70%);
+                }
                 .ech-ph { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #999; font-size: clamp(0.78rem, 1vw, 0.88rem); font-variation-settings: var(--fv-caption); }
                 .ech-cap {
-                    position: absolute; left: 0; right: 0; bottom: 0;
-                    padding: 0.75rem 0.85rem;
-                    font-size: clamp(0.65rem, 0.8vw, 0.74rem);
-                    letter-spacing: 0.04em;
+                    position: absolute; left: 0; right: auto; bottom: 0;
+                    z-index: 1;
+                    width: min(78%, 22rem);
+                    padding: clamp(0.9rem, 1.3vw, 1.25rem);
+                    font-size: clamp(0.72rem, 0.9vw, 0.86rem);
+                    letter-spacing: 0.035em;
                     font-variation-settings: var(--fv-caption);
-                    background: linear-gradient(transparent, rgba(0,0,0,0.75));
+                    background: transparent;
                     color: #fff;
                     display: flex;
                     flex-direction: column;
-                    gap: 0.2rem;
+                    gap: 0.28rem;
                 }
-                .ech-cap strong { font-variation-settings: var(--fv-subtitle); }
-                .ech-cap span { opacity: 0.82; }
+                .ech-cap strong {
+                    font-size: clamp(0.9rem, 1.25vw, 1.12rem);
+                    line-height: 1.08;
+                    font-variation-settings: var(--fv-subtitle);
+                    text-shadow: 0 1px 12px rgba(0,0,0,0.5);
+                }
+                .ech-cap span {
+                    max-width: 24rem;
+                    opacity: 0.9;
+                    line-height: 1.25;
+                    text-shadow: 0 1px 10px rgba(0,0,0,0.55);
+                }
                 .ech-play {
-                    position: absolute; bottom: 2.5rem; right: 0.75rem;
+                    position: absolute; bottom: 0.85rem; right: 0.85rem;
+                    z-index: 2;
                     width: 2rem; height: 2rem;
                     border-radius: 50%;
                     border: 1px solid #fff;
@@ -146,6 +201,7 @@ class ExclusiveContentHighlight extends HTMLElement {
                 }
                 @media (max-width: 768px) {
                     .ech-row { grid-template-columns: 1fr; }
+                    .ech-cap { width: min(84%, 22rem); }
                 }
             </style>
             <div class="ech-head">
@@ -155,15 +211,21 @@ class ExclusiveContentHighlight extends HTMLElement {
             <div class="ech-row">${blocks}</div>
         `;
 
-        const select = (idx) => {
+        const select = (idx, trigger = 'card') => {
             if (!Number.isInteger(idx) || idx < 0) return;
             this._activeIndex = idx;
+            captureCommunityEvent('community_exclusive_feature_selected', {
+                feature_index: idx,
+                trigger,
+                has_preview_video: Boolean(String(this._items[idx]?.previewVideoUrl ?? this._items[idx]?.videoUrl ?? '').trim()),
+                has_full_video: Boolean(String(this._items[idx]?.fullVideoKey ?? '').trim()),
+            });
             this.render();
             this.dispatchEvent(
                 new CustomEvent('fusion-community-feature-select', {
                     bubbles: true,
                     composed: true,
-                    detail: { index: idx, item: this._items[idx] },
+                    detail: { index: idx, item: this._items[idx], trigger },
                 }),
             );
         };
@@ -172,7 +234,7 @@ class ExclusiveContentHighlight extends HTMLElement {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const card = btn.closest('.ech-card');
-                select(Number(card?.getAttribute('data-index') ?? -1));
+                select(Number(card?.getAttribute('data-index') ?? -1), 'play_button');
             });
         });
 
@@ -180,7 +242,7 @@ class ExclusiveContentHighlight extends HTMLElement {
         if (row) {
             row.querySelectorAll('.ech-card').forEach((card, idx) => {
                 card.addEventListener('click', () => {
-                    select(idx);
+                    select(idx, 'card');
                 });
             });
         }

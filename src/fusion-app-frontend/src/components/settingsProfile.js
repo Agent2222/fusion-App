@@ -24,6 +24,7 @@ import {
   normalizeProgramVisibility,
   unwrapOpt,
   getApplicationPaymentGlobal,
+  getMyProgramPayments,
 } from "../utils/database.js";
 import { withSeoImageAlt } from "../utils/mediaAltSeo.js";
 import {
@@ -54,6 +55,12 @@ import {
 } from "../utils/adminPerspective.js";
 import { firstNonEmptyString } from "../utils/localeFallback.js";
 import { studioIconHref } from "../utils/studioIconRegistry.js";
+import { formatStudioDate } from "../utils/studioDateFormat.js";
+import exploreProgramsIconUrl from "../assets/icons/fusion_dashboard_svg_icons/explore-programs.svg";
+import myProgramsIconUrl from "../assets/icons/fusion_dashboard_svg_icons/my-programs.svg";
+import paymentsIconUrl from "../assets/icons/fusion_dashboard_svg_icons/payments.svg";
+import manualPaymentIconUrl from "../assets/icons/fusion_dashboard_svg_icons/manual-payment.svg";
+import paymentPlanIconUrl from "../assets/icons/fusion_dashboard_svg_icons/payment-plan.svg";
 
 function mpdEscapeAttr(value) {
   return String(value ?? "")
@@ -70,6 +77,10 @@ function mpdNavIconHtml(iconKey) {
       ? `<img src="${mpdEscapeAttr(icon)}" alt="" />`
       : '<span class="studio-nav-item__icon-fallback">•</span>'
   }</span>`;
+}
+
+function mpdInlineIconHtml(iconUrl, className) {
+  return `<span class="${mpdEscapeAttr(className)}" style="--mpd-icon-url: url(&quot;${mpdEscapeAttr(iconUrl)}&quot;)" aria-hidden="true"></span>`;
 }
 
 function applySettingsProfileDocumentSeo(dashTitle) {
@@ -106,6 +117,10 @@ let mpdStoryWorldDraft = null;
 let mpdStoryWorldNewAvailable = false;
 /** @type {'inactive' | 'pending' | 'private' | 'public'} */
 let mpdBackendRosterVisibility = "inactive";
+/** @type {Array<Record<string, unknown>>} */
+let mpdProgramPaymentItems = [];
+let mpdSelectedPaymentProgramId = "";
+let mpdLastProgramsForPayments = [];
 
 /**
  * Panel-specific shout (HTML allowed) and plain hint for `#settingsProfileHint`.
@@ -1077,6 +1092,995 @@ function escapeHtmlMpd(s) {
 }
 
 /** @param {unknown} value */
+function mpdText(value) {
+  return String(value ?? "").trim();
+}
+
+/**
+ * @param {string} tab
+ */
+function setMpdProgramsTab(tab) {
+  const root = document.getElementById("mpd-programs");
+  if (!root) return;
+  const target = ["explore", "my-programs", "payments"].includes(tab)
+    ? tab
+    : "explore";
+  const targetTab = root.querySelector(`[data-mpd-program-tab="${target}"]`);
+  const safeTarget =
+    target === "payments" &&
+    targetTab &&
+    (targetTab.hasAttribute("hidden") || targetTab.getAttribute("aria-hidden") === "true")
+      ? "my-programs"
+      : target;
+  root.querySelectorAll("[data-mpd-program-tab]").forEach((el) => {
+    const isActive = el.getAttribute("data-mpd-program-tab") === safeTarget;
+    el.classList.toggle("is-active", isActive);
+    el.setAttribute("aria-selected", isActive ? "true" : "false");
+    el.setAttribute("tabindex", isActive ? "0" : "-1");
+  });
+  root.querySelectorAll("[data-mpd-program-panel]").forEach((el) => {
+    const isActive = el.getAttribute("data-mpd-program-panel") === safeTarget;
+    if (isActive) el.removeAttribute("hidden");
+    else el.setAttribute("hidden", "");
+  });
+}
+
+function applyMpdPublicProgramFilters() {
+  const root = document.getElementById("mpd_public_programs_discovery");
+  if (!root) return;
+  const search = /** @type {HTMLInputElement | null} */ (
+    root.querySelector("#mpd_public_programs_search")
+  );
+  const filter = /** @type {HTMLSelectElement | null} */ (
+    root.querySelector("#mpd_public_programs_filter")
+  );
+  const q = String(search?.value ?? "").trim().toLowerCase();
+  const selected = String(filter?.value ?? "all").trim();
+  const cards = Array.from(root.querySelectorAll(".mpd-public-program-card"));
+  let visibleCount = 0;
+  for (const card of cards) {
+    const hay = String(card.getAttribute("data-search") ?? "").toLowerCase();
+    const status = String(card.getAttribute("data-status") ?? "");
+    const category = String(card.getAttribute("data-category") ?? "");
+    const matchesSearch = !q || hay.includes(q);
+    const matchesFilter =
+      selected === "all" ||
+      (selected === "open" && status === "open") ||
+      (selected === "not-open" && status !== "open") ||
+      (selected.startsWith("category:") && category === selected.slice(9));
+    const visible = matchesSearch && matchesFilter;
+    card.toggleAttribute("hidden", !visible);
+    if (visible) visibleCount += 1;
+  }
+  const noResults = document.getElementById("mpd_public_programs_no_results");
+  if (noResults) {
+    noResults.hidden = cards.length === 0 || visibleCount > 0;
+  }
+}
+
+function applyMpdMyProgramsFilters() {
+  const root = document.getElementById("mpd-program-panel-my-programs");
+  if (!root) return;
+  const active =
+    root.querySelector(".mpd-my-program-filter.is-active")?.getAttribute(
+      "data-mpd-my-program-filter",
+    ) || "all";
+  const cards = Array.from(root.querySelectorAll(".mpd-my-program-card"));
+  let visibleCount = 0;
+  for (const card of cards) {
+    const status = String(card.getAttribute("data-status-key") || "submitted");
+    const visible = active === "all" || status === active;
+    card.toggleAttribute("hidden", !visible);
+    if (visible) visibleCount += 1;
+  }
+  const noResults = document.getElementById("mpd_my_programs_no_results");
+  if (noResults) {
+    noResults.hidden = cards.length === 0 || visibleCount > 0;
+  }
+}
+
+/** @param {Element} chip */
+function setMpdMyProgramsFilter(chip) {
+  const root = document.getElementById("mpd-program-panel-my-programs");
+  if (!root || !root.contains(chip)) return;
+  root.querySelectorAll("[data-mpd-my-program-filter]").forEach((el) => {
+    const active = el === chip;
+    el.classList.toggle("is-active", active);
+    el.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+  applyMpdMyProgramsFilters();
+}
+
+/** @param {string} programId */
+function openMpdApplicationDetailsModal(programId) {
+  const card = Array.from(document.querySelectorAll(".mpd-my-program-card")).find(
+    (el) => el.getAttribute("data-program-id") === programId,
+  );
+  if (!card) return;
+  const title = card.querySelector("h4")?.textContent || "Application";
+  const payloadTemplate = /** @type {HTMLTemplateElement | null} */ (
+    Array.from(card.querySelectorAll("template[data-mpd-application-payload]")).find(
+      (el) => el.getAttribute("data-mpd-application-payload") === programId,
+    ) || null
+  );
+  const payloadHtml =
+    payloadTemplate?.innerHTML ||
+    '<p class="studio-muted">No application payload details are available.</p>';
+  const modal = document.createElement("div");
+  modal.className =
+    "settings-profile-page profile-gallery-access-modal mpd-application-details-modal";
+  modal.setAttribute("aria-hidden", "false");
+  modal.innerHTML = `
+    <div class="profile-gallery-access-modal__scrim" aria-hidden="true"></div>
+    <div class="profile-gallery-access-modal__panel mpd-application-details-modal__panel" role="dialog" aria-modal="true" aria-labelledby="mpdApplicationDetailsTitle">
+      <h2 id="mpdApplicationDetailsTitle" class="profile-gallery-access-modal__title">${escapeHtmlMpd(title)}</h2>
+      <div class="mpd-application-details-modal__body">
+        ${payloadHtml}
+      </div>
+      <button type="button" class="profile-gallery-access-modal__close">Close</button>
+    </div>
+  `;
+  const close = () => {
+    modal.remove();
+    window.removeEventListener("keydown", onKeydown);
+  };
+  function onKeydown(e) {
+    if (e.key === "Escape") close();
+  }
+  modal.querySelector(".profile-gallery-access-modal__scrim")?.addEventListener("click", close);
+  modal.querySelector(".profile-gallery-access-modal__close")?.addEventListener("click", close);
+  window.addEventListener("keydown", onKeydown);
+  document.body.appendChild(modal);
+  const closeBtn = modal.querySelector(".profile-gallery-access-modal__close");
+  if (closeBtn instanceof HTMLElement) closeBtn.focus();
+}
+
+/** @param {unknown} value */
+function mpdObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? /** @type {Record<string, unknown>} */ (value)
+    : {};
+}
+
+/** @param {unknown} value */
+function mpdArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {{ key: string, label: string }}
+ */
+function normalizeMpdApplicationStatus(raw) {
+  const s = mpdText(raw).toLowerCase().replace(/[\s_-]+/g, "-");
+  if (["reviewing", "review", "in-review", "under-review", "initial-review", "final-review"].includes(s)) {
+    return { key: "under-review", label: "Under review" };
+  }
+  if (["invited", "invite", "accepted", "approved", "payment-required", "deposit-due"].includes(s)) {
+    return { key: "invited", label: "Invited" };
+  }
+  if (["not-selected", "rejected", "declined", "not-accepted"].includes(s)) {
+    return { key: "not-selected", label: "Not selected" };
+  }
+  if (["withdrawn", "withdrew", "cancelled", "canceled"].includes(s)) {
+    return { key: "withdrawn", label: "Withdrawn" };
+  }
+  return { key: "submitted", label: "Submitted" };
+}
+
+/**
+ * @param {Record<string, unknown>} program
+ * @param {string} programId
+ * @param {Record<string, unknown>} entry
+ */
+function normalizeMpdMyProgramCard(program, programId, entry) {
+  const en = mpdObject(program.enCard);
+  const ja = mpdObject(program.jaCard);
+  const payload = mpdObject(entry.payload);
+  const status = normalizeMpdApplicationStatus(
+    entry.status ?? entry.applicationStatus ?? entry.decision,
+  );
+  const focus = firstNonEmptyString(en.focus, en.headline);
+  const location = firstNonEmptyString(en.location, en.place);
+  const title =
+    location ||
+    firstNonEmptyString(en.title, focus, programId) ||
+    "Program";
+  const openTo = firstNonEmptyString(
+    en.openTo,
+    en.audience,
+    en.eligibility,
+    en.discipline,
+    en.medium,
+  );
+  const startDate = firstNonEmptyString(en.startDate, en.start);
+  const endDate = firstNonEmptyString(en.endDate, en.deadline);
+  const deadline = firstNonEmptyString(
+    en.deadline,
+    en.applicationDeadline,
+    en.deadlineDate,
+    en.applyBy,
+    startDate && endDate ? `${startDate} - ${endDate}` : startDate || endDate,
+    en.year,
+  );
+  const imageSrc = firstNonEmptyString(ja.imageSrc, en.imageSrc, program.image);
+  const imageAlt = firstNonEmptyString(en.imageAlt, title);
+  const category = firstNonEmptyString(en.category, en.type, focus, "Program");
+  let route = "/programs";
+  if (program.routeLink) {
+    const rawRoute = String(program.routeLink);
+    route = rawRoute.startsWith("/") ? rawRoute : `/${rawRoute}`;
+  }
+  const submittedAt = firstNonEmptyString(
+    entry.submittedAt,
+    entry.submitted_at,
+    entry.createdAt,
+  );
+  const paymentRequired = Boolean(
+    entry.paymentRequired ||
+      entry.payment_required ||
+      ["accepted", "approved", "payment-required", "deposit-due"].includes(
+        mpdText(entry.status ?? entry.decision).toLowerCase().replace(/[\s_-]+/g, "-"),
+      ),
+  );
+  const teamNote = firstNonEmptyString(
+    entry.teamNote,
+    entry.teamNotes,
+    entry.programNote,
+    entry.note,
+  );
+  return {
+    programId,
+    title,
+    location,
+    focus,
+    openTo,
+    deadline,
+    imageSrc,
+    imageAlt,
+    category,
+    route,
+    submittedAt,
+    payload,
+    status,
+    paymentRequired,
+    teamNote,
+    rawEntry: entry,
+  };
+}
+
+/** @param {ReturnType<typeof normalizeMpdMyProgramCard>} item */
+function mpdMyProgramTimeline(item) {
+  const status = item.status.key;
+  const progress =
+    status === "under-review"
+      ? { completeThrough: 2, activeStep: 3 }
+      : status === "invited" || status === "not-selected" || status === "withdrawn"
+        ? { completeThrough: 4, activeStep: 5 }
+        : { completeThrough: item.submittedAt ? 1 : 0, activeStep: 0 };
+  return ["Submitted", "Initial review", "Under review", "Final review", "Decision"].map(
+    (label, index) => {
+      const step = index + 1;
+      const state =
+        step <= progress.completeThrough
+          ? "complete"
+          : step === progress.activeStep
+            ? "active"
+            : "pending";
+      const date = step === 1 ? formatStudioDate(item.submittedAt) : "";
+      return { label, state, date: date === "—" ? "" : date };
+    },
+  );
+}
+
+/** @param {Record<string, unknown>} payload */
+function mpdApplicationMaterialRows(payload) {
+  const hasText = (...keys) => keys.some((k) => mpdText(payload[k]));
+  const hasPortfolio =
+    hasText("portfolio", "portfolioUrl", "portfolioLink", "website", "websiteUrl") ||
+    mpdArray(payload.files).length > 0;
+  return [
+    {
+      label: "Personal statement",
+      submitted: hasText("statement", "personalStatement", "artistStatement", "bio"),
+    },
+    { label: "Artist CV", submitted: hasText("cv", "cvUrl", "resume", "resumeUrl") },
+    { label: "Portfolio", submitted: hasPortfolio },
+    { label: "References", submitted: hasText("references", "reference", "referrals") },
+  ];
+}
+
+/** @param {ReturnType<typeof normalizeMpdMyProgramCard>} item */
+function mpdTeamNoteForApplication(item) {
+  if (item.teamNote) return item.teamNote;
+  if (item.paymentRequired) {
+    return "You have been invited to continue. Payment details will appear here when the next step opens.";
+  }
+  switch (item.status.key) {
+    case "under-review":
+      return "Thank you for your application. Our team is currently reviewing submissions. You will be notified when a decision is ready.";
+    case "invited":
+      return "Your application has moved forward. Watch this space for next steps from the program team.";
+    case "not-selected":
+      return "Thank you for applying. This application was not selected for the current cycle.";
+    case "withdrawn":
+      return "This application has been withdrawn. No further action is needed.";
+    default:
+      return "Your application has been received and is queued for review.";
+  }
+}
+
+/** @param {Record<string, unknown>} payload */
+function mpdPayloadSummaryHtml(payload) {
+  const rows = Object.entries(payload)
+    .filter(([, value]) => {
+      if (value == null) return false;
+      if (typeof value === "string") return Boolean(value.trim());
+      if (Array.isArray(value)) return value.length > 0;
+      return typeof value === "number" || typeof value === "boolean";
+    })
+    .slice(0, 16);
+  if (!rows.length) return '<p class="studio-muted">No application payload details are available.</p>';
+  return `<dl class="mpd-application-payload-list">${rows
+    .map(([key, value]) => {
+      const label = key
+        .replace(/([a-z])([A-Z])/g, "$1 $2")
+        .replace(/[_-]+/g, " ")
+        .replace(/\b\w/g, (m) => m.toUpperCase());
+      const text = Array.isArray(value) ? value.join(", ") : String(value);
+      return `<dt>${escapeHtmlMpd(label)}</dt><dd>${escapeHtmlMpd(text)}</dd>`;
+    })
+    .join("")}</dl>`;
+}
+
+/** @param {ReturnType<typeof normalizeMpdMyProgramCard>} item */
+function renderMpdMyProgramCard(item) {
+  const timeline = mpdMyProgramTimeline(item);
+  const materials = mpdApplicationMaterialRows(item.payload);
+  const dateLabel = item.submittedAt ? `Submitted: ${formatStudioDate(item.submittedAt)}` : "";
+  return `
+    <article class="mpd-my-program-card mpd-my-program-card--${escapeHtmlMpd(item.status.key)}" data-status-key="${escapeHtmlMpd(item.status.key)}" data-program-id="${escapeHtmlMpd(item.programId)}">
+      <div class="mpd-my-program-card__summary">
+        <div class="mpd-my-program-card__media">
+          ${
+            item.imageSrc
+              ? `<img src="${escapeHtmlMpd(item.imageSrc)}" alt="${escapeHtmlMpd(withSeoImageAlt(item.imageAlt || item.title))}" loading="lazy" />`
+              : `<div class="mpd-my-program-card__placeholder">Fusion</div>`
+          }
+        </div>
+        <div class="mpd-my-program-card__meta">
+          <div class="mpd-my-program-card__title-row">
+            <div>
+              <h4>${escapeHtmlMpd(item.title)}</h4>
+              ${item.category ? `<p class="mpd-my-program-card__category">${escapeHtmlMpd(item.category)}</p>` : ""}
+            </div>
+            <div class="mpd-my-program-card__status-wrap">
+              <span class="mpd-my-program-status mpd-my-program-status--${escapeHtmlMpd(item.status.key)}">${escapeHtmlMpd(item.status.label)}</span>
+              ${dateLabel ? `<span class="mpd-my-program-card__date">${escapeHtmlMpd(dateLabel)}</span>` : ""}
+            </div>
+          </div>
+          <div class="mpd-my-program-card__facts">
+            ${item.focus ? `<p><strong>Program:</strong> ${escapeHtmlMpd(item.focus)}</p>` : ""}
+            ${item.openTo ? `<p><strong>Open to:</strong> ${escapeHtmlMpd(item.openTo)}</p>` : ""}
+            ${item.deadline ? `<p><strong>Deadline:</strong> ${escapeHtmlMpd(item.deadline)}</p>` : ""}
+          </div>
+        </div>
+      </div>
+      ${
+        item.paymentRequired
+          ? `<div class="mpd-my-program-payment-callout"><strong>Payment required</strong><span>Payment details will appear here when this step is ready.</span></div>`
+          : ""
+      }
+      <ol class="mpd-my-program-timeline" aria-label="Application progress for ${escapeHtmlMpd(item.title)}">
+        ${timeline
+          .map(
+            (step) => `
+              <li class="mpd-my-program-timeline__step is-${escapeHtmlMpd(step.state)}">
+                <span class="mpd-my-program-timeline__dot" aria-hidden="true"></span>
+                <span class="mpd-my-program-timeline__label">${escapeHtmlMpd(step.label)}</span>
+                ${step.date ? `<span class="mpd-my-program-timeline__date">${escapeHtmlMpd(step.date)}</span>` : ""}
+              </li>
+            `,
+          )
+          .join("")}
+      </ol>
+      <div class="mpd-my-program-card__details">
+        <section>
+          <h5>Application materials</h5>
+          <ul class="mpd-my-program-materials">
+            ${materials
+              .map(
+                (row) => `
+                  <li class="${row.submitted ? "is-submitted" : "is-pending"}">
+                    <span aria-hidden="true">${row.submitted ? "✓" : "○"}</span>
+                    <span>${escapeHtmlMpd(row.label)}</span>
+                    <em>${row.submitted ? "Submitted" : "Pending"}</em>
+                  </li>
+                `,
+              )
+              .join("")}
+          </ul>
+        </section>
+        <section>
+          <h5>Notes from the program</h5>
+          <p>${escapeHtmlMpd(mpdTeamNoteForApplication(item))}</p>
+        </section>
+        <section>
+          <h5>Actions</h5>
+          <div class="mpd-my-program-actions">
+            <button type="button" class="mpd-my-program-action" data-mpd-application-action="view" data-program-id="${escapeHtmlMpd(item.programId)}">View application</button>
+            <button type="button" class="mpd-my-program-action" data-mpd-application-action="update" data-program-id="${escapeHtmlMpd(item.programId)}">Update materials</button>
+            <button type="button" class="mpd-my-program-action mpd-my-program-action--danger" data-mpd-application-action="withdraw" data-program-id="${escapeHtmlMpd(item.programId)}">Withdraw application</button>
+          </div>
+        </section>
+      </div>
+      <template data-mpd-application-payload="${escapeHtmlMpd(item.programId)}">${mpdPayloadSummaryHtml(item.payload)}</template>
+    </article>
+  `;
+}
+
+function mpdCents(value) {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0;
+}
+
+function mpdUsd(cents) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  }).format(mpdCents(cents) / 100);
+}
+
+function mpdParseUsdCents(value) {
+  const raw = String(value ?? "").replace(/,/g, "");
+  const m = raw.match(/\$?\s*(\d+(?:\.\d{1,2})?)\s*(?:USD)?/i);
+  if (!m) return 0;
+  return Math.round(Number(m[1]) * 100);
+}
+
+function mpdCollectMoneyTexts(value, out = []) {
+  if (value == null) return out;
+  if (typeof value === "string") {
+    if (/\$\s*\d|USD/i.test(value)) out.push(value);
+    return out;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((x) => mpdCollectMoneyTexts(x, out));
+    return out;
+  }
+  if (typeof value === "object") {
+    Object.values(value).forEach((x) => mpdCollectMoneyTexts(x, out));
+  }
+  return out;
+}
+
+function mpdProgramTotalDueCents(program, depositCents) {
+  const candidates = mpdCollectMoneyTexts(program)
+    .map(mpdParseUsdCents)
+    .filter((n) => n > 0);
+  return Math.max(depositCents, ...candidates, 0);
+}
+
+function mpdDateMonthsUntil(startText) {
+  const d = new Date(String(startText || ""));
+  if (Number.isNaN(d.getTime())) return 0;
+  const now = new Date();
+  return Math.max(0, (d.getUTCFullYear() - now.getUTCFullYear()) * 12 + (d.getUTCMonth() - now.getUTCMonth()));
+}
+
+function mpdPaymentSummaryFor(programId, payments) {
+  return (payments.summaries || []).find((x) => String(x.programId || "") === String(programId)) || null;
+}
+
+function mpdPaymentPlanFor(id, payments) {
+  if (!id) return null;
+  return (payments.plans || []).find((x) => String(x.id || "") === String(id)) || null;
+}
+
+function normalizeMpdProgramPaymentViewModels(programs, payments) {
+  const approved = Array.isArray(payments.approvedPrograms) ? payments.approvedPrograms : [];
+  return approved
+    .map((approval) => {
+      const programId = String(approval.programId || "").trim();
+      if (!programId) return null;
+      const program = programs.find((x) => String(x.id || "") === programId) || { id: programId, enCard: { focus: programId } };
+      const en = mpdObject(program.enCard || program);
+      const ja = mpdObject(program.jaCard || {});
+      const location = firstNonEmptyString(en.location, en.place);
+      const focus = firstNonEmptyString(en.focus, en.headline, en.title);
+      const title = firstNonEmptyString(location, focus, programId);
+      const imageSrc = firstNonEmptyString(ja.imageSrc, en.imageSrc, program.image);
+      const imageAlt = firstNonEmptyString(en.imageAlt, focus, title);
+      const startText = firstNonEmptyString(en.startDate, en.start, en.programStart, en.programPage?.startDate);
+      const depositDisplay = firstNonEmptyString(program.depositAmountDisplay, en.depositAmountDisplay, en.programPage?.applicationForm?.depositAmountDisplay);
+      const depositCents = mpdParseUsdCents(depositDisplay);
+      const totalDueCents = mpdProgramTotalDueCents(program, depositCents);
+      const summary = mpdPaymentSummaryFor(programId, payments);
+      const totalPaidCents = mpdCents(summary?.totalPaidCents);
+      const outstandingCents = summary ? mpdCents(summary.outstandingCents) : Math.max(0, totalDueCents - totalPaidCents);
+      const activePlan = mpdPaymentPlanFor(summary?.activePlanId, payments);
+      const ledger = (payments.ledger || [])
+        .filter((x) => String(x.programId || "") === programId)
+        .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+      return {
+        programId,
+        applicationId: String(approval.applicationId || ""),
+        title,
+        location,
+        focus,
+        imageSrc,
+        imageAlt,
+        startText,
+        email: String(approval.email || ""),
+        depositCents,
+        totalDueCents,
+        totalPaidCents,
+        outstandingCents,
+        refundedCents: mpdCents(summary?.refundedCents),
+        depositPaid: ["paid", "paid_full"].includes(String(summary?.depositStatus || "")) || totalPaidCents > 0,
+        paidInFull: outstandingCents <= 0 && totalDueCents > 0,
+        activePlan,
+        ledger,
+        summary,
+      };
+    })
+    .filter(Boolean);
+}
+
+function renderMpdProgramPaymentPills(items) {
+  return `
+    <div class="mpd-payments-pill-rail" role="tablist" aria-label="Approved program payments">
+      ${items
+        .map((item) => {
+          const active = item.programId === mpdSelectedPaymentProgramId;
+          const cue = item.paidInFull ? "Paid" : item.activePlan ? "Plan active" : item.depositPaid ? "Balance due" : "Deposit due";
+          return `<button type="button" class="mpd-payments-pill ${active ? "is-active" : ""}" data-mpd-payment-program="${escapeHtmlMpd(item.programId)}" aria-selected="${active ? "true" : "false"}">
+            <strong>${escapeHtmlMpd(item.title)}</strong>
+            <span>${escapeHtmlMpd(cue)}</span>
+          </button>`;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderMpdPaymentHistory(item) {
+  if (!item.ledger.length) {
+    return `<div class="mpd-payments-empty"><h4>No payment history yet.</h4><p class="studio-muted">Receipts will appear here after your first program payment.</p></div>`;
+  }
+  return `
+    <div class="mpd-payments-history-list">
+      ${item.ledger
+        .map((row) => {
+          const receipt = String(row.stripeReceiptUrl || "");
+          return `<div class="mpd-payments-history-row">
+            <span>${escapeHtmlMpd(formatStudioDate(row.createdAt) || "—")}</span>
+            <strong>${escapeHtmlMpd(String(row.paymentType || "payment").replace(/_/g, " "))}</strong>
+            <span>${mpdUsd(row.amountCents)}</span>
+            <span class="mpd-payment-status">${escapeHtmlMpd(row.status || "recorded")}</span>
+            ${receipt ? `<a href="${mpdEscapeAttr(receipt)}" target="_blank" rel="noopener">Receipt</a>` : `<span class="studio-muted">Receipt pending</span>`}
+          </div>`;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderMpdPaymentsWorkspace() {
+  const root = document.getElementById("mpd_program_payments_workspace");
+  const tab = document.getElementById("mpd-program-tab-payments");
+  if (!root || !tab) return;
+  const items = mpdProgramPaymentItems;
+  const hasItems = items.length > 0;
+  tab.toggleAttribute("hidden", !hasItems);
+  tab.setAttribute("aria-hidden", hasItems ? "false" : "true");
+  if (!hasItems) {
+    root.innerHTML = `<div class="mpd-program-placeholder"><h3>Payments</h3><p class="studio-muted">Program payments appear after you are approved for a program.</p></div>`;
+    if (tab.classList.contains("is-active")) setMpdProgramsTab("my-programs");
+    return;
+  }
+  if (!mpdSelectedPaymentProgramId || !items.some((x) => x.programId === mpdSelectedPaymentProgramId)) {
+    mpdSelectedPaymentProgramId = items.find((x) => !x.depositPaid || x.outstandingCents > 0)?.programId || items[0].programId;
+  }
+  const item = items.find((x) => x.programId === mpdSelectedPaymentProgramId) || items[0];
+  const canCharge = item.depositCents > 0 && item.totalDueCents > 0;
+  const planButton = item.activePlan
+    ? `<button type="button" class="studio-btn-primary" data-mpd-payment-action="cancel-plan">Cancel plan</button>`
+    : `<button type="button" class="studio-btn-primary" data-mpd-payment-action="start-plan" ${item.outstandingCents <= 0 ? "disabled" : ""}>Start payment plan</button>`;
+  root.innerHTML = `
+    <div class="mpd-payments-shell">
+      ${renderMpdProgramPaymentPills(items)}
+      ${
+        !item.depositPaid
+          ? `<div class="mpd-payment-choice-grid">
+              <article class="mpd-payment-choice-program">
+                <div class="mpd-payment-choice-program__media">
+                  ${
+                    item.imageSrc
+                      ? `<img src="${mpdEscapeAttr(item.imageSrc)}" alt="${mpdEscapeAttr(withSeoImageAlt(item.imageAlt || item.title))}" loading="lazy" />`
+                      : `<div class="mpd-payment-choice-program__placeholder">Fusion</div>`
+                  }
+                </div>
+                <div class="mpd-payment-choice-program__copy">
+                  <p class="mpd-payments-eyebrow">Confirm your program slot</p>
+                  <h3>${escapeHtmlMpd(item.title)}</h3>
+                  <p class="studio-muted">${escapeHtmlMpd(item.focus || "Choose how you would like to pay.")}</p>
+                </div>
+              </article>
+              <div class="mpd-payment-choice-stack">
+                <article class="mpd-payment-choice">
+                  <span class="mpd-payment-choice__label">Deposit</span>
+                  <h4>${mpdUsd(item.depositCents)}</h4>
+                  <p class="studio-muted">Secure your accepted program slot today. Remaining balance can be paid later.</p>
+                  <button type="button" class="studio-btn-primary" data-mpd-payment-action="deposit" ${canCharge ? "" : "disabled"}>Pay deposit</button>
+                </article>
+                <article class="mpd-payment-choice mpd-payment-choice--recommended">
+                  <span class="mpd-payment-recommended">Recommended</span>
+                  <span class="mpd-payment-choice__label">Full payment</span>
+                  <h4>${mpdUsd(item.totalDueCents)}</h4>
+                  <p class="studio-muted">Complete your program payment now. No payment plan needed.</p>
+                  <button type="button" class="studio-btn-primary" data-mpd-payment-action="full" ${canCharge ? "" : "disabled"}>Pay in full</button>
+                </article>
+              </div>
+            </div>`
+          : ""
+      }
+      <div class="mpd-payments-action-grid">
+        <article class="mpd-payments-action-card">
+          ${mpdInlineIconHtml(manualPaymentIconUrl, "mpd-payments-action-card__icon mpd-payments-action-card__icon--manual")}
+          <div class="mpd-payments-action-card__copy">
+            <h4>Make a manual payment</h4>
+            <p class="studio-muted">Pay any amount toward your outstanding balance.</p>
+          </div>
+          <button type="button" class="studio-btn-primary" data-mpd-payment-action="manual" ${item.outstandingCents <= 0 ? "disabled" : ""}>Make a payment</button>
+        </article>
+        <article class="mpd-payments-action-card">
+          ${mpdInlineIconHtml(paymentPlanIconUrl, "mpd-payments-action-card__icon mpd-payments-action-card__icon--plan")}
+          <div class="mpd-payments-action-card__copy">
+            <h4>${item.activePlan ? "Payment plan active" : "Start a payment plan"}</h4>
+            <p class="studio-muted">${item.activePlan ? "Cancel future installments if your plans change." : "Split the remaining balance into equal monthly payments."}</p>
+          </div>
+          ${planButton}
+        </article>
+      </div>
+      <div class="mpd-payments-overview-grid">
+        <div><span>Total paid</span><strong>${mpdUsd(item.totalPaidCents)}</strong><small>Across ${item.ledger.length} payments</small></div>
+        <div><span>Outstanding</span><strong>${mpdUsd(item.outstandingCents)}</strong><small>${item.outstandingCents > 0 ? "Balance remaining" : "Paid in full"}</small></div>
+        <div><span>Upcoming</span><strong>${item.activePlan ? mpdUsd(item.activePlan.installmentAmountCents) : "$0.00"}</strong><small>${item.activePlan ? "Next plan installment" : "No scheduled payments"}</small></div>
+        <div><span>Total refunded</span><strong>${mpdUsd(item.refundedCents)}</strong><small>Refund display only</small></div>
+      </div>
+      <div class="mpd-payments-detail-grid">
+        <section class="mpd-payments-panel">
+          <div class="mpd-payments-section-head"><h4>Payment history</h4><span class="studio-muted">Receipts and status</span></div>
+          ${renderMpdPaymentHistory(item)}
+        </section>
+        <section class="mpd-payments-panel">
+          <div class="mpd-payments-section-head"><h4>Upcoming payments</h4><span class="studio-muted">${item.activePlan ? "Plan scheduled" : "No active plan"}</span></div>
+          ${
+            item.activePlan
+              ? `<div class="mpd-upcoming-payment-card"><strong>${escapeHtmlMpd(item.title)}</strong><span>${mpdUsd(item.activePlan.installmentAmountCents)} monthly</span><small>${escapeHtmlMpd(item.activePlan.installmentCount || "")} installments · ${escapeHtmlMpd(item.activePlan.status || "active")}</small></div>`
+              : `<div class="mpd-payments-empty"><h4>No upcoming payments.</h4><p class="studio-muted">Start a payment plan to schedule installments.</p></div>`
+          }
+        </section>
+      </div>
+    </div>
+  `;
+}
+
+async function hydrateProgramPaymentsPanel(programs) {
+  mpdLastProgramsForPayments = Array.isArray(programs) ? programs : [];
+  let payments;
+  try {
+    payments = await getMyProgramPayments();
+  } catch {
+    payments = { approvedPrograms: [], summaries: [], ledger: [], plans: [] };
+  }
+  mpdProgramPaymentItems = normalizeMpdProgramPaymentViewModels(mpdLastProgramsForPayments, payments);
+  renderMpdPaymentsWorkspace();
+}
+
+function mpdCurrentPaymentItem() {
+  return mpdProgramPaymentItems.find((x) => x.programId === mpdSelectedPaymentProgramId) || mpdProgramPaymentItems[0] || null;
+}
+
+function closeMpdPaymentModal() {
+  document.getElementById("mpdProgramPaymentModal")?.remove();
+  try {
+    document.body.style.overflow = "";
+  } catch {
+    /* ignore */
+  }
+}
+
+function openMpdPaymentModalShell(title, bodyHtml) {
+  closeMpdPaymentModal();
+  const wrap = document.createElement("div");
+  wrap.id = "mpdProgramPaymentModal";
+  wrap.className = "profile-gallery-access-modal mpd-program-payment-modal";
+  wrap.innerHTML = `
+    <div class="profile-gallery-access-modal__scrim" data-mpd-payment-close aria-hidden="true"></div>
+    <div class="profile-gallery-access-modal__panel mpd-program-payment-modal__panel" role="dialog" aria-modal="true" aria-labelledby="mpdProgramPaymentModalTitle">
+      <button type="button" class="profile-gallery-access-modal__close" data-mpd-payment-close aria-label="Close payment modal">×</button>
+      <h2 id="mpdProgramPaymentModalTitle" class="profile-gallery-access-modal__title">${escapeHtmlMpd(title)}</h2>
+      ${bodyHtml}
+    </div>
+  `;
+  document.body.appendChild(wrap);
+  document.body.style.overflow = "hidden";
+  wrap.addEventListener("click", (e) => {
+    const close = e.target && /** @type {Element} */ (e.target).closest?.("[data-mpd-payment-close]");
+    if (close) closeMpdPaymentModal();
+  });
+  return wrap;
+}
+
+async function openMpdStripePaymentModal(item, paymentType, amountCents) {
+  if (!item || amountCents <= 0) return;
+  const snap = await getAuthSnapshot();
+  if (!snap.authenticated) {
+    window.alert("Sign in to make a program payment.");
+    return;
+  }
+  const title =
+    paymentType === "deposit"
+      ? "Pay program deposit"
+      : paymentType === "full_payment"
+        ? "Pay in full"
+        : "Make a manual payment";
+  const modal = openMpdPaymentModalShell(
+    title,
+    `<div class="mpd-program-payment-modal__body">
+      <p class="studio-muted">${escapeHtmlMpd(item.title)} · ${mpdUsd(amountCents)}</p>
+      <div id="mpdProgramStripeMount" class="mpd-program-stripe-mount">Loading secure payment form…</div>
+      <p id="mpdProgramPaymentError" class="mpd-membership-inline-error" hidden></p>
+      <div class="mpd-program-payment-modal__actions">
+        <button type="button" class="studio-btn-primary" id="mpdProgramPaymentSubmit" disabled>Pay ${mpdUsd(amountCents)}</button>
+      </div>
+    </div>`,
+  );
+  const errEl = modal.querySelector("#mpdProgramPaymentError");
+  const submit = /** @type {HTMLButtonElement | null} */ (modal.querySelector("#mpdProgramPaymentSubmit"));
+  const mount = modal.querySelector("#mpdProgramStripeMount");
+  try {
+    const [{ loadStripe }, svc, cfg] = await Promise.all([
+      import("@stripe/stripe-js"),
+      import("../utils/integrationApi.js"),
+      import("../utils/studioServicesConfig.js"),
+    ]);
+    const pk = cfg.getStripePublishableKeyResolved();
+    if (!pk) throw new Error("Configure Stripe publishable key in Studio → Services.");
+    const intent = await svc.createProgramPaymentIntent({
+      principal: snap.principal.toText(),
+      programId: item.programId,
+      applicationId: item.applicationId,
+      paymentType,
+      amountCents,
+      totalDueCents: item.totalDueCents,
+      depositAmountCents: item.depositCents,
+    });
+    const stripe = await loadStripe(pk);
+    if (!stripe) throw new Error("Stripe failed to load.");
+    const elements = stripe.elements({ clientSecret: intent.clientSecret, appearance: { theme: "stripe" } });
+    const paymentElement = elements.create("payment");
+    if (mount) {
+      mount.textContent = "";
+      paymentElement.mount(mount);
+    }
+    if (submit) submit.disabled = false;
+    submit?.addEventListener("click", async () => {
+      if (submit) {
+        submit.disabled = true;
+        submit.textContent = "Processing…";
+      }
+      try {
+        const result = await stripe.confirmPayment({
+          elements,
+          redirect: "if_required",
+          confirmParams: { return_url: window.location.href },
+        });
+        if (result.error) throw new Error(result.error.message || "Payment failed.");
+        await svc.confirmProgramPaymentRecorded(intent.paymentIntentId);
+        closeMpdPaymentModal();
+        await hydrateProgramPaymentsPanel(mpdLastProgramsForPayments);
+      } catch (e) {
+        if (errEl instanceof HTMLElement) {
+          errEl.hidden = false;
+          errEl.textContent = e instanceof Error ? e.message : String(e);
+        }
+        if (submit) {
+          submit.disabled = false;
+          submit.textContent = `Pay ${mpdUsd(amountCents)}`;
+        }
+      }
+    });
+  } catch (e) {
+    if (errEl instanceof HTMLElement) {
+      errEl.hidden = false;
+      errEl.textContent = e instanceof Error ? e.message : String(e);
+    }
+  }
+}
+
+function openMpdManualPaymentModal(item) {
+  if (!item) return;
+  const modal = openMpdPaymentModalShell(
+    "Make a manual payment",
+    `<div class="mpd-program-payment-modal__body">
+      <p class="studio-muted">${escapeHtmlMpd(item.title)} · outstanding ${mpdUsd(item.outstandingCents)}</p>
+      <div class="mpd-manual-payment-options" role="radiogroup" aria-label="Manual payment amount">
+        <label><input type="radio" name="mpdManualPaymentMode" value="custom" checked /> Custom amount</label>
+        <label><input type="radio" name="mpdManualPaymentMode" value="remaining" /> Pay remaining balance</label>
+      </div>
+      <label class="studio-field">
+        <span>Amount (USD)</span>
+        <input type="number" min="1" step="0.01" id="mpdManualPaymentAmount" class="studio-input" value="${Math.max(1, Math.min(item.outstandingCents, item.depositCents || item.outstandingCents) / 100).toFixed(2)}" />
+      </label>
+      <div class="mpd-program-payment-modal__actions">
+        <button type="button" class="studio-btn-primary" id="mpdManualPaymentContinue">Continue to payment</button>
+      </div>
+    </div>`,
+  );
+  const amount = /** @type {HTMLInputElement | null} */ (modal.querySelector("#mpdManualPaymentAmount"));
+  modal.querySelectorAll('input[name="mpdManualPaymentMode"]').forEach((el) => {
+    el.addEventListener("change", () => {
+      const mode = String((modal.querySelector('input[name="mpdManualPaymentMode"]:checked') || {}).value || "custom");
+      if (amount) {
+        amount.value = mode === "remaining" ? (item.outstandingCents / 100).toFixed(2) : amount.value;
+        amount.readOnly = mode === "remaining";
+      }
+    });
+  });
+  modal.querySelector("#mpdManualPaymentContinue")?.addEventListener("click", () => {
+    const cents = Math.min(item.outstandingCents, Math.round(Number(amount?.value || 0) * 100));
+    if (cents < 50) {
+      window.alert("Enter at least $0.50.");
+      return;
+    }
+    closeMpdPaymentModal();
+    void openMpdStripePaymentModal(item, "manual", cents);
+  });
+}
+
+function mpdPaymentPlanOptions(item) {
+  const months = mpdDateMonthsUntil(item.startText);
+  const max = Math.max(0, months);
+  const options = [];
+  for (let count = max; count >= 2; count -= 1) {
+    options.push({
+      count,
+      amountCents: Math.ceil(item.outstandingCents / count),
+    });
+  }
+  if (!options.length && item.outstandingCents >= 100) {
+    options.push({ count: 2, amountCents: Math.ceil(item.outstandingCents / 2) });
+  }
+  return options.slice(0, 4);
+}
+
+function openMpdPaymentPlanModal(item) {
+  if (!item) return;
+  const options = mpdPaymentPlanOptions(item);
+  const modal = openMpdPaymentModalShell(
+    "Start a payment plan",
+    `<div class="mpd-program-payment-modal__body">
+      <p class="studio-muted">${escapeHtmlMpd(item.title)} · remaining ${mpdUsd(item.outstandingCents)}</p>
+      ${
+        options.length
+          ? `<div class="mpd-plan-options">${options
+              .map(
+                (opt, i) => `<label class="mpd-plan-option">
+                  <input type="radio" name="mpdPlanOption" value="${i}" ${i === 0 ? "checked" : ""} />
+                  <span><strong>${opt.count} monthly payments</strong><small>${mpdUsd(opt.amountCents)} per month</small></span>
+                </label>`,
+              )
+              .join("")}</div>`
+          : `<div class="mpd-payments-empty"><h4>Payment plan unavailable.</h4><p class="studio-muted">Use manual payment for this balance.</p></div>`
+      }
+      <p id="mpdPlanError" class="mpd-membership-inline-error" hidden></p>
+      <div id="mpdPlanStripeMount" class="mpd-program-stripe-mount" hidden></div>
+      <div class="mpd-program-payment-modal__actions">
+        <button type="button" class="studio-btn-primary" id="mpdPlanContinue" ${options.length ? "" : "disabled"}>Start selected plan</button>
+      </div>
+    </div>`,
+  );
+  const errEl = modal.querySelector("#mpdPlanError");
+  const mount = /** @type {HTMLElement | null} */ (modal.querySelector("#mpdPlanStripeMount"));
+  const btn = /** @type {HTMLButtonElement | null} */ (modal.querySelector("#mpdPlanContinue"));
+  btn?.addEventListener("click", async () => {
+    const snap = await getAuthSnapshot();
+    if (!snap.authenticated) {
+      window.alert("Sign in to start a payment plan.");
+      return;
+    }
+    const selected = Number((modal.querySelector('input[name="mpdPlanOption"]:checked') || {}).value || 0);
+    const opt = options[selected];
+    if (!opt) return;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "Creating plan…";
+    }
+    try {
+      const [{ loadStripe }, svc, cfg] = await Promise.all([
+        import("@stripe/stripe-js"),
+        import("../utils/integrationApi.js"),
+        import("../utils/studioServicesConfig.js"),
+      ]);
+      const pk = cfg.getStripePublishableKeyResolved();
+      if (!pk) throw new Error("Configure Stripe publishable key in Studio → Services.");
+      const plan = await svc.createProgramPaymentPlan({
+        principal: snap.principal.toText(),
+        email: item.email,
+        programId: item.programId,
+        applicationId: item.applicationId,
+        installmentCount: opt.count,
+        installmentAmountCents: opt.amountCents,
+        totalDueCents: item.totalDueCents,
+        depositAmountCents: item.depositCents,
+        planStartAt: new Date().toISOString(),
+        planEndAt: item.startText || "",
+      });
+      const stripe = await loadStripe(pk);
+      if (!stripe) throw new Error("Stripe failed to load.");
+      const elements = stripe.elements({ clientSecret: plan.clientSecret, appearance: { theme: "stripe" } });
+      const paymentElement = elements.create("payment");
+      if (mount) {
+        mount.hidden = false;
+        mount.textContent = "";
+        paymentElement.mount(mount);
+      }
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "Confirm first payment";
+      }
+      btn?.addEventListener(
+        "click",
+        async () => {
+          if (btn) {
+            btn.disabled = true;
+            btn.textContent = "Processing…";
+          }
+          const result = await stripe.confirmPayment({
+            elements,
+            redirect: "if_required",
+            confirmParams: { return_url: window.location.href },
+          });
+          if (result.error) throw new Error(result.error.message || "Payment failed.");
+          await svc.confirmProgramPaymentRecorded(plan.paymentIntentId);
+          closeMpdPaymentModal();
+          await hydrateProgramPaymentsPanel(mpdLastProgramsForPayments);
+        },
+        { once: true },
+      );
+    } catch (e) {
+      if (errEl instanceof HTMLElement) {
+        errEl.hidden = false;
+        errEl.textContent = e instanceof Error ? e.message : String(e);
+      }
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "Start selected plan";
+      }
+    }
+  }, { once: true });
+}
+
+async function cancelMpdProgramPaymentPlan(item) {
+  if (!item?.activePlan) return;
+  if (!window.confirm("Cancel this payment plan? Future scheduled installments will stop.")) return;
+  try {
+    const { cancelProgramPaymentPlan } = await import("../utils/integrationApi.js");
+    await cancelProgramPaymentPlan({
+      planId: String(item.activePlan.id || ""),
+      subscriptionId: String(item.activePlan.stripeSubscriptionId || ""),
+    });
+    await hydrateProgramPaymentsPanel(mpdLastProgramsForPayments);
+  } catch (e) {
+    window.alert(e instanceof Error ? e.message : String(e));
+  }
+}
+
+/** @param {unknown} value */
 function detailIsObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -1199,8 +2203,6 @@ function wireMpdResidencyComingSoonModal() {
 async function hydrateProgramsPanel(rec, locales, active) {
   const container = document.getElementById("mpd_programs_list");
   if (!container) return;
-  const b = localeBlock(locales, active);
-  const programIds = Array.isArray(b.programs) ? b.programs.map(String) : [];
   /** @type {Record<string, unknown>} */
   let applied = {};
   try {
@@ -1218,72 +2220,53 @@ async function hydrateProgramsPanel(rec, locales, active) {
     programs = [];
   }
   container.replaceChildren();
-  const idSet = new Set([...programIds, ...Object.keys(applied)]);
-  if (idSet.size === 0) {
-    const p = document.createElement("p");
-    p.className = "studio-muted mpd-programs-empty";
-    p.textContent =
-      "No program associations yet. When you apply to a residency, your application status will appear here.";
-    container.appendChild(p);
+  const applicationIds = Object.keys(applied).filter(Boolean);
+  const countBadge = document.getElementById("mpd_my_programs_count");
+  if (countBadge) {
+    countBadge.textContent = String(applicationIds.length);
+    countBadge.toggleAttribute("hidden", applicationIds.length === 0);
+    countBadge.setAttribute("aria-label", `${applicationIds.length} applications`);
+  }
+  if (applicationIds.length === 0) {
+    container.innerHTML = `
+      <div class="mpd-programs-empty-state mpd-my-program-empty">
+        <h4>No applications yet.</h4>
+        <p class="studio-muted">When you apply to a Fusion program, your status and next steps will appear here.</p>
+      </div>
+    `;
+    await hydrateProgramPaymentsPanel(programs);
     return;
   }
-  for (const pid of idSet) {
-    const pr = programs.find((x) => String(x.id) === String(pid));
-    const en = pr?.enCard && typeof pr.enCard === "object" ? pr.enCard : {};
-    const title =
-      String(en.focus ?? en.headline ?? en.location ?? "").trim() ||
-      String(pid);
-    let route = MPD_APPLY_PROGRAM_PATH;
-    if (pr?.routeLink) {
-      const rl = String(pr.routeLink);
-      route = rl.startsWith("/") ? rl : `/${rl}`;
-    }
-    const entry = applied[pid];
-    let statusText = "Not applied";
-    let detail = "";
-    if (entry && typeof entry === "object") {
-      const er = /** @type {Record<string, unknown>} */ (entry);
-      const st = String(er.status ?? "").toLowerCase();
-      if (st === "reviewing" || st === "review" || st === "in_review") {
-        statusText = "In review";
-      } else {
-        statusText = "Submitted";
-      }
-      const sub = er.submittedAt ?? er.submitted_at;
-      if (sub) detail = `Submitted: ${String(sub)}`;
-    }
-    const applicationsOpen = pr
-      ? String(pr.studioStatus ?? "").toLowerCase() === "open"
-      : true;
-    const card = document.createElement("article");
-    card.className = "mpd-program-card";
-    const ctaClosedCls = applicationsOpen
-      ? "program-intro-cta mpd-program-intro-cta mpd-program-card__link"
-      : "program-intro-cta mpd-program-intro-cta mpd-program-card__link mpd-residency-cta--closed";
-    const ctaLabel = applicationsOpen ? "View program" : "Coming soon";
-    card.innerHTML = `
-      <div class="mpd-program-card__head">
-        <h3 class="mpd-program-card__title">${escapeHtmlMpd(title)}</h3>
-        <span class="mpd-program-card__badge">${escapeHtmlMpd(statusText)}</span>
-      </div>
-      ${detail ? `<p class="mpd-program-card__detail studio-muted">${escapeHtmlMpd(detail)}</p>` : ""}
-      <button type="button" class="${ctaClosedCls}" data-mpd-program-route="${escapeHtmlMpd(route)}" data-mpd-program-applications-open="${applicationsOpen ? "true" : "false"}">${escapeHtmlMpd(ctaLabel)}</button>
-    `;
-    const go = card.querySelector("button.mpd-program-card__link");
-    if (go) {
-      go.addEventListener("click", (ev) => {
-        if (go.getAttribute("data-mpd-program-applications-open") === "false") {
-          ev.preventDefault();
-          openMpdResidencyComingSoonModal();
-          return;
-        }
-        const r =
-          go.getAttribute("data-mpd-program-route") || MPD_APPLY_PROGRAM_PATH;
-        navigate(r);
-      });
-    }
-    container.appendChild(card);
+  const cards = applicationIds
+    .map((pid) => {
+      const pr =
+        programs.find((x) => String(x.id) === String(pid)) ||
+        ({ id: pid, enCard: { focus: pid } });
+      return normalizeMpdMyProgramCard(
+        /** @type {Record<string, unknown>} */ (pr),
+        pid,
+        mpdObject(applied[pid]),
+      );
+    })
+    .sort((a, b) => String(b.submittedAt || "").localeCompare(String(a.submittedAt || "")));
+  container.innerHTML = `
+    <div class="mpd-my-program-cards">
+      ${cards.map(renderMpdMyProgramCard).join("")}
+    </div>
+    <div id="mpd_my_programs_no_results" class="mpd-programs-empty-state mpd-my-program-empty" hidden>
+      <h4>No applications match this filter.</h4>
+      <p class="studio-muted">Choose another status to see more applications.</p>
+    </div>
+  `;
+  for (const chip of document.querySelectorAll("[data-mpd-my-program-filter]")) {
+    const key = chip.getAttribute("data-mpd-my-program-filter") || "all";
+    const count =
+      key === "all" ? cards.length : cards.filter((card) => card.status.key === key).length;
+    const countEl = chip.querySelector(".mpd-my-program-filter__count");
+    if (countEl) countEl.textContent = String(count);
   }
+  applyMpdMyProgramsFilters();
+  await hydrateProgramPaymentsPanel(programs);
 }
 
 /**
@@ -1304,37 +2287,56 @@ async function hydratePublicProgramDiscoveryCards() {
   );
   container.replaceChildren();
   if (publicProgs.length === 0) {
-    const p = document.createElement("p");
-    p.className = "studio-muted mpd-programs-empty";
-    p.textContent = "No public programs are listed yet.";
-    container.appendChild(p);
+    container.innerHTML = `
+      <div class="mpd-programs-empty-state">
+        <h4>No public programs are listed yet.</h4>
+        <p class="studio-muted">When Fusion publishes new public opportunities, they will appear here.</p>
+      </div>
+    `;
     return;
   }
   const grid = document.createElement("div");
   grid.className = "mpd-public-programs-grid";
+  /** @type {Set<string>} */
+  const categoryOptions = new Set();
   for (const pr of publicProgs) {
     const en = pr?.enCard && typeof pr.enCard === "object" ? pr.enCard : {};
     const ja =
       pr?.jaCard && typeof pr.jaCard === "object" ? pr.jaCard : {};
-    const focus = String(en.focus ?? en.headline ?? "").trim();
-    const location =
-      typeof en.location === "string"
-        ? en.location.trim()
-        : String(en.location ?? "").trim() ||
-          String(en.headline ?? "").trim();
+    const focus = mpdText(en.focus ?? en.headline);
+    const location = mpdText(en.location) || mpdText(en.headline);
     const title =
-      focus ||
       location ||
-      String(en.headline ?? "").trim() ||
-      String(pr.id ?? "");
-    const startDate = String(en.startDate ?? "").trim();
-    const endDate = String(en.endDate ?? "").trim();
-    const year = String(en.year ?? "").trim();
+      focus ||
+      mpdText(en.headline) ||
+      mpdText(pr.id);
+    const startDate = mpdText(en.startDate);
+    const endDate = mpdText(en.endDate);
+    const year = mpdText(en.year);
+    const openTo = firstNonEmptyString(
+      en.openTo,
+      en.audience,
+      en.eligibility,
+      en.discipline,
+      en.medium,
+    );
+    const deadline = firstNonEmptyString(
+      en.deadline,
+      en.applicationDeadline,
+      en.deadlineDate,
+      en.applyBy,
+      startDate && endDate ? `${startDate} - ${endDate}` : startDate || endDate,
+      year,
+    );
+    const category = firstNonEmptyString(en.category, en.type, focus);
+    const categoryKey = category.toLowerCase().replace(/\s+/g, "-");
+    if (category) categoryOptions.add(category);
+    const studioStatus = mpdText(pr?.studioStatus).toLowerCase();
     const imageSrc = firstNonEmptyString(
       /** @type {Record<string, unknown>} */ (ja).imageSrc,
       /** @type {Record<string, unknown>} */ (en).imageSrc,
     );
-    const imageAlt = String(en.imageAlt ?? en.focus ?? title).trim() || title;
+    const imageAlt = mpdText(en.imageAlt ?? en.focus ?? title) || title;
     let route = "/programs";
     if (pr?.routeLink) {
       const rl = String(pr.routeLink);
@@ -1342,6 +2344,21 @@ async function hydratePublicProgramDiscoveryCards() {
     }
     const card = document.createElement("article");
     card.className = "mpd-public-program-card mpd-public-program-card--rich";
+    card.dataset.status = studioStatus || "unknown";
+    card.dataset.category = categoryKey;
+    card.dataset.search = [
+      title,
+      focus,
+      location,
+      openTo,
+      deadline,
+      category,
+      pr?.id,
+      route,
+      studioStatus,
+    ]
+      .filter(Boolean)
+      .join(" ");
 
     const link = document.createElement("a");
     link.className = "mpd-public-program-card__link-rich";
@@ -1351,12 +2368,10 @@ async function hydratePublicProgramDiscoveryCards() {
 
     const imgWrap = document.createElement("div");
     imgWrap.className = "mpd-public-program-card__image-wrap";
-    if (focus) {
-      const foc = document.createElement("div");
-      foc.className = "mpd-public-program-card__focus";
-      foc.textContent = focus;
-      imgWrap.appendChild(foc);
-    }
+    const foc = document.createElement("div");
+    foc.className = "mpd-public-program-card__focus";
+    foc.textContent = category || focus || "Program";
+    imgWrap.appendChild(foc);
     if (imageSrc) {
       const img = document.createElement("img");
       img.className = "mpd-public-program-card__img";
@@ -1376,32 +2391,68 @@ async function hydratePublicProgramDiscoveryCards() {
     body.className = "mpd-public-program-card__body";
     const tEl = document.createElement("div");
     tEl.className = "mpd-public-program-card__title";
-    tEl.textContent = location || title;
+    tEl.textContent = title || location;
     body.appendChild(tEl);
-    const dates = document.createElement("div");
-    dates.className = "mpd-public-program-card__dates";
-    if (startDate || endDate) {
-      const range = document.createElement("span");
-      range.className = "mpd-public-program-card__range";
-      range.textContent =
-        startDate && endDate
-          ? `${startDate} – ${endDate}`
-          : startDate || endDate;
-      dates.appendChild(range);
+
+    const meta = document.createElement("div");
+    meta.className = "mpd-public-program-card__meta";
+    const addMetaRow = (label, value) => {
+      const text = mpdText(value);
+      if (!text) return;
+      const row = document.createElement("p");
+      row.className = "mpd-public-program-card__meta-row";
+      row.innerHTML = `<strong>${escapeHtmlMpd(label)}:</strong> ${escapeHtmlMpd(text)}`;
+      meta.appendChild(row);
+    };
+    addMetaRow("Program", focus);
+    addMetaRow("Open to", openTo);
+    addMetaRow("Deadline", deadline);
+    if (meta.childElementCount) {
+      body.appendChild(meta);
     }
-    if (year) {
-      const y = document.createElement("span");
-      y.className = "mpd-public-program-card__year";
-      y.textContent = year;
-      dates.appendChild(y);
-    }
-    if (dates.childElementCount) body.appendChild(dates);
+
+    const cta = document.createElement("span");
+    cta.className = "mpd-public-program-card__cta";
+    cta.textContent = "View details ->";
+    body.appendChild(cta);
     link.appendChild(body);
 
     card.appendChild(link);
     grid.appendChild(card);
   }
+  const filter = /** @type {HTMLSelectElement | null} */ (
+    document.getElementById("mpd_public_programs_filter")
+  );
+  if (filter) {
+    const current = filter.value || "all";
+    const categoryHtml = Array.from(categoryOptions)
+      .sort((a, b) => a.localeCompare(b))
+      .map((label) => {
+        const value = `category:${label.toLowerCase().replace(/\s+/g, "-")}`;
+        return `<option value="${escapeHtmlMpd(value)}">${escapeHtmlMpd(label)}</option>`;
+      })
+      .join("");
+    filter.innerHTML = `
+      <option value="all">All programs</option>
+      <option value="open">Open now</option>
+      <option value="not-open">Not open yet</option>
+      ${categoryHtml}
+    `;
+    filter.value = Array.from(filter.options).some((opt) => opt.value === current)
+      ? current
+      : "all";
+  }
   container.appendChild(grid);
+  const noResults = document.createElement("div");
+  noResults.id = "mpd_public_programs_no_results";
+  noResults.className = "mpd-programs-empty-state";
+  noResults.hidden = true;
+  noResults.innerHTML = `
+    <h4>No programs match your search.</h4>
+    <p class="studio-muted">Try a different keyword or clear the filter to see all public programs.</p>
+  `;
+  container.appendChild(noResults);
+  applyMpdPublicProgramFilters();
 }
 
 async function syncResidencyApplyCta() {
@@ -1802,16 +2853,76 @@ export function generateSettingsProfileContent() {
                         </div>
 
                         <div class="mpd-panel" id="mpd-panel-programs" data-mpd-panel="programs" hidden>
-                            <section class="member-profile-dashboard__card" id="mpd-programs">
-                                <h2>Programs</h2>
-                                <p class="studio-muted">Programs you are associated with and your application status.</p>
-                                <div id="mpd_programs_list" class="mpd-programs-list" aria-live="polite"></div>
-                                <div class="mpd-public-programs-discovery" id="mpd_public_programs_discovery">
-                                    <h3 class="mpd-public-programs-discovery__h">Explore programs</h3>
-                                    <p class="studio-muted">
-                                        Browse all public Fusion programs — each link opens in a new tab.
-                                    </p>
-                                    <div id="mpd_public_programs_all" class="mpd-public-programs-list" aria-live="polite"></div>
+                            <section class="member-profile-dashboard__card mpd-programs-shell" id="mpd-programs">
+                                <div class="mpd-program-tabs" role="tablist" aria-label="Programs sections">
+                                    <button type="button" class="mpd-program-tab mpd-program-tab--explore is-active" id="mpd-program-tab-explore" role="tab" aria-selected="true" tabindex="0" aria-controls="mpd-program-panel-explore" data-mpd-program-tab="explore">
+                                        ${mpdInlineIconHtml(exploreProgramsIconUrl, "mpd-program-tab__icon")}
+                                        <span>Explore programs</span>
+                                    </button>
+                                    <button type="button" class="mpd-program-tab mpd-program-tab--my-programs" id="mpd-program-tab-my-programs" role="tab" aria-selected="false" tabindex="-1" aria-controls="mpd-program-panel-my-programs" data-mpd-program-tab="my-programs">
+                                        ${mpdInlineIconHtml(myProgramsIconUrl, "mpd-program-tab__icon")}
+                                        <span>My programs</span>
+                                        <span class="mpd-program-tab__count" id="mpd_my_programs_count" hidden>0</span>
+                                    </button>
+                                    <button type="button" class="mpd-program-tab mpd-program-tab--payments" id="mpd-program-tab-payments" role="tab" aria-selected="false" tabindex="-1" aria-controls="mpd-program-panel-payments" data-mpd-program-tab="payments">
+                                        ${mpdInlineIconHtml(paymentsIconUrl, "mpd-program-tab__icon")}
+                                        <span>Payments</span>
+                                    </button>
+                                </div>
+
+                                <div class="mpd-program-tab-panel" id="mpd-program-panel-explore" role="tabpanel" aria-labelledby="mpd-program-tab-explore" data-mpd-program-panel="explore">
+                                    <div class="mpd-public-programs-discovery" id="mpd_public_programs_discovery">
+                                        <div class="mpd-public-programs-toolbar">
+                                            <div>
+                                                <h3 class="mpd-public-programs-discovery__h">Explore programs</h3>
+                                                <p class="studio-muted">
+                                                    Browse all public Fusion programs — each link opens in a new tab.
+                                                </p>
+                                            </div>
+                                            <div class="mpd-public-programs-controls" aria-label="Explore programs filters">
+                                                <label class="mpd-public-programs-search">
+                                                    <span class="sr-only">Search programs</span>
+                                                    <input type="search" id="mpd_public_programs_search" class="studio-input" placeholder="Search programs..." autocomplete="off" />
+                                                </label>
+                                                <label class="mpd-public-programs-filter">
+                                                    <span class="sr-only">Filter programs</span>
+                                                    <select id="mpd_public_programs_filter" class="studio-input" aria-label="Filter programs">
+                                                        <option value="all">All programs</option>
+                                                        <option value="open">Open now</option>
+                                                        <option value="not-open">Not open yet</option>
+                                                    </select>
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <div id="mpd_public_programs_all" class="mpd-public-programs-list" aria-live="polite"></div>
+                                    </div>
+                                </div>
+
+                                <div class="mpd-program-tab-panel" id="mpd-program-panel-my-programs" role="tabpanel" aria-labelledby="mpd-program-tab-my-programs" data-mpd-program-panel="my-programs" hidden>
+                                    <div class="mpd-my-programs-head">
+                                        <div>
+                                            <h3>My programs</h3>
+                                            <p class="studio-muted">View and manage your applications.</p>
+                                        </div>
+                                    </div>
+                                    <div class="mpd-my-program-filters" role="group" aria-label="Filter my programs by application status">
+                                        <button type="button" class="mpd-my-program-filter is-active" data-mpd-my-program-filter="all" aria-pressed="true">All <span class="mpd-my-program-filter__count">0</span></button>
+                                        <button type="button" class="mpd-my-program-filter" data-mpd-my-program-filter="submitted" aria-pressed="false">Submitted <span class="mpd-my-program-filter__count">0</span></button>
+                                        <button type="button" class="mpd-my-program-filter" data-mpd-my-program-filter="under-review" aria-pressed="false">Under review <span class="mpd-my-program-filter__count">0</span></button>
+                                        <button type="button" class="mpd-my-program-filter" data-mpd-my-program-filter="invited" aria-pressed="false">Invited <span class="mpd-my-program-filter__count">0</span></button>
+                                        <button type="button" class="mpd-my-program-filter" data-mpd-my-program-filter="not-selected" aria-pressed="false">Not selected <span class="mpd-my-program-filter__count">0</span></button>
+                                        <button type="button" class="mpd-my-program-filter" data-mpd-my-program-filter="withdrawn" aria-pressed="false">Withdrawn <span class="mpd-my-program-filter__count">0</span></button>
+                                    </div>
+                                    <div id="mpd_programs_list" class="mpd-programs-list" aria-live="polite"></div>
+                                </div>
+
+                                <div class="mpd-program-tab-panel" id="mpd-program-panel-payments" role="tabpanel" aria-labelledby="mpd-program-tab-payments" data-mpd-program-panel="payments" hidden>
+                                    <div id="mpd_program_payments_workspace" aria-live="polite">
+                                        <div class="mpd-program-placeholder">
+                                            <h3>Payments</h3>
+                                            <p class="studio-muted">Program payments appear after you are approved for a program.</p>
+                                        </div>
+                                    </div>
                                 </div>
                             </section>
                         </div>
@@ -2966,6 +4077,69 @@ export default function initSettingsProfile() {
         if (k) showMpdPanel(k);
         return;
       }
+      const programTab =
+        e.target &&
+        /** @type {Element} */ (e.target).closest?.("[data-mpd-program-tab]");
+      if (programTab && rootEl.contains(programTab)) {
+        e.preventDefault();
+        if (programTab.hasAttribute("hidden") || programTab.getAttribute("aria-hidden") === "true") return;
+        setMpdProgramsTab(programTab.getAttribute("data-mpd-program-tab") || "explore");
+        return;
+      }
+      const paymentProgram =
+        e.target &&
+        /** @type {Element} */ (e.target).closest?.("[data-mpd-payment-program]");
+      if (paymentProgram && rootEl.contains(paymentProgram)) {
+        e.preventDefault();
+        mpdSelectedPaymentProgramId = paymentProgram.getAttribute("data-mpd-payment-program") || "";
+        renderMpdPaymentsWorkspace();
+        return;
+      }
+      const paymentAction =
+        e.target &&
+        /** @type {Element} */ (e.target).closest?.("[data-mpd-payment-action]");
+      if (paymentAction && rootEl.contains(paymentAction)) {
+        e.preventDefault();
+        const item = mpdCurrentPaymentItem();
+        if (!item) return;
+        const action = paymentAction.getAttribute("data-mpd-payment-action") || "";
+        if (action === "deposit") {
+          void openMpdStripePaymentModal(item, "deposit", item.depositCents);
+        } else if (action === "full") {
+          void openMpdStripePaymentModal(item, "full_payment", item.totalDueCents);
+        } else if (action === "manual") {
+          openMpdManualPaymentModal(item);
+        } else if (action === "start-plan") {
+          openMpdPaymentPlanModal(item);
+        } else if (action === "cancel-plan") {
+          void cancelMpdProgramPaymentPlan(item);
+        }
+        return;
+      }
+      const myProgramFilter =
+        e.target &&
+        /** @type {Element} */ (e.target).closest?.("[data-mpd-my-program-filter]");
+      if (myProgramFilter && rootEl.contains(myProgramFilter)) {
+        e.preventDefault();
+        setMpdMyProgramsFilter(myProgramFilter);
+        return;
+      }
+      const applicationAction =
+        e.target &&
+        /** @type {Element} */ (e.target).closest?.("[data-mpd-application-action]");
+      if (applicationAction && rootEl.contains(applicationAction)) {
+        e.preventDefault();
+        const action = applicationAction.getAttribute("data-mpd-application-action") || "";
+        const programId = applicationAction.getAttribute("data-program-id") || "";
+        if (action === "view") {
+          openMpdApplicationDetailsModal(programId);
+        } else if (action === "update") {
+          window.alert("Material updates are coming soon. For now, contact the Fusion team if your application needs changes.");
+        } else if (action === "withdraw") {
+          window.alert("Application withdrawal is coming soon. Contact the Fusion team if you need to withdraw before this action is available.");
+        }
+        return;
+      }
       const saveBtn =
         e.target &&
         /** @type {Element} */ (e.target).closest?.(".mpd-section-save");
@@ -3042,8 +4216,43 @@ export default function initSettingsProfile() {
         renderLinkRows(cur);
       }
     });
+    rootEl.addEventListener("keydown", (e) => {
+      const tab =
+        e.target &&
+        /** @type {Element} */ (e.target).closest?.("[data-mpd-program-tab]");
+      if (!tab || !rootEl.contains(tab)) return;
+      const key = e.key;
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(key)) return;
+      const tabs = Array.from(rootEl.querySelectorAll("[data-mpd-program-tab]")).filter(
+        (el) => !el.hasAttribute("hidden") && el.getAttribute("aria-hidden") !== "true",
+      );
+      const currentIndex = tabs.indexOf(tab);
+      if (currentIndex < 0) return;
+      e.preventDefault();
+      let nextIndex = currentIndex;
+      if (key === "Home") nextIndex = 0;
+      else if (key === "End") nextIndex = tabs.length - 1;
+      else if (key === "ArrowRight") nextIndex = (currentIndex + 1) % tabs.length;
+      else if (key === "ArrowLeft")
+        nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+      const next = tabs[nextIndex];
+      if (!(next instanceof HTMLElement)) return;
+      setMpdProgramsTab(next.getAttribute("data-mpd-program-tab") || "explore");
+      next.focus();
+    });
+    rootEl.addEventListener("input", (e) => {
+      const t = e.target;
+      if (!(t instanceof HTMLInputElement)) return;
+      if (t.id === "mpd_public_programs_search") {
+        applyMpdPublicProgramFilters();
+      }
+    });
     rootEl.addEventListener("change", async (e) => {
       const t = e.target;
+      if (t instanceof HTMLSelectElement && t.id === "mpd_public_programs_filter") {
+        applyMpdPublicProgramFilters();
+        return;
+      }
       if (!(t instanceof HTMLInputElement)) return;
       if (t.id === "mpd_hero_file" && t.files?.[0]) {
         const f = t.files[0];
@@ -3718,6 +4927,7 @@ export default function initSettingsProfile() {
       /** @type {Record<string, unknown>} */ (localesState),
       activeLocale,
     );
+    setMpdProgramsTab("explore");
     void hydratePublicProgramDiscoveryCards();
     void syncResidencyApplyCta();
 

@@ -105,6 +105,9 @@ const s3PublicBase =
         ? `https://${s3Bucket}.s3.${awsRegion}.amazonaws.com`
         : '');
 const s3Prefix = (process.env.S3_KEY_PREFIX || 'uploads/').replace(/^\/+/, '');
+const fusionMediaPublicPrefix = (process.env.S3_FUSION_MEDIA_PUBLIC_PREFIX || 'fusionMedia/uploads/')
+    .replace(/^\/+/, '')
+    .replace(/\/?$/, '/');
 const privateVideoPrefix = (process.env.S3_PRIVATE_VIDEO_PREFIX || 'fusionMedia/private-video/')
     .replace(/^\/+/, '')
     .replace(/\/?$/, '/');
@@ -352,6 +355,316 @@ app.post('/stripe/create-payment-intent', requireApiKey, async (req, res) => {
             metadata,
         });
         return res.json({ clientSecret: pi.client_secret });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return res.status(500).json({ error: msg });
+    }
+});
+
+function centsFromBody(value, fieldName) {
+    const n = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(n) || n < 50) {
+        throw new Error(`${fieldName} must be at least 50 cents`);
+    }
+    return Math.round(n);
+}
+
+function safeStripeMetaValue(value, max = 500) {
+    return String(value ?? '').trim().slice(0, max);
+}
+
+function programPaymentMetadata(body, paymentType, amountCents) {
+    const principal = safeStripeMetaValue(body?.principal);
+    const programId = safeStripeMetaValue(body?.programId, 120);
+    const applicationId = safeStripeMetaValue(body?.applicationId, 240);
+    if (!principal) throw new Error('principal required');
+    Principal.fromText(principal);
+    if (!programId) throw new Error('programId required');
+    if (!applicationId) throw new Error('applicationId required');
+    return {
+        principal,
+        programId,
+        applicationId,
+        paymentType,
+        amountCents: String(amountCents),
+        totalDueCents: String(Math.max(0, Math.round(Number(body?.totalDueCents || 0)))),
+        depositAmountCents: String(Math.max(0, Math.round(Number(body?.depositAmountCents || 0)))),
+        source: 'program_payments_tab',
+    };
+}
+
+async function cancelPlatformSubscriptionImmediately(principalText) {
+    if (!stripe) return { ok: false, reason: 'stripe_not_configured' };
+    const picked = await getStripeCustomerAndBestSubscription(stripe, principalText);
+    if (!picked.ok) return { ok: false, reason: picked.reason };
+    const { customer, subscription } = picked;
+    if (subscription.status === 'canceled') {
+        return { ok: true, subscriptionId: subscription.id, status: subscription.status };
+    }
+    const canceled = await stripe.subscriptions.cancel(subscription.id, { prorate: false });
+    try {
+        await pushSubscriptionToCanister(canceled, customer.id);
+    } catch (e) {
+        console.warn('[stripe] immediate program-payment cancel canister sync:', e);
+    }
+    return { ok: true, subscriptionId: canceled.id, status: canceled.status };
+}
+
+async function recordVerifiedProgramPayment(paymentIntent) {
+    const actor = await getIntegrationActor();
+    if (!actor) {
+        throw new Error('Canister integration not configured');
+    }
+    const meta = paymentIntent.metadata || {};
+    const principalText = safeStripeMetaValue(meta.principal);
+    const programId = safeStripeMetaValue(meta.programId, 120);
+    const applicationId = safeStripeMetaValue(meta.applicationId, 240);
+    const paymentType = safeStripeMetaValue(meta.paymentType, 80);
+    Principal.fromText(principalText);
+    if (!programId || !applicationId || !paymentType) {
+        throw new Error('PaymentIntent missing program payment metadata');
+    }
+    const charge =
+        paymentIntent.latest_charge && typeof paymentIntent.latest_charge === 'object'
+            ? paymentIntent.latest_charge
+            : null;
+    const chargeId = charge?.id || (typeof paymentIntent.latest_charge === 'string' ? paymentIntent.latest_charge : '');
+    const receiptUrl = charge?.receipt_url || '';
+    const createdAt =
+        typeof paymentIntent.created === 'number'
+            ? new Date(paymentIntent.created * 1000).toISOString()
+            : new Date().toISOString();
+    const amountCents = Math.max(0, Math.round(Number(paymentIntent.amount_received || paymentIntent.amount || 0)));
+    const totalDueCents = Math.max(0, Math.round(Number(meta.totalDueCents || 0)));
+    const depositAmountCents = Math.max(0, Math.round(Number(meta.depositAmountCents || 0)));
+    const row = {
+        id: paymentIntent.id,
+        principal: Principal.fromText(principalText),
+        programId,
+        applicationId,
+        paymentType,
+        amountCents: BigInt(amountCents),
+        currency: safeStripeMetaValue(paymentIntent.currency || 'usd', 20).toLowerCase(),
+        stripePaymentIntentId: paymentIntent.id,
+        stripeChargeId: chargeId,
+        stripeReceiptUrl: receiptUrl,
+        status: paymentIntent.status === 'succeeded' ? 'succeeded' : safeStripeMetaValue(paymentIntent.status, 40),
+        createdAt,
+        dueAt: [],
+    };
+    await actor.integrationRecordProgramPayment(
+        row,
+        BigInt(totalDueCents),
+        BigInt(depositAmountCents),
+        0n,
+    );
+    if (paymentType === 'deposit' || paymentType === 'full_payment') {
+        await actor.integrationMarkProgramDepositAccepted(
+            Principal.fromText(principalText),
+            programId,
+            applicationId,
+            paymentType === 'full_payment' ? 'paid_full' : 'paid',
+            createdAt,
+        );
+        await cancelPlatformSubscriptionImmediately(principalText);
+    }
+    if (paymentType === 'plan_installment') {
+        const planId = safeStripeMetaValue(meta.planId, 120);
+        if (planId) {
+            const plan = {
+                id: planId,
+                principal: Principal.fromText(principalText),
+                programId,
+                applicationId,
+                stripeSubscriptionId: safeStripeMetaValue(meta.stripeSubscriptionId, 120),
+                stripeScheduleId: safeStripeMetaValue(meta.stripeScheduleId, 120),
+                installmentCount: BigInt(Math.max(0, Math.round(Number(meta.installmentCount || 0)))),
+                installmentAmountCents: BigInt(Math.max(0, Math.round(Number(meta.installmentAmountCents || 0)))),
+                currency: safeStripeMetaValue(paymentIntent.currency || 'usd', 20).toLowerCase(),
+                status: 'active',
+                startAt: safeStripeMetaValue(meta.planStartAt) || createdAt,
+                endAt: safeStripeMetaValue(meta.planEndAt) || '',
+                createdAt,
+                updatedAt: createdAt,
+            };
+            await actor.integrationActivateProgramPaymentPlan(plan, BigInt(totalDueCents), BigInt(depositAmountCents));
+        }
+    }
+    return { receiptUrl, chargeId, amountCents, paymentType, programId };
+}
+
+app.post('/stripe/program-payment-intent', requireApiKey, async (req, res) => {
+    try {
+        if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
+        const paymentType = safeStripeMetaValue(req.body?.paymentType, 80);
+        if (!['deposit', 'full_payment', 'manual'].includes(paymentType)) {
+            return res.status(400).json({ error: 'Invalid paymentType' });
+        }
+        const amountCents = centsFromBody(req.body?.amountCents, 'amountCents');
+        const metadata = programPaymentMetadata(req.body, paymentType, amountCents);
+        const pi = await stripe.paymentIntents.create({
+            amount: amountCents,
+            currency: 'usd',
+            automatic_payment_methods: { enabled: true },
+            metadata,
+        });
+        return res.json({ clientSecret: pi.client_secret, paymentIntentId: pi.id });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return res.status(500).json({ error: msg });
+    }
+});
+
+app.post('/stripe/program-payment-confirmed', requireApiKey, async (req, res) => {
+    try {
+        if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
+        const paymentIntentId = safeStripeMetaValue(req.body?.paymentIntentId, 120);
+        if (!paymentIntentId.startsWith('pi_')) {
+            return res.status(400).json({ error: 'paymentIntentId required' });
+        }
+        const pi = await stripe.paymentIntents.retrieve(paymentIntentId, {
+            expand: ['latest_charge'],
+        });
+        if (pi.status !== 'succeeded') {
+            return res.status(409).json({ error: `PaymentIntent not succeeded: ${pi.status}` });
+        }
+        const recorded = await recordVerifiedProgramPayment(pi);
+        return res.json({ ok: true, paymentIntentId: pi.id, ...recorded });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return res.status(500).json({ error: msg });
+    }
+});
+
+async function getOrCreateProgramPaymentCustomer(principalText, email) {
+    const escaped = escapeStripeMetadataQueryValue(principalText);
+    const search = await stripe.customers.search({
+        query: `metadata['principal']:'${escaped}'`,
+        limit: 1,
+    });
+    if (search.data.length) return search.data[0];
+    const emailText = safeStripeMetaValue(email, 320);
+    if (!emailText.includes('@')) {
+        throw new Error('valid email required for payment plan customer');
+    }
+    const existing = await stripe.customers.list({ email: emailText, limit: 1 });
+    if (existing.data.length) {
+        return stripe.customers.update(existing.data[0].id, {
+            metadata: { ...existing.data[0].metadata, principal: principalText },
+        });
+    }
+    return stripe.customers.create({
+        email: emailText,
+        metadata: { principal: principalText },
+    });
+}
+
+app.post('/stripe/program-payment-plan', requireApiKey, async (req, res) => {
+    try {
+        if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
+        const installmentCount = Math.round(Number(req.body?.installmentCount || 0));
+        if (!Number.isFinite(installmentCount) || installmentCount < 2) {
+            return res.status(400).json({ error: 'installmentCount must be at least 2' });
+        }
+        const installmentAmountCents = centsFromBody(req.body?.installmentAmountCents, 'installmentAmountCents');
+        const principal = safeStripeMetaValue(req.body?.principal);
+        Principal.fromText(principal);
+        const customer = await getOrCreateProgramPaymentCustomer(principal, req.body?.email);
+        const planId = `plan_${randomUUID()}`;
+        const planStartAt = safeStripeMetaValue(req.body?.planStartAt, 80) || new Date().toISOString();
+        const planEndAt = safeStripeMetaValue(req.body?.planEndAt, 80);
+        const baseMeta = programPaymentMetadata(req.body, 'plan_installment', installmentAmountCents);
+        const metadata = {
+            ...baseMeta,
+            planId,
+            installmentCount: String(installmentCount),
+            installmentAmountCents: String(installmentAmountCents),
+            planStartAt,
+            planEndAt,
+        };
+        const subscription = await stripe.subscriptions.create({
+            customer: customer.id,
+            items: [
+                {
+                    price_data: {
+                        currency: 'usd',
+                        unit_amount: installmentAmountCents,
+                        recurring: { interval: 'month' },
+                        product_data: {
+                            name: `Fusion program payment plan: ${metadata.programId}`,
+                        },
+                    },
+                },
+            ],
+            payment_behavior: 'default_incomplete',
+            payment_settings: { save_default_payment_method: 'on_subscription' },
+            metadata,
+            expand: ['latest_invoice.payment_intent'],
+        });
+        const invoice = subscription.latest_invoice;
+        const pi =
+            invoice && typeof invoice === 'object' && invoice.payment_intent && typeof invoice.payment_intent === 'object'
+                ? invoice.payment_intent
+                : null;
+        if (!pi?.client_secret) {
+            return res.status(500).json({ error: 'No client_secret on payment plan invoice' });
+        }
+        await stripe.paymentIntents.update(pi.id, {
+            metadata: {
+                ...metadata,
+                stripeSubscriptionId: subscription.id,
+                stripeScheduleId: '',
+            },
+        });
+        return res.json({
+            clientSecret: pi.client_secret,
+            paymentIntentId: pi.id,
+            subscriptionId: subscription.id,
+            planId,
+        });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return res.status(500).json({ error: msg });
+    }
+});
+
+app.post('/stripe/program-payment-plan-cancel', requireApiKey, async (req, res) => {
+    try {
+        if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
+        const planId = safeStripeMetaValue(req.body?.planId, 120);
+        const subscriptionId = safeStripeMetaValue(req.body?.subscriptionId, 120);
+        if (!planId) return res.status(400).json({ error: 'planId required' });
+        if (subscriptionId && subscriptionId.startsWith('sub_')) {
+            await stripe.subscriptions.cancel(subscriptionId, { prorate: false });
+        }
+        const actor = await getIntegrationActor();
+        if (!actor) return res.status(503).json({ error: 'Canister integration not configured' });
+        const updatedAt = new Date().toISOString();
+        await actor.integrationCancelProgramPaymentPlan(planId, 'cancelled', updatedAt);
+        return res.json({ ok: true, planId, subscriptionId, status: 'cancelled' });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return res.status(500).json({ error: msg });
+    }
+});
+
+app.post('/stripe/program-payment-receipts', requireApiKey, async (req, res) => {
+    try {
+        if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
+        const ids = Array.isArray(req.body?.paymentIntentIds)
+            ? req.body.paymentIntentIds.map((x) => safeStripeMetaValue(x, 120)).filter((x) => x.startsWith('pi_'))
+            : [];
+        const receipts = [];
+        for (const id of ids.slice(0, 50)) {
+            const pi = await stripe.paymentIntents.retrieve(id, { expand: ['latest_charge'] });
+            const charge = pi.latest_charge && typeof pi.latest_charge === 'object' ? pi.latest_charge : null;
+            receipts.push({
+                paymentIntentId: id,
+                receiptUrl: charge?.receipt_url || '',
+                chargeId: charge?.id || '',
+            });
+        }
+        return res.json({ ok: true, receipts });
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         return res.status(500).json({ error: msg });
@@ -630,6 +943,28 @@ app.post('/stripe/link-subscription-to-principal', requireApiKey, async (req, re
  */
 function escapeStripeMetadataQueryValue(s) {
     return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+/**
+ * @param {unknown} value
+ * @param {number} [max]
+ */
+function safeContactText(value, max = 500) {
+    return typeof value === 'string' ? value.trim().slice(0, max) : '';
+}
+
+/**
+ * @param {string} fullName
+ */
+function splitContactName(fullName) {
+    const clean = safeContactText(fullName);
+    if (!clean) return { firstName: '', lastName: '' };
+    const parts = clean.split(/\s+/).filter(Boolean);
+    if (parts.length <= 1) return { firstName: clean, lastName: '' };
+    return {
+        firstName: parts.slice(0, -1).join(' '),
+        lastName: parts[parts.length - 1],
+    };
 }
 
 /** @param {import('stripe').Stripe.Subscription} s */
@@ -927,6 +1262,93 @@ app.post('/stripe/sync-subscription-by-email', requireApiKey, async (req, res) =
         }
         const result = await syncStripeSubscriptionByEmailAndPrincipal(stripe, email, principal);
         return res.json(result);
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return res.status(500).json({ error: msg });
+    }
+});
+
+/** Studio: safe contact backfill for Users rows, matched by Stripe metadata.principal. */
+app.post('/stripe/account-contacts-by-principal', requireApiKey, async (req, res) => {
+    try {
+        if (!stripe) {
+            return res.status(503).json({ error: 'Stripe not configured' });
+        }
+        const raw = Array.isArray(req.body?.principals) ? req.body.principals : [];
+        const principals = [...new Set(raw.map((p) => String(p || '').trim()).filter(Boolean))].slice(0, 250);
+        /** @type {Array<Record<string, string | boolean>>} */
+        const contacts = [];
+        /** @type {Array<Record<string, string>>} */
+        const failures = [];
+        for (const principal of principals) {
+            try {
+                Principal.fromText(principal);
+            } catch {
+                failures.push({ principal, reason: 'invalid_principal' });
+                continue;
+            }
+            try {
+                let picked = await getStripeCustomerAndBestSubscription(stripe, principal);
+                if (
+                    !picked.ok &&
+                    picked.reason === 'no_stripe_customer' &&
+                    stripe.subscriptions &&
+                    typeof stripe.subscriptions.search === 'function'
+                ) {
+                    const escaped = escapeStripeMetadataQueryValue(principal);
+                    const subSearch = await stripe.subscriptions.search({
+                        query: `metadata['principal']:'${escaped}'`,
+                        limit: 10,
+                    });
+                    if (subSearch.data.length) {
+                        const sorted = [...subSearch.data].sort((a, b) => {
+                            const d = rankStripeSubscription(a) - rankStripeSubscription(b);
+                            if (d !== 0) return d;
+                            return b.created - a.created;
+                        });
+                        const subscription = sorted[0];
+                        const customerId = typeof subscription.customer === 'string'
+                            ? subscription.customer
+                            : subscription.customer?.id || '';
+                        if (customerId) {
+                            const customerRaw = await stripe.customers.retrieve(customerId);
+                            if (!customerRaw.deleted) {
+                                picked = { ok: true, customer: customerRaw, subscription };
+                            }
+                        }
+                    }
+                }
+                if (!picked.ok) {
+                    failures.push({ principal, reason: picked.reason || 'not_found' });
+                    continue;
+                }
+                const { customer, subscription } = picked;
+                const customerMeta = customer.metadata && typeof customer.metadata === 'object' ? customer.metadata : {};
+                const subMeta = subscription.metadata && typeof subscription.metadata === 'object' ? subscription.metadata : {};
+                const email = safeContactText(customer.email);
+                const fullName = safeContactText(
+                    customer.name ||
+                        customerMeta.full_name ||
+                        customerMeta.fullName ||
+                        subMeta.full_name ||
+                        subMeta.fullName,
+                );
+                const firstFromMeta = safeContactText(customerMeta.first_name || customerMeta.firstName || subMeta.first_name || subMeta.firstName);
+                const lastFromMeta = safeContactText(customerMeta.last_name || customerMeta.lastName || subMeta.last_name || subMeta.lastName);
+                const split = splitContactName(fullName);
+                contacts.push({
+                    principal,
+                    email,
+                    fullName,
+                    firstName: firstFromMeta || split.firstName,
+                    lastName: lastFromMeta || split.lastName,
+                    customerId: customer.id,
+                });
+            } catch (e) {
+                failures.push({ principal, reason: e instanceof Error ? e.message : String(e) });
+            }
+        }
+        return res.json({ ok: true, contacts, failures });
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         return res.status(500).json({ error: msg });
@@ -1434,8 +1856,10 @@ app.post('/storage/presign', requireApiKey, async (req, res) => {
             return res.status(400).json({ error: 'Invalid key' });
         }
         key = key.replace(/^\/+/, '');
-        if (!key.startsWith(s3Prefix)) {
-            key = `${s3Prefix}${key}`;
+        const rootPrefix = String(req.body?.rootPrefix || '').replace(/^\/+/, '').replace(/\/?$/, '/');
+        const requestedPrefix = rootPrefix === fusionMediaPublicPrefix ? fusionMediaPublicPrefix : s3Prefix;
+        if (!key.startsWith(requestedPrefix)) {
+            key = `${requestedPrefix}${key}`;
         }
         if (typeof contentType !== 'string' || !contentType.length) {
             return res.status(400).json({ error: 'Invalid contentType' });

@@ -63,6 +63,9 @@ persistent actor {
   stable var editionsStable : [(Text, Types.EditionRecord)] = [];
   stable var contentPagesStable : [(Text, Types.ContentPageRecord)] = [];
   stable var applicantsStable : [(Text, Types.ApplicantRecord)] = [];
+  stable var programPaymentSummariesStable : [(Text, Types.ProgramPaymentSummary)] = [];
+  stable var programPaymentLedgerStable : [(Text, Types.ProgramPaymentLedgerRow)] = [];
+  stable var programPaymentPlansStable : [(Text, Types.ProgramPaymentPlan)] = [];
   stable var siteSettingsStable : [(Text, Text)] = [];
 
   /// Join invite codes (8-digit) — admin-generated; deactivated after first successful redemption.
@@ -192,6 +195,15 @@ persistent actor {
   transient var applicantsById : _HashMap.HashMap<Text, Types.ApplicantRecord> =
     _HashMap.HashMap<Text, Types.ApplicantRecord>(0, Text.equal, Text.hash);
 
+  transient var programPaymentSummariesByKey : _HashMap.HashMap<Text, Types.ProgramPaymentSummary> =
+    _HashMap.HashMap<Text, Types.ProgramPaymentSummary>(0, Text.equal, Text.hash);
+
+  transient var programPaymentLedgerById : _HashMap.HashMap<Text, Types.ProgramPaymentLedgerRow> =
+    _HashMap.HashMap<Text, Types.ProgramPaymentLedgerRow>(0, Text.equal, Text.hash);
+
+  transient var programPaymentPlansById : _HashMap.HashMap<Text, Types.ProgramPaymentPlan> =
+    _HashMap.HashMap<Text, Types.ProgramPaymentPlan>(0, Text.equal, Text.hash);
+
   transient var siteSettingsByKey : _HashMap.HashMap<Text, Text> =
     _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
 
@@ -308,6 +320,16 @@ persistent actor {
 
   for (entry in membershipStripePeriodEndStable.vals()) {
     membershipStripePeriodEndByPrincipal.put(entry.0, entry.1);
+  };
+
+  for (entry in programPaymentSummariesStable.vals()) {
+    programPaymentSummariesByKey.put(entry.0, entry.1);
+  };
+  for (entry in programPaymentLedgerStable.vals()) {
+    programPaymentLedgerById.put(entry.0, entry.1);
+  };
+  for (entry in programPaymentPlansStable.vals()) {
+    programPaymentPlansById.put(entry.0, entry.1);
   };
 
   for (entry in artistsStable.vals()) {
@@ -720,16 +742,31 @@ persistent actor {
     };
   };
 
-  private func randomEightDigitCandidate() : Text {
-    var rng : Nat = Int.abs(Time.now());
+  private func eightDigitCodeFromNat(seed : Nat) : Text {
+    var x = Nat.rem(seed, 100_000_000);
     var s = "";
+    var divisor : Nat = 10_000_000;
     var i = 0;
     while (i < 8) {
-      rng := Nat.rem(rng * 31 + 17, 1_000_000_000);
-      s := s # digitCharSmall(Nat.rem(rng, 10));
+      let digit = Nat.div(x, divisor);
+      s := s # digitCharSmall(digit);
+      x := Nat.rem(x, divisor);
+      if (divisor > 1) {
+        divisor := Nat.div(divisor, 10);
+      };
       i += 1;
     };
     s;
+  };
+
+  private func randomEightDigitCandidate(salt : Nat) : Text {
+    let base : Nat = Int.abs(Time.now());
+    eightDigitCodeFromNat(
+      base +
+      (salt * 104_729) +
+      (joinInvitesByCode.size() * 9_973) +
+      (accessCodeToArtistId.size() * 7_919)
+    );
   };
 
   private func isJoinInviteCodeTaken(code : Text) : Bool {
@@ -811,6 +848,10 @@ persistent actor {
 
   private func nowSec() : Nat {
     Int.abs(Time.now() / 1_000_000_000);
+  };
+
+  private func nowText() : Text {
+    Int.toText(Time.now());
   };
 
   private func trialIsActive(p : Principal) : Bool {
@@ -968,7 +1009,7 @@ persistent actor {
       return false;
     };
     adminPrincipals := [msg.caller];
-    let now = "1970-01-01T00:00:00.000Z";
+    let now = nowText();
     let core : Types.UserAccountCore = {
       role = #admin;
       status = #active;
@@ -1079,6 +1120,9 @@ persistent actor {
     editionsStable := _Iter.toArray(editionsById.entries());
     contentPagesStable := _Iter.toArray(contentBySlug.entries());
     applicantsStable := _Iter.toArray(applicantsById.entries());
+    programPaymentSummariesStable := _Iter.toArray(programPaymentSummariesByKey.entries());
+    programPaymentLedgerStable := _Iter.toArray(programPaymentLedgerById.entries());
+    programPaymentPlansStable := _Iter.toArray(programPaymentPlansById.entries());
     siteSettingsStable := _Iter.toArray(siteSettingsByKey.entries());
     applicationByArtistProgramStable := _Iter.toArray(applicationByArtistProgram.entries());
     artistMostRecentProgramStable := _Iter.toArray(mostRecentProgramByArtistId.entries());
@@ -1256,6 +1300,24 @@ persistent actor {
     };
     applicantsStable := [];
 
+    programPaymentSummariesByKey := _HashMap.HashMap<Text, Types.ProgramPaymentSummary>(0, Text.equal, Text.hash);
+    for (entry in programPaymentSummariesStable.vals()) {
+      programPaymentSummariesByKey.put(entry.0, entry.1);
+    };
+    programPaymentSummariesStable := [];
+
+    programPaymentLedgerById := _HashMap.HashMap<Text, Types.ProgramPaymentLedgerRow>(0, Text.equal, Text.hash);
+    for (entry in programPaymentLedgerStable.vals()) {
+      programPaymentLedgerById.put(entry.0, entry.1);
+    };
+    programPaymentLedgerStable := [];
+
+    programPaymentPlansById := _HashMap.HashMap<Text, Types.ProgramPaymentPlan>(0, Text.equal, Text.hash);
+    for (entry in programPaymentPlansStable.vals()) {
+      programPaymentPlansById.put(entry.0, entry.1);
+    };
+    programPaymentPlansStable := [];
+
     siteSettingsByKey := _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
     for (entry in siteSettingsStable.vals()) {
       siteSettingsByKey.put(entry.0, entry.1);
@@ -1411,6 +1473,21 @@ persistent actor {
       applicantsById.put(entry.0, entry.1);
     };
 
+    programPaymentSummariesByKey := _HashMap.HashMap<Text, Types.ProgramPaymentSummary>(0, Text.equal, Text.hash);
+    for (entry in programPaymentSummariesStable.vals()) {
+      programPaymentSummariesByKey.put(entry.0, entry.1);
+    };
+
+    programPaymentLedgerById := _HashMap.HashMap<Text, Types.ProgramPaymentLedgerRow>(0, Text.equal, Text.hash);
+    for (entry in programPaymentLedgerStable.vals()) {
+      programPaymentLedgerById.put(entry.0, entry.1);
+    };
+
+    programPaymentPlansById := _HashMap.HashMap<Text, Types.ProgramPaymentPlan>(0, Text.equal, Text.hash);
+    for (entry in programPaymentPlansStable.vals()) {
+      programPaymentPlansById.put(entry.0, entry.1);
+    };
+
     siteSettingsByKey := _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
     for (entry in siteSettingsStable.vals()) {
       siteSettingsByKey.put(entry.0, entry.1);
@@ -1478,6 +1555,9 @@ persistent actor {
       editionsStable = _Iter.toArray(editionsById.entries());
       contentPagesStable = _Iter.toArray(contentBySlug.entries());
       applicantsStable = _Iter.toArray(applicantsById.entries());
+      programPaymentSummariesStable = ?(_Iter.toArray(programPaymentSummariesByKey.entries()));
+      programPaymentLedgerStable = ?(_Iter.toArray(programPaymentLedgerById.entries()));
+      programPaymentPlansStable = ?(_Iter.toArray(programPaymentPlansById.entries()));
       siteSettingsStable = _Iter.toArray(siteSettingsByKey.entries());
       applicationByArtistProgramStable = _Iter.toArray(applicationByArtistProgram.entries());
       artistMostRecentProgramStable = _Iter.toArray(mostRecentProgramByArtistId.entries());
@@ -1521,6 +1601,18 @@ persistent actor {
     editionsStable := snapshot.editionsStable;
     contentPagesStable := snapshot.contentPagesStable;
     applicantsStable := snapshot.applicantsStable;
+    programPaymentSummariesStable := switch (snapshot.programPaymentSummariesStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    programPaymentLedgerStable := switch (snapshot.programPaymentLedgerStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    programPaymentPlansStable := switch (snapshot.programPaymentPlansStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
     siteSettingsStable := snapshot.siteSettingsStable;
     applicationByArtistProgramStable := snapshot.applicationByArtistProgramStable;
     artistMostRecentProgramStable := snapshot.artistMostRecentProgramStable;
@@ -1644,7 +1736,7 @@ persistent actor {
     if (roleIsPrivileged(role)) {
       Debug.trap("Cannot self-request staff or admin");
     };
-    let now = "1970-01-01T00:00:00.000Z";
+    let now = nowText();
     switch (accountsByPrincipal.get(msg.caller)) {
       case null {
         let acc : Types.UserAccountCore = {
@@ -1679,10 +1771,10 @@ persistent actor {
     if (not roleAllowedForJoinInvite(role)) {
       Debug.trap("Invalid role for join invite");
     };
-    let now = "1970-01-01T00:00:00.000Z";
+    let now = nowText();
     var attempts : Nat = 0;
     while (attempts < 50) {
-      let cand = randomEightDigitCandidate();
+      let cand = randomEightDigitCandidate(attempts);
       if (not isJoinInviteCodeTaken(cand)) {
         let rec : Types.JoinInviteRecord = {
           role = role;
@@ -1719,10 +1811,10 @@ persistent actor {
     if (trialMonths == 0) {
       Debug.trap("trialMonths must be >= 1");
     };
-    let now = "1970-01-01T00:00:00.000Z";
+    let now = nowText();
     var attempts : Nat = 0;
     while (attempts < 50) {
-      let cand = randomEightDigitCandidate();
+      let cand = randomEightDigitCandidate(attempts);
       if (not isJoinInviteCodeTaken(cand)) {
         let rec : Types.JoinInviteRecord = {
           role = role;
@@ -1790,7 +1882,7 @@ persistent actor {
         if (inv.role != role) {
           return #wrongRole;
         };
-        let now = "1970-01-01T00:00:00.000Z";
+        let now = nowText();
         let core : Types.UserAccountCore = {
           role = inv.role;
           status = #active;
@@ -1843,7 +1935,7 @@ persistent actor {
             if (principalAlreadyLinkedToArtist(artistId)) {
               return #artistAlreadyLinked;
             };
-            let now = "1970-01-01T00:00:00.000Z";
+            let now = nowText();
             let core : Types.UserAccountCore = {
               role = #artist;
               status = #active;
@@ -1889,7 +1981,7 @@ persistent actor {
         };
         let pidText = Principal.toText(msg.caller);
         let artistId = "m-" # pidText;
-        let now = "1970-01-01T00:00:00.000Z";
+        let now = nowText();
         switch (artistsById.get(artistId)) {
           case (?_) {
             let newCore : Types.UserAccountCore = {
@@ -2179,6 +2271,343 @@ persistent actor {
         switch (acc.linkedArtistId) {
           case null { null };
           case (?aid) { buildAppliedJsonForArtist(aid) };
+        };
+      };
+    };
+  };
+
+  private func programPaymentKey(p : Principal, programId : Text) : Text {
+    Principal.toText(p) # "|" # programId;
+  };
+
+  private func jsonText(v : Text) : Text {
+    let slashEscaped = Text.replace(v, #char('\\'), "\\\\");
+    "\"" # Text.replace(slashEscaped, #char('\"'), "\\\"") # "\"";
+  };
+
+  private func optJsonText(v : ?Text) : Text {
+    switch (v) {
+      case null { "null" };
+      case (?s) { jsonText(s) };
+    };
+  };
+
+  private func applicantStatusText(status : Types.ApplicantStatus) : Text {
+    switch (status) {
+      case (#pending) { "pending" };
+      case (#reviewing) { "reviewing" };
+      case (#needsInfo) { "needsInfo" };
+      case (#accepted) { "accepted" };
+      case (#rejected) { "rejected" };
+    };
+  };
+
+  private func accountLinkedArtistId(p : Principal) : ?Text {
+    switch (accountsByPrincipal.get(p)) {
+      case null { null };
+      case (?acc) { acc.linkedArtistId };
+    };
+  };
+
+  private func acceptedApplicantJsonForCaller(p : Principal) : Text {
+    let aid = switch (accountLinkedArtistId(p)) {
+      case null { return "[]" };
+      case (?id) { id };
+    };
+    let prefix = aid # "|";
+    var first : Bool = true;
+    var out : Text = "[";
+    for ((_, rec) in applicantsById.entries()) {
+      if (Text.startsWith(rec.id, #text prefix)) {
+        switch (rec.status) {
+          case (#accepted) {
+            if (not first) { out := out # "," };
+            first := false;
+            out := out
+              # "{\"applicationId\":" # jsonText(rec.id)
+              # ",\"programId\":" # jsonText(rec.programId)
+              # ",\"status\":" # jsonText(applicantStatusText(rec.status))
+              # ",\"email\":" # jsonText(rec.email)
+              # ",\"fullName\":" # jsonText(rec.fullName)
+              # ",\"createdAt\":" # jsonText(rec.createdAt)
+              # "}";
+          };
+          case _ {};
+        };
+      };
+    };
+    out # "]";
+  };
+
+  private func programPaymentSummaryJson(s : Types.ProgramPaymentSummary) : Text {
+    "{"
+      # "\"key\":" # jsonText(s.key)
+      # ",\"principal\":" # jsonText(Principal.toText(s.principal))
+      # ",\"programId\":" # jsonText(s.programId)
+      # ",\"applicationId\":" # jsonText(s.applicationId)
+      # ",\"depositStatus\":" # jsonText(s.depositStatus)
+      # ",\"totalDueCents\":" # Nat.toText(s.totalDueCents)
+      # ",\"depositAmountCents\":" # Nat.toText(s.depositAmountCents)
+      # ",\"totalPaidCents\":" # Nat.toText(s.totalPaidCents)
+      # ",\"outstandingCents\":" # Nat.toText(s.outstandingCents)
+      # ",\"refundedCents\":" # Nat.toText(s.refundedCents)
+      # ",\"activePlanId\":" # optJsonText(s.activePlanId)
+      # ",\"updatedAt\":" # jsonText(s.updatedAt)
+      # "}";
+  };
+
+  private func programPaymentLedgerJson(row : Types.ProgramPaymentLedgerRow) : Text {
+    "{"
+      # "\"id\":" # jsonText(row.id)
+      # ",\"principal\":" # jsonText(Principal.toText(row.principal))
+      # ",\"programId\":" # jsonText(row.programId)
+      # ",\"applicationId\":" # jsonText(row.applicationId)
+      # ",\"paymentType\":" # jsonText(row.paymentType)
+      # ",\"amountCents\":" # Nat.toText(row.amountCents)
+      # ",\"currency\":" # jsonText(row.currency)
+      # ",\"stripePaymentIntentId\":" # jsonText(row.stripePaymentIntentId)
+      # ",\"stripeChargeId\":" # jsonText(row.stripeChargeId)
+      # ",\"stripeReceiptUrl\":" # jsonText(row.stripeReceiptUrl)
+      # ",\"status\":" # jsonText(row.status)
+      # ",\"createdAt\":" # jsonText(row.createdAt)
+      # ",\"dueAt\":" # optJsonText(row.dueAt)
+      # "}";
+  };
+
+  private func programPaymentPlanJson(plan : Types.ProgramPaymentPlan) : Text {
+    "{"
+      # "\"id\":" # jsonText(plan.id)
+      # ",\"principal\":" # jsonText(Principal.toText(plan.principal))
+      # ",\"programId\":" # jsonText(plan.programId)
+      # ",\"applicationId\":" # jsonText(plan.applicationId)
+      # ",\"stripeSubscriptionId\":" # jsonText(plan.stripeSubscriptionId)
+      # ",\"stripeScheduleId\":" # jsonText(plan.stripeScheduleId)
+      # ",\"installmentCount\":" # Nat.toText(plan.installmentCount)
+      # ",\"installmentAmountCents\":" # Nat.toText(plan.installmentAmountCents)
+      # ",\"currency\":" # jsonText(plan.currency)
+      # ",\"status\":" # jsonText(plan.status)
+      # ",\"startAt\":" # jsonText(plan.startAt)
+      # ",\"endAt\":" # jsonText(plan.endAt)
+      # ",\"createdAt\":" # jsonText(plan.createdAt)
+      # ",\"updatedAt\":" # jsonText(plan.updatedAt)
+      # "}";
+  };
+
+  /// Authenticated: program payment state for payable accepted applications.
+  public shared query (msg) func getMyProgramPaymentsJson() : async Text {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      return "{\"approvedPrograms\":[],\"summaries\":[],\"ledger\":[],\"plans\":[]}";
+    };
+    let principal = msg.caller;
+    var summaries : Text = "[";
+    var firstSummary = true;
+    for ((_, s) in programPaymentSummariesByKey.entries()) {
+      if (Principal.equal(s.principal, principal)) {
+        if (not firstSummary) { summaries := summaries # "," };
+        firstSummary := false;
+        summaries := summaries # programPaymentSummaryJson(s);
+      };
+    };
+    summaries := summaries # "]";
+
+    var ledger : Text = "[";
+    var firstLedger = true;
+    for ((_, row) in programPaymentLedgerById.entries()) {
+      if (Principal.equal(row.principal, principal)) {
+        if (not firstLedger) { ledger := ledger # "," };
+        firstLedger := false;
+        ledger := ledger # programPaymentLedgerJson(row);
+      };
+    };
+    ledger := ledger # "]";
+
+    var plans : Text = "[";
+    var firstPlan = true;
+    for ((_, plan) in programPaymentPlansById.entries()) {
+      if (Principal.equal(plan.principal, principal)) {
+        if (not firstPlan) { plans := plans # "," };
+        firstPlan := false;
+        plans := plans # programPaymentPlanJson(plan);
+      };
+    };
+    plans := plans # "]";
+
+    "{\"approvedPrograms\":" # acceptedApplicantJsonForCaller(principal)
+      # ",\"summaries\":" # summaries
+      # ",\"ledger\":" # ledger
+      # ",\"plans\":" # plans
+      # "}";
+  };
+
+  private func setProgramMemberExempt(memberPrincipal : Principal, exempt : Bool) {
+    switch (accountsByPrincipal.get(memberPrincipal)) {
+      case null { Debug.trap("No account for principal") };
+      case (?_) {};
+    };
+    let m0 = switch (membershipByPrincipal.get(memberPrincipal)) {
+      case null { defaultMembership() };
+      case (?x) { x };
+    };
+    let m1 : Types.MembershipFields = {
+      stripeCustomerId = m0.stripeCustomerId;
+      stripeSubscriptionId = m0.stripeSubscriptionId;
+      stripeSubscriptionStatus = m0.stripeSubscriptionStatus;
+      membershipExemptManual = exempt;
+    };
+    membershipByPrincipal.put(memberPrincipal, m1);
+  };
+
+  private func putProgramPaymentSummaryFromLedger(
+    row : Types.ProgramPaymentLedgerRow,
+    totalDueCents : Nat,
+    depositAmountCents : Nat,
+    refundedCents : Nat,
+  ) {
+    let key = programPaymentKey(row.principal, row.programId);
+    let prior = programPaymentSummariesByKey.get(key);
+    let priorPaid = switch (prior) {
+      case null { 0 };
+      case (?s) { s.totalPaidCents };
+    };
+    let priorPlan = switch (prior) {
+      case null { null };
+      case (?s) { s.activePlanId };
+    };
+    let paidDelta =
+      if (row.status == "succeeded" or row.status == "paid") {
+        if (row.paymentType == "refund") { 0 } else { row.amountCents }
+      } else {
+        0
+      };
+    let nextPaid = priorPaid + paidDelta;
+    let outstanding = if (totalDueCents > nextPaid) { totalDueCents - nextPaid } else { 0 };
+    let depositStatus =
+      if ((row.paymentType == "deposit" or row.paymentType == "full_payment") and paidDelta > 0) {
+        "paid"
+      } else {
+        switch (prior) {
+          case null { "due" };
+          case (?s) { s.depositStatus };
+        };
+      };
+    let summary : Types.ProgramPaymentSummary = {
+      key = key;
+      principal = row.principal;
+      programId = row.programId;
+      applicationId = row.applicationId;
+      depositStatus = depositStatus;
+      totalDueCents = totalDueCents;
+      depositAmountCents = depositAmountCents;
+      totalPaidCents = nextPaid;
+      outstandingCents = outstanding;
+      refundedCents = refundedCents;
+      activePlanId = priorPlan;
+      updatedAt = row.createdAt;
+    };
+    programPaymentSummariesByKey.put(key, summary);
+  };
+
+  public shared (msg) func integrationRecordProgramPayment(
+    row : Types.ProgramPaymentLedgerRow,
+    totalDueCents : Nat,
+    depositAmountCents : Nat,
+    refundedCents : Nat,
+  ) : async () {
+    assertIntegrationCaller(msg.caller);
+    if (row.id.size() == 0 or row.programId.size() == 0) {
+      Debug.trap("Program payment id and programId required");
+    };
+    switch (programPaymentLedgerById.get(row.id)) {
+      case (?_) { return };
+      case null {};
+    };
+    programPaymentLedgerById.put(row.id, row);
+    putProgramPaymentSummaryFromLedger(row, totalDueCents, depositAmountCents, refundedCents);
+  };
+
+  public shared (msg) func integrationMarkProgramDepositAccepted(
+    memberPrincipal : Principal,
+    programId : Text,
+    applicationId : Text,
+    status : Text,
+    updatedAt : Text,
+  ) : async () {
+    assertIntegrationCaller(msg.caller);
+    setProgramMemberExempt(memberPrincipal, true);
+    let key = programPaymentKey(memberPrincipal, programId);
+    let prior = switch (programPaymentSummariesByKey.get(key)) {
+      case null {
+        {
+          key = key;
+          principal = memberPrincipal;
+          programId = programId;
+          applicationId = applicationId;
+          depositStatus = status;
+          totalDueCents = 0;
+          depositAmountCents = 0;
+          totalPaidCents = 0;
+          outstandingCents = 0;
+          refundedCents = 0;
+          activePlanId = null;
+          updatedAt = updatedAt;
+        };
+      };
+      case (?s) { s };
+    };
+    programPaymentSummariesByKey.put(key, { prior with depositStatus = status; updatedAt = updatedAt });
+  };
+
+  public shared (msg) func integrationActivateProgramPaymentPlan(
+    plan : Types.ProgramPaymentPlan,
+    totalDueCents : Nat,
+    depositAmountCents : Nat,
+  ) : async () {
+    assertIntegrationCaller(msg.caller);
+    programPaymentPlansById.put(plan.id, plan);
+    let key = programPaymentKey(plan.principal, plan.programId);
+    let prior = switch (programPaymentSummariesByKey.get(key)) {
+      case null {
+        {
+          key = key;
+          principal = plan.principal;
+          programId = plan.programId;
+          applicationId = plan.applicationId;
+          depositStatus = "paid";
+          totalDueCents = totalDueCents;
+          depositAmountCents = depositAmountCents;
+          totalPaidCents = 0;
+          outstandingCents = totalDueCents;
+          refundedCents = 0;
+          activePlanId = ?plan.id;
+          updatedAt = plan.updatedAt;
+        };
+      };
+      case (?s) { s };
+    };
+    programPaymentSummariesByKey.put(key, { prior with activePlanId = ?plan.id; updatedAt = plan.updatedAt });
+  };
+
+  public shared (msg) func integrationCancelProgramPaymentPlan(
+    planId : Text,
+    status : Text,
+    updatedAt : Text,
+  ) : async () {
+    assertIntegrationCaller(msg.caller);
+    switch (programPaymentPlansById.get(planId)) {
+      case null { return };
+      case (?plan) {
+        let next = { plan with status = status; updatedAt = updatedAt };
+        programPaymentPlansById.put(planId, next);
+        let key = programPaymentKey(plan.principal, plan.programId);
+        switch (programPaymentSummariesByKey.get(key)) {
+          case null {};
+          case (?s) {
+            let active = switch (s.activePlanId) {
+              case (?id) { if (id == planId) { null } else { s.activePlanId } };
+              case null { null };
+            };
+            programPaymentSummariesByKey.put(key, { s with activePlanId = active; updatedAt = updatedAt });
+          };
         };
       };
     };
@@ -2526,7 +2955,7 @@ persistent actor {
                 if (unique == rec.profile.slug) {
                   return unique;
                 };
-                let now = "1970-01-01T00:00:00.000Z";
+                let now = nowText();
                 let newProfile : Types.ArtistCore = {
                   rec.profile with
                   slug = unique;
@@ -2553,7 +2982,7 @@ persistent actor {
     for (k in buf.vals()) {
       ignore applicationByArtistProgram.remove(k);
     };
-    let now = "1970-01-01T00:00:00.000Z";
+    let now = nowText();
     for ((p, core) in accountsByPrincipal.entries()) {
       switch (core.linkedArtistId) {
         case (?aid) {
@@ -2807,7 +3236,7 @@ persistent actor {
     if (audioUrl.size() > maxProfileImageUrlLen) {
       Debug.trap("Audio URL too long");
     };
-    let now = if (updatedAt.size() > 0) updatedAt else "1970-01-01T00:00:00.000Z";
+    let now = if (updatedAt.size() > 0) updatedAt else nowText();
     let m : Types.ArtistMedia = {
       quote = quote;
       audioUrl = audioUrl;
@@ -3110,10 +3539,15 @@ persistent actor {
 
   public shared (msg) func deleteApplicant(applicantId : Text) : async Bool {
     assertAdmin(msg.caller);
-    switch (applicantsById.remove(applicantId)) {
+    let removedApplicant = switch (applicantsById.remove(applicantId)) {
       case null { false };
       case (?_) { true };
     };
+    let removedApplication = switch (applicationByArtistProgram.remove(applicantId)) {
+      case null { false };
+      case (?_) { true };
+    };
+    removedApplicant or removedApplication;
   };
 
   // ===== Site settings (key/value text) =====
@@ -3154,6 +3588,20 @@ persistent actor {
     assertContactFieldLen(contact.lastName);
     assertContactFieldLen(contact.email);
     accountContactByPrincipal.put(p, contact);
+  };
+
+  public shared (msg) func setMyAccountContact(contact : Types.AccountContact) : async () {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      Debug.trap("Anonymous caller");
+    };
+    switch (accountsByPrincipal.get(msg.caller)) {
+      case null { Debug.trap("No account for caller") };
+      case (?_) {};
+    };
+    assertContactFieldLen(contact.firstName);
+    assertContactFieldLen(contact.lastName);
+    assertContactFieldLen(contact.email);
+    accountContactByPrincipal.put(msg.caller, contact);
   };
 
   // ===== Queries: subscribers =====

@@ -1,4 +1,6 @@
 import { navigate } from '../../router.js';
+import { PH_LOADER_BASE_STYLES, programHeroLoaderHtml } from '../../utils/programHeroLoader.js';
+import { captureCommunityEvent, communityDestinationProps } from '../../utils/communityPosthog.js';
 
 function esc(s) {
     return String(s ?? '')
@@ -8,12 +10,21 @@ function esc(s) {
         .replace(/"/g, '&quot;');
 }
 
+function firstText(...values) {
+    for (const value of values) {
+        const text = String(value ?? '').trim();
+        if (text) return text;
+    }
+    return '';
+}
+
 class CommunityConnect extends HTMLElement {
     constructor() {
         super();
         this.shadow = this.attachShadow({ mode: 'open' });
         /** @type {Record<string, unknown> | null} */
         this._data = null;
+        this._loaded = false;
     }
 
     connectedCallback() {
@@ -24,35 +35,53 @@ class CommunityConnect extends HTMLElement {
      * @param {Record<string, unknown>} data — `communityPage.connect`
      */
     setData(data) {
+        this._loaded = true;
         this._data = data && typeof data === 'object' ? data : null;
         this.render();
     }
 
     render() {
+        if (!this._loaded) {
+            this.shadow.innerHTML = `
+                <style>
+                    :host { display: block; width: 100%; }
+                    ${PH_LOADER_BASE_STYLES}
+                    .community-connect-pending-loader {
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        min-height: clamp(12rem, 24vw, 18rem);
+                        background: var(--bg, #f8f4f0);
+                    }
+                </style>
+                ${programHeroLoaderHtml({ wrapperClass: 'community-connect-pending-loader', ariaLabel: 'Loading community connection content' })}
+            `;
+            return;
+        }
         const d = this._data && typeof this._data === 'object' ? this._data : {};
         const loc =
             typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
-        const title = loc === 'ja' ? String(d.titleJa ?? d.titleEn ?? '') : String(d.titleEn ?? '');
+        const title = loc === 'ja' ? firstText(d.titleJa, d.titleEn) : firstText(d.titleEn, d.titleJa);
         const hiHref = String(d.howItWorksHref ?? '').trim();
         const hiLab =
             loc === 'ja'
-                ? String(d.howItWorksLabelJa ?? d.howItWorksLabelEn ?? 'How it works')
-                : String(d.howItWorksLabelEn ?? 'How it works');
+                ? firstText(d.howItWorksLabelJa, d.howItWorksLabelEn, 'How it works')
+                : firstText(d.howItWorksLabelEn, d.howItWorksLabelJa, 'How it works');
         const browseHref = String(d.browseHref ?? '/community').trim() || '/community';
         const browseLab =
             loc === 'ja'
-                ? String(d.browseLabelJa ?? d.browseLabelEn ?? 'BROWSE')
-                : String(d.browseLabelEn ?? 'BROWSE');
+                ? firstText(d.browseLabelJa, d.browseLabelEn, 'BROWSE')
+                : firstText(d.browseLabelEn, d.browseLabelJa, 'BROWSE');
         const bites = Array.isArray(d.bites) ? d.bites : [];
 
         const biteCols = [0, 1, 2].map((i) => {
             const b = bites[i] && typeof bites[i] === 'object' ? bites[i] : {};
             const t =
                 loc === 'ja'
-                    ? String(b.titleJa ?? b.titleEn ?? '')
-                    : String(b.titleEn ?? '');
+                    ? firstText(b.titleJa, b.titleEn)
+                    : firstText(b.titleEn, b.titleJa);
             const body =
-                loc === 'ja' ? String(b.bodyJa ?? b.bodyEn ?? '') : String(b.bodyEn ?? '');
+                loc === 'ja' ? firstText(b.bodyJa, b.bodyEn) : firstText(b.bodyEn, b.bodyJa);
             const icon = ['○', '◎', '◉'][i] ?? '·';
             return `
                 <div class="cc-bite">
@@ -137,10 +166,18 @@ class CommunityConnect extends HTMLElement {
 
         this.shadow.querySelector('#ccHiw')?.addEventListener('click', () => {
             if (!hiHref) return;
+            captureCommunityEvent('community_connect_cta_clicked', {
+                cta: 'how_it_works',
+                ...communityDestinationProps(hiHref),
+            });
             if (hiHref.startsWith('/') && !hiHref.startsWith('//')) navigate(hiHref);
             else window.open(hiHref, '_blank', 'noopener,noreferrer');
         });
         this.shadow.querySelector('#ccBrowse')?.addEventListener('click', () => {
+            captureCommunityEvent('community_connect_cta_clicked', {
+                cta: 'browse',
+                ...communityDestinationProps(browseHref),
+            });
             if (browseHref.startsWith('/')) navigate(browseHref);
             else window.open(browseHref, '_blank', 'noopener,noreferrer');
         });

@@ -1301,6 +1301,12 @@ class HeaderComponent extends HTMLElement {
                     display: none !important;
                 }
 
+                :host-context(html[data-fusion-page="community"]) .header-sound-row app-sound-environment {
+                    opacity: 0 !important;
+                    visibility: hidden !important;
+                    pointer-events: none !important;
+                }
+
                 .header-utility-stack {
                     display: flex;
                     flex-direction: column;

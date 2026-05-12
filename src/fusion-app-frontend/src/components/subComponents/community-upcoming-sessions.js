@@ -1,4 +1,6 @@
 import { navigate } from '../../router.js';
+import { PH_LOADER_BASE_STYLES, programHeroLoaderHtml } from '../../utils/programHeroLoader.js';
+import { captureCommunityEvent, communityDestinationProps } from '../../utils/communityPosthog.js';
 
 function esc(s) {
     return String(s ?? '')
@@ -8,12 +10,29 @@ function esc(s) {
         .replace(/"/g, '&quot;');
 }
 
+function firstText(...values) {
+    for (const value of values) {
+        const text = String(value ?? '').trim();
+        if (text) return text;
+    }
+    return '';
+}
+
+function localized(obj, key, loc, fallback = '') {
+    if (!obj || typeof obj !== 'object') return fallback;
+    const source = /** @type {Record<string, unknown>} */ (obj);
+    return loc === 'ja'
+        ? firstText(source[`${key}Ja`], source[`${key}En`], source[key], fallback)
+        : firstText(source[`${key}En`], source[`${key}Ja`], source[key], fallback);
+}
+
 class CommunityUpcomingSessions extends HTMLElement {
     constructor() {
         super();
         this.shadow = this.attachShadow({ mode: 'open' });
         /** @type {Array<Record<string, unknown>>} */
         this._sessions = [];
+        this._loaded = false;
     }
 
     connectedCallback() {
@@ -24,18 +43,38 @@ class CommunityUpcomingSessions extends HTMLElement {
      * @param {Array<Record<string, unknown>>} sessions
      */
     setData(sessions) {
+        this._loaded = true;
         this._sessions = Array.isArray(sessions) ? sessions : [];
         this.render();
     }
 
     render() {
+        if (!this._loaded) {
+            this.shadow.innerHTML = `
+                <style>
+                    :host { display: block; width: 100%; }
+                    ${PH_LOADER_BASE_STYLES}
+                    .community-sessions-pending-loader {
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        min-height: clamp(12rem, 24vw, 18rem);
+                        background: var(--bg, #f8f4f0);
+                    }
+                </style>
+                ${programHeroLoaderHtml({ wrapperClass: 'community-sessions-pending-loader', ariaLabel: 'Loading community sessions' })}
+            `;
+            return;
+        }
+        const loc =
+            typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
         const rows = this._sessions
-            .map((s) => {
+            .map((s, i) => {
                 const thumb = String(s?.thumbUrl ?? '').trim();
-                const kind = String(s?.kindLabel ?? '').trim();
-                const title = String(s?.title ?? '').trim();
-                const dt = String(s?.datetimeLine ?? '').trim();
-                const regLabel = String(s?.registerLabel ?? 'REGISTER').trim();
+                const kind = localized(s, 'kindLabel', loc);
+                const title = localized(s, 'title', loc);
+                const dt = localized(s, 'datetimeLine', loc);
+                const regLabel = localized(s, 'registerLabel', loc, 'REGISTER');
                 const regHref = String(s?.registerHref ?? '').trim();
                 return `
                     <li class="us-row">
@@ -44,7 +83,7 @@ class CommunityUpcomingSessions extends HTMLElement {
                             <div class="us-kind">${esc(kind)}</div>
                             <div class="us-title">${esc(title)}</div>
                             <div class="us-dt">${esc(dt)}</div>
-                            <button type="button" class="us-reg" data-href="${esc(regHref)}">${esc(regLabel)}</button>
+                            <button type="button" class="us-reg" data-session-index="${i}" data-href="${esc(regHref)}">${esc(regLabel)}</button>
                         </div>
                     </li>`;
             })
@@ -112,11 +151,20 @@ class CommunityUpcomingSessions extends HTMLElement {
             <ul>${rows || '<li class="studio-muted">No sessions yet.</li>'}</ul>
         `;
 
-        this.shadow.querySelector('#usView')?.addEventListener('click', () => navigate('/programs'));
+        this.shadow.querySelector('#usView')?.addEventListener('click', () => {
+            captureCommunityEvent('community_sessions_view_all_clicked', {
+                ...communityDestinationProps('/programs'),
+            });
+            navigate('/programs');
+        });
         this.shadow.querySelectorAll('.us-reg').forEach((btn) => {
             btn.addEventListener('click', () => {
                 const h = btn.getAttribute('data-href') || '';
                 if (!h) return;
+                captureCommunityEvent('community_session_register_clicked', {
+                    session_index: Number(btn.getAttribute('data-session-index') ?? -1),
+                    ...communityDestinationProps(h),
+                });
                 if (h.startsWith('/') && !h.startsWith('//')) navigate(h);
                 else window.open(h, '_blank', 'noopener,noreferrer');
             });

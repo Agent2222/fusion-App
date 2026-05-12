@@ -29,6 +29,7 @@ import {
     sendEmail,
     sendEmailBatch,
 } from '../../utils/integrationApi.js';
+import { formatStudioDate } from '../../utils/studioDateFormat.js';
 import { EMAIL_CAMPAIGN_TEMPLATES, getEmailTemplateById, wrapEmailHtml } from '../../utils/emailCampaignTemplates.js';
 import { Principal } from '@dfinity/principal';
 
@@ -1355,7 +1356,7 @@ export async function initEmailCampaignStudio(mainEl) {
                       return `<tr data-hist-id="${esc(id)}">
   <td>${esc(String(r.subject || '').slice(0, 40))}</td>
   <td>${esc(statusKey(r.status))}</td>
-  <td>${esc(String(r.updatedAt || '').slice(0, 19))}</td>
+  <td>${esc(formatStudioDate(r.updatedAt))}</td>
   <td class="studio-td-actions">
     <button type="button" class="studio-btn-ghost studio-hist-open" data-id="${esc(id)}">Open</button>
     <button type="button" class="studio-btn-ghost studio-hist-dup" data-id="${esc(id)}">Duplicate</button>

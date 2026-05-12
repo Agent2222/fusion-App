@@ -4,9 +4,11 @@
 import {
     adminGetCommunityPageStudio,
     adminSetCommunityPageStudio,
-    getArtistsForStudio,
+    getCommunityArtistsForStudio,
+    getCommunityDataMode,
 } from '../../../utils/database.js';
 import { presignPrivateVideoUpload } from '../../../utils/integrationApi.js';
+import { toCloudFrontAssetUrl } from '../../../utils/assetDistribution.js';
 import { uploadBlobToS3 } from '../../../utils/studioS3Upload.js';
 import { studioPageHeaderHtml } from '../../../utils/studioCategoryLayout.js';
 import { studioFeatureAccess } from '../../../utils/studioShellState.js';
@@ -46,16 +48,19 @@ function artistLabel(artist) {
 
 function renderArtistOptions(artists, selectedId) {
     const selected = String(selectedId ?? '');
+    const sorted = [...(Array.isArray(artists) ? artists : [])].sort((a, b) =>
+        artistLabel(a).localeCompare(artistLabel(b), undefined, { sensitivity: 'base' })
+    );
     return `
         <option value="">Select artist</option>
-        ${artists.map((artist) => {
+        ${sorted.map((artist) => {
             const id = String(artist?.id ?? '');
             return `<option value="${escapeHtml(id)}" ${id === selected ? 'selected' : ''}>${escapeHtml(artistLabel(artist))}</option>`;
         }).join('')}
     `;
 }
 
-function renderChapterRows(featureKey, chapters, artists) {
+function renderChapterRows(featureKey, chapters, artists, title = 'Artist timestamps', hint = 'Each row links a video timestamp to an artist in the roster. The public hero will derive the micro profile automatically.') {
     const rows = (Array.isArray(chapters) ? chapters : []).map((raw, i) => {
         const c = raw && typeof raw === 'object' ? /** @type {Record<string, unknown>} */ (raw) : {};
         return `
@@ -79,15 +84,15 @@ function renderChapterRows(featureKey, chapters, artists) {
     }).join('');
     return `
         <div class="studio-community__chapters">
-            <h4 class="studio-subheading studio-community__subhead">Artist timestamps</h4>
-            <p class="studio-muted">Each row links a video timestamp to an artist in the roster. The public hero will derive the micro profile automatically.</p>
+            <h4 class="studio-subheading studio-community__subhead">${escapeHtml(title)}</h4>
+            <p class="studio-muted">${escapeHtml(hint)}</p>
             ${rows || '<p class="studio-muted">No timestamps yet.</p>'}
             <button type="button" class="studio-btn-ghost st-com-chapter-add" data-feature="${escapeHtml(featureKey)}">Add timestamp</button>
         </div>
     `;
 }
 
-function renderTopicRows(featureKey, topics) {
+function renderTopicRows(featureKey, topics, title = 'Idea timestamps', hint = 'Each row adds a localized topic or quote timestamp for videos that are organized by ideas instead of people.') {
     const rows = (Array.isArray(topics) ? topics : []).map((raw, i) => {
         const t = raw && typeof raw === 'object' ? /** @type {Record<string, unknown>} */ (raw) : {};
         return `
@@ -120,16 +125,67 @@ function renderTopicRows(featureKey, topics) {
     }).join('');
     return `
         <div class="studio-community__chapters">
-            <h4 class="studio-subheading studio-community__subhead">Idea timestamps</h4>
-            <p class="studio-muted">Each row adds a localized topic or quote timestamp for videos that are organized by ideas instead of people.</p>
+            <h4 class="studio-subheading studio-community__subhead">${escapeHtml(title)}</h4>
+            <p class="studio-muted">${escapeHtml(hint)}</p>
             ${rows || '<p class="studio-muted">No idea timestamps yet.</p>'}
             <button type="button" class="studio-btn-ghost st-com-topic-add" data-feature="${escapeHtml(featureKey)}">Add idea timestamp</button>
         </div>
     `;
 }
 
+function renderTimestampEditor(featureKey, feature, artists) {
+    const item = feature && typeof feature === 'object' ? /** @type {Record<string, unknown>} */ (feature) : {};
+    const previewChapters = Array.isArray(item.previewChapters) ? item.previewChapters : item.chapters;
+    const previewTopics = Array.isArray(item.previewTopics) ? item.previewTopics : item.topics;
+    const fullChapters = Array.isArray(item.fullChapters) ? item.fullChapters : [];
+    const fullTopics = Array.isArray(item.fullTopics) ? item.fullTopics : [];
+    return `
+        <div class="studio-community__timestamp-shell">
+            <details class="studio-community__timestamp-group" open>
+                <summary>
+                    <span>Preview video timestamps</span>
+                    <small>Shown to non-members and teaser viewers.</small>
+                </summary>
+                <div class="studio-community__timestamp-grid">
+                    ${renderChapterRows(`${featureKey}-preview`, previewChapters, artists, 'People', 'Artist moments for the public preview.')}
+                    ${renderTopicRows(`${featureKey}-preview`, previewTopics, 'Ideas', 'Topic or quote timestamps for the public preview.')}
+                </div>
+            </details>
+            <details class="studio-community__timestamp-group">
+                <summary>
+                    <span>Full video timestamps</span>
+                    <small>Shown after the members-only full video unlocks.</small>
+                </summary>
+                <div class="studio-community__timestamp-grid">
+                    ${renderChapterRows(`${featureKey}-full`, fullChapters, artists, 'People', 'Artist moments for the full members-only video.')}
+                    ${renderTopicRows(`${featureKey}-full`, fullTopics, 'Ideas', 'Topic or quote timestamps for the full members-only video.')}
+                </div>
+            </details>
+        </div>
+    `;
+}
+
+function sleep(ms) {
+    return new Promise((resolve) => {
+        window.setTimeout(resolve, ms);
+    });
+}
+
+function comparableAssetUrl(url) {
+    return toCloudFrontAssetUrl(url).trim();
+}
+
 /** @returns {string} */
 export function renderCommunitySection() {
+    const tabs = [
+        ['overview', 'Overview'],
+        ['hero', 'Hero'],
+        ['exclusive', 'Exclusive'],
+        ['connect', 'Connect'],
+        ['network', 'Network'],
+        ['sessions', 'Sessions'],
+        ['promo', 'Promo'],
+    ];
     return `
         <div class="studio-section-stack studio-category-page studio-community">
             ${studioPageHeaderHtml({
@@ -139,42 +195,21 @@ export function renderCommunitySection() {
                 countLabel: '',
             })}
             <p id="studio-community-msg" class="studio-banner studio-banner--info" style="display:none"></p>
-            <div class="studio-community__stack">
-                <section class="studio-community__section" aria-labelledby="studio-community-sections-title">
-                    <div class="studio-community__section-head">
-                        <h3 id="studio-community-sections-title" class="studio-subheading">Active sections</h3>
-                        <p class="studio-muted">Toggle which Community page subcomponents are visible on the public site.</p>
-                    </div>
-                    <div id="studio-com-form-sections" class="studio-community__form"></div>
-                </section>
-                <section class="studio-community__section" aria-labelledby="studio-community-hero-title">
-                    <div class="studio-community__section-head">
-                        <h3 id="studio-community-hero-title" class="studio-subheading">Hero</h3>
-                        <p class="studio-muted">Primary video and CTA copy shown on <code>/community</code>.</p>
-                    </div>
-                    <div id="studio-com-form-hero" class="studio-community__form"></div>
-                </section>
-                <section class="studio-community__section" aria-labelledby="studio-community-exclusive-title">
-                    <div class="studio-community__section-head">
-                        <h3 id="studio-community-exclusive-title" class="studio-subheading">Exclusive</h3>
-                        <p class="studio-muted">Three featured cards with image, locale copy, and destination.</p>
-                    </div>
-                    <div id="studio-com-form-exc" class="studio-community__form"></div>
-                </section>
-                <section class="studio-community__section" aria-labelledby="studio-community-connect-title">
-                    <div class="studio-community__section-head">
-                        <h3 id="studio-community-connect-title" class="studio-subheading">Connect</h3>
-                        <p class="studio-muted">Section headings, links, and three info bites.</p>
-                    </div>
-                    <div id="studio-com-form-con" class="studio-community__form"></div>
-                </section>
-                <section class="studio-community__section" aria-labelledby="studio-community-footer-title">
-                    <div class="studio-community__section-head">
-                        <h3 id="studio-community-footer-title" class="studio-subheading">Promo, Network, Sessions</h3>
-                        <p class="studio-muted">Promo copy plus repeatable network cards and session rows.</p>
-                    </div>
-                    <div id="studio-com-form-foot" class="studio-community__form"></div>
-                </section>
+            <div class="studio-community__workspace" data-studio-tabs="community">
+                <nav class="studio-community__tabs" role="tablist" aria-label="Community editor sections">
+                    ${tabs.map(([key, label], i) => `
+                        <button type="button" class="studio-tabs__tab studio-community__tab ${i === 0 ? 'is-active' : ''}" role="tab" aria-selected="${i === 0 ? 'true' : 'false'}" aria-controls="studio-community-panel-${key}">
+                            ${escapeHtml(label)}
+                        </button>
+                    `).join('')}
+                </nav>
+                <div class="studio-community__panels">
+                    ${tabs.map(([key, label], i) => `
+                        <section class="studio-tabs__panel studio-community__section ${i === 0 ? 'is-active' : ''}" id="studio-community-panel-${key}" role="tabpanel" ${i === 0 ? '' : 'hidden'} aria-label="${escapeHtml(label)}">
+                            <div id="studio-com-form-${key}" class="studio-community__form"></div>
+                        </section>
+                    `).join('')}
+                </div>
             </div>
             <div class="studio-community__actions">
                 <div class="studio-toolbar-actions">
@@ -210,13 +245,36 @@ function communitySectionActive(sections, key) {
  */
 function renderSectionToggles(bundle) {
     const sections = bundle.sections && typeof bundle.sections === 'object' ? bundle.sections : {};
+    const activeCount = COMMUNITY_SECTION_TOGGLES.filter(([key]) => communitySectionActive(sections, key)).length;
     return `
-        <div class="studio-form-grid">
+        <div class="studio-community__section-head">
+            <p class="studio-kicker">Page map</p>
+            <h3 class="studio-subheading">Community page structure</h3>
+            <p class="studio-muted">Start here to decide what appears publicly. Then edit each module in its own tab.</p>
+        </div>
+        <div class="studio-community__overview-grid">
+            <div class="studio-community__summary-card">
+                <strong>${activeCount}/${COMMUNITY_SECTION_TOGGLES.length}</strong>
+                <span>Sections active</span>
+            </div>
+            <div class="studio-community__summary-card">
+                <strong>${escapeHtml(String(Array.isArray(bundle.exclusive) ? bundle.exclusive.length : 0))}</strong>
+                <span>Exclusive features</span>
+            </div>
+            <div class="studio-community__summary-card">
+                <strong>${escapeHtml(String(Array.isArray(bundle.sessions) ? bundle.sessions.length : 0))}</strong>
+                <span>Sessions listed</span>
+            </div>
+        </div>
+        <div class="studio-community__toggle-grid">
             ${COMMUNITY_SECTION_TOGGLES.map(
                 ([key, label]) => `
-                    <label class="studio-field studio-field--checkbox">
+                    <label class="studio-community__toggle-card">
                         <input type="checkbox" id="st-com-section-${key}" ${communitySectionActive(sections, key) ? 'checked' : ''} />
-                        <span>${escapeHtml(label)}</span>
+                        <span>
+                            <strong>${escapeHtml(label)}</strong>
+                            <small>${communitySectionActive(sections, key) ? 'Visible on public page' : 'Hidden from public page'}</small>
+                        </span>
                     </label>
                 `,
             ).join('')}
@@ -230,45 +288,101 @@ function renderSectionToggles(bundle) {
  */
 function renderHeroForm(bundle, artists) {
     const h = bundle.hero && typeof bundle.hero === 'object' ? /** @type {Record<string, unknown>} */ (bundle.hero) : {};
+    const exclusive = Array.isArray(bundle.exclusive) ? bundle.exclusive : [];
     const field = (id, label, val) => `
         <label class="studio-field">
             <span>${escapeHtml(label)}</span>
             <input type="text" id="${id}" class="studio-input" value="${escapeHtml(String(val ?? ''))}" />
         </label>`;
+    const poster = String(h.posterUrl ?? h.imageUrl ?? '').trim();
+    const headline = String(h.headlineEn ?? 'Community hero').trim();
+    const body = String(h.bodyEn ?? '').trim();
     return `
-        <p class="studio-muted">Primary CTA on the public site switches between <strong>Join</strong> and <strong>Watch</strong> based on membership. Public previews can use CloudFront; full videos are stored privately under <code>fusionMedia/private-video</code>.</p>
-        ${field('st-com-hero-preview-video', 'Public preview video URL', h.previewVideoUrl)}
-        ${field('st-com-hero-full-key', 'Members-only full video key', h.fullVideoKey)}
-        ${field('st-com-hero-full-name', 'Members-only full video file name', h.fullVideoFileName)}
-        ${field('st-com-hero-video', 'Legacy public video URL', h.videoUrl)}
-        ${field('st-com-hero-poster', 'Poster image URL', h.posterUrl)}
-        ${field('st-com-hero-ov-title', 'Overlay — line 1 (e.g. In Conversation)', h.overlayTitle)}
-        ${field('st-com-hero-ov-guests', 'Overlay — guests', h.overlayGuests)}
-        ${field('st-com-hero-ov-dur', 'Overlay — duration text', h.overlayDuration)}
-        ${field('st-com-hero-k-en', 'Kicker EN', h.kickerEn)}
-        ${field('st-com-hero-k-ja', 'Kicker JA', h.kickerJa)}
-        ${field('st-com-hero-h-en', 'Headline EN', h.headlineEn)}
-        ${field('st-com-hero-h-ja', 'Headline JA', h.headlineJa)}
-        <label class="studio-field"><span>Body EN</span><textarea id="st-com-hero-b-en" class="studio-input" rows="3">${escapeHtml(String(h.bodyEn ?? ''))}</textarea></label>
-        <label class="studio-field"><span>Body JA</span><textarea id="st-com-hero-b-ja" class="studio-input" rows="3">${escapeHtml(String(h.bodyJa ?? ''))}</textarea></label>
-        ${field('st-com-hero-cta-join-en', 'CTA Join EN', h.ctaJoinLabelEn)}
-        ${field('st-com-hero-cta-join-ja', 'CTA Join JA', h.ctaJoinLabelJa)}
-        ${field('st-com-hero-cta-watch-en', 'CTA Watch EN', h.ctaWatchLabelEn)}
-        ${field('st-com-hero-cta-watch-ja', 'CTA Watch JA', h.ctaWatchLabelJa)}
-        ${renderChapterRows('hero', h.chapters, artists)}
-        ${renderTopicRows('hero', h.topics)}
-        <label class="studio-file-label studio-btn-ghost">
-            <input type="file" id="st-com-hero-poster-file" accept="image/*" class="studio-file-input" />
-            Upload poster to S3
-        </label>
-        <label class="studio-file-label studio-btn-ghost">
-            <input type="file" id="st-com-hero-preview-file" accept="video/*,.mp4,.webm,.mov" class="studio-file-input" />
-            Upload public preview video
-        </label>
-        <label class="studio-file-label studio-btn-ghost">
-            <input type="file" id="st-com-hero-full-file" accept="video/*,.mp4,.webm,.mov" class="studio-file-input" />
-            Upload members-only full video
-        </label>
+        <div class="studio-community__panel-intro">
+            <div>
+                <p class="studio-kicker">Hero</p>
+                <h3 class="studio-subheading">Main community video</h3>
+                <p class="studio-muted">Edit the public first impression. Primary fields are first; technical fallback fields live in Advanced.</p>
+            </div>
+        </div>
+        <div class="studio-community__hero-preview" style="${poster ? `background-image:url(${escapeHtml(poster)})` : ''}">
+            <div>
+                <span>${escapeHtml(String(h.kickerEn ?? 'Community'))}</span>
+                <strong>${escapeHtml(headline || 'Community hero')}</strong>
+                <p>${escapeHtml(body || 'Add body copy for the hero.')}</p>
+            </div>
+        </div>
+        <section class="studio-community__edit-card">
+            <h4>Media</h4>
+            <div class="studio-community__editorial">
+                ${field('st-com-hero-preview-video', 'Public preview video URL', h.previewVideoUrl)}
+                ${field('st-com-hero-poster', 'Poster image URL', h.posterUrl)}
+                ${field('st-com-hero-full-key', 'Members-only full video key', h.fullVideoKey)}
+                ${field('st-com-hero-full-name', 'Members-only full video file name', h.fullVideoFileName)}
+            </div>
+            <div class="studio-community__file-actions">
+                <label class="studio-file-label studio-btn-ghost">
+                    <input type="file" id="st-com-hero-poster-file" accept="image/*" class="studio-file-input" />
+                    Upload poster
+                </label>
+                <label class="studio-file-label studio-btn-ghost">
+                    <input type="file" id="st-com-hero-preview-file" accept="video/*,.mp4,.webm,.mov" class="studio-file-input" />
+                    Upload preview video
+                </label>
+                <label class="studio-file-label studio-btn-ghost">
+                    <input type="file" id="st-com-hero-full-file" accept="video/*,.mp4,.webm,.mov" class="studio-file-input" />
+                    Upload full video
+                </label>
+            </div>
+        </section>
+        <section class="studio-community__edit-card">
+            <h4>Copy</h4>
+            <div class="studio-community__editorial">
+                ${field('st-com-hero-k-en', 'Kicker EN', h.kickerEn)}
+                ${field('st-com-hero-k-ja', 'Kicker JA', h.kickerJa)}
+                ${field('st-com-hero-h-en', 'Headline EN', h.headlineEn)}
+                ${field('st-com-hero-h-ja', 'Headline JA', h.headlineJa)}
+                <label class="studio-field"><span>Body EN</span><textarea id="st-com-hero-b-en" class="studio-input" rows="3">${escapeHtml(String(h.bodyEn ?? ''))}</textarea></label>
+                <label class="studio-field"><span>Body JA</span><textarea id="st-com-hero-b-ja" class="studio-input" rows="3">${escapeHtml(String(h.bodyJa ?? ''))}</textarea></label>
+                ${field('st-com-hero-cta-join-en', 'CTA Join EN', h.ctaJoinLabelEn)}
+                ${field('st-com-hero-cta-join-ja', 'CTA Join JA', h.ctaJoinLabelJa)}
+                ${field('st-com-hero-cta-watch-en', 'CTA Watch EN', h.ctaWatchLabelEn)}
+                ${field('st-com-hero-cta-watch-ja', 'CTA Watch JA', h.ctaWatchLabelJa)}
+            </div>
+        </section>
+        <section class="studio-community__edit-card">
+            <h4>Timestamps</h4>
+            <div class="studio-community__adopt-card">
+                <div>
+                    <strong>Adopt from Exclusive video</strong>
+                    <p class="studio-muted">Copy People timestamps or Ideas from an Exclusive feature into the Hero, including preview and full video timelines.</p>
+                </div>
+                <label class="studio-field">
+                    <span>Source feature</span>
+                    <select id="st-com-hero-adopt-feature" class="studio-select">
+                        ${exclusive.slice(0, 3).map((raw, i) => {
+                            const item = raw && typeof raw === 'object' ? /** @type {Record<string, unknown>} */ (raw) : {};
+                            const label = String(item.headlineEn ?? item.lineEn ?? `Feature ${i + 1}`).trim() || `Feature ${i + 1}`;
+                            return `<option value="${i}">${escapeHtml(label)}</option>`;
+                        }).join('')}
+                    </select>
+                </label>
+                <div class="studio-community__file-actions">
+                    <button type="button" class="studio-btn-ghost st-com-hero-adopt" data-kind="chapters">Adopt people timestamps</button>
+                    <button type="button" class="studio-btn-ghost st-com-hero-adopt" data-kind="topics">Adopt idea timestamps</button>
+                </div>
+            </div>
+            ${renderTimestampEditor('hero', h, artists)}
+        </section>
+        <details class="studio-community__advanced">
+            <summary>Advanced fallback fields</summary>
+            <div class="studio-community__editorial">
+                ${field('st-com-hero-video', 'Legacy public video URL', h.videoUrl)}
+                ${field('st-com-hero-ov-title', 'Overlay line 1', h.overlayTitle)}
+                ${field('st-com-hero-ov-guests', 'Overlay guests', h.overlayGuests)}
+                ${field('st-com-hero-ov-dur', 'Overlay duration text', h.overlayDuration)}
+            </div>
+        </details>
     `;
 }
 
@@ -287,51 +401,88 @@ function renderExclusiveForm(bundle, artists) {
     const cards = ex.slice(0, 3).map((raw, i) => {
         const c = raw && typeof raw === 'object' ? /** @type {Record<string, unknown>} */ (raw) : {};
         const n = i + 1;
+        const image = String(c.imageUrl ?? c.posterUrl ?? '').trim();
+        const headline = String(c.headlineEn ?? c.lineEn ?? `Feature ${n}`).trim();
+        const line = String(c.lineEn ?? '').trim();
         return `
-            <fieldset class="studio-field-group studio-community__card">
-                <legend>Feature ${n}</legend>
-                <label class="studio-field"><span>Image URL</span><input type="text" id="st-com-ex-${i}-img" class="studio-input" value="${escapeHtml(String(c.imageUrl ?? ''))}" /></label>
-                ${field(`st-com-ex-${i}-poster`, 'Poster image URL', c.posterUrl)}
-                ${field(`st-com-ex-${i}-preview-video`, 'Public preview video URL', c.previewVideoUrl)}
-                ${field(`st-com-ex-${i}-full-key`, 'Members-only full video key', c.fullVideoKey)}
-                ${field(`st-com-ex-${i}-full-name`, 'Members-only full video file name', c.fullVideoFileName)}
-                ${field(`st-com-ex-${i}-video`, 'Legacy public video URL', c.videoUrl)}
-                ${field(`st-com-ex-${i}-ov-title`, 'Overlay — line 1', c.overlayTitle)}
-                ${field(`st-com-ex-${i}-ov-guests`, 'Overlay — guests', c.overlayGuests)}
-                ${field(`st-com-ex-${i}-ov-dur`, 'Overlay — duration text', c.overlayDuration)}
-                <label class="studio-field"><span>Line EN</span><input type="text" id="st-com-ex-${i}-en" class="studio-input" value="${escapeHtml(String(c.lineEn ?? ''))}" /></label>
-                <label class="studio-field"><span>Line JA</span><input type="text" id="st-com-ex-${i}-ja" class="studio-input" value="${escapeHtml(String(c.lineJa ?? ''))}" /></label>
-                ${field(`st-com-ex-${i}-k-en`, 'Kicker EN', c.kickerEn)}
-                ${field(`st-com-ex-${i}-k-ja`, 'Kicker JA', c.kickerJa)}
-                ${field(`st-com-ex-${i}-h-en`, 'Headline EN', c.headlineEn)}
-                ${field(`st-com-ex-${i}-h-ja`, 'Headline JA', c.headlineJa)}
-                <label class="studio-field"><span>Body EN</span><textarea id="st-com-ex-${i}-b-en" class="studio-input" rows="3">${escapeHtml(String(c.bodyEn ?? ''))}</textarea></label>
-                <label class="studio-field"><span>Body JA</span><textarea id="st-com-ex-${i}-b-ja" class="studio-input" rows="3">${escapeHtml(String(c.bodyJa ?? ''))}</textarea></label>
-                ${field(`st-com-ex-${i}-cta-join-en`, 'CTA Join EN', c.ctaJoinLabelEn)}
-                ${field(`st-com-ex-${i}-cta-join-ja`, 'CTA Join JA', c.ctaJoinLabelJa)}
-                ${field(`st-com-ex-${i}-cta-watch-en`, 'CTA Watch EN', c.ctaWatchLabelEn)}
-                ${field(`st-com-ex-${i}-cta-watch-ja`, 'CTA Watch JA', c.ctaWatchLabelJa)}
-                ${renderChapterRows(`ex-${i}`, c.chapters, artists)}
-                ${renderTopicRows(`ex-${i}`, c.topics)}
-                <label class="studio-file-label studio-btn-ghost">
-                    <input type="file" id="st-com-ex-${i}-image-file" accept="image/*" class="studio-file-input" data-card-idx="${i}" />
-                    Upload card image
-                </label>
-                <label class="studio-file-label studio-btn-ghost">
-                    <input type="file" id="st-com-ex-${i}-poster-file" accept="image/*" class="studio-file-input" data-card-idx="${i}" />
-                    Upload poster
-                </label>
-                <label class="studio-file-label studio-btn-ghost">
-                    <input type="file" id="st-com-ex-${i}-preview-file" accept="video/*,.mp4,.webm,.mov" class="studio-file-input" data-card-idx="${i}" />
-                    Upload public preview video
-                </label>
-                <label class="studio-file-label studio-btn-ghost">
-                    <input type="file" id="st-com-ex-${i}-full-file" accept="video/*,.mp4,.webm,.mov" class="studio-file-input" data-card-idx="${i}" />
-                    Upload members-only full video
-                </label>
-            </fieldset>`;
+            <article class="studio-community__feature-card">
+                <div class="studio-community__feature-preview" style="${image ? `background-image:url(${escapeHtml(image)})` : ''}">
+                    <div>
+                        <span>Feature ${n}</span>
+                        <strong>${escapeHtml(headline)}</strong>
+                        <small>${escapeHtml(line || 'Add a short content line.')}</small>
+                    </div>
+                </div>
+                <details class="studio-community__feature-details" open>
+                    <summary>Media</summary>
+                    <div class="studio-community__editorial">
+                        <label class="studio-field"><span>Image URL</span><input type="text" id="st-com-ex-${i}-img" class="studio-input" value="${escapeHtml(String(c.imageUrl ?? ''))}" /></label>
+                        ${field(`st-com-ex-${i}-poster`, 'Poster image URL', c.posterUrl)}
+                        ${field(`st-com-ex-${i}-preview-video`, 'Public preview video URL', c.previewVideoUrl)}
+                        ${field(`st-com-ex-${i}-full-key`, 'Members-only full video key', c.fullVideoKey)}
+                        ${field(`st-com-ex-${i}-full-name`, 'Members-only full video file name', c.fullVideoFileName)}
+                    </div>
+                    <div class="studio-community__file-actions">
+                        <label class="studio-file-label studio-btn-ghost">
+                            <input type="file" id="st-com-ex-${i}-image-file" accept="image/*" class="studio-file-input" data-card-idx="${i}" />
+                            Upload image
+                        </label>
+                        <label class="studio-file-label studio-btn-ghost">
+                            <input type="file" id="st-com-ex-${i}-poster-file" accept="image/*" class="studio-file-input" data-card-idx="${i}" />
+                            Upload poster
+                        </label>
+                        <label class="studio-file-label studio-btn-ghost">
+                            <input type="file" id="st-com-ex-${i}-preview-file" accept="video/*,.mp4,.webm,.mov" class="studio-file-input" data-card-idx="${i}" />
+                            Upload preview video
+                        </label>
+                        <label class="studio-file-label studio-btn-ghost">
+                            <input type="file" id="st-com-ex-${i}-full-file" accept="video/*,.mp4,.webm,.mov" class="studio-file-input" data-card-idx="${i}" />
+                            Upload full video
+                        </label>
+                    </div>
+                </details>
+                <details class="studio-community__feature-details" open>
+                    <summary>Copy</summary>
+                    <div class="studio-community__editorial">
+                        <label class="studio-field"><span>Line EN</span><input type="text" id="st-com-ex-${i}-en" class="studio-input" value="${escapeHtml(String(c.lineEn ?? ''))}" /></label>
+                        <label class="studio-field"><span>Line JA</span><input type="text" id="st-com-ex-${i}-ja" class="studio-input" value="${escapeHtml(String(c.lineJa ?? ''))}" /></label>
+                        ${field(`st-com-ex-${i}-k-en`, 'Kicker EN', c.kickerEn)}
+                        ${field(`st-com-ex-${i}-k-ja`, 'Kicker JA', c.kickerJa)}
+                        ${field(`st-com-ex-${i}-h-en`, 'Headline EN', c.headlineEn)}
+                        ${field(`st-com-ex-${i}-h-ja`, 'Headline JA', c.headlineJa)}
+                        <label class="studio-field"><span>Body EN</span><textarea id="st-com-ex-${i}-b-en" class="studio-input" rows="3">${escapeHtml(String(c.bodyEn ?? ''))}</textarea></label>
+                        <label class="studio-field"><span>Body JA</span><textarea id="st-com-ex-${i}-b-ja" class="studio-input" rows="3">${escapeHtml(String(c.bodyJa ?? ''))}</textarea></label>
+                        ${field(`st-com-ex-${i}-cta-join-en`, 'CTA Join EN', c.ctaJoinLabelEn)}
+                        ${field(`st-com-ex-${i}-cta-join-ja`, 'CTA Join JA', c.ctaJoinLabelJa)}
+                        ${field(`st-com-ex-${i}-cta-watch-en`, 'CTA Watch EN', c.ctaWatchLabelEn)}
+                        ${field(`st-com-ex-${i}-cta-watch-ja`, 'CTA Watch JA', c.ctaWatchLabelJa)}
+                    </div>
+                </details>
+                <details class="studio-community__feature-details">
+                    <summary>Timestamps</summary>
+                    ${renderTimestampEditor(`ex-${i}`, c, artists)}
+                </details>
+                <details class="studio-community__advanced">
+                    <summary>Advanced fallback fields</summary>
+                    <div class="studio-community__editorial">
+                        ${field(`st-com-ex-${i}-video`, 'Legacy public video URL', c.videoUrl)}
+                        ${field(`st-com-ex-${i}-ov-title`, 'Overlay line 1', c.overlayTitle)}
+                        ${field(`st-com-ex-${i}-ov-guests`, 'Overlay guests', c.overlayGuests)}
+                        ${field(`st-com-ex-${i}-ov-dur`, 'Overlay duration text', c.overlayDuration)}
+                    </div>
+                </details>
+            </article>`;
     });
-    return cards.join('');
+    return `
+        <div class="studio-community__panel-intro">
+            <div>
+                <p class="studio-kicker">Exclusive</p>
+                <h3 class="studio-subheading">Featured content cards</h3>
+                <p class="studio-muted">Each card can swap the hero. Edit cards as content modules instead of scanning one long field list.</p>
+            </div>
+        </div>
+        <div class="studio-community__feature-grid">${cards.join('')}</div>
+    `;
 }
 
 /**
@@ -344,8 +495,8 @@ function renderConnectForm(bundle) {
     const biteFields = bites.slice(0, 3).map((raw, i) => {
         const b = raw && typeof raw === 'object' ? /** @type {Record<string, unknown>} */ (raw) : {};
         return `
-            <fieldset class="studio-field-group studio-community__card">
-                <legend>Bite ${i + 1}</legend>
+            <fieldset class="studio-field-group studio-community__card studio-community__bite-card">
+                <legend>${escapeHtml(String(b.titleEn || `Bite ${i + 1}`))}</legend>
                 <label class="studio-field"><span>Title EN</span><input type="text" id="st-com-cn-b${i}-ten" class="studio-input" value="${escapeHtml(String(b.titleEn ?? ''))}" /></label>
                 <label class="studio-field"><span>Title JA</span><input type="text" id="st-com-cn-b${i}-tja" class="studio-input" value="${escapeHtml(String(b.titleJa ?? ''))}" /></label>
                 <label class="studio-field"><span>Body EN</span><textarea id="st-com-cn-b${i}-ben" class="studio-input" rows="2">${escapeHtml(String(b.bodyEn ?? ''))}</textarea></label>
@@ -353,15 +504,35 @@ function renderConnectForm(bundle) {
             </fieldset>`;
     });
     return `
-        <label class="studio-field"><span>Section title EN</span><input type="text" id="st-com-cn-t-en" class="studio-input" value="${escapeHtml(String(d.titleEn ?? ''))}" /></label>
-        <label class="studio-field"><span>Section title JA</span><input type="text" id="st-com-cn-t-ja" class="studio-input" value="${escapeHtml(String(d.titleJa ?? ''))}" /></label>
-        <label class="studio-field"><span>How it works URL</span><input type="text" id="st-com-cn-hiw-h" class="studio-input" value="${escapeHtml(String(d.howItWorksHref ?? ''))}" /></label>
-        <label class="studio-field"><span>How it works label EN</span><input type="text" id="st-com-cn-hiw-en" class="studio-input" value="${escapeHtml(String(d.howItWorksLabelEn ?? ''))}" /></label>
-        <label class="studio-field"><span>How it works label JA</span><input type="text" id="st-com-cn-hiw-ja" class="studio-input" value="${escapeHtml(String(d.howItWorksLabelJa ?? ''))}" /></label>
-        <label class="studio-field"><span>Browse href</span><input type="text" id="st-com-cn-br-h" class="studio-input" value="${escapeHtml(String(d.browseHref ?? ''))}" /></label>
-        <label class="studio-field"><span>Browse label EN</span><input type="text" id="st-com-cn-br-en" class="studio-input" value="${escapeHtml(String(d.browseLabelEn ?? ''))}" /></label>
-        <label class="studio-field"><span>Browse label JA</span><input type="text" id="st-com-cn-br-ja" class="studio-input" value="${escapeHtml(String(d.browseLabelJa ?? ''))}" /></label>
-        ${biteFields.join('')}
+        <div class="studio-community__panel-intro">
+            <div>
+                <p class="studio-kicker">Connect</p>
+                <h3 class="studio-subheading">Communication blocks</h3>
+                <p class="studio-muted">Group the public communication copy by purpose: headline, routes, then the three bite-sized explanations.</p>
+            </div>
+        </div>
+        <section class="studio-community__edit-card">
+            <h4>Section heading</h4>
+            <div class="studio-community__editorial">
+                <label class="studio-field"><span>Title EN</span><input type="text" id="st-com-cn-t-en" class="studio-input" value="${escapeHtml(String(d.titleEn ?? ''))}" /></label>
+                <label class="studio-field"><span>Title JA</span><input type="text" id="st-com-cn-t-ja" class="studio-input" value="${escapeHtml(String(d.titleJa ?? ''))}" /></label>
+            </div>
+        </section>
+        <section class="studio-community__edit-card">
+            <h4>Links</h4>
+            <div class="studio-community__editorial">
+                <label class="studio-field"><span>How it works URL</span><input type="text" id="st-com-cn-hiw-h" class="studio-input" value="${escapeHtml(String(d.howItWorksHref ?? ''))}" /></label>
+                <label class="studio-field"><span>How it works label EN</span><input type="text" id="st-com-cn-hiw-en" class="studio-input" value="${escapeHtml(String(d.howItWorksLabelEn ?? ''))}" /></label>
+                <label class="studio-field"><span>How it works label JA</span><input type="text" id="st-com-cn-hiw-ja" class="studio-input" value="${escapeHtml(String(d.howItWorksLabelJa ?? ''))}" /></label>
+                <label class="studio-field"><span>Browse href</span><input type="text" id="st-com-cn-br-h" class="studio-input" value="${escapeHtml(String(d.browseHref ?? ''))}" /></label>
+                <label class="studio-field"><span>Browse label EN</span><input type="text" id="st-com-cn-br-en" class="studio-input" value="${escapeHtml(String(d.browseLabelEn ?? ''))}" /></label>
+                <label class="studio-field"><span>Browse label JA</span><input type="text" id="st-com-cn-br-ja" class="studio-input" value="${escapeHtml(String(d.browseLabelJa ?? ''))}" /></label>
+            </div>
+        </section>
+        <section class="studio-community__edit-card">
+            <h4>How it works cards</h4>
+            <div class="studio-community__bite-grid">${biteFields.join('')}</div>
+        </section>
     `;
 }
 
@@ -435,6 +606,99 @@ function renderFootForm(bundle) {
     `;
 }
 
+function renderPromoForm(bundle) {
+    const pr = bundle.promo && typeof bundle.promo === 'object' ? /** @type {Record<string, unknown>} */ (bundle.promo) : {};
+    return `
+        <div class="studio-community__panel-intro">
+            <div>
+                <p class="studio-kicker">Promo</p>
+                <h3 class="studio-subheading">Final community prompt</h3>
+                <p class="studio-muted">Short closing copy that reinforces the invitation before the join CTA.</p>
+            </div>
+        </div>
+        <section class="studio-community__edit-card">
+            <h4>Promo copy</h4>
+            <div class="studio-community__editorial">
+                <label class="studio-field"><span>Headline EN</span><textarea id="st-com-pr-h-en" class="studio-input" rows="2">${escapeHtml(String(pr.headlineEn ?? ''))}</textarea></label>
+                <label class="studio-field"><span>Headline JA</span><textarea id="st-com-pr-h-ja" class="studio-input" rows="2">${escapeHtml(String(pr.headlineJa ?? ''))}</textarea></label>
+                <label class="studio-field"><span>Subline EN</span><input type="text" id="st-com-pr-s-en" class="studio-input" value="${escapeHtml(String(pr.sublineEn ?? ''))}" /></label>
+                <label class="studio-field"><span>Subline JA</span><input type="text" id="st-com-pr-s-ja" class="studio-input" value="${escapeHtml(String(pr.sublineJa ?? ''))}" /></label>
+            </div>
+        </section>
+    `;
+}
+
+function renderNetworkForm(bundle) {
+    const net = Array.isArray(bundle.networkCards) ? bundle.networkCards : [];
+    const netRows = net
+        .map((raw, i) => {
+            const c = raw && typeof raw === 'object' ? /** @type {Record<string, unknown>} */ (raw) : {};
+            return `
+            <tr>
+                <td><strong>${escapeHtml(String(c.name || `Card ${i + 1}`))}</strong><small>${escapeHtml(String(c.role || 'Role'))}</small></td>
+                <td><input type="text" class="studio-input st-com-net-name" value="${escapeHtml(String(c.name ?? ''))}" placeholder="Name" /></td>
+                <td><input type="text" class="studio-input st-com-net-role" value="${escapeHtml(String(c.role ?? ''))}" /></td>
+                <td><input type="text" class="studio-input st-com-net-loc" value="${escapeHtml(String(c.location ?? ''))}" /></td>
+                <td><input type="text" class="studio-input st-com-net-av" value="${escapeHtml(String(c.avatarUrl ?? ''))}" placeholder="Avatar URL" /></td>
+                <td><input type="text" class="studio-input st-com-net-href" value="${escapeHtml(String(c.connectHref ?? ''))}" placeholder="/…" /></td>
+                <td><button type="button" class="studio-btn-ghost st-com-net-del">Remove</button></td>
+            </tr>`;
+        })
+        .join('');
+    return `
+        <div class="studio-community__panel-intro">
+            <div>
+                <p class="studio-kicker">Network</p>
+                <h3 class="studio-subheading">Member and partner cards</h3>
+                <p class="studio-muted">Each row is a public card. Use clear names, roles, and paths so the row reads well before opening it.</p>
+            </div>
+            <button type="button" class="studio-btn-ghost" id="st-com-net-add">Add network card</button>
+        </div>
+        <div class="studio-table-wrap studio-table-wrap--rounded studio-community__table-wrap studio-community__summary-table">
+            <table class="studio-table studio-table--dense">
+                <thead><tr><th>Summary</th><th>Name</th><th>Role</th><th>Location</th><th>Avatar URL</th><th>Connect href</th><th></th></tr></thead>
+                <tbody id="st-com-net-tbody">${netRows || ''}</tbody>
+            </table>
+        </div>
+    `;
+}
+
+function renderSessionsForm(bundle) {
+    const sess = Array.isArray(bundle.sessions) ? bundle.sessions : [];
+    const sessRows = sess
+        .map((raw, i) => {
+            const s = raw && typeof raw === 'object' ? /** @type {Record<string, unknown>} */ (raw) : {};
+            return `
+            <tr>
+                <td><strong>${escapeHtml(String(s.title || `Session ${i + 1}`))}</strong><small>${escapeHtml(String(s.datetimeLine || s.kindLabel || 'Date/time'))}</small></td>
+                <td><input type="text" class="studio-input st-com-ss-thumb" value="${escapeHtml(String(s.thumbUrl ?? ''))}" placeholder="Thumb URL" /></td>
+                <td><input type="text" class="studio-input st-com-ss-kind" value="${escapeHtml(String(s.kindLabel ?? ''))}" /></td>
+                <td><input type="text" class="studio-input st-com-ss-title" value="${escapeHtml(String(s.title ?? ''))}" /></td>
+                <td><input type="text" class="studio-input st-com-ss-dt" value="${escapeHtml(String(s.datetimeLine ?? ''))}" /></td>
+                <td><input type="text" class="studio-input st-com-ss-rlab" value="${escapeHtml(String(s.registerLabel ?? ''))}" /></td>
+                <td><input type="text" class="studio-input st-com-ss-rhref" value="${escapeHtml(String(s.registerHref ?? ''))}" /></td>
+                <td><button type="button" class="studio-btn-ghost st-com-ss-del">Remove</button></td>
+            </tr>`;
+        })
+        .join('');
+    return `
+        <div class="studio-community__panel-intro">
+            <div>
+                <p class="studio-kicker">Sessions</p>
+                <h3 class="studio-subheading">Upcoming sessions</h3>
+                <p class="studio-muted">Keep sessions scannable with strong titles and simple registration labels.</p>
+            </div>
+            <button type="button" class="studio-btn-ghost" id="st-com-ss-add">Add session</button>
+        </div>
+        <div class="studio-table-wrap studio-table-wrap--rounded studio-community__table-wrap studio-community__summary-table">
+            <table class="studio-table studio-table--dense">
+                <thead><tr><th>Summary</th><th>Thumb</th><th>Kind</th><th>Title</th><th>Date/time line</th><th>Reg label</th><th>Reg href</th><th></th></tr></thead>
+                <tbody id="st-com-ss-tbody">${sessRows || ''}</tbody>
+            </table>
+        </div>
+    `;
+}
+
 /**
  * @param {HTMLElement} mainEl
  */
@@ -457,6 +721,7 @@ export async function initCommunitySection(mainEl) {
     let bundle = {};
     /** @type {Array<Record<string, unknown>>} */
     let studioArtists = [];
+    let openDetails = new Set();
 
     const root = mainEl.querySelector('[data-studio-tabs="community"]');
     if (root) {
@@ -537,8 +802,12 @@ export async function initCommunitySection(mainEl) {
             ctaJoinLabelJa: val('st-com-hero-cta-join-ja'),
             ctaWatchLabelEn: val('st-com-hero-cta-watch-en'),
             ctaWatchLabelJa: val('st-com-hero-cta-watch-ja'),
-            chapters: chaptersFor('hero'),
-            topics: topicsFor('hero'),
+            chapters: chaptersFor('hero-preview'),
+            topics: topicsFor('hero-preview'),
+            previewChapters: chaptersFor('hero-preview'),
+            previewTopics: topicsFor('hero-preview'),
+            fullChapters: chaptersFor('hero-full'),
+            fullTopics: topicsFor('hero-full'),
         };
 
         const exclusive = [0, 1, 2].map((i) => ({
@@ -563,8 +832,12 @@ export async function initCommunitySection(mainEl) {
             ctaJoinLabelJa: val(`st-com-ex-${i}-cta-join-ja`),
             ctaWatchLabelEn: val(`st-com-ex-${i}-cta-watch-en`),
             ctaWatchLabelJa: val(`st-com-ex-${i}-cta-watch-ja`),
-            chapters: chaptersFor(`ex-${i}`),
-            topics: topicsFor(`ex-${i}`),
+            chapters: chaptersFor(`ex-${i}-preview`),
+            topics: topicsFor(`ex-${i}-preview`),
+            previewChapters: chaptersFor(`ex-${i}-preview`),
+            previewTopics: topicsFor(`ex-${i}-preview`),
+            fullChapters: chaptersFor(`ex-${i}-full`),
+            fullTopics: topicsFor(`ex-${i}-full`),
         }));
 
         const bites = [0, 1, 2].map((i) => ({
@@ -629,16 +902,93 @@ export async function initCommunitySection(mainEl) {
     }
 
     function fillForms() {
-        const fs = mainEl.querySelector('#studio-com-form-sections');
+        const fs = mainEl.querySelector('#studio-com-form-overview');
         const fh = mainEl.querySelector('#studio-com-form-hero');
-        const fe = mainEl.querySelector('#studio-com-form-exc');
-        const fc = mainEl.querySelector('#studio-com-form-con');
-        const ff = mainEl.querySelector('#studio-com-form-foot');
+        const fe = mainEl.querySelector('#studio-com-form-exclusive');
+        const fc = mainEl.querySelector('#studio-com-form-connect');
+        const fn = mainEl.querySelector('#studio-com-form-network');
+        const fss = mainEl.querySelector('#studio-com-form-sessions');
+        const fp = mainEl.querySelector('#studio-com-form-promo');
         if (fs) fs.innerHTML = renderSectionToggles(bundle);
         if (fh) fh.innerHTML = renderHeroForm(bundle, studioArtists);
         if (fe) fe.innerHTML = renderExclusiveForm(bundle, studioArtists);
         if (fc) fc.innerHTML = renderConnectForm(bundle);
-        if (ff) ff.innerHTML = renderFootForm(bundle);
+        if (fn) fn.innerHTML = renderNetworkForm(bundle);
+        if (fss) fss.innerHTML = renderSessionsForm(bundle);
+        if (fp) fp.innerHTML = renderPromoForm(bundle);
+    }
+
+    async function readBackSavedCommunityPage(expectedPreview) {
+        let last = null;
+        for (const delay of [500, 900, 1400, 2200]) {
+            await sleep(delay);
+            const saved = await adminGetCommunityPageStudio();
+            last = saved && typeof saved === 'object' ? saved : null;
+            const savedPreview = comparableAssetUrl(last?.hero?.previewVideoUrl);
+            if (savedPreview === expectedPreview) return last;
+        }
+        return last;
+    }
+
+    function timestampOwnerFor(featureKey) {
+        const m = /^(hero|ex-\d+)-(preview|full)$/.exec(String(featureKey || ''));
+        if (!m) return null;
+        const baseKey = m[1];
+        const mode = m[2];
+        if (baseKey === 'hero') {
+            const hero = bundle.hero && typeof bundle.hero === 'object' ? /** @type {Record<string, unknown>} */ (bundle.hero) : {};
+            bundle.hero = hero;
+            return { owner: hero, mode };
+        }
+        const idx = Number(/^ex-(\d+)$/.exec(baseKey)?.[1] ?? -1);
+        if (idx < 0) return null;
+        const exclusive = Array.isArray(bundle.exclusive) ? [...bundle.exclusive] : [];
+        const item = exclusive[idx] && typeof exclusive[idx] === 'object' ? /** @type {Record<string, unknown>} */ (exclusive[idx]) : {};
+        exclusive[idx] = item;
+        bundle.exclusive = exclusive;
+        return { owner: item, mode };
+    }
+
+    function setTimestampList(owner, mode, kind, list) {
+        const prop = `${mode}${kind}`;
+        owner[prop] = list;
+        if (mode === 'preview') {
+            owner[kind === 'Chapters' ? 'chapters' : 'topics'] = list;
+        }
+    }
+
+    function rememberOpenDetails() {
+        openDetails = new Set(
+            Array.from(mainEl.querySelectorAll('details[open]'))
+                .map((el) => el instanceof HTMLElement ? signatureForDetails(el) : '')
+                .filter(Boolean)
+        );
+    }
+
+    function signatureForDetails(el) {
+        const summary = el.querySelector('summary');
+        const title = String(summary?.textContent || '').replace(/\s+/g, ' ').trim();
+        const feature = el.querySelector('[data-feature]')?.getAttribute('data-feature') ||
+            el.querySelector('[data-chapter-row]')?.getAttribute('data-chapter-row') ||
+            el.querySelector('[data-topic-row]')?.getAttribute('data-topic-row') ||
+            '';
+        return `${feature}|${title}`;
+    }
+
+    function restoreOpenDetails() {
+        if (!openDetails.size) return;
+        mainEl.querySelectorAll('details').forEach((el) => {
+            if (!(el instanceof HTMLDetailsElement)) return;
+            if (openDetails.has(signatureForDetails(el))) {
+                el.open = true;
+            }
+        });
+    }
+
+    function refillFormsPreservingDetails() {
+        rememberOpenDetails();
+        fillForms();
+        restoreOpenDetails();
     }
 
     mainEl.addEventListener('click', (e) => {
@@ -648,36 +998,28 @@ export async function initCommunitySection(mainEl) {
             e.preventDefault();
             bundle = collectFromDom();
             bundle.networkCards = [...(Array.isArray(bundle.networkCards) ? bundle.networkCards : []), {}];
-            fillForms();
+            refillFormsPreservingDetails();
             return;
         }
         if (t.id === 'st-com-ss-add') {
             e.preventDefault();
             bundle = collectFromDom();
             bundle.sessions = [...(Array.isArray(bundle.sessions) ? bundle.sessions : []), {}];
-            fillForms();
+            refillFormsPreservingDetails();
             return;
         }
         if (t.classList.contains('st-com-chapter-add')) {
             e.preventDefault();
             const featureKey = t.getAttribute('data-feature') || '';
             bundle = collectFromDom();
-            if (featureKey === 'hero') {
-                const hero = bundle.hero && typeof bundle.hero === 'object' ? /** @type {Record<string, unknown>} */ (bundle.hero) : {};
-                hero.chapters = [...(Array.isArray(hero.chapters) ? hero.chapters : []), { artistId: '', timestampSec: 0 }];
-                bundle.hero = hero;
-            } else {
-                const m = /^ex-(\d+)$/.exec(featureKey);
-                const idx = m ? Number(m[1]) : -1;
-                const exclusive = Array.isArray(bundle.exclusive) ? [...bundle.exclusive] : [];
-                if (idx >= 0) {
-                    const item = exclusive[idx] && typeof exclusive[idx] === 'object' ? /** @type {Record<string, unknown>} */ (exclusive[idx]) : {};
-                    item.chapters = [...(Array.isArray(item.chapters) ? item.chapters : []), { artistId: '', timestampSec: 0 }];
-                    exclusive[idx] = item;
-                    bundle.exclusive = exclusive;
-                }
+            const target = timestampOwnerFor(featureKey);
+            if (target) {
+                const prop = `${target.mode}Chapters`;
+                const chapters = Array.isArray(target.owner[prop]) ? [...target.owner[prop]] : [];
+                chapters.push({ artistId: '', timestampSec: 0 });
+                setTimestampList(target.owner, target.mode, 'Chapters', chapters);
             }
-            fillForms();
+            refillFormsPreservingDetails();
             return;
         }
         if (t.classList.contains('st-com-chapter-del')) {
@@ -685,55 +1027,28 @@ export async function initCommunitySection(mainEl) {
             const featureKey = t.getAttribute('data-feature') || '';
             const chapterIndex = Number(t.getAttribute('data-chapter-index') ?? -1);
             bundle = collectFromDom();
-            const removeAt = (owner) => {
-                const chapters = Array.isArray(owner.chapters) ? [...owner.chapters] : [];
+            const target = timestampOwnerFor(featureKey);
+            if (target) {
+                const prop = `${target.mode}Chapters`;
+                const chapters = Array.isArray(target.owner[prop]) ? [...target.owner[prop]] : [];
                 if (chapterIndex >= 0) chapters.splice(chapterIndex, 1);
-                owner.chapters = chapters;
-            };
-            if (featureKey === 'hero') {
-                const hero = bundle.hero && typeof bundle.hero === 'object' ? /** @type {Record<string, unknown>} */ (bundle.hero) : {};
-                removeAt(hero);
-                bundle.hero = hero;
-            } else {
-                const m = /^ex-(\d+)$/.exec(featureKey);
-                const idx = m ? Number(m[1]) : -1;
-                const exclusive = Array.isArray(bundle.exclusive) ? [...bundle.exclusive] : [];
-                if (idx >= 0) {
-                    const item = exclusive[idx] && typeof exclusive[idx] === 'object' ? /** @type {Record<string, unknown>} */ (exclusive[idx]) : {};
-                    removeAt(item);
-                    exclusive[idx] = item;
-                    bundle.exclusive = exclusive;
-                }
+                setTimestampList(target.owner, target.mode, 'Chapters', chapters);
             }
-            fillForms();
+            refillFormsPreservingDetails();
             return;
         }
         if (t.classList.contains('st-com-topic-add')) {
             e.preventDefault();
             const featureKey = t.getAttribute('data-feature') || '';
             bundle = collectFromDom();
-            const addTopic = (owner) => {
-                owner.topics = [
-                    ...(Array.isArray(owner.topics) ? owner.topics : []),
-                    { timestampSec: 0, titleEn: '', titleJa: '', quoteEn: '', quoteJa: '' },
-                ];
-            };
-            if (featureKey === 'hero') {
-                const hero = bundle.hero && typeof bundle.hero === 'object' ? /** @type {Record<string, unknown>} */ (bundle.hero) : {};
-                addTopic(hero);
-                bundle.hero = hero;
-            } else {
-                const m = /^ex-(\d+)$/.exec(featureKey);
-                const idx = m ? Number(m[1]) : -1;
-                const exclusive = Array.isArray(bundle.exclusive) ? [...bundle.exclusive] : [];
-                if (idx >= 0) {
-                    const item = exclusive[idx] && typeof exclusive[idx] === 'object' ? /** @type {Record<string, unknown>} */ (exclusive[idx]) : {};
-                    addTopic(item);
-                    exclusive[idx] = item;
-                    bundle.exclusive = exclusive;
-                }
+            const target = timestampOwnerFor(featureKey);
+            if (target) {
+                const prop = `${target.mode}Topics`;
+                const topics = Array.isArray(target.owner[prop]) ? [...target.owner[prop]] : [];
+                topics.push({ timestampSec: 0, titleEn: '', titleJa: '', quoteEn: '', quoteJa: '' });
+                setTimestampList(target.owner, target.mode, 'Topics', topics);
             }
-            fillForms();
+            refillFormsPreservingDetails();
             return;
         }
         if (t.classList.contains('st-com-topic-del')) {
@@ -741,27 +1056,48 @@ export async function initCommunitySection(mainEl) {
             const featureKey = t.getAttribute('data-feature') || '';
             const topicIndex = Number(t.getAttribute('data-topic-index') ?? -1);
             bundle = collectFromDom();
-            const removeTopic = (owner) => {
-                const topics = Array.isArray(owner.topics) ? [...owner.topics] : [];
+            const target = timestampOwnerFor(featureKey);
+            if (target) {
+                const prop = `${target.mode}Topics`;
+                const topics = Array.isArray(target.owner[prop]) ? [...target.owner[prop]] : [];
                 if (topicIndex >= 0) topics.splice(topicIndex, 1);
-                owner.topics = topics;
-            };
-            if (featureKey === 'hero') {
-                const hero = bundle.hero && typeof bundle.hero === 'object' ? /** @type {Record<string, unknown>} */ (bundle.hero) : {};
-                removeTopic(hero);
-                bundle.hero = hero;
-            } else {
-                const m = /^ex-(\d+)$/.exec(featureKey);
-                const idx = m ? Number(m[1]) : -1;
-                const exclusive = Array.isArray(bundle.exclusive) ? [...bundle.exclusive] : [];
-                if (idx >= 0) {
-                    const item = exclusive[idx] && typeof exclusive[idx] === 'object' ? /** @type {Record<string, unknown>} */ (exclusive[idx]) : {};
-                    removeTopic(item);
-                    exclusive[idx] = item;
-                    bundle.exclusive = exclusive;
-                }
+                setTimestampList(target.owner, target.mode, 'Topics', topics);
             }
-            fillForms();
+            refillFormsPreservingDetails();
+            return;
+        }
+        if (t.classList.contains('st-com-hero-adopt')) {
+            e.preventDefault();
+            bundle = collectFromDom();
+            const select = /** @type {HTMLSelectElement | null} */ (mainEl.querySelector('#st-com-hero-adopt-feature'));
+            const idx = Number(select?.value ?? -1);
+            const kind = t.getAttribute('data-kind') === 'topics' ? 'topics' : 'chapters';
+            const exclusive = Array.isArray(bundle.exclusive) ? bundle.exclusive : [];
+            const source = exclusive[idx] && typeof exclusive[idx] === 'object'
+                ? /** @type {Record<string, unknown>} */ (exclusive[idx])
+                : null;
+            const hero = bundle.hero && typeof bundle.hero === 'object'
+                ? /** @type {Record<string, unknown>} */ (bundle.hero)
+                : {};
+            if (source) {
+                if (kind === 'topics') {
+                    const preview = JSON.parse(JSON.stringify(Array.isArray(source.previewTopics) ? source.previewTopics : source.topics || []));
+                    const full = JSON.parse(JSON.stringify(Array.isArray(source.fullTopics) ? source.fullTopics : []));
+                    hero.previewTopics = preview;
+                    hero.topics = preview;
+                    hero.fullTopics = full;
+                    show(`Hero idea timestamps adopted from Exclusive ${idx + 1}.`, 'info');
+                } else {
+                    const preview = JSON.parse(JSON.stringify(Array.isArray(source.previewChapters) ? source.previewChapters : source.chapters || []));
+                    const full = JSON.parse(JSON.stringify(Array.isArray(source.fullChapters) ? source.fullChapters : []));
+                    hero.previewChapters = preview;
+                    hero.chapters = preview;
+                    hero.fullChapters = full;
+                    show(`Hero people timestamps adopted from Exclusive ${idx + 1}.`, 'info');
+                }
+                bundle.hero = hero;
+                refillFormsPreservingDetails();
+            }
             return;
         }
         if (t.classList.contains('st-com-net-del')) {
@@ -917,7 +1253,7 @@ export async function initCommunitySection(mainEl) {
         bundle = {};
     }
     try {
-        studioArtists = await getArtistsForStudio();
+        studioArtists = await getCommunityArtistsForStudio();
         if (!Array.isArray(studioArtists)) studioArtists = [];
     } catch {
         studioArtists = [];
@@ -930,13 +1266,33 @@ export async function initCommunitySection(mainEl) {
     }
 
     mainEl.querySelector('#studio-community-save')?.addEventListener('click', async () => {
+        const saveBtn = /** @type {HTMLButtonElement | null} */ (mainEl.querySelector('#studio-community-save'));
         try {
+            if (saveBtn) {
+                saveBtn.disabled = true;
+                saveBtn.textContent = 'Saving...';
+            }
+            show('Saving community page...', 'info');
             const next = collectFromDom();
-            await adminSetCommunityPageStudio(next);
-            bundle = next;
-            show('Saved.', 'info');
+            const saveResult = await adminSetCommunityPageStudio(next);
+            const expectedPreview = comparableAssetUrl(next?.hero?.previewVideoUrl);
+            const saved = await readBackSavedCommunityPage(expectedPreview);
+            const savedPreview = comparableAssetUrl(saved?.hero?.previewVideoUrl);
+            bundle = savedPreview === expectedPreview && saved ? saved : next;
+            fillForms();
+            show(
+                savedPreview === expectedPreview
+                    ? `Saved to ${saveResult?.mode === 'test' ? 'local test storage' : 'backend'}.`
+                    : `Saved to ${saveResult?.mode === 'test' ? 'local test storage' : 'backend'}, but backend read-back is still returning the previous preview URL. Data mode: ${getCommunityDataMode()}.`,
+                savedPreview === expectedPreview ? 'info' : 'warn'
+            );
         } catch (e) {
             show(e instanceof Error ? e.message : String(e), 'warn');
+        } finally {
+            if (saveBtn) {
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save community page';
+            }
         }
     });
 }

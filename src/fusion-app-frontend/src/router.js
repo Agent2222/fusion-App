@@ -303,8 +303,10 @@ class Router {
             'data-theme',
             path === '/gallery-access' ? 'dark' : 'light'
         );
-        /* Header layout: sound env control aligns right on artist profile (see app-header). */
-        if (path === '/profile' || path.startsWith('/profile/')) {
+        /* Header layout / route guards used by shared header subcomponents. */
+        if (path === '/community' || path.startsWith('/community/')) {
+            document.documentElement.setAttribute('data-fusion-page', 'community');
+        } else if (path === '/profile' || path.startsWith('/profile/')) {
             document.documentElement.setAttribute('data-fusion-page', 'profile');
         } else {
             document.documentElement.removeAttribute('data-fusion-page');

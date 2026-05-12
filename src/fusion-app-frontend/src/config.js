@@ -70,7 +70,7 @@ export const config = {
   
     community: {
       status: {
-        public: false,
+        public: true,
         dev: true,
       },
       message: 'This is not for every artist.<br><br>It is for those willing to work<br>within unfamiliar environments,<br>alongside others,<br>in close proximity to place and process.',
@@ -184,6 +184,10 @@ export const MAINNET_FUSION_APP_BACKEND_CANISTER_ID = 'e7x5d-vaaaa-aaaab-af7bq-c
  * @see https://internetcomputer.org/docs/building-apps/authentication/alternative-origins
  */
 export const MAINNET_FUSION_ASSET_CANISTER_DERIVATION_ORIGIN = 'https://ekqmo-uiaaa-aaaab-af7ca-cai.icp0.io';
+const MAINNET_FUSION_ALTERNATIVE_ORIGINS = new Set([
+    'fusionart.world',
+    'www.fusionart.world',
+]);
 
 let _warnedMissingLocalIi;
 let _loggedLocalInternetIdentityUrlOnce;
@@ -306,7 +310,7 @@ export function getInternetIdentityUrl() {
         } catch (_) {
             /* ignore */
         }
-        return 'https://identity.internetcomputer.org';
+        return 'https://identity.ic0.app';
     }
     // Never fall back to mainnet II id (rdmx6-…) for local — that breaks verification on the replica.
     const ii = trimEnv(import.meta.env && import.meta.env.VITE_II_CANISTER_ID);
@@ -351,9 +355,23 @@ export function getInternetIdentityDerivationOrigin() {
     }
     if (typeof window !== 'undefined' && window.location && window.location.hostname) {
         const h = String(window.location.hostname).toLowerCase();
-        if (h === 'fusionart.world' || h === 'www.fusionart.world') {
-            return MAINNET_FUSION_ASSET_CANISTER_DERIVATION_ORIGIN;
+        try {
+            const canonical = new URL(MAINNET_FUSION_ASSET_CANISTER_DERIVATION_ORIGIN);
+            if (h === canonical.hostname.toLowerCase()) return undefined;
+        } catch (_) {
+            /* ignore */
         }
+        if (
+            h.endsWith('.icp0.io') ||
+            h.endsWith('.raw.icp0.io') ||
+            h.endsWith('.ic0.app') ||
+            h.endsWith('.raw.ic0.app')
+        ) {
+            return undefined;
+        }
+        return MAINNET_FUSION_ALTERNATIVE_ORIGINS.has(h)
+            ? MAINNET_FUSION_ASSET_CANISTER_DERIVATION_ORIGIN
+            : undefined;
     }
     return undefined;
 }

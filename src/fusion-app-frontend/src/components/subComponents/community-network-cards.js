@@ -1,4 +1,6 @@
 import { navigate } from '../../router.js';
+import { PH_LOADER_BASE_STYLES, programHeroLoaderHtml } from '../../utils/programHeroLoader.js';
+import { captureCommunityEvent, communityDestinationProps } from '../../utils/communityPosthog.js';
 
 function esc(s) {
     return String(s ?? '')
@@ -8,12 +10,29 @@ function esc(s) {
         .replace(/"/g, '&quot;');
 }
 
+function firstText(...values) {
+    for (const value of values) {
+        const text = String(value ?? '').trim();
+        if (text) return text;
+    }
+    return '';
+}
+
+function localized(obj, key, loc) {
+    if (!obj || typeof obj !== 'object') return '';
+    const source = /** @type {Record<string, unknown>} */ (obj);
+    return loc === 'ja'
+        ? firstText(source[`${key}Ja`], source[`${key}En`], source[key])
+        : firstText(source[`${key}En`], source[`${key}Ja`], source[key]);
+}
+
 class CommunityNetworkCards extends HTMLElement {
     constructor() {
         super();
         this.shadow = this.attachShadow({ mode: 'open' });
         /** @type {Array<Record<string, unknown>>} */
         this._cards = [];
+        this._loaded = false;
     }
 
     connectedCallback() {
@@ -24,17 +43,37 @@ class CommunityNetworkCards extends HTMLElement {
      * @param {Array<Record<string, unknown>>} cards
      */
     setData(cards) {
+        this._loaded = true;
         this._cards = Array.isArray(cards) ? cards : [];
         this.render();
     }
 
     render() {
+        if (!this._loaded) {
+            this.shadow.innerHTML = `
+                <style>
+                    :host { display: block; width: 100%; }
+                    ${PH_LOADER_BASE_STYLES}
+                    .community-network-pending-loader {
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        min-height: clamp(11rem, 22vw, 16rem);
+                        background: var(--bg, #f8f4f0);
+                    }
+                </style>
+                ${programHeroLoaderHtml({ wrapperClass: 'community-network-pending-loader', ariaLabel: 'Loading community network' })}
+            `;
+            return;
+        }
+        const loc =
+            typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
         const rows = this._cards
-            .map((c) => {
+            .map((c, i) => {
                 const avatarUrl = String(c?.avatarUrl ?? '').trim();
-                const name = String(c?.name ?? '').trim();
-                const role = String(c?.role ?? '').trim();
-                const location = String(c?.location ?? '').trim();
+                const name = localized(c, 'name', loc);
+                const role = localized(c, 'role', loc);
+                const location = localized(c, 'location', loc);
                 const href = String(c?.connectHref ?? '').trim();
                 return `
                     <article class="nc-card">
@@ -42,7 +81,7 @@ class CommunityNetworkCards extends HTMLElement {
                         <div class="nc-name">${esc(name)}</div>
                         <div class="nc-role">${esc(role)}</div>
                         <div class="nc-loc">${esc(location)}</div>
-                        <button type="button" class="nc-btn" data-href="${esc(href)}">CONNECT</button>
+                        <button type="button" class="nc-btn" data-card-index="${i}" data-href="${esc(href)}">CONNECT</button>
                     </article>`;
             })
             .join('');
@@ -111,6 +150,10 @@ class CommunityNetworkCards extends HTMLElement {
             btn.addEventListener('click', () => {
                 const h = btn.getAttribute('data-href') || '';
                 if (!h) return;
+                captureCommunityEvent('community_network_connect_clicked', {
+                    card_index: Number(btn.getAttribute('data-card-index') ?? -1),
+                    ...communityDestinationProps(h),
+                });
                 if (h.startsWith('/') && !h.startsWith('//')) navigate(h);
                 else window.open(h, '_blank', 'noopener,noreferrer');
             });

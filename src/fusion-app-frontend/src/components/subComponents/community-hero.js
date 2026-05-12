@@ -1,6 +1,8 @@
 import { getMembershipAccessForCaller } from '../../utils/database.js';
 import { getAuthSnapshot } from '../../utils/icAuth.js';
 import { signPrivateVideoPlayback } from '../../utils/integrationApi.js';
+import { PH_LOADER_BASE_STYLES, programHeroLoaderHtml } from '../../utils/programHeroLoader.js';
+import { captureCommunityEvent, communityDestinationProps } from '../../utils/communityPosthog.js';
 
 function esc(s) {
     return String(s ?? '')
@@ -20,9 +22,11 @@ function formatTime(sec) {
 function localeText(obj, key, loc, fallback = '') {
     if (!obj || typeof obj !== 'object') return fallback;
     const source = /** @type {Record<string, unknown>} */ (obj);
+    const en = String(source[`${key}En`] ?? '').trim();
+    const ja = String(source[`${key}Ja`] ?? '').trim();
     return loc === 'ja'
-        ? String(source[`${key}Ja`] ?? source[`${key}En`] ?? fallback)
-        : String(source[`${key}En`] ?? fallback);
+        ? (ja || en || fallback)
+        : (en || ja || fallback);
 }
 
 function artistLocale(artist, loc) {
@@ -36,19 +40,38 @@ function artistLocale(artist, loc) {
           : {};
 }
 
+function artistLocaleFallback(artist) {
+    const locales = artist?.locales && typeof artist.locales === 'object' ? artist.locales : {};
+    const fallback = /** @type {Record<string, unknown>} */ (locales).en;
+    return fallback && typeof fallback === 'object'
+        ? /** @type {Record<string, unknown>} */ (fallback)
+        : {};
+}
+
+function firstText(...values) {
+    for (const value of values) {
+        const text = String(value ?? '').trim();
+        if (text) return text;
+    }
+    return '';
+}
+
 function artistName(artist, loc) {
     const local = artistLocale(artist, loc);
-    return String(local.name ?? artist?.name ?? artist?.slug ?? '');
+    const fallback = artistLocaleFallback(artist);
+    return firstText(local.name, fallback.name, artist?.name, artist?.slug);
 }
 
 function artistRole(artist, loc) {
     const local = artistLocale(artist, loc);
-    return String(local.discipline ?? artist?.discipline ?? artist?.filter?.disciplineKey ?? 'Artist');
+    const fallback = artistLocaleFallback(artist);
+    return firstText(local.discipline, fallback.discipline, artist?.discipline, artist?.filter?.disciplineKey, 'Artist');
 }
 
 function artistBio(artist, loc) {
     const local = artistLocale(artist, loc);
-    return String(local.bio ?? local.bioLong ?? artist?.bio ?? '');
+    const fallback = artistLocaleFallback(artist);
+    return firstText(local.bio, local.bioLong, fallback.bio, fallback.bioLong, artist?.bio);
 }
 
 function truncateWords(text, maxWords = 30) {
@@ -60,8 +83,14 @@ function truncateWords(text, maxWords = 30) {
 
 function artistLocation(artist, loc) {
     const local = artistLocale(artist, loc);
+    const fallback = artistLocaleFallback(artist);
     const location = local.location && typeof local.location === 'object' ? local.location : {};
-    return String(/** @type {Record<string, unknown>} */ (location).display ?? artist?.location ?? '');
+    const fallbackLocation = fallback.location && typeof fallback.location === 'object' ? fallback.location : {};
+    return firstText(
+        /** @type {Record<string, unknown>} */ (location).display,
+        /** @type {Record<string, unknown>} */ (fallbackLocation).display,
+        artist?.location,
+    );
 }
 
 function artistImage(artist, loc) {
@@ -105,6 +134,7 @@ class CommunityHero extends HTMLElement {
         this._lastMediaKey = '';
         this._profileTransitionTimer = 0;
         this._topicOverlayTimer = 0;
+        this._railResizeObserver = null;
         this._onAuth = () => {
             void this._refreshGate();
         };
@@ -112,6 +142,7 @@ class CommunityHero extends HTMLElement {
 
     connectedCallback() {
         window.addEventListener('fusion-auth-change', this._onAuth);
+        if (!this._data) this.renderLoading();
         if (this._data) void this._refreshGate();
     }
 
@@ -125,6 +156,33 @@ class CommunityHero extends HTMLElement {
             window.clearTimeout(this._topicOverlayTimer);
             this._topicOverlayTimer = 0;
         }
+        if (this._railResizeObserver) {
+            this._railResizeObserver.disconnect();
+            this._railResizeObserver = null;
+        }
+    }
+
+    renderLoading() {
+        this.shadow.innerHTML = `
+            <style>
+                :host {
+                    display: block;
+                    width: 100%;
+                    margin: 0 0 clamp(2.5rem, 5vw, 4.5rem);
+                }
+                ${PH_LOADER_BASE_STYLES}
+                .community-hero-pending-loader {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 100%;
+                    min-height: min(72vh, 720px);
+                    background: var(--bg, #f8f4f0);
+                    box-sizing: border-box;
+                }
+            </style>
+            ${programHeroLoaderHtml({ wrapperClass: 'community-hero-pending-loader', ariaLabel: 'Loading community hero' })}
+        `;
     }
 
     /**
@@ -191,7 +249,21 @@ class CommunityHero extends HTMLElement {
         const loc =
             typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
         const artistById = new Map(this._artists.map((artist) => [String(artist?.id ?? ''), artist]));
-        const configuredChapters = (Array.isArray(d.chapters) ? d.chapters : [])
+        const legacyVideoUrl = String(d.videoUrl ?? '').trim();
+        const previewVideoUrl = String(d.previewVideoUrl ?? '').trim();
+        const fullVideoKey = String(d.fullVideoKey ?? '').trim();
+        const fullTimelineActive = Boolean(canWatch && this._signedFullVideoUrl && fullVideoKey);
+        const previewChapterSource = Array.isArray(d.previewChapters) ? d.previewChapters : d.chapters;
+        const previewTopicSource = Array.isArray(d.previewTopics) ? d.previewTopics : d.topics;
+        const fullChapterSource = Array.isArray(d.fullChapters) && d.fullChapters.length
+            ? d.fullChapters
+            : previewChapterSource;
+        const fullTopicSource = Array.isArray(d.fullTopics) && d.fullTopics.length
+            ? d.fullTopics
+            : previewTopicSource;
+        const chapterSource = fullTimelineActive ? fullChapterSource : previewChapterSource;
+        const topicSource = fullTimelineActive ? fullTopicSource : previewTopicSource;
+        const configuredChapters = (Array.isArray(chapterSource) ? chapterSource : [])
             .map((raw) => {
                 const c = raw && typeof raw === 'object' ? /** @type {Record<string, unknown>} */ (raw) : {};
                 const artistId = String(c.artistId ?? '').trim();
@@ -210,15 +282,15 @@ class CommunityHero extends HTMLElement {
                   timestampSec: fallbackChapterTimes[i] ?? i * 24,
               }));
         if (this._activeChapterIndex >= chapters.length) this._activeChapterIndex = 0;
-        const topics = (Array.isArray(d.topics) ? d.topics : [])
+        const topics = (Array.isArray(topicSource) ? topicSource : [])
             .map((raw) => {
                 const t = raw && typeof raw === 'object' ? /** @type {Record<string, unknown>} */ (raw) : {};
                 const title = loc === 'ja'
-                    ? String(t.titleJa ?? t.titleEn ?? t.title ?? '')
-                    : String(t.titleEn ?? t.titleJa ?? t.title ?? '');
+                    ? firstText(t.titleJa, t.titleEn, t.title)
+                    : firstText(t.titleEn, t.titleJa, t.title);
                 const quote = loc === 'ja'
-                    ? String(t.quoteJa ?? t.quoteEn ?? t.quote ?? '')
-                    : String(t.quoteEn ?? t.quoteJa ?? t.quote ?? '');
+                    ? firstText(t.quoteJa, t.quoteEn, t.quote)
+                    : firstText(t.quoteEn, t.quoteJa, t.quote);
                 const timestampSec = Math.max(0, Math.floor(Number(t.timestampSec) || 0));
                 return title || quote ? { title, quote, timestampSec } : null;
             })
@@ -232,9 +304,6 @@ class CommunityHero extends HTMLElement {
         const body = localeText(d, 'body', loc);
         const joinLabel = localeText(d, 'ctaJoinLabel', loc, 'JOIN');
         const watchLabel = localeText(d, 'ctaWatchLabel', loc, 'WATCH');
-        const legacyVideoUrl = String(d.videoUrl ?? '').trim();
-        const previewVideoUrl = String(d.previewVideoUrl ?? '').trim();
-        const fullVideoKey = String(d.fullVideoKey ?? '').trim();
         const posterUrl = String(d.posterUrl ?? '').trim();
         const overlayTitle = String(d.overlayTitle ?? '').trim();
         const overlayGuests = String(d.overlayGuests ?? '').trim();
@@ -248,6 +317,15 @@ class CommunityHero extends HTMLElement {
                 ? this._signedFullVideoUrl
                 : previewVideoUrl || (isLegacyPublicVideo ? legacyVideoUrl : '');
         const hasLockedFullVideo = Boolean(fullVideoKey && !this._signedFullVideoUrl);
+        const videoTier = fullTimelineActive ? 'full' : videoUrl ? 'preview' : 'none';
+        const trackingBase = () => ({
+            hero_source: this._activeIndex >= 0 ? 'exclusive' : 'hero',
+            active_index: this._activeIndex,
+            video_tier: videoTier,
+            can_watch: Boolean(canWatch),
+            has_preview_video: Boolean(previewVideoUrl || legacyVideoUrl),
+            has_full_video: Boolean(fullVideoKey),
+        });
         const emptyCopy = hasLockedFullVideo
             ? 'Members-only full video'
             : 'Video URL (Studio)';
@@ -317,6 +395,7 @@ class CommunityHero extends HTMLElement {
                     grid-template-columns: minmax(0, 1fr) minmax(190px, 22vw);
                     align-items: stretch;
                     max-width: 100%;
+                    min-height: calc(max(310px, 42vw) + max(9.4rem, calc(clamp(6.5rem, 9vw, 8rem) + clamp(1.9rem, 4vw, 2.7rem))));
                     margin: 0 auto;
                     padding: 0;
                     box-sizing: border-box;
@@ -448,6 +527,12 @@ class CommunityHero extends HTMLElement {
                     flex-wrap: wrap;
                     align-items: flex-end;
                     gap: 0.5rem 1rem;
+                    transition: opacity 260ms ease, visibility 260ms ease;
+                }
+                .ch-overlay.is-hidden {
+                    opacity: 0;
+                    visibility: hidden;
+                    pointer-events: none;
                 }
                 .ch-overlay strong { font-variation-settings: var(--fv-subtitle); }
                 .ch-topic-overlay {
@@ -488,11 +573,13 @@ class CommunityHero extends HTMLElement {
                     background: #151515;
                     color: #fff;
                     min-width: 0;
-                    height: 100%;
-                    min-height: 100%;
+                    height: var(--ch-rail-max-height, 100%);
+                    min-height: 0;
+                    max-height: var(--ch-rail-max-height, calc(max(310px, 42vw) + max(9.4rem, calc(clamp(6.5rem, 9vw, 8rem) + clamp(1.9rem, 4vw, 2.7rem)))));
                     padding: clamp(0.9rem, 1.5vw, 1.15rem);
                     display: flex;
                     flex-direction: column;
+                    overflow: hidden;
                 }
                 .ch-rail-title {
                     padding: 0 0 0.7rem;
@@ -532,7 +619,24 @@ class CommunityHero extends HTMLElement {
                     display: flex;
                     flex-direction: column;
                     flex: 1;
-                    overflow: auto;
+                    min-height: 0;
+                    overflow-y: auto;
+                    overflow-x: hidden;
+                    overscroll-behavior: contain;
+                    padding-right: 0.25rem;
+                    scrollbar-width: thin;
+                    scrollbar-color: var(--c2, #000) var(--bg, #faf3f4);
+                    scrollbar-gutter: stable;
+                }
+                .ch-chapters::-webkit-scrollbar {
+                    width: 6px;
+                }
+                .ch-chapters::-webkit-scrollbar-track {
+                    background-color: var(--bg, #faf3f4);
+                }
+                .ch-chapters::-webkit-scrollbar-thumb {
+                    background: var(--c2, #000);
+                    border-radius: 5px;
                 }
                 .ch-chapters[hidden] { display: none; }
                 .ch-chapter {
@@ -697,13 +801,19 @@ class CommunityHero extends HTMLElement {
                     background: #ddd center/cover no-repeat;
                 }
                 @media (max-width: 900px) {
-                    .ch-wrap { grid-template-columns: 1fr; }
+                    .ch-wrap {
+                        grid-template-columns: 1fr;
+                        height: auto;
+                        max-height: none;
+                    }
                     .ch-stage { grid-template-rows: auto auto; }
                     .ch-media,
                     .ch-media video { min-height: 420px; }
                     .ch-copy { max-width: calc(100vw - 2rem); }
                     .ch-rail {
                         max-height: none;
+                        height: auto;
+                        overflow: visible;
                         padding: clamp(1rem, 3vw, 1.4rem);
                     }
                     .ch-chapters {
@@ -803,10 +913,18 @@ class CommunityHero extends HTMLElement {
         const vid = /** @type {HTMLVideoElement | null} */ (this.shadow.querySelector('#chVideo'));
         const media = this.shadow.querySelector('.ch-media');
         const copy = this.shadow.querySelector('#ch-copy');
+        const overlay = this.shadow.querySelector('.ch-overlay');
         const topicOverlay = /** @type {HTMLElement | null} */ (this.shadow.querySelector('#chTopicOverlay'));
+        const syncRailHeight = () => {
+            const stage = /** @type {HTMLElement | null} */ (this.shadow.querySelector('.ch-stage'));
+            const rail = /** @type {HTMLElement | null} */ (this.shadow.querySelector('.ch-rail'));
+            if (!stage || !rail) return;
+            rail.style.setProperty('--ch-rail-max-height', `${Math.ceil(stage.getBoundingClientRect().height)}px`);
+        };
         const syncCopyVisibility = () => {
             const playing = Boolean(vid && !vid.paused && !vid.ended);
             copy?.classList.toggle('is-hidden', playing);
+            overlay?.classList.toggle('is-hidden', playing);
             media?.classList.toggle('is-playing', playing);
         };
         const syncProfileArtFallback = () => {
@@ -878,7 +996,10 @@ class CommunityHero extends HTMLElement {
                     const next = this.shadow.querySelector('.ch-profile');
                     next?.classList.add('is-transitioning');
                     syncProfileArtFallback();
-                    requestAnimationFrame(() => next?.classList.remove('is-transitioning'));
+                    requestAnimationFrame(() => {
+                        next?.classList.remove('is-transitioning');
+                        syncRailHeight();
+                    });
                 }
                 return;
             }
@@ -890,16 +1011,29 @@ class CommunityHero extends HTMLElement {
                     const next = this.shadow.querySelector('.ch-profile');
                     next?.classList.add('is-transitioning');
                     syncProfileArtFallback();
-                    requestAnimationFrame(() => next?.classList.remove('is-transitioning'));
+                    requestAnimationFrame(() => {
+                        next?.classList.remove('is-transitioning');
+                        syncRailHeight();
+                    });
                 }
                 this._profileTransitionTimer = 0;
+                syncRailHeight();
             }, 500);
         };
         syncProfileArtFallback();
+        syncRailHeight();
+        requestAnimationFrame(syncRailHeight);
+        if (typeof ResizeObserver !== 'undefined') {
+            if (this._railResizeObserver) this._railResizeObserver.disconnect();
+            const stage = /** @type {HTMLElement | null} */ (this.shadow.querySelector('.ch-stage'));
+            this._railResizeObserver = new ResizeObserver(syncRailHeight);
+            if (stage) this._railResizeObserver.observe(stage);
+        }
         syncTabUi();
         syncActiveTopicUi();
         if (vid && canWatch && fullVideoKey && this._signedFullVideoUrl) {
             vid.addEventListener('error', () => {
+                captureCommunityEvent('community_hero_full_video_playback_failed', trackingBase());
                 this._signedFullVideoUrl = '';
                 void this._refreshGate();
             }, { once: true });
@@ -907,20 +1041,79 @@ class CommunityHero extends HTMLElement {
         if (vid) {
             vid.addEventListener('play', syncCopyVisibility);
             vid.addEventListener('pause', syncCopyVisibility);
-            vid.addEventListener('ended', syncCopyVisibility);
+            vid.addEventListener('ended', () => {
+                if (videoUrl) {
+                    captureCommunityEvent('community_hero_video_completed', trackingBase());
+                }
+                try {
+                    vid.pause();
+                    vid.currentTime = 0;
+                    if (posterUrl) vid.load();
+                } catch {
+                    /* media reset best effort */
+                }
+                syncCopyVisibility();
+            });
+            vid.addEventListener('click', (event) => {
+                const rect = vid.getBoundingClientRect();
+                const controlsBand = Math.max(42, rect.height * 0.14);
+                if (event.clientY >= rect.bottom - controlsBand) return;
+                if (primaryMode === 'join' && !videoUrl) {
+                    captureCommunityEvent('community_hero_unlock_clicked', {
+                        ...trackingBase(),
+                        trigger: 'video_surface',
+                    });
+                    window.dispatchEvent(new CustomEvent('fusion-open-join-network', { detail: {} }));
+                    return;
+                }
+                if (canWatch && fullVideoKey && !this._signedFullVideoUrl) {
+                    captureCommunityEvent('community_hero_full_video_unlock_requested', {
+                        ...trackingBase(),
+                        trigger: 'video_surface',
+                    });
+                    void this._refreshGate();
+                    return;
+                }
+                captureCommunityEvent('community_hero_video_toggled', {
+                    ...trackingBase(),
+                    action: vid.paused || vid.ended ? 'play' : 'pause',
+                    trigger: 'video_surface',
+                });
+                if (vid.paused || vid.ended) {
+                    try {
+                        void vid.play();
+                    } catch {
+                        /* autoplay policy */
+                    }
+                } else {
+                    vid.pause();
+                }
+            });
             syncCopyVisibility();
         }
         if (btn instanceof HTMLButtonElement) {
             btn.addEventListener('click', () => {
                 if (primaryMode === 'join') {
+                    captureCommunityEvent('community_hero_unlock_clicked', {
+                        ...trackingBase(),
+                        trigger: 'primary_cta',
+                    });
                     window.dispatchEvent(new CustomEvent('fusion-open-join-network', { detail: {} }));
                     return;
                 }
                 if (fullVideoKey && !this._signedFullVideoUrl) {
+                    captureCommunityEvent('community_hero_full_video_unlock_requested', {
+                        ...trackingBase(),
+                        trigger: 'primary_cta',
+                    });
                     void this._refreshGate();
                     return;
                 }
                 if (vid) {
+                    captureCommunityEvent('community_hero_watch_clicked', {
+                        ...trackingBase(),
+                        trigger: 'primary_cta',
+                    });
                     try {
                         void vid.play();
                     } catch {
@@ -935,6 +1128,12 @@ class CommunityHero extends HTMLElement {
                 const key = tab.getAttribute('data-chapter-tab') || 'people';
                 if (key === 'ideas' && topics.length === 0) return;
                 this._activeChapterTab = key === 'ideas' ? 'ideas' : 'people';
+                captureCommunityEvent('community_hero_timestamp_tab_clicked', {
+                    ...trackingBase(),
+                    tab: this._activeChapterTab,
+                    people_count: chapters.length,
+                    idea_count: topics.length,
+                });
                 syncTabUi();
                 if (this._activeChapterTab === 'people') syncActiveChapterUi();
                 if (this._activeChapterTab === 'ideas') syncActiveTopicUi();
@@ -948,15 +1147,33 @@ class CommunityHero extends HTMLElement {
                 this._activeChapterIndex = idx;
                 this.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 if (!canWatch && fullVideoKey) {
+                    captureCommunityEvent('community_hero_unlock_clicked', {
+                        ...trackingBase(),
+                        trigger: 'people_timestamp',
+                        timestamp_index: idx,
+                        timestamp_sec: chapter.timestampSec,
+                    });
                     window.dispatchEvent(new CustomEvent('fusion-open-join-network', { detail: {} }));
                     syncActiveChapterUi();
                     return;
                 }
                 if (canWatch && fullVideoKey && !this._signedFullVideoUrl) {
+                    captureCommunityEvent('community_hero_full_video_unlock_requested', {
+                        ...trackingBase(),
+                        trigger: 'people_timestamp',
+                        timestamp_index: idx,
+                        timestamp_sec: chapter.timestampSec,
+                    });
                     void this._refreshGate();
                     syncActiveChapterUi();
                     return;
                 }
+                captureCommunityEvent('community_hero_timestamp_clicked', {
+                    ...trackingBase(),
+                    timestamp_type: 'people',
+                    timestamp_index: idx,
+                    timestamp_sec: chapter.timestampSec,
+                });
                 if (vid) {
                     vid.currentTime = chapter.timestampSec;
                     try {
@@ -977,6 +1194,12 @@ class CommunityHero extends HTMLElement {
                 this._activeChapterTab = 'ideas';
                 this.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 if (!canWatch && fullVideoKey) {
+                    captureCommunityEvent('community_hero_unlock_clicked', {
+                        ...trackingBase(),
+                        trigger: 'idea_timestamp',
+                        timestamp_index: idx,
+                        timestamp_sec: topic.timestampSec,
+                    });
                     window.dispatchEvent(new CustomEvent('fusion-open-join-network', { detail: {} }));
                     syncTabUi();
                     syncActiveTopicUi();
@@ -984,12 +1207,24 @@ class CommunityHero extends HTMLElement {
                     return;
                 }
                 if (canWatch && fullVideoKey && !this._signedFullVideoUrl) {
+                    captureCommunityEvent('community_hero_full_video_unlock_requested', {
+                        ...trackingBase(),
+                        trigger: 'idea_timestamp',
+                        timestamp_index: idx,
+                        timestamp_sec: topic.timestampSec,
+                    });
                     void this._refreshGate();
                     syncTabUi();
                     syncActiveTopicUi();
                     showTopicOverlay(topic);
                     return;
                 }
+                captureCommunityEvent('community_hero_timestamp_clicked', {
+                    ...trackingBase(),
+                    timestamp_type: 'idea',
+                    timestamp_index: idx,
+                    timestamp_sec: topic.timestampSec,
+                });
                 if (vid) {
                     vid.currentTime = topic.timestampSec;
                     try {
@@ -1001,6 +1236,13 @@ class CommunityHero extends HTMLElement {
                 syncTabUi();
                 syncActiveTopicUi();
                 showTopicOverlay(topic);
+            });
+        });
+        this.shadow.querySelector('.ch-profile__link')?.addEventListener('click', (event) => {
+            const href = event.currentTarget instanceof HTMLAnchorElement ? event.currentTarget.href : '';
+            captureCommunityEvent('community_hero_artist_profile_clicked', {
+                ...trackingBase(),
+                ...communityDestinationProps(href),
             });
         });
         if (vid && (chapters.length > 0 || topics.length > 0)) {

@@ -1,7 +1,8 @@
 /**
  * `/community` landing — CMS from canister (`getCommunityPagePublic`).
  */
-import { getArtists, getCommunityPagePublic } from '../utils/database.js';
+import { getCommunityArtistsPublic, getCommunityPagePublic } from '../utils/database.js';
+import { captureCommunityEvent } from '../utils/communityPosthog.js';
 
 export function render() {
     return `
@@ -33,18 +34,29 @@ export function generateCommunityContent() {
 }
 
 export default async function initCommunity() {
+    document.documentElement.setAttribute('data-fusion-page', 'community');
+    document.querySelectorAll('app-sound-environment').forEach((el) => {
+        if (!(el instanceof HTMLElement)) return;
+        el.setAttribute('hidden', '');
+        if (typeof el.setMasterEnabled === 'function') {
+            el.setMasterEnabled(false);
+        }
+    });
+
     let data;
     let artists = [];
     try {
         data = await getCommunityPagePublic();
     } catch {
         data = {};
+        captureCommunityEvent('community_page_data_load_failed', { source: 'community_page' });
     }
     try {
-        artists = await getArtists();
+        artists = await getCommunityArtistsPublic();
         if (!Array.isArray(artists)) artists = [];
     } catch {
         artists = [];
+        captureCommunityEvent('community_page_data_load_failed', { source: 'community_artists' });
     }
 
     const hero = document.getElementById('communityHero');
@@ -66,6 +78,27 @@ export default async function initCommunity() {
     const sessions = Array.isArray(data?.sessions) ? data.sessions : [];
     const promoData = data?.promo && typeof data.promo === 'object' ? data.promo : {};
 
+    captureCommunityEvent('community_page_data_loaded', {
+        hero_active: active('hero'),
+        exclusive_active: active('exclusive'),
+        connect_active: active('connect'),
+        network_active: active('network'),
+        sessions_active: active('sessions'),
+        promo_active: active('promo'),
+        join_active: active('join'),
+        exclusive_count: exclusive.length,
+        network_card_count: networkCards.length,
+        session_count: sessions.length,
+        artist_count: artists.length,
+    });
+
+    const setVisible = (el, visible) => {
+        if (!(el instanceof HTMLElement)) return;
+        el.toggleAttribute('hidden', !visible);
+        el.setAttribute('aria-hidden', visible ? 'false' : 'true');
+        el.style.display = visible ? '' : 'none';
+    };
+
     const setActiveHero = (item, index = -1) => {
         const activeItem = item && typeof item === 'object' ? item : h;
         if (hero && typeof hero.setData === 'function') {
@@ -83,21 +116,37 @@ export default async function initCommunity() {
     if (sess && typeof sess.setData === 'function') sess.setData(sessions);
     if (promo && typeof promo.setData === 'function') promo.setData(promoData);
 
-    if (hero) hero.toggleAttribute('hidden', !active('hero'));
-    if (exc) exc.toggleAttribute('hidden', !active('exclusive'));
-    if (conn) conn.toggleAttribute('hidden', !active('connect'));
-    if (netSection) netSection.toggleAttribute('hidden', !active('network'));
-    if (net) net.toggleAttribute('hidden', !active('network'));
-    if (sess) sess.toggleAttribute('hidden', !active('sessions'));
-    if (promo) promo.toggleAttribute('hidden', !active('promo'));
-    if (footGrid) footGrid.toggleAttribute('hidden', !active('sessions') && !active('promo'));
-    if (join) join.toggleAttribute('hidden', !active('join'));
+    setVisible(hero, active('hero'));
+    setVisible(exc, active('exclusive'));
+    setVisible(conn, active('connect'));
+    setVisible(netSection, active('network'));
+    setVisible(net, active('network'));
+    setVisible(sess, active('sessions'));
+    setVisible(promo, active('promo'));
+    setVisible(footGrid, active('sessions') || active('promo'));
+    setVisible(join, active('join'));
 
     exc?.addEventListener('fusion-community-feature-select', (event) => {
         const detail = event instanceof CustomEvent ? event.detail : {};
         const index = Number(detail?.index ?? -1);
         const item = Number.isInteger(index) && index >= 0 ? exclusive[index] : detail?.item;
         setActiveHero(item, index);
-        hero?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const scrollTargets = [
+            document.getElementById('communityMainContent'),
+            document.getElementById('communityMain'),
+            document.getElementById('mainContent'),
+            document.scrollingElement,
+            document.documentElement,
+            document.body,
+        ].filter(Boolean);
+        scrollTargets.forEach((target) => {
+            if ('scrollTo' in target) {
+                target.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+            } else {
+                target.scrollTop = 0;
+            }
+        });
+        window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
     });
+
 }

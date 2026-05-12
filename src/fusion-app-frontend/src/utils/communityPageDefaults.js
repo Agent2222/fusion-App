@@ -42,6 +42,10 @@ export function defaultCommunityPage() {
             ctaWatchLabelJa: '視聴する',
             chapters: [],
             topics: [],
+            previewChapters: [],
+            previewTopics: [],
+            fullChapters: [],
+            fullTopics: [],
         },
         exclusive: [
             {
@@ -159,6 +163,20 @@ function normalizeFeatureItem(raw, fallback) {
     const text = (key, fb = '') => String(item[key] ?? fallback[key] ?? fb);
     const imageUrl = text('imageUrl', text('posterUrl'));
     const posterUrl = text('posterUrl', imageUrl);
+    const legacyChapters = item.chapters ?? fallback.chapters;
+    const legacyTopics = item.topics ?? fallback.topics;
+    const previewChapters = normalizeChapters(
+        pickTimestampSource(item.previewChapters, item.preview_chapters, legacyChapters, fallback.previewChapters),
+    );
+    const previewTopics = normalizeTopics(
+        pickTimestampSource(item.previewTopics, item.preview_topics, legacyTopics, fallback.previewTopics),
+    );
+    const fullChapters = normalizeChapters(
+        pickTimestampSource(item.fullChapters, item.full_chapters, fallback.fullChapters),
+    );
+    const fullTopics = normalizeTopics(
+        pickTimestampSource(item.fullTopics, item.full_topics, fallback.fullTopics),
+    );
     return {
         imageUrl,
         lineEn: text('lineEn'),
@@ -182,9 +200,20 @@ function normalizeFeatureItem(raw, fallback) {
         ctaJoinLabelJa: text('ctaJoinLabelJa', text('ctaJoinLabelEn', 'JOIN THE COMMUNITY')),
         ctaWatchLabelEn: text('ctaWatchLabelEn', 'WATCH NOW'),
         ctaWatchLabelJa: text('ctaWatchLabelJa', text('ctaWatchLabelEn', 'WATCH NOW')),
-        chapters: normalizeChapters(item.chapters ?? fallback.chapters),
-        topics: normalizeTopics(item.topics ?? fallback.topics),
+        chapters: previewChapters,
+        topics: previewTopics,
+        previewChapters,
+        previewTopics,
+        fullChapters,
+        fullTopics,
     };
+}
+
+function pickTimestampSource(...values) {
+    const firstWithRows = values.find((value) => Array.isArray(value) && value.length > 0);
+    if (firstWithRows) return firstWithRows;
+    const firstArray = values.find((value) => Array.isArray(value));
+    return firstArray || [];
 }
 
 /**

@@ -467,6 +467,33 @@ export async function syncSubscriptionFromStripeByEmail(email, principalText) {
 }
 
 /**
+ * Studio / admin: fetch safe Stripe customer contact fields for account rows matched by metadata.principal.
+ * @param {string[]} principals
+ * @returns {Promise<{ ok?: boolean, contacts?: Array<{ principal: string, email?: string, fullName?: string, firstName?: string, lastName?: string, customerId?: string }>, failures?: Array<{ principal: string, reason: string }> }>}
+ */
+export async function fetchStripeAccountContactsForPrincipals(principals) {
+    const list = Array.isArray(principals)
+        ? [...new Set(principals.map((p) => String(p || '').trim()).filter(Boolean))]
+        : [];
+    if (!list.length) return { ok: true, contacts: [], failures: [] };
+    const base = getIntegrationBaseUrl();
+    if (!base) {
+        return { ok: false, contacts: [], failures: list.map((principal) => ({ principal, reason: 'no_integration_url' })) };
+    }
+    const res = await fetch(`${base}/stripe/account-contacts-by-principal`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify({ principals: list }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        const detail = typeof err.error === 'string' ? err.error : `HTTP ${res.status}`;
+        throw new Error(detail);
+    }
+    return await res.json();
+}
+
+/**
  * Studio / admin: live Stripe subscription status for an email (integration API; API key).
  * @param {string} email
  * @returns {Promise<
@@ -614,6 +641,140 @@ export async function createPaymentIntent(amountCents, currency = 'usd', metadat
         throw new Error('Invalid payment intent response');
     }
     return data;
+}
+
+function programPaymentBody(opts = {}) {
+    return {
+        principal: String(opts.principal || '').trim(),
+        programId: String(opts.programId || '').trim(),
+        applicationId: String(opts.applicationId || '').trim(),
+        amountCents: Math.round(Number(opts.amountCents || 0)),
+        totalDueCents: Math.round(Number(opts.totalDueCents || 0)),
+        depositAmountCents: Math.round(Number(opts.depositAmountCents || 0)),
+    };
+}
+
+/**
+ * @param {{ principal: string, programId: string, applicationId: string, paymentType: 'deposit' | 'full_payment' | 'manual', amountCents: number, totalDueCents: number, depositAmountCents: number }} opts
+ * @returns {Promise<{ clientSecret: string, paymentIntentId: string }>}
+ */
+export async function createProgramPaymentIntent(opts) {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const res = await fetch(`${base}/stripe/program-payment-intent`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify({
+            ...programPaymentBody(opts),
+            paymentType: opts.paymentType,
+        }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        const raw = typeof err.error === 'string' ? err.error : '';
+        throw new Error(mapIntegrationUserMessage(raw || `Program payment HTTP ${res.status}`, res.status));
+    }
+    const data = await res.json();
+    if (!data.clientSecret || !data.paymentIntentId) {
+        throw new Error('Invalid program payment response');
+    }
+    return data;
+}
+
+/**
+ * @param {string} paymentIntentId
+ */
+export async function confirmProgramPaymentRecorded(paymentIntentId) {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const res = await fetch(`${base}/stripe/program-payment-confirmed`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify({ paymentIntentId: String(paymentIntentId || '').trim() }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        const raw = typeof err.error === 'string' ? err.error : '';
+        throw new Error(mapIntegrationUserMessage(raw || `Program payment confirm HTTP ${res.status}`, res.status));
+    }
+    return res.json();
+}
+
+/**
+ * @param {{ principal: string, email?: string, programId: string, applicationId: string, installmentCount: number, installmentAmountCents: number, totalDueCents: number, depositAmountCents: number, planStartAt?: string, planEndAt?: string }} opts
+ * @returns {Promise<{ clientSecret: string, paymentIntentId: string, subscriptionId: string, planId: string }>}
+ */
+export async function createProgramPaymentPlan(opts) {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const res = await fetch(`${base}/stripe/program-payment-plan`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify({
+            ...programPaymentBody({
+                ...opts,
+                amountCents: opts.installmentAmountCents,
+            }),
+            email: String(opts.email || '').trim(),
+            installmentCount: Math.round(Number(opts.installmentCount || 0)),
+            installmentAmountCents: Math.round(Number(opts.installmentAmountCents || 0)),
+            planStartAt: String(opts.planStartAt || '').trim(),
+            planEndAt: String(opts.planEndAt || '').trim(),
+        }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        const raw = typeof err.error === 'string' ? err.error : '';
+        throw new Error(mapIntegrationUserMessage(raw || `Payment plan HTTP ${res.status}`, res.status));
+    }
+    const data = await res.json();
+    if (!data.clientSecret || !data.paymentIntentId || !data.subscriptionId || !data.planId) {
+        throw new Error('Invalid payment plan response');
+    }
+    return data;
+}
+
+/**
+ * @param {{ planId: string, subscriptionId?: string }} opts
+ */
+export async function cancelProgramPaymentPlan(opts) {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const res = await fetch(`${base}/stripe/program-payment-plan-cancel`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify({
+            planId: String(opts?.planId || '').trim(),
+            subscriptionId: String(opts?.subscriptionId || '').trim(),
+        }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        const raw = typeof err.error === 'string' ? err.error : '';
+        throw new Error(mapIntegrationUserMessage(raw || `Cancel payment plan HTTP ${res.status}`, res.status));
+    }
+    return res.json();
+}
+
+/**
+ * @param {string[]} paymentIntentIds
+ * @returns {Promise<{ ok?: boolean, receipts?: Array<{ paymentIntentId: string, receiptUrl: string, chargeId: string }> }>}
+ */
+export async function fetchProgramPaymentReceipts(paymentIntentIds) {
+    const ids = Array.isArray(paymentIntentIds) ? paymentIntentIds.map((x) => String(x || '').trim()).filter(Boolean) : [];
+    const base = getIntegrationBaseUrl();
+    if (!base || !ids.length) return { ok: false, receipts: [] };
+    const res = await fetch(`${base}/stripe/program-payment-receipts`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify({ paymentIntentIds: ids }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        const raw = typeof err.error === 'string' ? err.error : '';
+        throw new Error(mapIntegrationUserMessage(raw || `Payment receipts HTTP ${res.status}`, res.status));
+    }
+    return res.json();
 }
 
 /**
@@ -798,8 +959,9 @@ export async function resendSendBroadcast(id, body = {}) {
 /**
  * @param {string} key
  * @param {string} contentType
+ * @param {{ rootPrefix?: string }} [options]
  */
-export async function presignUpload(key, contentType) {
+export async function presignUpload(key, contentType, options = {}) {
     const base = getIntegrationBaseUrl();
     if (!base) {
         throw new Error('Integration API URL not configured.');
@@ -807,7 +969,7 @@ export async function presignUpload(key, contentType) {
     const res = await fetch(`${base}/storage/presign`, {
         method: 'POST',
         headers: integrationHeadersJson(),
-        body: JSON.stringify({ key, contentType }),
+        body: JSON.stringify({ key, contentType, rootPrefix: options.rootPrefix }),
     });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));

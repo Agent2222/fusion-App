@@ -1,3 +1,5 @@
+import { PH_LOADER_BASE_STYLES, programHeroLoaderHtml } from '../../utils/programHeroLoader.js';
+
 function esc(s) {
     return String(s ?? '')
         .replace(/&/g, '&amp;')
@@ -6,12 +8,21 @@ function esc(s) {
         .replace(/"/g, '&quot;');
 }
 
+function firstText(...values) {
+    for (const value of values) {
+        const text = String(value ?? '').trim();
+        if (text) return text;
+    }
+    return '';
+}
+
 class CommunityPromoBlock extends HTMLElement {
     constructor() {
         super();
         this.shadow = this.attachShadow({ mode: 'open' });
         /** @type {Record<string, unknown> | null} */
         this._data = null;
+        this._loaded = false;
     }
 
     connectedCallback() {
@@ -22,20 +33,46 @@ class CommunityPromoBlock extends HTMLElement {
      * @param {Record<string, unknown>} data — `communityPage.promo`
      */
     setData(data) {
+        this._loaded = true;
         this._data = data && typeof data === 'object' ? data : null;
         this.render();
     }
 
     render() {
+        if (!this._loaded) {
+            this.shadow.innerHTML = `
+                <style>
+                    :host {
+                        display: block;
+                        height: 100%;
+                        min-height: 220px;
+                    }
+                    ${PH_LOADER_BASE_STYLES}
+                    .community-promo-pending-loader {
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        min-height: 220px;
+                        height: 100%;
+                        background: var(--c2, #000);
+                    }
+                    .community-promo-pending-loader .ph-loader circle {
+                        stroke: var(--bg, #fff);
+                    }
+                </style>
+                ${programHeroLoaderHtml({ wrapperClass: 'community-promo-pending-loader', ariaLabel: 'Loading community promo' })}
+            `;
+            return;
+        }
         const d = this._data && typeof this._data === 'object' ? this._data : {};
         const loc =
             typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
         const headline =
             loc === 'ja'
-                ? String(d.headlineJa ?? d.headlineEn ?? '')
-                : String(d.headlineEn ?? '');
+                ? firstText(d.headlineJa, d.headlineEn)
+                : firstText(d.headlineEn, d.headlineJa);
         const sub =
-            loc === 'ja' ? String(d.sublineJa ?? d.sublineEn ?? '') : String(d.sublineEn ?? '');
+            loc === 'ja' ? firstText(d.sublineJa, d.sublineEn) : firstText(d.sublineEn, d.sublineJa);
 
         this.shadow.innerHTML = `
             <style>

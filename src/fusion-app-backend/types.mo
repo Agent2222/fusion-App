@@ -356,6 +356,58 @@ module {
         payloadJson : Text;
     };
 
+    /// Program payment summary shown in member dashboard and future Studio Finance views.
+    /// Amounts are stored in minor units (USD cents for the first implementation).
+    public type ProgramPaymentSummary = {
+        key : Text;
+        principal : Principal;
+        programId : Text;
+        applicationId : Text;
+        depositStatus : Text;
+        totalDueCents : Nat;
+        depositAmountCents : Nat;
+        totalPaidCents : Nat;
+        outstandingCents : Nat;
+        refundedCents : Nat;
+        activePlanId : ?Text;
+        updatedAt : Text;
+    };
+
+    /// Immutable-ish ledger row recorded by the integration API after Stripe verification.
+    public type ProgramPaymentLedgerRow = {
+        id : Text;
+        principal : Principal;
+        programId : Text;
+        applicationId : Text;
+        paymentType : Text;
+        amountCents : Nat;
+        currency : Text;
+        stripePaymentIntentId : Text;
+        stripeChargeId : Text;
+        stripeReceiptUrl : Text;
+        status : Text;
+        createdAt : Text;
+        dueAt : ?Text;
+    };
+
+    /// Active or historical Stripe-backed program payment plan.
+    public type ProgramPaymentPlan = {
+        id : Text;
+        principal : Principal;
+        programId : Text;
+        applicationId : Text;
+        stripeSubscriptionId : Text;
+        stripeScheduleId : Text;
+        installmentCount : Nat;
+        installmentAmountCents : Nat;
+        currency : Text;
+        status : Text;
+        startAt : Text;
+        endAt : Text;
+        createdAt : Text;
+        updatedAt : Text;
+    };
+
     // --- Profile plan: explicit names for JSON blobs (full locale trees stay in `ArtistRecord.localesJson`) ---
 
     /// Canonical per-locale payload is JSON inside `ArtistRecord.localesJson` (en/ja blocks). Motoko keeps it opaque
@@ -457,5 +509,8 @@ module {
         accountContactStable : ?[(Principal, AccountContact)];
         membershipTrialWindowStable : ?[(Principal, TrialMembershipWindow)];
         joinInviteTrialMonthsStable : ?[(Text, Nat)];
+        programPaymentSummariesStable : ?[(Text, ProgramPaymentSummary)];
+        programPaymentLedgerStable : ?[(Text, ProgramPaymentLedgerRow)];
+        programPaymentPlansStable : ?[(Text, ProgramPaymentPlan)];
     };
 };

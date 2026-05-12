@@ -45,6 +45,7 @@ import {
     adminListJoinInvitesStudio,
     adminCreateTrialJoinInviteCodeStudio,
     adminListAccountContactsForStudio,
+    adminSetAccountContactForStudio,
     adminCreateProgramApplicationAccessCodeStudio,
     adminGetJournalLayoutStudio,
     adminSetJournalLayoutStudio,
@@ -98,8 +99,10 @@ import { openSendBlastModal } from './sendBlastModal.js';
 import { openIndividualEmailModal } from './individualEmailModal.js';
 import { openApplicantEmailModal as openApplicantEmailComposer } from './applicantEmailModal.js';
 import { initEmailCampaignStudio, renderEmailCampaignStudio } from './emailCampaignStudio.js';
+import { formatStudioDate, formatStudioDateWithTitle } from '../../utils/studioDateFormat.js';
 import {
     createPaymentIntent,
+    fetchStripeAccountContactsForPrincipals,
     fetchIntegrationHealth,
     fetchStripeSubscriptionStatusByEmail,
     getIntegrationBaseUrl,
@@ -1105,12 +1108,15 @@ function renderUsers() {
                 <button type="button" class="studio-btn-primary" id="studio-users-sync-all" aria-busy="false">
                     Sync subscriptions
                 </button>
+                <button type="button" class="studio-btn-secondary" id="studio-users-load-contacts" aria-busy="false">
+                    Load contacts
+                </button>
                 <span id="studio-users-sync-msg" class="studio-muted" role="status"></span>
             </div>
             <div class="studio-table-wrap studio-table-wrap--sticky-head">
                 <table class="studio-table studio-table--dense">
-                    <thead><tr><th><span class="studio-sr-only">Health</span></th><th>Identity</th><th>Role</th><th>Status</th><th>Membership</th><th>Trial</th><th>Renews</th><th>Linked artist</th><th>Linked contact</th><th>Org</th><th>Updated</th><th class="studio-td-actions">Actions</th></tr></thead>
-                    <tbody id="studio-users-tbody"><tr><td colspan="12">Loading…</td></tr></tbody>
+                    <thead><tr><th><span class="studio-sr-only">Health</span></th><th>Identity</th><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Membership</th><th>Trial</th><th>Renews</th><th>Linked artist</th><th>Org</th><th>Updated</th><th class="studio-td-actions">Actions</th></tr></thead>
+                    <tbody id="studio-users-tbody"><tr><td colspan="13">Loading…</td></tr></tbody>
                 </table>
             </div>
         </div>
@@ -1480,7 +1486,7 @@ function openStudioArtistManageFromRow(tableRow, afterSave, hostEl, listSurface 
         const profileLink = `/profile/${encodeURIComponent(String(full.slug || ''))}`;
         const statusText = String(full.locales?.en?.status || full.status || 'Artist');
         const slugLabel = String(full.slug || full.id || '').trim();
-        const joinedAt = String(full.createdAt || full.joinedAt || '').slice(0, 10) || '—';
+        const joinedAt = formatStudioDate(full.createdAt || full.joinedAt);
         const visibility = normalizeArtistRosterVisibility(full.visibility);
         const visibilityBadgeMod =
             visibility === 'public'
@@ -1540,7 +1546,7 @@ function openStudioArtistManageFromRow(tableRow, afterSave, hostEl, listSurface 
                             <div class="studio-artist-kv"><span>Exclusive content</span><strong>${escapeHtml(String((full.locales?.en?.links || []).length || 0))}</strong></div>
                             <div class="studio-artist-kv"><span>Discussions</span><strong>—</strong></div>
                             <div class="studio-artist-kv"><span>Followers</span><strong>—</strong></div>
-                            <div class="studio-artist-kv"><span>Last active</span><strong>${escapeHtml(String(full.updatedAt || '—').slice(0, 10) || '—')}</strong></div>
+                            <div class="studio-artist-kv"><span>Last active</span><strong>${escapeHtml(formatStudioDate(full.updatedAt))}</strong></div>
                         </section>
                         <section class="studio-artist-context-card">
                             <h3>Quick Links</h3>
@@ -1551,8 +1557,8 @@ function openStudioArtistManageFromRow(tableRow, afterSave, hostEl, listSurface 
                         </section>
                         <section class="studio-artist-context-card">
                             <h3>System Info</h3>
-                            <div class="studio-artist-kv"><span>Created</span><strong>${escapeHtml(String(full.createdAt || '—').slice(0, 10) || '—')}</strong></div>
-                            <div class="studio-artist-kv"><span>Updated</span><strong>${escapeHtml(String(full.updatedAt || '—').slice(0, 10) || '—')}</strong></div>
+                            <div class="studio-artist-kv"><span>Created</span><strong>${escapeHtml(formatStudioDate(full.createdAt))}</strong></div>
+                            <div class="studio-artist-kv"><span>Updated</span><strong>${escapeHtml(formatStudioDate(full.updatedAt))}</strong></div>
                             <div class="studio-artist-kv"><span>Artist ID</span><strong>${escapeHtml(String(full.id || '—'))}</strong></div>
                         </section>
                     </aside>
@@ -1882,8 +1888,8 @@ function studioTrialStatusLabel(row) {
     if (state === 'none') return '—';
     const started = Number(row?.trialStartedAtSec);
     const ends = Number(row?.trialEndsAtSec);
-    const startTxt = Number.isFinite(started) ? new Date(started * 1000).toISOString().slice(0, 10) : '—';
-    const endTxt = Number.isFinite(ends) ? new Date(ends * 1000).toISOString().slice(0, 10) : '—';
+    const startTxt = Number.isFinite(started) ? formatStudioDate(started) : '—';
+    const endTxt = Number.isFinite(ends) ? formatStudioDate(ends) : '—';
     return state === 'active' ? `Trial active (${startTxt} -> ${endTxt})` : `Trial expired (${endTxt})`;
 }
 
@@ -1952,14 +1958,12 @@ function formatSyncAttempts(emailRes, principalRes) {
 
 /** @param {string | undefined} iso */
 function formatSubscriptionPeriodEnd(iso) {
-    if (!iso) return '—';
-    try {
-        const d = new Date(String(iso));
-        if (Number.isNaN(d.getTime())) return '—';
-        return d.toISOString().slice(0, 10);
-    } catch {
-        return '—';
-    }
+    return formatStudioDate(iso);
+}
+
+/** @param {string | undefined} iso */
+function formatStudioAccountUpdatedAt(iso) {
+    return formatStudioDateWithTitle(iso);
 }
 
 /**
@@ -2801,7 +2805,7 @@ async function initApplicants(mainEl) {
             <td>${escapeHtml(r.fullName || '')}</td>
             <td>${escapeHtml(r.programId)}</td>
             <td>${applicantStatusPillHtml(r.status)}</td>
-            <td>${escapeHtml(r.createdAt)}</td>
+            <td><span class="studio-muted" title="${escapeHtml(r.createdAt || '')}">${escapeHtml(formatStudioDate(r.createdAt))}</span></td>
             <td>${profileCell}</td>
             <td class="studio-td-actions"><button type="button" class="studio-btn-ghost studio-app-view" data-id="${escapeHtml(r.id)}">View</button></td>
             <td class="studio-td-actions"><button type="button" class="studio-btn-ghost studio-app-email" data-id="${escapeHtml(r.id)}">Send email</button></td>
@@ -2885,7 +2889,7 @@ async function initApplicants(mainEl) {
             <p><strong>Name:</strong> ${escapeHtml(r.fullName || '—')}</p>
             <p><strong>Program:</strong> ${escapeHtml(r.programId)}</p>
             <p><strong>Status:</strong> ${applicantStatusPillHtml(r.status)}</p>
-            <p><strong>Created:</strong> ${escapeHtml(r.createdAt)}</p>
+            <p><strong>Created:</strong> ${escapeHtml(formatStudioDate(r.createdAt))}</p>
             <h3 class="studio-subheading">Application</h3>
             ${appBlock}
             ${internalBlock}
@@ -5519,9 +5523,10 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
     const curStatus = row.status || 'pending';
     const exempt = !!row.membershipExemptManual;
     const stripeSt = row.stripeSubscriptionStatus || '—';
-    const renews = row.stripeCurrentPeriodEnd || '—';
+    const renews = formatSubscriptionPeriodEnd(row.stripeCurrentPeriodEnd);
     const canisterMembershipLabel = exempt ? 'Manual exempt' : String(stripeSt);
-    const accountUpdatedLabel = row.updatedAt ? escapeHtml(String(row.updatedAt).slice(0, 19)) : '—';
+    const accountUpdated = formatStudioAccountUpdatedAt(row.updatedAt);
+    const accountUpdatedLabel = escapeHtml(accountUpdated.label);
     const billingHintStored = getStoredBillingEmailForPrincipal(principal);
     const billingHintHtml =
         billingHintStored && billingHintStored.includes('@')
@@ -5959,6 +5964,7 @@ async function initUsers(mainEl) {
     const statusFilter = mainEl.querySelector('#studio-users-filter-status');
     const countHeader = mainEl.querySelector('#studio-users-header-count');
     const syncAllBtn = mainEl.querySelector('#studio-users-sync-all');
+    const loadContactsBtn = mainEl.querySelector('#studio-users-load-contacts');
     const generateTrialBtn = mainEl.querySelector('#studio-users-generate-trial-code');
     const viewCodesBtn = mainEl.querySelector('#studio-users-view-access-codes');
     const trialRoleSel = mainEl.querySelector('#studio-users-trial-role');
@@ -5968,7 +5974,7 @@ async function initUsers(mainEl) {
     let allPairs = [];
     /** @type {Map<string, string>} */
     let linkedArtistLabelById = new Map();
-    /** @type {Map<string, string>} */
+    /** @type {Map<string, { firstName: string, lastName: string, fullName: string, email: string }>} */
     let contactByPrincipal = new Map();
 
     const membershipCellHtml = (r) => {
@@ -5976,6 +5982,27 @@ async function initUsers(mainEl) {
             return escapeHtml('Exempt (manual)');
         }
         return escapeHtml(studioMembershipStatusLabel(r.stripeSubscriptionStatus));
+    };
+
+    const mapAccountContactRows = (contacts) =>
+        new Map(
+            (Array.isArray(contacts) ? contacts : []).map((row) => {
+                const p =
+                    row && row[0] && typeof row[0] === 'object' && typeof row[0].toText === 'function'
+                        ? row[0].toText()
+                        : String(row?.[0] || '');
+                const c = row?.[1] || {};
+                const firstName = String(c.firstName || '').trim();
+                const lastName = String(c.lastName || '').trim();
+                const email = String(c.email || '').trim();
+                const fullName = String(`${firstName} ${lastName}`).trim();
+                return [p, { firstName, lastName, fullName, email }];
+            })
+        );
+
+    const refreshAccountContacts = async () => {
+        const contacts = await adminListAccountContactsForStudio();
+        contactByPrincipal = mapAccountContactRows(contacts);
     };
 
     const renderTable = () => {
@@ -5993,7 +6020,7 @@ async function initUsers(mainEl) {
                 allPairs.length === 0 && !wantRole && !wantSt
                     ? 'No accounts on this canister yet.'
                     : 'No accounts match filters.';
-            tbody.innerHTML = `<tr><td colspan="12">${emptyMsg}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="13">${emptyMsg}</td></tr>`;
             return;
         }
         tbody.innerHTML = rows
@@ -6001,19 +6028,23 @@ async function initUsers(mainEl) {
                 (r) => {
                     const aid = r.linkedArtistId ? String(r.linkedArtistId) : '';
                     const linkedArtistLabel = aid ? linkedArtistLabelById.get(aid) || aid : '';
-                    const linkedContact = contactByPrincipal.get(String(r.principal || '')) || '';
+                    const contact = contactByPrincipal.get(String(r.principal || '')) || null;
+                    const contactName = contact?.fullName || [contact?.firstName, contact?.lastName].filter(Boolean).join(' ');
+                    const contactEmail = contact?.email || '';
+                    const updated = formatStudioAccountUpdatedAt(r.updatedAt);
                     return `<tr>
                 <td><span class="studio-user-sub-dot ${studioMembershipDotClass(r)}" title="Subscription health" aria-hidden="true"></span></td>
                 <td><span class="studio-identity-short" title="${escapeHtml(r.principal)}">${escapeHtml(shortPrincipalDisplay(r.principal))}</span></td>
+                <td>${contactName ? escapeHtml(contactName) : '—'}</td>
+                <td>${contactEmail ? escapeHtml(contactEmail) : '—'}</td>
                 <td>${escapeHtml(r.role)}</td>
                 <td>${escapeHtml(r.status)}</td>
                 <td>${membershipCellHtml(r)}</td>
                 <td>${escapeHtml(studioTrialStatusLabel(r))}</td>
                 <td><span class="studio-muted" title="${escapeHtml(r.stripeCurrentPeriodEnd || '')}">${escapeHtml(formatSubscriptionPeriodEnd(r.stripeCurrentPeriodEnd))}</span></td>
                 <td>${linkedArtistLabel ? escapeHtml(linkedArtistLabel) : '—'}</td>
-                <td>${linkedContact ? escapeHtml(linkedContact) : '—'}</td>
                 <td>${r.linkedOrgId ? escapeHtml(String(r.linkedOrgId)) : '—'}</td>
-                <td><span class="studio-muted" title="${escapeHtml(r.updatedAt)}">${escapeHtml(r.updatedAt ? r.updatedAt.slice(0, 19) : '—')}</span></td>
+                <td><span class="studio-muted" title="${escapeHtml(updated.title)}">${escapeHtml(updated.label)}</span></td>
                 <td><button type="button" class="studio-btn-primary studio-user-manage" data-principal="${escapeHtml(r.principal)}">Manage</button></td>
             </tr>`;
                 }
@@ -6035,7 +6066,7 @@ async function initUsers(mainEl) {
         if (typeof actor.listAccounts !== 'function') {
             if (tbody) {
                 tbody.innerHTML =
-                    '<tr><td colspan="12">listAccounts missing from declarations — run <code>dfx generate fusion-app-backend</code>.</td></tr>';
+                    '<tr><td colspan="13">listAccounts missing from declarations — run <code>dfx generate fusion-app-backend</code>.</td></tr>';
             }
             return;
         }
@@ -6056,27 +6087,13 @@ async function initUsers(mainEl) {
                 linkedArtistLabelById = new Map();
             }
             try {
-                const contacts = await adminListAccountContactsForStudio();
-                contactByPrincipal = new Map(
-                    (Array.isArray(contacts) ? contacts : []).map((row) => {
-                        const p =
-                            row && row[0] && typeof row[0] === 'object' && typeof row[0].toText === 'function'
-                                ? row[0].toText()
-                                : String(row?.[0] || '');
-                        const c = row?.[1] || {};
-                        const first = String(c.firstName || '').trim();
-                        const last = String(c.lastName || '').trim();
-                        const email = String(c.email || '').trim();
-                        const label = [String(`${first} ${last}`).trim(), email].filter(Boolean).join(' · ');
-                        return [p, label];
-                    })
-                );
+                await refreshAccountContacts();
             } catch {
                 contactByPrincipal = new Map();
             }
         } catch (listErr) {
             if (tbody) {
-                tbody.innerHTML = `<tr><td colspan="12">${escapeHtml(listErr instanceof Error ? listErr.message : String(listErr))}</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="13">${escapeHtml(listErr instanceof Error ? listErr.message : String(listErr))}</td></tr>`;
             }
             roleFilter?.addEventListener('change', renderTable);
             statusFilter?.addEventListener('change', renderTable);
@@ -6100,7 +6117,12 @@ async function initUsers(mainEl) {
                     );
                     if (syncMsg) syncMsg.textContent = 'Trial access code generated.';
                 } catch (e) {
-                    if (syncMsg) syncMsg.textContent = e instanceof Error ? e.message : String(e);
+                    const msg = e instanceof Error ? e.message : String(e);
+                    if (syncMsg) {
+                        syncMsg.textContent = /Could not allocate trial join code/i.test(msg)
+                            ? 'Could not generate a trial access code. Redeploy the backend with the latest access-code generator fix, then try again.'
+                            : msg;
+                    }
                 } finally {
                     trialBtn.disabled = false;
                 }
@@ -6134,7 +6156,7 @@ async function initUsers(mainEl) {
                         return `<div class="studio-table-wrap"><table class="studio-table studio-table--dense"><thead><tr><th>Code</th><th>Role</th><th>Created</th></tr></thead><tbody>${list
                             .map(
                                 (x) =>
-                                    `<tr><td><code>${escapeHtml(x.code)}</code></td><td>${escapeHtml(x.role || '—')}</td><td>${escapeHtml(x.createdAt ? x.createdAt.slice(0, 19) : '—')}</td></tr>`
+                                    `<tr><td><code>${escapeHtml(x.code)}</code></td><td>${escapeHtml(x.role || '—')}</td><td><span class="studio-muted" title="${escapeHtml(x.createdAt || '')}">${escapeHtml(formatStudioDate(x.createdAt))}</span></td></tr>`
                             )
                             .join('')}</tbody></table></div>`;
                     };
@@ -6192,6 +6214,89 @@ async function initUsers(mainEl) {
             });
         }
 
+        const contactsBtn = loadContactsBtn instanceof HTMLButtonElement ? loadContactsBtn : null;
+        if (contactsBtn) {
+            contactsBtn.addEventListener('click', async () => {
+                contactsBtn.disabled = true;
+                contactsBtn.setAttribute('aria-busy', 'true');
+                if (syncMsg) syncMsg.textContent = 'Loading contacts…';
+                let loaded = 0;
+                let skipped = 0;
+                let failed = 0;
+                try {
+                    if (getIntegrationBaseUrl()) {
+                        const principalList = allPairs.map((row) => row.principal).filter(Boolean);
+                        const result = await fetchStripeAccountContactsForPrincipals(principalList);
+                        const stripeContacts = Array.isArray(result.contacts) ? result.contacts : [];
+                        const stripeContactByPrincipal = new Map(
+                            stripeContacts.map((contact) => [String(contact.principal || ''), contact])
+                        );
+                        for (const row of allPairs) {
+                            const principal = String(row.principal || '').trim();
+                            if (!principal) {
+                                skipped += 1;
+                                continue;
+                            }
+                            const current = contactByPrincipal.get(principal) || {
+                                firstName: '',
+                                lastName: '',
+                                fullName: '',
+                                email: '',
+                            };
+                            const stripeContact = stripeContactByPrincipal.get(principal) || {};
+                            const stripeFullName = String(stripeContact.fullName || '').trim();
+                            const nameParts = stripeFullName.split(/\s+/).filter(Boolean);
+                            const stripeFirst = String(stripeContact.firstName || '').trim() ||
+                                (nameParts.length > 1 ? nameParts.slice(0, -1).join(' ') : stripeFullName);
+                            const stripeLast = String(stripeContact.lastName || '').trim() ||
+                                (nameParts.length > 1 ? nameParts[nameParts.length - 1] : '');
+                            const next = {
+                                firstName: current.firstName || stripeFirst,
+                                lastName: current.lastName || stripeLast,
+                                email: current.email || String(stripeContact.email || '').trim(),
+                            };
+                            if (!next.firstName && !next.lastName && !next.email) {
+                                skipped += 1;
+                                continue;
+                            }
+                            if (
+                                next.firstName === current.firstName &&
+                                next.lastName === current.lastName &&
+                                next.email === current.email
+                            ) {
+                                skipped += 1;
+                                continue;
+                            }
+                            try {
+                                await adminSetAccountContactForStudio(principal, next);
+                                loaded += 1;
+                            } catch {
+                                failed += 1;
+                            }
+                        }
+                        failed += Array.isArray(result.failures) ? result.failures.length : 0;
+                    } else {
+                        skipped = allPairs.length;
+                    }
+                    try {
+                        await refreshAccountContacts();
+                    } catch {
+                        failed += 1;
+                    }
+                    renderTable();
+                    if (syncMsg) {
+                        const noIntegration = getIntegrationBaseUrl() ? '' : ' Integration API URL is not set; refreshed saved canister contacts only.';
+                        syncMsg.textContent = `Contacts loaded: ${loaded} saved, ${skipped} skipped, ${failed} failed.${noIntegration}`;
+                    }
+                } catch (e) {
+                    if (syncMsg) syncMsg.textContent = e instanceof Error ? e.message : String(e);
+                } finally {
+                    contactsBtn.disabled = false;
+                    contactsBtn.setAttribute('aria-busy', 'false');
+                }
+            });
+        }
+
         const syncBtn = syncAllBtn instanceof HTMLButtonElement ? syncAllBtn : null;
         if (syncBtn) {
             syncBtn.disabled = !getIntegrationBaseUrl();
@@ -6231,7 +6336,7 @@ async function initUsers(mainEl) {
         }
     } catch (e) {
         if (tbody) {
-            tbody.innerHTML = `<tr><td colspan="12">${escapeHtml(e instanceof Error ? e.message : String(e))}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="13">${escapeHtml(e instanceof Error ? e.message : String(e))}</td></tr>`;
         }
     }
 }

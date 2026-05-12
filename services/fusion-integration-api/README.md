@@ -45,7 +45,7 @@ stripe listen --forward-to localhost:8787/webhooks/stripe
 | `AWS_SECRET_ACCESS_KEY` | with access key above | IAM secret key |
 | `AWS_SESSION_TOKEN` | optional | Only if using temporary credentials (STS) |
 | `S3_PUBLIC_BASE_URL` | no | Public base for object URLs (default: virtual-hosted–style S3 URL) |
-| `S3_KEY_PREFIX` | no | Prefix for keys (default `uploads/`) |
+| `S3_KEY_PREFIX` | no | Prefix for keys (default `fusionMedia/uploads/`) |
 | `FUSION_SIGNATURE_LOGO_URL` | no | If set, integration server rewrites `https://…/email/Fusion-X-logo-02.png` (and legacy `Fusion-Logo-Sig-1.png`) in HTML email bodies to this URL (e.g. CDN) for test/batch send |
 
 ## Scripts
