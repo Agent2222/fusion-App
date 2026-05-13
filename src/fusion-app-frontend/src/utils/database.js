@@ -2002,6 +2002,26 @@ export async function getMyProgramPayments() {
 }
 
 /**
+ * Persist the applicant's travel pricing choice for a program payment.
+ * @param {{ programId: string, applicationId?: string, ownFlight: boolean }} opts
+ * @returns {Promise<void>}
+ */
+export async function setMyProgramPaymentFlightPreference(opts) {
+    if (getDataSource() === 'test') return;
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.setMyProgramPaymentFlightPreference !== 'function') {
+        throw new Error('Program flight preference API is not available. Regenerate declarations after backend deploy.');
+    }
+    await actor.setMyProgramPaymentFlightPreference(
+        String(opts.programId || '').trim(),
+        String(opts.applicationId || '').trim(),
+        Boolean(opts.ownFlight),
+        new Date().toISOString()
+    );
+}
+
+/**
  * Create a minimal linked roster row when membership allows (`#ok` / `#exempt`). Idempotent.
  * Test mode: creates a local overlay artist and selects it when none is selected.
  * @returns {Promise<'ok' | 'alreadyLinked' | 'needsSubscription' | 'noAccount'>}

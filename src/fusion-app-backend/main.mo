@@ -66,6 +66,7 @@ persistent actor {
   stable var programPaymentSummariesStable : [(Text, Types.ProgramPaymentSummary)] = [];
   stable var programPaymentLedgerStable : [(Text, Types.ProgramPaymentLedgerRow)] = [];
   stable var programPaymentPlansStable : [(Text, Types.ProgramPaymentPlan)] = [];
+  var programPaymentFlightPreferencesStable : [(Text, Types.ProgramPaymentFlightPreference)] = [];
   stable var siteSettingsStable : [(Text, Text)] = [];
 
   /// Join invite codes (8-digit) — admin-generated; deactivated after first successful redemption.
@@ -204,6 +205,9 @@ persistent actor {
   transient var programPaymentPlansById : _HashMap.HashMap<Text, Types.ProgramPaymentPlan> =
     _HashMap.HashMap<Text, Types.ProgramPaymentPlan>(0, Text.equal, Text.hash);
 
+  transient var programPaymentFlightPreferencesByKey : _HashMap.HashMap<Text, Types.ProgramPaymentFlightPreference> =
+    _HashMap.HashMap<Text, Types.ProgramPaymentFlightPreference>(0, Text.equal, Text.hash);
+
   transient var siteSettingsByKey : _HashMap.HashMap<Text, Text> =
     _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
 
@@ -330,6 +334,9 @@ persistent actor {
   };
   for (entry in programPaymentPlansStable.vals()) {
     programPaymentPlansById.put(entry.0, entry.1);
+  };
+  for (entry in programPaymentFlightPreferencesStable.vals()) {
+    programPaymentFlightPreferencesByKey.put(entry.0, entry.1);
   };
 
   for (entry in artistsStable.vals()) {
@@ -1123,6 +1130,7 @@ persistent actor {
     programPaymentSummariesStable := _Iter.toArray(programPaymentSummariesByKey.entries());
     programPaymentLedgerStable := _Iter.toArray(programPaymentLedgerById.entries());
     programPaymentPlansStable := _Iter.toArray(programPaymentPlansById.entries());
+    programPaymentFlightPreferencesStable := _Iter.toArray(programPaymentFlightPreferencesByKey.entries());
     siteSettingsStable := _Iter.toArray(siteSettingsByKey.entries());
     applicationByArtistProgramStable := _Iter.toArray(applicationByArtistProgram.entries());
     artistMostRecentProgramStable := _Iter.toArray(mostRecentProgramByArtistId.entries());
@@ -1318,6 +1326,12 @@ persistent actor {
     };
     programPaymentPlansStable := [];
 
+    programPaymentFlightPreferencesByKey := _HashMap.HashMap<Text, Types.ProgramPaymentFlightPreference>(0, Text.equal, Text.hash);
+    for (entry in programPaymentFlightPreferencesStable.vals()) {
+      programPaymentFlightPreferencesByKey.put(entry.0, entry.1);
+    };
+    programPaymentFlightPreferencesStable := [];
+
     siteSettingsByKey := _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
     for (entry in siteSettingsStable.vals()) {
       siteSettingsByKey.put(entry.0, entry.1);
@@ -1488,6 +1502,11 @@ persistent actor {
       programPaymentPlansById.put(entry.0, entry.1);
     };
 
+    programPaymentFlightPreferencesByKey := _HashMap.HashMap<Text, Types.ProgramPaymentFlightPreference>(0, Text.equal, Text.hash);
+    for (entry in programPaymentFlightPreferencesStable.vals()) {
+      programPaymentFlightPreferencesByKey.put(entry.0, entry.1);
+    };
+
     siteSettingsByKey := _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
     for (entry in siteSettingsStable.vals()) {
       siteSettingsByKey.put(entry.0, entry.1);
@@ -1558,6 +1577,7 @@ persistent actor {
       programPaymentSummariesStable = ?(_Iter.toArray(programPaymentSummariesByKey.entries()));
       programPaymentLedgerStable = ?(_Iter.toArray(programPaymentLedgerById.entries()));
       programPaymentPlansStable = ?(_Iter.toArray(programPaymentPlansById.entries()));
+      programPaymentFlightPreferencesStable = ?(_Iter.toArray(programPaymentFlightPreferencesByKey.entries()));
       siteSettingsStable = _Iter.toArray(siteSettingsByKey.entries());
       applicationByArtistProgramStable = _Iter.toArray(applicationByArtistProgram.entries());
       artistMostRecentProgramStable = _Iter.toArray(mostRecentProgramByArtistId.entries());
@@ -1610,6 +1630,10 @@ persistent actor {
       case (?rows) { rows };
     };
     programPaymentPlansStable := switch (snapshot.programPaymentPlansStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    programPaymentFlightPreferencesStable := switch (snapshot.programPaymentFlightPreferencesStable) {
       case null { [] };
       case (?rows) { rows };
     };
@@ -2292,6 +2316,15 @@ persistent actor {
     };
   };
 
+  private func jsonBool(v : Bool) : Text {
+    if (v) { "true" } else { "false" };
+  };
+
+  private func natSubFloor(a : Nat, b : Nat) : Nat {
+    let diff : Int = (a : Int) - (b : Int);
+    if (diff > 0) { Int.abs(diff) } else { 0 };
+  };
+
   private func applicantStatusText(status : Types.ApplicantStatus) : Text {
     switch (status) {
       case (#pending) { "pending" };
@@ -2339,18 +2372,51 @@ persistent actor {
     out # "]";
   };
 
+  private func hasAcceptedApplicantForProgram(p : Principal, programId : Text) : Bool {
+    let aid = switch (accountLinkedArtistId(p)) {
+      case null { return false };
+      case (?id) { id };
+    };
+    let prefix = aid # "|";
+    for ((_, rec) in applicantsById.entries()) {
+      if (Text.startsWith(rec.id, #text prefix) and rec.programId == programId) {
+        switch (rec.status) {
+          case (#accepted) { return true };
+          case _ {};
+        };
+      };
+    };
+    false;
+  };
+
   private func programPaymentSummaryJson(s : Types.ProgramPaymentSummary) : Text {
+    let flightPreference = programPaymentFlightPreferencesByKey.get(s.key);
+    let ownFlight = switch (flightPreference) {
+      case null { false };
+      case (?pref) { pref.ownFlight };
+    };
+    let flightCreditCents = switch (flightPreference) {
+      case null { 0 };
+      case (?pref) { pref.flightCreditCents };
+    };
+    let effectiveTotalDueCents = switch (flightPreference) {
+      case null { s.totalDueCents };
+      case (?pref) { pref.totalDueCents };
+    };
+    let effectiveOutstandingCents = natSubFloor(effectiveTotalDueCents, s.totalPaidCents);
     "{"
       # "\"key\":" # jsonText(s.key)
       # ",\"principal\":" # jsonText(Principal.toText(s.principal))
       # ",\"programId\":" # jsonText(s.programId)
       # ",\"applicationId\":" # jsonText(s.applicationId)
       # ",\"depositStatus\":" # jsonText(s.depositStatus)
-      # ",\"totalDueCents\":" # Nat.toText(s.totalDueCents)
+      # ",\"totalDueCents\":" # Nat.toText(effectiveTotalDueCents)
       # ",\"depositAmountCents\":" # Nat.toText(s.depositAmountCents)
       # ",\"totalPaidCents\":" # Nat.toText(s.totalPaidCents)
-      # ",\"outstandingCents\":" # Nat.toText(s.outstandingCents)
+      # ",\"outstandingCents\":" # Nat.toText(effectiveOutstandingCents)
       # ",\"refundedCents\":" # Nat.toText(s.refundedCents)
+      # ",\"ownFlight\":" # jsonBool(ownFlight)
+      # ",\"flightCreditCents\":" # Nat.toText(flightCreditCents)
       # ",\"activePlanId\":" # optJsonText(s.activePlanId)
       # ",\"updatedAt\":" # jsonText(s.updatedAt)
       # "}";
@@ -2457,6 +2523,187 @@ persistent actor {
     membershipByPrincipal.put(memberPrincipal, m1);
   };
 
+  private func addUniqueNat(xs : [Nat], value : Nat) : [Nat] {
+    if (value == 0) {
+      return xs;
+    };
+    for (x in xs.vals()) {
+      if (x == value) {
+        return xs;
+      };
+    };
+    let b = Buffer.Buffer<Nat>(xs.size() + 1);
+    for (x in xs.vals()) {
+      b.add(x);
+    };
+    b.add(value);
+    Buffer.toArray(b);
+  };
+
+  private func programCohortYear(programId : Text) : Nat {
+    switch (programsById.get(programId)) {
+      case null { 0 };
+      case (?program) {
+        switch (Nat.fromText(extractJsonStringField(program.localesJson, "year"))) {
+          case (?n) { n };
+          case null { 0 };
+        };
+      };
+    };
+  };
+
+  private func markArtistConfirmedForProgram(memberPrincipal : Principal, programId : Text, updatedAt : Text) {
+    let artistId = switch (accountLinkedArtistId(memberPrincipal)) {
+      case null { return };
+      case (?id) { id };
+    };
+    switch (artistsById.get(artistId)) {
+      case null { return };
+      case (?rec) {
+        mostRecentProgramByArtistId.put(artistId, programId);
+        let year = programCohortYear(programId);
+        if (year > 0) {
+          let currentYears = switch (artistFilterCohortYearsById.get(artistId)) {
+            case null { [] };
+            case (?ys) { ys };
+          };
+          artistFilterCohortYearsById.put(artistId, addUniqueNat(currentYears, year));
+          let filter = switch (rec.profile.filter) {
+            case (?f) { ?f };
+            case null {
+              ?{
+                connection = "";
+                cohortYear = year;
+                disciplineKey = "";
+                locationKey = "";
+              };
+            };
+          };
+          let profile = { rec.profile with filter = filter; updatedAt = updatedAt };
+          putArtistRecord({ rec with profile = profile });
+        } else {
+          let profile = { rec.profile with updatedAt = updatedAt };
+          putArtistRecord({ rec with profile = profile });
+        };
+      };
+    };
+  };
+
+  public shared query (msg) func integrationGetProgram(programId : Text) : async ?Types.ProgramRecord {
+    assertIntegrationCaller(msg.caller);
+    programsById.get(programId);
+  };
+
+  public shared query (msg) func integrationGetArtistConfirmationName(memberPrincipal : Principal) : async ?Text {
+    assertIntegrationCaller(msg.caller);
+    let artistId = switch (accountLinkedArtistId(memberPrincipal)) {
+      case null { return null };
+      case (?id) { id };
+    };
+    switch (artistsById.get(artistId)) {
+      case null { null };
+      case (?rec) {
+        switch (rec.localesJson) {
+          case (?json) {
+            let name = extractJsonStringField(json, "name");
+            if (name.size() > 0) { ?name } else { ?artistId };
+          };
+          case null { ?artistId };
+        };
+      };
+    };
+  };
+
+  public shared (msg) func integrationSetProgramLocalesJson(programId : Text, localesJson : Text, updatedAt : Text) : async () {
+    assertIntegrationCaller(msg.caller);
+    switch (programsById.get(programId)) {
+      case null { Debug.trap("Unknown program id") };
+      case (?program) {
+        programsById.put(programId, { program with localesJson = localesJson; updatedAt = updatedAt });
+      };
+    };
+  };
+
+  private func putProgramPaymentFlightPreference(
+    memberPrincipal : Principal,
+    programId : Text,
+    applicationId : Text,
+    ownFlight : Bool,
+    flightCreditCents : Nat,
+    totalDueCents : Nat,
+    updatedAt : Text,
+    allowLocked : Bool,
+  ) {
+    let key = programPaymentKey(memberPrincipal, programId);
+    switch (programPaymentSummariesByKey.get(key)) {
+      case (?summary) {
+        if (not allowLocked and (summary.totalPaidCents > 0 or summary.activePlanId != null)) {
+          Debug.trap("Flight preference is locked after payment activity starts");
+        };
+      };
+      case null {};
+    };
+    let pref : Types.ProgramPaymentFlightPreference = {
+      key = key;
+      principal = memberPrincipal;
+      programId = programId;
+      applicationId = applicationId;
+      ownFlight = ownFlight;
+      flightCreditCents = flightCreditCents;
+      totalDueCents = totalDueCents;
+      updatedAt = updatedAt;
+    };
+    programPaymentFlightPreferencesByKey.put(key, pref);
+    switch (programPaymentSummariesByKey.get(key)) {
+      case null {
+        programPaymentSummariesByKey.put(key, {
+          key = key;
+          principal = memberPrincipal;
+          programId = programId;
+          applicationId = applicationId;
+          depositStatus = "due";
+          totalDueCents = totalDueCents;
+          depositAmountCents = 100000;
+          totalPaidCents = 0;
+          outstandingCents = totalDueCents;
+          refundedCents = 0;
+          activePlanId = null;
+          updatedAt = updatedAt;
+        });
+      };
+      case (?summary) {
+        let outstanding = natSubFloor(totalDueCents, summary.totalPaidCents);
+        programPaymentSummariesByKey.put(key, {
+          summary with
+          applicationId = applicationId;
+          totalDueCents = totalDueCents;
+          outstandingCents = outstanding;
+          updatedAt = updatedAt;
+        });
+      };
+    };
+  };
+
+  public shared (msg) func setMyProgramPaymentFlightPreference(
+    programId : Text,
+    applicationId : Text,
+    ownFlight : Bool,
+    updatedAt : Text,
+  ) : async () {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      Debug.trap("Authentication required");
+    };
+    if (programId.size() == 0) {
+      Debug.trap("programId required");
+    };
+    if (not hasAcceptedApplicantForProgram(msg.caller, programId)) {
+      Debug.trap("Accepted program application required");
+    };
+    let flightCreditCents = if (ownFlight) { 80000 } else { 0 };
+    let totalDueCents = if (ownFlight) { 420000 } else { 500000 };
+    putProgramPaymentFlightPreference(msg.caller, programId, applicationId, ownFlight, flightCreditCents, totalDueCents, updatedAt, false);
+  };
+
   private func putProgramPaymentSummaryFromLedger(
     row : Types.ProgramPaymentLedgerRow,
     totalDueCents : Nat,
@@ -2480,7 +2727,7 @@ persistent actor {
         0
       };
     let nextPaid = priorPaid + paidDelta;
-    let outstanding = if (totalDueCents > nextPaid) { totalDueCents - nextPaid } else { 0 };
+    let outstanding = natSubFloor(totalDueCents, nextPaid);
     let depositStatus =
       if ((row.paymentType == "deposit" or row.paymentType == "full_payment") and paidDelta > 0) {
         "paid"
@@ -2512,6 +2759,8 @@ persistent actor {
     totalDueCents : Nat,
     depositAmountCents : Nat,
     refundedCents : Nat,
+    ownFlight : Bool,
+    flightCreditCents : Nat,
   ) : async () {
     assertIntegrationCaller(msg.caller);
     if (row.id.size() == 0 or row.programId.size() == 0) {
@@ -2522,6 +2771,7 @@ persistent actor {
       case null {};
     };
     programPaymentLedgerById.put(row.id, row);
+    putProgramPaymentFlightPreference(row.principal, row.programId, row.applicationId, ownFlight, flightCreditCents, totalDueCents, row.createdAt, true);
     putProgramPaymentSummaryFromLedger(row, totalDueCents, depositAmountCents, refundedCents);
   };
 
@@ -2534,6 +2784,7 @@ persistent actor {
   ) : async () {
     assertIntegrationCaller(msg.caller);
     setProgramMemberExempt(memberPrincipal, true);
+    markArtistConfirmedForProgram(memberPrincipal, programId, updatedAt);
     let key = programPaymentKey(memberPrincipal, programId);
     let prior = switch (programPaymentSummariesByKey.get(key)) {
       case null {

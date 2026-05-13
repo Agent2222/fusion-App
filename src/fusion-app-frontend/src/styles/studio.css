@@ -3717,6 +3717,253 @@ a.studio-app-payload-link:hover {
   max-width: 100%;
 }
 
+/* Applicant email composer (Applicants → Send email) */
+.studio-modal-panel--wide:has(.studio-applicant-email-composer) {
+  width: min(96vw, 78rem);
+  max-width: 78rem;
+}
+
+.studio-applicant-email-composer {
+  display: grid;
+  gap: 0;
+  margin: -0.25rem -0.25rem 0;
+  color: var(--c2, #0f172a);
+}
+
+.studio-applicant-email-composer__layout {
+  display: grid;
+  grid-template-columns: minmax(14rem, 0.78fr) minmax(24rem, 1.45fr) minmax(15rem, 0.82fr);
+  gap: 0.85rem;
+  align-items: stretch;
+}
+
+.studio-applicant-email-composer__rail,
+.studio-applicant-email-composer__editor,
+.studio-applicant-email-composer__review {
+  min-width: 0;
+}
+
+.studio-applicant-email-composer__rail,
+.studio-applicant-email-composer__review {
+  display: grid;
+  align-content: start;
+  gap: 0.75rem;
+}
+
+.studio-applicant-email-composer__editor,
+.studio-applicant-email-composer__card {
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+}
+
+.studio-applicant-email-composer__editor {
+  display: grid;
+  gap: 0.8rem;
+  padding: 1rem;
+}
+
+.studio-applicant-email-composer__card {
+  padding: 0.9rem;
+}
+
+.studio-applicant-email-composer__editor-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: start;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  padding-bottom: 0.75rem;
+}
+
+.studio-applicant-email-composer__editor-head h3,
+.studio-applicant-email-composer__applicant-card h3 {
+  margin: 0;
+  color: var(--c2, #0f172a);
+  font-size: 1.02rem;
+  line-height: 1.15;
+  font-variation-settings: var(--fv-subtitle);
+}
+
+.studio-applicant-email-composer__eyebrow {
+  margin: 0 0 0.35rem;
+  color: rgba(15, 23, 42, 0.58);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+  font-variation-settings: var(--fv-label);
+}
+
+.studio-applicant-email-composer__hint {
+  margin: 0.6rem 0 0;
+  color: var(--studio-muted, #64748b);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.studio-applicant-email-composer__meta {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.8rem 0 0;
+}
+
+.studio-applicant-email-composer__meta div {
+  display: grid;
+  gap: 0.12rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.studio-applicant-email-composer__meta dt {
+  color: var(--studio-muted, #64748b);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.studio-applicant-email-composer__meta dd {
+  margin: 0;
+  color: var(--c2, #0f172a);
+  font-size: 0.84rem;
+  line-height: 1.3;
+}
+
+.studio-applicant-email-composer__field {
+  margin: 0;
+}
+
+.studio-applicant-email-composer__field > span {
+  color: var(--c2, #0f172a);
+  font-size: 0.75rem;
+  font-variation-settings: var(--fv-label);
+}
+
+.studio-applicant-email-composer__field > span em {
+  color: var(--studio-muted, #64748b);
+  font-style: normal;
+  font-variation-settings: var(--fv-body);
+}
+
+.studio-applicant-email-composer__button-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+}
+
+.studio-applicant-email-composer__button-grid .studio-btn-secondary,
+.studio-applicant-email-composer__button-grid .studio-btn-ghost,
+.studio-applicant-email-composer__review .studio-btn-secondary,
+.studio-applicant-email-composer__signature-card .studio-btn-ghost {
+  min-height: 2rem;
+  padding: 0.42rem 0.68rem;
+  font-size: 0.74rem;
+}
+
+.studio-applicant-email-composer__message-field {
+  min-height: 0;
+}
+
+.studio-textarea.studio-individual-email__body {
+  min-height: clamp(18rem, 46vh, 30rem);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  font-size: 0.88rem;
+}
+
+.studio-applicant-email-composer__quick-draft {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.65rem;
+  align-items: end;
+}
+
+.studio-applicant-email-composer__card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.studio-applicant-email-composer__signature-card .studio-send-blast-sig-preview {
+  margin-top: 0.6rem;
+  max-height: 13rem;
+  overflow: auto;
+  border-radius: 10px;
+  background: rgba(248, 250, 252, 0.78);
+}
+
+.studio-applicant-email-composer__signature-card .studio-send-blast-sig-editor {
+  margin-top: 0.65rem;
+}
+
+.studio-applicant-email-composer__dock {
+  position: sticky;
+  bottom: -1rem;
+  z-index: 2;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin: 1rem -1.25rem -1.25rem;
+  padding: 0.85rem 1.25rem;
+  border-top: 1px solid rgba(15, 23, 42, 0.1);
+  background: color-mix(in srgb, var(--c3, #fff) 92%, var(--c5, #f5efe5));
+}
+
+.studio-applicant-email-composer__dock .studio-send-blast-foot-status {
+  margin: 0;
+  min-height: 1.2rem;
+}
+
+.studio-applicant-email-composer__dock-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  justify-content: flex-end;
+}
+
+.studio-applicant-email-composer__dock-actions .studio-btn-primary,
+.studio-applicant-email-composer__dock-actions .studio-btn-ghost {
+  min-height: 2.35rem;
+  padding: 0.55rem 1rem;
+}
+
+@media (max-width: 1100px) {
+  .studio-applicant-email-composer__layout {
+    grid-template-columns: 1fr;
+  }
+
+  .studio-applicant-email-composer__rail,
+  .studio-applicant-email-composer__review {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .studio-applicant-email-composer__rail,
+  .studio-applicant-email-composer__review,
+  .studio-applicant-email-composer__quick-draft {
+    grid-template-columns: 1fr;
+  }
+
+  .studio-applicant-email-composer__dock {
+    display: grid;
+    margin-left: -1rem;
+    margin-right: -1rem;
+  }
+
+  .studio-applicant-email-composer__dock-actions {
+    justify-content: stretch;
+  }
+
+  .studio-applicant-email-composer__dock-actions > button {
+    flex: 1;
+  }
+}
+
 /* Artists / Status tables: Email column action */
 .studio-td-email {
   white-space: nowrap;

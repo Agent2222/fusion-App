@@ -2900,7 +2900,7 @@ async function initApplicants(mainEl) {
     const openApplicantEmailModal = (id) => {
         const r = allRows.find((x) => x.id === id);
         if (!r) return;
-        openApplicantEmailComposer(r, { onSent: reload });
+        void openApplicantEmailComposer(r, { onSent: reload });
     };
 
     const openApplicantModal = (id) => {
@@ -2969,7 +2969,7 @@ async function initApplicants(mainEl) {
         };
 
         root.querySelector('#studio-app-modal-send-email')?.addEventListener('click', () => {
-            openApplicantEmailComposer(r, { onSent: reload });
+            void openApplicantEmailComposer(r, { onSent: reload });
         });
         sel?.addEventListener('change', () => {
             if (!(sel instanceof HTMLSelectElement)) return;
@@ -3001,7 +3001,7 @@ async function initApplicants(mainEl) {
                     close();
                     await reload();
                     const fresh = allRows.find((x) => x.id === r.id);
-                    if (fresh) openApplicantEmailComposer(fresh, { onSent: reload });
+                    if (fresh) void openApplicantEmailComposer(fresh, { onSent: reload });
                 } catch (e) {
                     alert(e instanceof Error ? e.message : String(e));
                 }

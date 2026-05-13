@@ -25,6 +25,7 @@ import {
   unwrapOpt,
   getApplicationPaymentGlobal,
   getMyProgramPayments,
+  setMyProgramPaymentFlightPreference,
 } from "../utils/database.js";
 import { withSeoImageAlt } from "../utils/mediaAltSeo.js";
 import {
@@ -61,6 +62,9 @@ import myProgramsIconUrl from "../assets/icons/fusion_dashboard_svg_icons/my-pro
 import paymentsIconUrl from "../assets/icons/fusion_dashboard_svg_icons/payments.svg";
 import manualPaymentIconUrl from "../assets/icons/fusion_dashboard_svg_icons/manual-payment.svg";
 import paymentPlanIconUrl from "../assets/icons/fusion_dashboard_svg_icons/payment-plan.svg";
+import receiptDownloadIconUrl from "../assets/icons/fusion_dashboard_svg_icons/receipt-download.svg";
+import warningIconUrl from "../assets/icons/fusion_dashboard_svg_icons/warning.svg";
+import flightIconUrl from "../assets/icons/flight-icon.png";
 
 function mpdEscapeAttr(value) {
   return String(value ?? "")
@@ -1384,9 +1388,9 @@ function mpdApplicationMaterialRows(payload) {
       label: "Personal statement",
       submitted: hasText("statement", "personalStatement", "artistStatement", "bio"),
     },
-    { label: "Artist CV", submitted: hasText("cv", "cvUrl", "resume", "resumeUrl") },
+    { label: "Artist profile", submitted: true },
     { label: "Portfolio", submitted: hasPortfolio },
-    { label: "References", submitted: hasText("references", "reference", "referrals") },
+    { label: "Travel documents", submitted: hasText("travelDocuments", "travelDocument", "passport", "passportUrl") },
   ];
 }
 
@@ -1462,7 +1466,7 @@ function renderMpdMyProgramCard(item) {
           <div class="mpd-my-program-card__facts">
             ${item.focus ? `<p><strong>Program:</strong> ${escapeHtmlMpd(item.focus)}</p>` : ""}
             ${item.openTo ? `<p><strong>Open to:</strong> ${escapeHtmlMpd(item.openTo)}</p>` : ""}
-            ${item.deadline ? `<p><strong>Deadline:</strong> ${escapeHtmlMpd(item.deadline)}</p>` : ""}
+            ${item.deadline ? `<p><strong>Dates:</strong> ${escapeHtmlMpd(item.deadline)}</p>` : ""}
           </div>
         </div>
       </div>
@@ -1539,28 +1543,9 @@ function mpdParseUsdCents(value) {
   return Math.round(Number(m[1]) * 100);
 }
 
-function mpdCollectMoneyTexts(value, out = []) {
-  if (value == null) return out;
-  if (typeof value === "string") {
-    if (/\$\s*\d|USD/i.test(value)) out.push(value);
-    return out;
-  }
-  if (Array.isArray(value)) {
-    value.forEach((x) => mpdCollectMoneyTexts(x, out));
-    return out;
-  }
-  if (typeof value === "object") {
-    Object.values(value).forEach((x) => mpdCollectMoneyTexts(x, out));
-  }
-  return out;
-}
-
-function mpdProgramTotalDueCents(program, depositCents) {
-  const candidates = mpdCollectMoneyTexts(program)
-    .map(mpdParseUsdCents)
-    .filter((n) => n > 0);
-  return Math.max(depositCents, ...candidates, 0);
-}
+const MPD_PROGRAM_BASE_TOTAL_CENTS = 500000;
+const MPD_PROGRAM_OWN_FLIGHT_CREDIT_CENTS = 80000;
+const MPD_PROGRAM_DEFAULT_DEPOSIT_CENTS = 100000;
 
 function mpdDateMonthsUntil(startText) {
   const d = new Date(String(startText || ""));
@@ -1594,15 +1579,21 @@ function normalizeMpdProgramPaymentViewModels(programs, payments) {
       const imageAlt = firstNonEmptyString(en.imageAlt, focus, title);
       const startText = firstNonEmptyString(en.startDate, en.start, en.programStart, en.programPage?.startDate);
       const depositDisplay = firstNonEmptyString(program.depositAmountDisplay, en.depositAmountDisplay, en.programPage?.applicationForm?.depositAmountDisplay);
-      const depositCents = mpdParseUsdCents(depositDisplay);
-      const totalDueCents = mpdProgramTotalDueCents(program, depositCents);
+      const depositCents = mpdParseUsdCents(depositDisplay) || MPD_PROGRAM_DEFAULT_DEPOSIT_CENTS;
       const summary = mpdPaymentSummaryFor(programId, payments);
+      const ownFlight = summary?.ownFlight === true || String(summary?.ownFlight || "").toLowerCase() === "true";
+      const baseTotalDueCents = MPD_PROGRAM_BASE_TOTAL_CENTS;
+      const flightCreditCents = ownFlight ? MPD_PROGRAM_OWN_FLIGHT_CREDIT_CENTS : 0;
+      const totalDueCents = ownFlight
+        ? Math.max(0, baseTotalDueCents - flightCreditCents)
+        : baseTotalDueCents;
       const totalPaidCents = mpdCents(summary?.totalPaidCents);
       const outstandingCents = summary ? mpdCents(summary.outstandingCents) : Math.max(0, totalDueCents - totalPaidCents);
       const activePlan = mpdPaymentPlanFor(summary?.activePlanId, payments);
       const ledger = (payments.ledger || [])
         .filter((x) => String(x.programId || "") === programId)
         .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+      const paymentStarted = totalPaidCents > 0 || ledger.length > 0 || Boolean(activePlan);
       return {
         programId,
         applicationId: String(approval.applicationId || ""),
@@ -1614,6 +1605,9 @@ function normalizeMpdProgramPaymentViewModels(programs, payments) {
         startText,
         email: String(approval.email || ""),
         depositCents,
+        baseTotalDueCents,
+        ownFlight,
+        flightCreditCents,
         totalDueCents,
         totalPaidCents,
         outstandingCents,
@@ -1621,6 +1615,7 @@ function normalizeMpdProgramPaymentViewModels(programs, payments) {
         depositPaid: ["paid", "paid_full"].includes(String(summary?.depositStatus || "")) || totalPaidCents > 0,
         paidInFull: outstandingCents <= 0 && totalDueCents > 0,
         activePlan,
+        paymentStarted,
         ledger,
         summary,
       };
@@ -1667,6 +1662,46 @@ function renderMpdPaymentHistory(item) {
   `;
 }
 
+function renderMpdFlightChoiceSection(item) {
+  if (!item) return "";
+  const locked = Boolean(item.paymentStarted);
+  const option = (ownFlight) => {
+    const selected = item.ownFlight === ownFlight;
+    const title = ownFlight ? "Yes, I’ll get my own flight" : "No, I need flight support";
+    const badge = ownFlight ? "$800 credit" : "No credit applied";
+    const copy = ownFlight
+      ? "Applied to your total residency price."
+      : "We’ll follow up with flight options and support.";
+    return `<button type="button" class="mpd-flight-option ${selected ? "is-selected" : ""}" data-mpd-flight-choice="${ownFlight ? "own" : "support"}" aria-pressed="${selected ? "true" : "false"}" ${locked ? "disabled" : ""}>
+      <span class="mpd-flight-option__icon" aria-hidden="true"><img src="${mpdEscapeAttr(flightIconUrl)}" alt="" /></span>
+      <span class="mpd-flight-option__copy">
+        <strong>${escapeHtmlMpd(title)}</strong>
+        <small>${escapeHtmlMpd(copy)}</small>
+      </span>
+      <span class="mpd-flight-option__badge">${escapeHtmlMpd(badge)}</span>
+    </button>`;
+  };
+  return `<section class="mpd-flight-choice-card ${locked ? "is-locked" : ""}" aria-label="Flight pricing choice">
+    <div class="mpd-flight-choice-card__head">
+      <div class="mpd-flight-choice-card__icon" aria-hidden="true"><img src="${mpdEscapeAttr(flightIconUrl)}" alt="" /></div>
+      <div>
+        <p class="mpd-payments-eyebrow">Travel support</p>
+        <h3>Will you be getting your own flight?</h3>
+        <p class="studio-muted">This helps us tailor the information and support we provide.</p>
+      </div>
+    </div>
+    <div class="mpd-flight-options">
+      ${option(true)}
+      ${option(false)}
+    </div>
+    <div class="mpd-flight-choice-card__note">
+      <strong>${item.ownFlight ? "Flight credit applied" : "No flight credit applied"}</strong>
+      <span>${item.ownFlight ? "The $800 credit will be applied to your balance once you confirm your program slot." : "Total residency price remains $5,000 when Fusion provides flight support."}</span>
+      ${locked ? `<em>Flight choice is locked after payment activity starts.</em>` : ""}
+    </div>
+  </section>`;
+}
+
 function renderMpdPaymentsWorkspace() {
   const root = document.getElementById("mpd_program_payments_workspace");
   const tab = document.getElementById("mpd-program-tab-payments");
@@ -1691,6 +1726,7 @@ function renderMpdPaymentsWorkspace() {
   root.innerHTML = `
     <div class="mpd-payments-shell">
       ${renderMpdProgramPaymentPills(items)}
+      ${renderMpdFlightChoiceSection(item)}
       ${
         !item.depositPaid
           ? `<div class="mpd-payment-choice-grid">
@@ -1709,16 +1745,16 @@ function renderMpdPaymentsWorkspace() {
                 </div>
               </article>
               <div class="mpd-payment-choice-stack">
-                <article class="mpd-payment-choice">
-                  <span class="mpd-payment-choice__label">Deposit</span>
-                  <h4>${mpdUsd(item.depositCents)}</h4>
+                <article class="mpd-payment-choice mpd-payment-choice--deposit">
+                  <h4>Deposit</h4>
+                  <span class="mpd-payment-choice__amount">${mpdUsd(item.depositCents)}</span>
                   <p class="studio-muted">Secure your accepted program slot today. Remaining balance can be paid later.</p>
                   <button type="button" class="studio-btn-primary" data-mpd-payment-action="deposit" ${canCharge ? "" : "disabled"}>Pay deposit</button>
                 </article>
-                <article class="mpd-payment-choice mpd-payment-choice--recommended">
+                <article class="mpd-payment-choice mpd-payment-choice--full mpd-payment-choice--recommended">
                   <span class="mpd-payment-recommended">Recommended</span>
-                  <span class="mpd-payment-choice__label">Full payment</span>
-                  <h4>${mpdUsd(item.totalDueCents)}</h4>
+                  <h4>${item.ownFlight ? "Total residency price (after flight credit)" : "Full payment"}</h4>
+                  <span class="mpd-payment-choice__amount">${mpdUsd(item.totalDueCents)}</span>
                   <p class="studio-muted">Complete your program payment now. No payment plan needed.</p>
                   <button type="button" class="studio-btn-primary" data-mpd-payment-action="full" ${canCharge ? "" : "disabled"}>Pay in full</button>
                 </article>
@@ -1727,7 +1763,7 @@ function renderMpdPaymentsWorkspace() {
           : ""
       }
       <div class="mpd-payments-action-grid">
-        <article class="mpd-payments-action-card">
+        <article class="mpd-payments-action-card mpd-payments-action-card--manual">
           ${mpdInlineIconHtml(manualPaymentIconUrl, "mpd-payments-action-card__icon mpd-payments-action-card__icon--manual")}
           <div class="mpd-payments-action-card__copy">
             <h4>Make a manual payment</h4>
@@ -1735,7 +1771,7 @@ function renderMpdPaymentsWorkspace() {
           </div>
           <button type="button" class="studio-btn-primary" data-mpd-payment-action="manual" ${item.outstandingCents <= 0 ? "disabled" : ""}>Make a payment</button>
         </article>
-        <article class="mpd-payments-action-card">
+        <article class="mpd-payments-action-card mpd-payments-action-card--plan">
           ${mpdInlineIconHtml(paymentPlanIconUrl, "mpd-payments-action-card__icon mpd-payments-action-card__icon--plan")}
           <div class="mpd-payments-action-card__copy">
             <h4>${item.activePlan ? "Payment plan active" : "Start a payment plan"}</h4>
@@ -1745,10 +1781,30 @@ function renderMpdPaymentsWorkspace() {
         </article>
       </div>
       <div class="mpd-payments-overview-grid">
-        <div><span>Total paid</span><strong>${mpdUsd(item.totalPaidCents)}</strong><small>Across ${item.ledger.length} payments</small></div>
-        <div><span>Outstanding</span><strong>${mpdUsd(item.outstandingCents)}</strong><small>${item.outstandingCents > 0 ? "Balance remaining" : "Paid in full"}</small></div>
-        <div><span>Upcoming</span><strong>${item.activePlan ? mpdUsd(item.activePlan.installmentAmountCents) : "$0.00"}</strong><small>${item.activePlan ? "Next plan installment" : "No scheduled payments"}</small></div>
-        <div><span>Total refunded</span><strong>${mpdUsd(item.refundedCents)}</strong><small>Refund display only</small></div>
+        <div class="mpd-payments-overview-card mpd-payments-overview-card--paid">
+          ${mpdInlineIconHtml(paymentsIconUrl, "mpd-payments-overview-card__icon")}
+          <span>Total residency price</span>
+          <strong>${mpdUsd(item.totalDueCents)}</strong>
+          <small>${item.ownFlight ? "After flight credit" : "Flight support included"}</small>
+        </div>
+        <div class="mpd-payments-overview-card mpd-payments-overview-card--outstanding">
+          ${mpdInlineIconHtml(warningIconUrl, "mpd-payments-overview-card__icon")}
+          <span>Flight credit</span>
+          <strong>${item.flightCreditCents ? `-${mpdUsd(item.flightCreditCents)}` : "$0.00"}</strong>
+          <small>${item.ownFlight ? "Own-flight discount" : "No credit selected"}</small>
+        </div>
+        <div class="mpd-payments-overview-card mpd-payments-overview-card--upcoming">
+          ${mpdInlineIconHtml(paymentPlanIconUrl, "mpd-payments-overview-card__icon")}
+          <span>Total paid</span>
+          <strong>${mpdUsd(item.totalPaidCents)}</strong>
+          <small>Across ${item.ledger.length} payments</small>
+        </div>
+        <div class="mpd-payments-overview-card mpd-payments-overview-card--refunded">
+          ${mpdInlineIconHtml(receiptDownloadIconUrl, "mpd-payments-overview-card__icon")}
+          <span>Remaining balance</span>
+          <strong>${mpdUsd(item.outstandingCents)}</strong>
+          <small>${item.outstandingCents > 0 ? "Balance remaining" : "Paid in full"}</small>
+        </div>
       </div>
       <div class="mpd-payments-detail-grid">
         <section class="mpd-payments-panel">
@@ -1784,6 +1840,44 @@ function mpdCurrentPaymentItem() {
   return mpdProgramPaymentItems.find((x) => x.programId === mpdSelectedPaymentProgramId) || mpdProgramPaymentItems[0] || null;
 }
 
+function applyMpdFlightChoiceToItem(item, ownFlight) {
+  if (!item) return;
+  item.ownFlight = Boolean(ownFlight);
+  item.flightCreditCents = item.ownFlight ? MPD_PROGRAM_OWN_FLIGHT_CREDIT_CENTS : 0;
+  item.totalDueCents = item.ownFlight
+    ? Math.max(0, item.baseTotalDueCents - item.flightCreditCents)
+    : item.baseTotalDueCents;
+  item.outstandingCents = Math.max(0, item.totalDueCents - mpdCents(item.totalPaidCents));
+  item.paidInFull = item.outstandingCents <= 0 && item.totalDueCents > 0;
+}
+
+async function updateMpdFlightChoice(choice) {
+  const item = mpdCurrentPaymentItem();
+  if (!item || item.paymentStarted) return;
+  const ownFlight = choice === "own";
+  if (item.ownFlight === ownFlight) return;
+  const previous = {
+    ownFlight: item.ownFlight,
+    flightCreditCents: item.flightCreditCents,
+    totalDueCents: item.totalDueCents,
+    outstandingCents: item.outstandingCents,
+    paidInFull: item.paidInFull,
+  };
+  applyMpdFlightChoiceToItem(item, ownFlight);
+  renderMpdPaymentsWorkspace();
+  try {
+    await setMyProgramPaymentFlightPreference({
+      programId: item.programId,
+      applicationId: item.applicationId,
+      ownFlight,
+    });
+  } catch (e) {
+    Object.assign(item, previous);
+    renderMpdPaymentsWorkspace();
+    window.alert(e instanceof Error ? e.message : String(e));
+  }
+}
+
 function closeMpdPaymentModal() {
   document.getElementById("mpdProgramPaymentModal")?.remove();
   try {
@@ -1797,7 +1891,7 @@ function openMpdPaymentModalShell(title, bodyHtml) {
   closeMpdPaymentModal();
   const wrap = document.createElement("div");
   wrap.id = "mpdProgramPaymentModal";
-  wrap.className = "profile-gallery-access-modal mpd-program-payment-modal";
+  wrap.className = "settings-profile-page profile-gallery-access-modal mpd-program-payment-modal";
   wrap.innerHTML = `
     <div class="profile-gallery-access-modal__scrim" data-mpd-payment-close aria-hidden="true"></div>
     <div class="profile-gallery-access-modal__panel mpd-program-payment-modal__panel" role="dialog" aria-modal="true" aria-labelledby="mpdProgramPaymentModalTitle">
@@ -1813,6 +1907,13 @@ function openMpdPaymentModalShell(title, bodyHtml) {
     if (close) closeMpdPaymentModal();
   });
   return wrap;
+}
+
+function mpdPaymentLoadingHtml(text = "Loading payment") {
+  return `<div class="mpd-payment-loading" role="status" aria-live="polite">
+    <span class="mpd-payment-loading__spinner" aria-hidden="true"></span>
+    <span class="mpd-payment-loading__text">${escapeHtmlMpd(text)}</span>
+  </div>`;
 }
 
 async function openMpdStripePaymentModal(item, paymentType, amountCents) {
@@ -1832,7 +1933,7 @@ async function openMpdStripePaymentModal(item, paymentType, amountCents) {
     title,
     `<div class="mpd-program-payment-modal__body">
       <p class="studio-muted">${escapeHtmlMpd(item.title)} · ${mpdUsd(amountCents)}</p>
-      <div id="mpdProgramStripeMount" class="mpd-program-stripe-mount">Loading secure payment form…</div>
+      <div id="mpdProgramStripeMount" class="mpd-program-stripe-mount">${mpdPaymentLoadingHtml()}</div>
       <p id="mpdProgramPaymentError" class="mpd-membership-inline-error" hidden></p>
       <div class="mpd-program-payment-modal__actions">
         <button type="button" class="studio-btn-primary" id="mpdProgramPaymentSubmit" disabled>Pay ${mpdUsd(amountCents)}</button>
@@ -1858,6 +1959,8 @@ async function openMpdStripePaymentModal(item, paymentType, amountCents) {
       amountCents,
       totalDueCents: item.totalDueCents,
       depositAmountCents: item.depositCents,
+      ownFlight: item.ownFlight,
+      flightCreditCents: item.flightCreditCents,
     });
     const stripe = await loadStripe(pk);
     if (!stripe) throw new Error("Stripe failed to load.");
@@ -1909,8 +2012,8 @@ function openMpdManualPaymentModal(item) {
     `<div class="mpd-program-payment-modal__body">
       <p class="studio-muted">${escapeHtmlMpd(item.title)} · outstanding ${mpdUsd(item.outstandingCents)}</p>
       <div class="mpd-manual-payment-options" role="radiogroup" aria-label="Manual payment amount">
-        <label><input type="radio" name="mpdManualPaymentMode" value="custom" checked /> Custom amount</label>
-        <label><input type="radio" name="mpdManualPaymentMode" value="remaining" /> Pay remaining balance</label>
+        <label class="mpd-payment-radio-option"><input type="radio" name="mpdManualPaymentMode" value="custom" checked /> <span>Custom amount</span></label>
+        <label class="mpd-payment-radio-option"><input type="radio" name="mpdManualPaymentMode" value="remaining" /> <span>Pay remaining balance</span></label>
       </div>
       <label class="studio-field">
         <span>Amount (USD)</span>
@@ -1969,7 +2072,7 @@ function openMpdPaymentPlanModal(item) {
         options.length
           ? `<div class="mpd-plan-options">${options
               .map(
-                (opt, i) => `<label class="mpd-plan-option">
+                (opt, i) => `<label class="mpd-plan-option mpd-payment-radio-option">
                   <input type="radio" name="mpdPlanOption" value="${i}" ${i === 0 ? "checked" : ""} />
                   <span><strong>${opt.count} monthly payments</strong><small>${mpdUsd(opt.amountCents)} per month</small></span>
                 </label>`,
@@ -2000,6 +2103,10 @@ function openMpdPaymentPlanModal(item) {
       btn.disabled = true;
       btn.textContent = "Creating plan…";
     }
+    if (mount) {
+      mount.hidden = false;
+      mount.innerHTML = mpdPaymentLoadingHtml("Loading payment plan");
+    }
     try {
       const [{ loadStripe }, svc, cfg] = await Promise.all([
         import("@stripe/stripe-js"),
@@ -2017,6 +2124,8 @@ function openMpdPaymentPlanModal(item) {
         installmentAmountCents: opt.amountCents,
         totalDueCents: item.totalDueCents,
         depositAmountCents: item.depositCents,
+        ownFlight: item.ownFlight,
+        flightCreditCents: item.flightCreditCents,
         planStartAt: new Date().toISOString(),
         planEndAt: item.startText || "",
       });
@@ -4093,6 +4202,15 @@ export default function initSettingsProfile() {
         e.preventDefault();
         mpdSelectedPaymentProgramId = paymentProgram.getAttribute("data-mpd-payment-program") || "";
         renderMpdPaymentsWorkspace();
+        return;
+      }
+      const flightChoice =
+        e.target &&
+        /** @type {Element} */ (e.target).closest?.("[data-mpd-flight-choice]");
+      if (flightChoice && rootEl.contains(flightChoice)) {
+        e.preventDefault();
+        if (flightChoice.hasAttribute("disabled")) return;
+        void updateMpdFlightChoice(flightChoice.getAttribute("data-mpd-flight-choice") || "support");
         return;
       }
       const paymentAction =

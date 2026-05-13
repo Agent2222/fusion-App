@@ -37,6 +37,16 @@ export const idlFactory = ({ IDL }) => {
         createdAt: IDL.Text,
         updatedAt: IDL.Text,
     });
+    const ProgramRecord = IDL.Record({
+        id: IDL.Text,
+        routeLink: IDL.Text,
+        featuredOrder: IDL.Nat,
+        visibility: IDL.Text,
+        studioStatus: IDL.Text,
+        updatedAt: IDL.Text,
+        depositAmountDisplay: IDL.Text,
+        localesJson: IDL.Text,
+    });
     return IDL.Service({
         integrationGetMembershipAccessForPrincipal: IDL.Func(
             [IDL.Principal],
@@ -48,8 +58,23 @@ export const idlFactory = ({ IDL }) => {
             [],
             [],
         ),
+        integrationGetProgram: IDL.Func(
+            [IDL.Text],
+            [IDL.Opt(ProgramRecord)],
+            ['query'],
+        ),
+        integrationGetArtistConfirmationName: IDL.Func(
+            [IDL.Principal],
+            [IDL.Opt(IDL.Text)],
+            ['query'],
+        ),
+        integrationSetProgramLocalesJson: IDL.Func(
+            [IDL.Text, IDL.Text, IDL.Text],
+            [],
+            [],
+        ),
         integrationRecordProgramPayment: IDL.Func(
-            [ProgramPaymentLedgerRow, IDL.Nat, IDL.Nat, IDL.Nat],
+            [ProgramPaymentLedgerRow, IDL.Nat, IDL.Nat, IDL.Nat, IDL.Bool, IDL.Nat],
             [],
             [],
         ),

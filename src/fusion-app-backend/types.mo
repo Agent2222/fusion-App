@@ -373,6 +373,18 @@ module {
         updatedAt : Text;
     };
 
+    /// Sidecar preference for travel pricing. Kept outside ProgramPaymentSummary for safer stable upgrades.
+    public type ProgramPaymentFlightPreference = {
+        key : Text;
+        principal : Principal;
+        programId : Text;
+        applicationId : Text;
+        ownFlight : Bool;
+        flightCreditCents : Nat;
+        totalDueCents : Nat;
+        updatedAt : Text;
+    };
+
     /// Immutable-ish ledger row recorded by the integration API after Stripe verification.
     public type ProgramPaymentLedgerRow = {
         id : Text;
@@ -512,5 +524,6 @@ module {
         programPaymentSummariesStable : ?[(Text, ProgramPaymentSummary)];
         programPaymentLedgerStable : ?[(Text, ProgramPaymentLedgerRow)];
         programPaymentPlansStable : ?[(Text, ProgramPaymentPlan)];
+        programPaymentFlightPreferencesStable : ?[(Text, ProgramPaymentFlightPreference)];
     };
 };

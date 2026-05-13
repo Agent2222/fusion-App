@@ -381,6 +381,8 @@ function programPaymentMetadata(body, paymentType, amountCents) {
     Principal.fromText(principal);
     if (!programId) throw new Error('programId required');
     if (!applicationId) throw new Error('applicationId required');
+    const ownFlight = body?.ownFlight === true || String(body?.ownFlight || '').toLowerCase() === 'true';
+    const flightCreditCents = Math.max(0, Math.round(Number(body?.flightCreditCents || 0)));
     return {
         principal,
         programId,
@@ -389,6 +391,8 @@ function programPaymentMetadata(body, paymentType, amountCents) {
         amountCents: String(amountCents),
         totalDueCents: String(Math.max(0, Math.round(Number(body?.totalDueCents || 0)))),
         depositAmountCents: String(Math.max(0, Math.round(Number(body?.depositAmountCents || 0)))),
+        ownFlight: ownFlight ? 'true' : 'false',
+        flightCreditCents: String(flightCreditCents),
         source: 'program_payments_tab',
     };
 }
@@ -408,6 +412,88 @@ async function cancelPlatformSubscriptionImmediately(principalText) {
         console.warn('[stripe] immediate program-payment cancel canister sync:', e);
     }
     return { ok: true, subscriptionId: canceled.id, status: canceled.status };
+}
+
+function unwrapCanisterOpt(value) {
+    return Array.isArray(value) ? value[0] : value;
+}
+
+function normalizeConfirmedArtistsList(raw) {
+    if (!Array.isArray(raw)) return [];
+    return raw
+        .map((item) => {
+            if (typeof item === 'string') return item.trim();
+            if (item && typeof item === 'object') return String(item.name || '').trim();
+            return '';
+        })
+        .filter(Boolean);
+}
+
+function setAvailableSlotsFromConfirmed(card, confirmed) {
+    if (!card || typeof card !== 'object') return;
+    const totalRaw = card.totalSlots ?? card.programPage?.totalSlots;
+    const total = Number(totalRaw);
+    const totalSlots = Number.isFinite(total) && total >= 0 ? Math.floor(total) : 0;
+    card.availableSlots = Math.max(0, totalSlots - confirmed.length);
+}
+
+async function addConfirmedArtistToProgram(actor, principalText, programId, updatedAt) {
+    if (
+        typeof actor.integrationGetProgram !== 'function' ||
+        typeof actor.integrationGetArtistConfirmationName !== 'function' ||
+        typeof actor.integrationSetProgramLocalesJson !== 'function'
+    ) {
+        return { ok: false, reason: 'integration_confirm_artist_api_missing' };
+    }
+    const principal = Principal.fromText(principalText);
+    const [programOpt, nameOpt] = await Promise.all([
+        actor.integrationGetProgram(programId),
+        actor.integrationGetArtistConfirmationName(principal),
+    ]);
+    const program = unwrapCanisterOpt(programOpt);
+    const artistName = String(unwrapCanisterOpt(nameOpt) || '').trim();
+    if (!program || !artistName) {
+        return { ok: false, reason: program ? 'artist_name_missing' : 'program_missing' };
+    }
+
+    let parsed;
+    try {
+        parsed = JSON.parse(String(program.localesJson || '{}'));
+        if (!parsed || typeof parsed !== 'object') parsed = {};
+    } catch {
+        parsed = {};
+    }
+
+    const en = {
+        ...(parsed.en && typeof parsed.en === 'object' ? parsed.en : {}),
+    };
+    en.programPage =
+        en.programPage && typeof en.programPage === 'object'
+            ? { ...en.programPage }
+            : {};
+
+    let list = normalizeConfirmedArtistsList(en.programPage.confirmedArtists);
+    const exists = list.some((name) => name.toLowerCase() === artistName.toLowerCase());
+    if (!exists) {
+        list = [...list, artistName];
+    }
+    en.programPage.confirmedArtists = list;
+    setAvailableSlotsFromConfirmed(en, list);
+    parsed.en = en;
+
+    const ja = {
+        ...(parsed.ja && typeof parsed.ja === 'object' ? parsed.ja : {}),
+    };
+    ja.programPage =
+        ja.programPage && typeof ja.programPage === 'object'
+            ? { ...ja.programPage }
+            : {};
+    ja.programPage.confirmedArtists = [...list];
+    setAvailableSlotsFromConfirmed(ja, list);
+    parsed.ja = ja;
+
+    await actor.integrationSetProgramLocalesJson(programId, JSON.stringify(parsed), updatedAt);
+    return { ok: true, artistName };
 }
 
 async function recordVerifiedProgramPayment(paymentIntent) {
@@ -437,6 +523,8 @@ async function recordVerifiedProgramPayment(paymentIntent) {
     const amountCents = Math.max(0, Math.round(Number(paymentIntent.amount_received || paymentIntent.amount || 0)));
     const totalDueCents = Math.max(0, Math.round(Number(meta.totalDueCents || 0)));
     const depositAmountCents = Math.max(0, Math.round(Number(meta.depositAmountCents || 0)));
+    const ownFlight = String(meta.ownFlight || '').toLowerCase() === 'true';
+    const flightCreditCents = Math.max(0, Math.round(Number(meta.flightCreditCents || 0)));
     const row = {
         id: paymentIntent.id,
         principal: Principal.fromText(principalText),
@@ -457,6 +545,8 @@ async function recordVerifiedProgramPayment(paymentIntent) {
         BigInt(totalDueCents),
         BigInt(depositAmountCents),
         0n,
+        ownFlight,
+        BigInt(flightCreditCents),
     );
     if (paymentType === 'deposit' || paymentType === 'full_payment') {
         await actor.integrationMarkProgramDepositAccepted(
@@ -466,6 +556,14 @@ async function recordVerifiedProgramPayment(paymentIntent) {
             paymentType === 'full_payment' ? 'paid_full' : 'paid',
             createdAt,
         );
+        try {
+            const confirmed = await addConfirmedArtistToProgram(actor, principalText, programId, createdAt);
+            if (!confirmed.ok) {
+                console.warn('[stripe] program confirmed artist update skipped:', confirmed.reason);
+            }
+        } catch (e) {
+            console.warn('[stripe] program confirmed artist update failed:', e);
+        }
         await cancelPlatformSubscriptionImmediately(principalText);
     }
     if (paymentType === 'plan_installment') {

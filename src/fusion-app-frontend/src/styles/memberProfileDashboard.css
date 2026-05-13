@@ -1111,6 +1111,14 @@
   width: 100%;
 }
 
+.settings-profile-page #mpd-program-panel-my-programs,
+.settings-profile-page #mpd-program-panel-my-programs > .mpd-my-programs-head,
+.settings-profile-page #mpd-program-panel-my-programs > .mpd-my-program-filters,
+.settings-profile-page #mpd-program-panel-my-programs > .mpd-programs-list {
+  padding-left: 0;
+  padding-right: 0;
+}
+
 .settings-profile-page .mpd-program-tab-panel > .mpd-my-programs-head,
 .settings-profile-page .mpd-program-tab-panel > .mpd-my-program-filters,
 .settings-profile-page .mpd-program-tab-panel > .mpd-programs-list {
@@ -1263,13 +1271,13 @@
   display: grid;
   grid-template-columns: minmax(10rem, 13rem) minmax(0, 1fr);
   gap: 1rem;
-  padding: 0.75rem;
+  padding: 0.75rem 0.75rem 0.75rem 0;
 }
 
 .settings-profile-page .mpd-my-program-card__media {
   overflow: hidden;
   aspect-ratio: 16 / 8.5;
-  border-radius: 7px;
+  border-radius: 0 7px 7px 0;
   background: #e2e8f0;
 }
 
@@ -1583,10 +1591,16 @@
 @media (max-width: 860px) {
   .settings-profile-page .mpd-my-program-card__summary {
     grid-template-columns: 1fr;
+    padding: 0 0 0.75rem;
   }
 
   .settings-profile-page .mpd-my-program-card__media {
     aspect-ratio: 16 / 9;
+    border-radius: 0;
+  }
+
+  .settings-profile-page .mpd-my-program-card__meta {
+    padding: 0 0.75rem;
   }
 
   .settings-profile-page .mpd-my-program-card__details {
@@ -2653,12 +2667,161 @@
 .settings-profile-page .mpd-payment-choice-program,
 .settings-profile-page .mpd-payments-action-card,
 .settings-profile-page .mpd-payment-choice,
-.settings-profile-page .mpd-payments-overview-grid > div,
+.settings-profile-page .mpd-flight-choice-card,
+.settings-profile-page .mpd-payments-overview-card,
 .settings-profile-page .mpd-payments-panel {
   border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.94);
   box-shadow: 0 10px 28px rgba(15, 23, 42, 0.035);
+}
+
+.settings-profile-page .mpd-flight-choice-card {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+  background:
+    radial-gradient(circle at 6% 10%, rgba(31, 122, 75, 0.11), transparent 30%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(250, 248, 242, 0.92));
+}
+
+.settings-profile-page .mpd-flight-choice-card__head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.85rem;
+  align-items: center;
+}
+
+.settings-profile-page .mpd-flight-choice-card__head h3 {
+  margin: 0;
+  font-size: clamp(1rem, 1.4vw, 1.24rem);
+  line-height: 1.1;
+  font-variation-settings: var(--fv-title);
+}
+
+.settings-profile-page .mpd-flight-choice-card__head .studio-muted {
+  margin: 0.2rem 0 0;
+  font-size: 0.82rem;
+}
+
+.settings-profile-page .mpd-flight-choice-card__icon {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: rgba(31, 122, 75, 0.12);
+  border: 1px solid rgba(31, 122, 75, 0.16);
+}
+
+.settings-profile-page .mpd-flight-choice-card__icon img {
+  width: 1.55rem;
+  height: 1.55rem;
+  object-fit: contain;
+}
+
+.settings-profile-page .mpd-flight-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.settings-profile-page .mpd-flight-option {
+  appearance: none;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  text-align: left;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--c2, #0f172a);
+  padding: 0.85rem;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.settings-profile-page .mpd-flight-option:hover,
+.settings-profile-page .mpd-flight-option:focus-visible {
+  border-color: rgba(31, 122, 75, 0.32);
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.07);
+  transform: translateY(-1px);
+}
+
+.settings-profile-page .mpd-flight-option.is-selected {
+  border-color: #1f7a4b;
+  background: rgba(239, 250, 244, 0.96);
+  box-shadow: 0 0 0 2px rgba(31, 122, 75, 0.1);
+}
+
+.settings-profile-page .mpd-flight-option:disabled {
+  cursor: default;
+  transform: none;
+}
+
+.settings-profile-page .mpd-flight-option__icon {
+  width: 2.35rem;
+  height: 2.35rem;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: rgba(31, 122, 75, 0.1);
+}
+
+.settings-profile-page .mpd-flight-option__icon img {
+  width: 1.2rem;
+  height: 1.2rem;
+  object-fit: contain;
+}
+
+.settings-profile-page .mpd-flight-option__copy {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.settings-profile-page .mpd-flight-option__copy strong {
+  font-size: 0.9rem;
+  line-height: 1.15;
+  font-variation-settings: var(--fv-subtitle);
+}
+
+.settings-profile-page .mpd-flight-option__copy small,
+.settings-profile-page .mpd-flight-choice-card__note span,
+.settings-profile-page .mpd-flight-choice-card__note em {
+  color: rgba(0, 0, 0, 0.58);
+  font-size: 0.76rem;
+  line-height: 1.25;
+}
+
+.settings-profile-page .mpd-flight-option__badge {
+  border-radius: 999px;
+  background: rgba(31, 122, 75, 0.12);
+  color: #1f7a4b;
+  padding: 0.3rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.settings-profile-page .mpd-flight-choice-card__note {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.55rem;
+  align-items: center;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.035);
+  padding: 0.7rem 0.8rem;
+}
+
+.settings-profile-page .mpd-flight-choice-card__note strong {
+  font-size: 0.78rem;
+  font-variation-settings: var(--fv-label);
+}
+
+.settings-profile-page .mpd-flight-choice-card__note em {
+  font-style: normal;
 }
 
 .settings-profile-page .mpd-payments-eyebrow,
@@ -2677,16 +2840,20 @@
   margin: 0;
 }
 
-.settings-profile-page .mpd-payments-overview-grid span {
+.settings-profile-page .mpd-payments-overview-card > span {
   display: block;
   color: rgba(0, 0, 0, 0.58);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
+  line-height: 1.2;
+  font-variation-settings: var(--fv-label);
 }
 
-.settings-profile-page .mpd-payments-overview-grid strong {
+.settings-profile-page .mpd-payments-overview-card strong {
   display: block;
-  margin-top: 0.2rem;
-  font-size: clamp(1.25rem, 2vw, 1.8rem);
+  margin-top: 0.18rem;
+  font-size: clamp(1rem, 1.25vw, 1.18rem);
+  line-height: 1.1;
+  font-variation-settings: var(--fv-emphasis);
 }
 
 .settings-profile-page .mpd-payment-choice-grid,
@@ -2766,6 +2933,18 @@
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 255, 255, 0.92));
 }
 
+.settings-profile-page .mpd-payment-choice--deposit,
+.settings-profile-page .mpd-payments-action-card--manual {
+  border-color: rgba(31, 122, 75, 0.16);
+  background: linear-gradient(180deg, rgba(239, 250, 244, 0.98), rgba(255, 255, 255, 0.94));
+}
+
+.settings-profile-page .mpd-payment-choice--full,
+.settings-profile-page .mpd-payments-action-card--plan {
+  border-color: rgba(46, 109, 159, 0.16);
+  background: linear-gradient(180deg, rgba(239, 247, 255, 0.98), rgba(255, 255, 255, 0.94));
+}
+
 .settings-profile-page .mpd-payments-action-card__icon {
   width: 2.35rem;
   height: 2.35rem;
@@ -2794,8 +2973,7 @@
 }
 
 .settings-profile-page .mpd-payment-choice--recommended {
-  border-color: rgba(22, 101, 52, 0.2);
-  background: rgba(255, 255, 255, 0.94);
+  border-color: rgba(46, 109, 159, 0.22);
 }
 
 .settings-profile-page .mpd-payment-recommended {
@@ -2814,10 +2992,19 @@
 .settings-profile-page .mpd-payments-action-card h4 {
   font-size: 0.95rem;
   line-height: 1.15;
+  font-variation-settings: var(--fv-subtitle);
 }
 
 .settings-profile-page .mpd-payment-choice__label {
   grid-column: 1;
+}
+
+.settings-profile-page .mpd-payment-choice__amount {
+  display: block;
+  color: var(--c2, #0f172a);
+  font-size: clamp(1.18rem, 2vw, 1.55rem);
+  line-height: 1;
+  font-variation-settings: var(--fv-emphasis);
 }
 
 .settings-profile-page .mpd-payment-choice p,
@@ -2855,6 +3042,20 @@
   grid-column: 3;
 }
 
+.settings-profile-page .mpd-payment-choice--deposit .studio-btn-primary,
+.settings-profile-page .mpd-payments-action-card--manual .studio-btn-primary {
+  border-color: #1f7a4b;
+  background: #1f7a4b;
+  color: #fff;
+}
+
+.settings-profile-page .mpd-payment-choice--full .studio-btn-primary,
+.settings-profile-page .mpd-payments-action-card--plan .studio-btn-primary {
+  border-color: #2e6d9f;
+  background: #2e6d9f;
+  color: #fff;
+}
+
 .settings-profile-page .mpd-payment-choice .studio-btn-primary:hover,
 .settings-profile-page .mpd-payment-choice .studio-btn-primary:focus-visible,
 .settings-profile-page .mpd-payments-action-card .studio-btn-primary:hover,
@@ -2864,6 +3065,22 @@
   background: color-mix(in srgb, var(--c2, #000000) 86%, var(--c5, #d9ceb8));
   border-color: color-mix(in srgb, var(--c2, #000000) 86%, var(--c5, #d9ceb8));
   color: var(--c3, #ffffff);
+}
+
+.settings-profile-page .mpd-payment-choice--deposit .studio-btn-primary:hover,
+.settings-profile-page .mpd-payment-choice--deposit .studio-btn-primary:focus-visible,
+.settings-profile-page .mpd-payments-action-card--manual .studio-btn-primary:hover,
+.settings-profile-page .mpd-payments-action-card--manual .studio-btn-primary:focus-visible {
+  border-color: #17633b;
+  background: #17633b;
+}
+
+.settings-profile-page .mpd-payment-choice--full .studio-btn-primary:hover,
+.settings-profile-page .mpd-payment-choice--full .studio-btn-primary:focus-visible,
+.settings-profile-page .mpd-payments-action-card--plan .studio-btn-primary:hover,
+.settings-profile-page .mpd-payments-action-card--plan .studio-btn-primary:focus-visible {
+  border-color: #245a86;
+  background: #245a86;
 }
 
 .settings-profile-page .mpd-payment-choice .studio-btn-primary:disabled,
@@ -2881,12 +3098,55 @@
   gap: 0.75rem;
 }
 
-.settings-profile-page .mpd-payments-overview-grid > div {
-  padding: 0.9rem;
+.settings-profile-page .mpd-payments-overview-card {
+  --mpd-overview-accent: #1f7a4b;
+  --mpd-overview-accent-soft: rgba(31, 122, 75, 0.12);
+  position: relative;
+  display: grid;
+  gap: 0.16rem;
+  min-height: 5rem;
+  padding: 0.78rem 3rem 0.78rem 0.85rem;
+}
+
+.settings-profile-page .mpd-payments-overview-card--outstanding {
+  --mpd-overview-accent: #2e6d9f;
+  --mpd-overview-accent-soft: rgba(46, 109, 159, 0.12);
+}
+
+.settings-profile-page .mpd-payments-overview-card--upcoming {
+  --mpd-overview-accent: #8a5b20;
+  --mpd-overview-accent-soft: rgba(138, 91, 32, 0.13);
+}
+
+.settings-profile-page .mpd-payments-overview-card--refunded {
+  --mpd-overview-accent: #7c4d9f;
+  --mpd-overview-accent-soft: rgba(124, 77, 159, 0.12);
+}
+
+.settings-profile-page .mpd-payments-overview-card__icon {
+  position: absolute;
+  top: 0.72rem;
+  right: 0.78rem;
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: 999px;
+  color: var(--mpd-overview-accent);
+  background: var(--mpd-overview-accent-soft);
+}
+
+.settings-profile-page .mpd-payments-overview-card__icon::before {
+  content: "";
+  position: absolute;
+  inset: 0.48rem;
+  background: currentColor;
+  mask: var(--mpd-icon-url) center / contain no-repeat;
+  -webkit-mask: var(--mpd-icon-url) center / contain no-repeat;
 }
 
 .settings-profile-page .mpd-payments-overview-grid small {
   color: rgba(0, 0, 0, 0.55);
+  font-size: 0.68rem;
+  line-height: 1.25;
 }
 
 .settings-profile-page .mpd-payments-detail-grid {
@@ -2940,7 +3200,50 @@
 }
 
 .settings-profile-page .mpd-program-payment-modal__panel {
+  width: min(92vw, 34rem);
   max-width: 34rem;
+  padding: 1.35rem;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  border-radius: 12px;
+  background: var(--c3, #fff);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.22);
+}
+
+.settings-profile-page.mpd-program-payment-modal .profile-gallery-access-modal__scrim {
+  background: rgba(0, 0, 0, 0.52);
+}
+
+.settings-profile-page.mpd-program-payment-modal .profile-gallery-access-modal__close {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  width: 2.1rem;
+  height: 2.1rem;
+  min-width: 0;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--c2, #000);
+  font-size: 1rem;
+  line-height: 1;
+  font-variation-settings: var(--fv-label);
+}
+
+.settings-profile-page.mpd-program-payment-modal .profile-gallery-access-modal__close:hover,
+.settings-profile-page.mpd-program-payment-modal .profile-gallery-access-modal__close:focus-visible {
+  border-color: var(--c2, #000);
+  background: var(--c2, #000);
+  color: var(--c3, #fff);
+}
+
+.settings-profile-page.mpd-program-payment-modal .profile-gallery-access-modal__title {
+  max-width: calc(100% - 3rem);
+  margin: 0 0 0.8rem;
+  color: var(--c2, #000);
+  font-size: clamp(1.12rem, 2vw, 1.42rem);
+  line-height: 1.12;
+  font-variation-settings: var(--fv-title);
 }
 
 .settings-profile-page .mpd-program-payment-modal__body,
@@ -2951,12 +3254,66 @@
   gap: 0.75rem;
 }
 
+.settings-profile-page .mpd-program-payment-modal__body {
+  color: var(--c2, #000);
+  font-size: 0.9rem;
+}
+
+.settings-profile-page .mpd-program-payment-modal__body > .studio-muted {
+  margin: 0;
+  color: rgba(0, 0, 0, 0.68);
+  font-size: 0.9rem;
+  line-height: 1.4;
+  font-variation-settings: var(--fv-body);
+}
+
 .settings-profile-page .mpd-program-stripe-mount {
   min-height: 4rem;
   border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 12px;
   padding: 0.85rem;
   background: #fff;
+}
+
+.settings-profile-page .mpd-payment-loading {
+  min-height: 4.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  color: rgba(0, 0, 0, 0.68);
+}
+
+.settings-profile-page .mpd-payment-loading__spinner {
+  width: 1.15rem;
+  height: 1.15rem;
+  border: 2px solid rgba(0, 0, 0, 0.14);
+  border-top-color: var(--c2, #000);
+  border-radius: 999px;
+  animation: mpd-payment-spin 0.75s linear infinite;
+}
+
+.settings-profile-page .mpd-payment-loading__text {
+  font-size: 0.82rem;
+  line-height: 1;
+  font-variation-settings: var(--fv-label);
+  animation: mpd-payment-text-blink 1.05s ease-in-out infinite;
+}
+
+@keyframes mpd-payment-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes mpd-payment-text-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.42;
+  }
 }
 
 .settings-profile-page .mpd-manual-payment-options,
@@ -2967,19 +3324,108 @@
   background: rgba(255, 255, 255, 0.8);
 }
 
+.settings-profile-page .mpd-manual-payment-options {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 0;
+  overflow: hidden;
+  gap: 0;
+}
+
+.settings-profile-page .mpd-payment-radio-option {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 2.65rem;
+  padding: 0.68rem 0.8rem;
+  color: rgba(0, 0, 0, 0.76);
+  font-size: 0.86rem;
+  line-height: 1.25;
+  font-variation-settings: var(--fv-label);
+  cursor: pointer;
+}
+
+.settings-profile-page .mpd-manual-payment-options .mpd-payment-radio-option + .mpd-payment-radio-option {
+  border-left: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.settings-profile-page .mpd-payment-radio-option:has(input:checked) {
+  background: rgba(0, 0, 0, 0.045);
+  color: var(--c2, #000);
+}
+
+.settings-profile-page .mpd-payment-radio-option input[type="radio"] {
+  width: 0.9rem;
+  height: 0.9rem;
+  margin: 0;
+  accent-color: var(--c2, #000);
+  flex: 0 0 auto;
+}
+
+.settings-profile-page .mpd-program-payment-modal__body .studio-field {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+}
+
+.settings-profile-page .mpd-program-payment-modal__body .studio-field > span {
+  color: var(--c2, #000);
+  font-size: 0.82rem;
+  font-variation-settings: var(--fv-label);
+}
+
+.settings-profile-page .mpd-program-payment-modal__body .studio-input {
+  min-height: 2.55rem;
+  border-radius: 7px;
+  font-size: 0.92rem;
+}
+
 .settings-profile-page .mpd-plan-option {
   display: flex;
   align-items: center;
   gap: 0.65rem;
+  margin: 0;
+}
+
+.settings-profile-page .mpd-plan-option:has(input:checked) {
+  border-color: rgba(0, 0, 0, 0.26);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.04);
+}
+
+.settings-profile-page .mpd-plan-option strong {
+  display: block;
+  color: var(--c2, #000);
+  font-size: 0.92rem;
+  line-height: 1.2;
+  font-variation-settings: var(--fv-subtitle);
 }
 
 .settings-profile-page .mpd-plan-option small {
   display: block;
   color: rgba(0, 0, 0, 0.58);
+  margin-top: 0.15rem;
+  font-size: 0.78rem;
+  line-height: 1.25;
+}
+
+.settings-profile-page .mpd-program-payment-modal__actions {
+  justify-items: start;
+  margin-top: 0.15rem;
+}
+
+.settings-profile-page .mpd-program-payment-modal__actions .studio-btn-primary {
+  grid-column: auto;
+  grid-row: auto;
+  justify-self: start;
+  min-width: 11rem;
+  border-color: var(--c2, #000);
+  background: var(--c2, #000);
+  color: var(--c3, #fff);
+  font-size: 0.82rem;
 }
 
 @media (max-width: 860px) {
   .settings-profile-page .mpd-payment-choice-grid,
+  .settings-profile-page .mpd-flight-options,
   .settings-profile-page .mpd-payments-action-grid,
   .settings-profile-page .mpd-payments-detail-grid {
     grid-template-columns: 1fr;
@@ -3007,6 +3453,15 @@
 }
 
 @media (max-width: 620px) {
+  .settings-profile-page .mpd-flight-option {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .settings-profile-page .mpd-flight-option__badge {
+    grid-column: 2;
+    justify-self: start;
+  }
+
   .settings-profile-page .mpd-payments-overview-grid {
     grid-template-columns: 1fr;
   }

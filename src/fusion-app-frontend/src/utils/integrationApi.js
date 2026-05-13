@@ -651,11 +651,13 @@ function programPaymentBody(opts = {}) {
         amountCents: Math.round(Number(opts.amountCents || 0)),
         totalDueCents: Math.round(Number(opts.totalDueCents || 0)),
         depositAmountCents: Math.round(Number(opts.depositAmountCents || 0)),
+        ownFlight: opts.ownFlight === true,
+        flightCreditCents: Math.round(Number(opts.flightCreditCents || 0)),
     };
 }
 
 /**
- * @param {{ principal: string, programId: string, applicationId: string, paymentType: 'deposit' | 'full_payment' | 'manual', amountCents: number, totalDueCents: number, depositAmountCents: number }} opts
+ * @param {{ principal: string, programId: string, applicationId: string, paymentType: 'deposit' | 'full_payment' | 'manual', amountCents: number, totalDueCents: number, depositAmountCents: number, ownFlight?: boolean, flightCreditCents?: number }} opts
  * @returns {Promise<{ clientSecret: string, paymentIntentId: string }>}
  */
 export async function createProgramPaymentIntent(opts) {
@@ -701,7 +703,7 @@ export async function confirmProgramPaymentRecorded(paymentIntentId) {
 }
 
 /**
- * @param {{ principal: string, email?: string, programId: string, applicationId: string, installmentCount: number, installmentAmountCents: number, totalDueCents: number, depositAmountCents: number, planStartAt?: string, planEndAt?: string }} opts
+ * @param {{ principal: string, email?: string, programId: string, applicationId: string, installmentCount: number, installmentAmountCents: number, totalDueCents: number, depositAmountCents: number, ownFlight?: boolean, flightCreditCents?: number, planStartAt?: string, planEndAt?: string }} opts
  * @returns {Promise<{ clientSecret: string, paymentIntentId: string, subscriptionId: string, planId: string }>}
  */
 export async function createProgramPaymentPlan(opts) {
