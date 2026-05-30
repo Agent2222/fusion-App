@@ -17,10 +17,17 @@ function firstText(...values) {
     return '';
 }
 
+function exclusiveItemVisible(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return true;
+    return /** @type {Record<string, unknown>} */ (raw).visible !== false;
+}
+
 class ExclusiveContentHighlight extends HTMLElement {
     constructor() {
         super();
         this.shadow = this.attachShadow({ mode: 'open' });
+        /** @type {Array<Record<string, unknown>>} */
+        this._allItems = [];
         /** @type {Array<Record<string, unknown>>} */
         this._items = [];
         this._activeIndex = -1;
@@ -32,12 +39,13 @@ class ExclusiveContentHighlight extends HTMLElement {
     }
 
     /**
-     * @param {Array<Record<string, unknown>>} items — max 3
+     * @param {Array<Record<string, unknown>>} items — max 6
      * @param {{ activeIndex?: number }} [opts]
      */
     setData(items, opts = {}) {
         this._loaded = true;
-        this._items = Array.isArray(items) ? items.slice(0, 3) : [];
+        this._allItems = Array.isArray(items) ? items.slice(0, 6) : [];
+        this._items = this._allItems.filter((item) => exclusiveItemVisible(item));
         this._activeIndex = Number.isFinite(opts.activeIndex) ? Number(opts.activeIndex) : this._activeIndex;
         this.render();
     }
@@ -70,10 +78,13 @@ class ExclusiveContentHighlight extends HTMLElement {
         }
         const loc =
             typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
-        const cards = (this._items.length ? this._items : [{}, {}, {}]).slice(0, 3);
+        const cards = this._allItems
+            .map((raw, sourceIndex) => ({ raw, sourceIndex }))
+            .filter(({ raw }) => exclusiveItemVisible(raw));
 
-        const blocks = cards
-            .map((raw, i) => {
+        const blocks = cards.length
+            ? cards
+            .map(({ raw, sourceIndex: i }) => {
                 const imageUrl = String(raw?.imageUrl ?? '').trim();
                 const posterUrl = String(raw?.posterUrl ?? '').trim();
                 const displayImage = imageUrl || posterUrl;
@@ -99,7 +110,8 @@ class ExclusiveContentHighlight extends HTMLElement {
                     </article>
                 `;
             })
-            .join('');
+            .join('')
+            : '<p class="ech-empty">No exclusive content is visible right now.</p>';
 
         this.shadow.innerHTML = `
             <style>
@@ -199,6 +211,15 @@ class ExclusiveContentHighlight extends HTMLElement {
                     font-size: 0.65rem;
                     font-variation-settings: var(--fv-label);
                 }
+                .ech-empty {
+                    margin: 0;
+                    padding: 0 0 2rem;
+                    color: #666;
+                    font-size: 0.88rem;
+                }
+                @media (max-width: 1024px) {
+                    .ech-row { grid-template-columns: repeat(2, 1fr); }
+                }
                 @media (max-width: 768px) {
                     .ech-row { grid-template-columns: 1fr; }
                     .ech-cap { width: min(84%, 22rem); }
@@ -213,19 +234,21 @@ class ExclusiveContentHighlight extends HTMLElement {
 
         const select = (idx, trigger = 'card') => {
             if (!Number.isInteger(idx) || idx < 0) return;
+            const item = this._allItems[idx];
+            if (!exclusiveItemVisible(item)) return;
             this._activeIndex = idx;
             captureCommunityEvent('community_exclusive_feature_selected', {
                 feature_index: idx,
                 trigger,
-                has_preview_video: Boolean(String(this._items[idx]?.previewVideoUrl ?? this._items[idx]?.videoUrl ?? '').trim()),
-                has_full_video: Boolean(String(this._items[idx]?.fullVideoKey ?? '').trim()),
+                has_preview_video: Boolean(String(item?.previewVideoUrl ?? item?.videoUrl ?? '').trim()),
+                has_full_video: Boolean(String(item?.fullVideoKey ?? '').trim()),
             });
             this.render();
             this.dispatchEvent(
                 new CustomEvent('fusion-community-feature-select', {
                     bubbles: true,
                     composed: true,
-                    detail: { index: idx, item: this._items[idx], trigger },
+                    detail: { index: idx, item, trigger },
                 }),
             );
         };
@@ -240,9 +263,9 @@ class ExclusiveContentHighlight extends HTMLElement {
 
         const row = this.shadow.querySelector('.ech-row');
         if (row) {
-            row.querySelectorAll('.ech-card').forEach((card, idx) => {
+            row.querySelectorAll('.ech-card').forEach((card) => {
                 card.addEventListener('click', () => {
-                    select(idx, 'card');
+                    select(Number(card.getAttribute('data-index') ?? -1), 'card');
                 });
             });
         }

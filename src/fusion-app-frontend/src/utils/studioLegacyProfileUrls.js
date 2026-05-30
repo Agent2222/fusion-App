@@ -1,10 +1,11 @@
 /**
- * Predictable S3 URLs for legacy profile hero + intro gallery (Studio sync buttons).
+ * Predictable CDN URLs for legacy profile hero + intro gallery (Studio sync buttons).
  * @see docs/delete-later.md — remove with temporary Studio sync + `syncStudioArtistsLegacyHeroImages`.
  */
 
-export const LEGACY_PROFILE_BASE =
-    'https://fusionart-bucket.s3.us-east-2.amazonaws.com/uploads/legacyProfiles/';
+import { CLOUDFRONT_ASSET_ORIGIN } from './assetDistribution.js';
+
+export const LEGACY_PROFILE_BASE = `${CLOUDFRONT_ASSET_ORIGIN}/uploads/legacyProfiles/`;
 
 /**
  * @param {string} s
@@ -77,10 +78,10 @@ export function needsHeroSync(row) {
 }
 
 /**
- * True when EN world.introGallery has no non-empty src in slots 0–2.
  * @param {Record<string, unknown> | null | undefined} locales
+ * @param {number} slotIndex
  */
-export function needsIntroGallerySync(locales) {
+function introGallerySlotSrc(locales, slotIndex) {
     const L = locales && typeof locales === 'object' ? locales : {};
     const en = /** @type {Record<string, unknown>} */ (L).en;
     const enObj = en && typeof en === 'object' && !Array.isArray(en) ? en : {};
@@ -88,15 +89,49 @@ export function needsIntroGallerySync(locales) {
     const w = world && typeof world === 'object' && !Array.isArray(world) ? world : {};
     const raw = w.introGallery;
     const arr = Array.isArray(raw) ? raw : [];
+    const item = arr[slotIndex];
+    if (item && typeof item === 'object' && !Array.isArray(item)) {
+        return String(/** @type {Record<string, unknown>} */ (item).src ?? '').trim();
+    }
+    if (typeof item === 'string') {
+        return item.trim();
+    }
+    return '';
+}
+
+/**
+ * @param {string} url
+ */
+export function isFirebaseStorageUrl(url) {
+    const s = String(url ?? '').trim();
+    if (!s) return false;
+    try {
+        return new URL(s).hostname === 'firebasestorage.googleapis.com';
+    } catch {
+        return s.includes('firebasestorage.googleapis.com');
+    }
+}
+
+/**
+ * True when any EN intro gallery slot (0–2) uses Firebase Storage.
+ * @param {Record<string, unknown> | null | undefined} locales
+ */
+export function hasFirebaseIntroGalleryUrl(locales) {
     for (let i = 0; i < 3; i++) {
-        const item = arr[i];
-        let src = '';
-        if (item && typeof item === 'object' && !Array.isArray(item)) {
-            src = String(/** @type {Record<string, unknown>} */ (item).src ?? '').trim();
-        } else if (typeof item === 'string') {
-            src = item.trim();
+        if (isFirebaseStorageUrl(introGallerySlotSrc(locales, i))) {
+            return true;
         }
-        if (src) {
+    }
+    return false;
+}
+
+/**
+ * True when EN world.introGallery has no non-empty src in slots 0–2.
+ * @param {Record<string, unknown> | null | undefined} locales
+ */
+export function needsIntroGallerySync(locales) {
+    for (let i = 0; i < 3; i++) {
+        if (introGallerySlotSrc(locales, i)) {
             return false;
         }
     }

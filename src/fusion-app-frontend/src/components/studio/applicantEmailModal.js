@@ -2,20 +2,65 @@
  * Studio — email to a program applicant (Integration API + LLM + templates in localStorage).
  */
 import { getPublicSiteOrigin } from '../../config.js';
-import { getDataSource, getPrograms, studioReinterpretWithPrompt } from '../../utils/database.js';
+import { getDataSource, getPrograms, studioReinterpretWithPrompt, appendApplicantEmailOutreachStudio, getApplicantEmailOutreachForStudio, applicantEmailOutreachApiAvailable, clearApplicantEmailOutreachStudio } from '../../utils/database.js';
 import { openStudioModal } from '../../utils/studioModal.js';
 import { getIntegrationBaseUrl, sendEmail } from '../../utils/integrationApi.js';
-import { DEFAULT_SIGNATURE_HTML } from '../../utils/emailHtml.js';
 import { wrapEmailHtml } from '../../utils/emailCampaignTemplates.js';
+import { buildProgramRunSidebarDateLines } from '../../utils/programSidebarRunDates.js';
+import { formatStudioDateWithTitle } from '../../utils/studioDateFormat.js';
 
 const LLM_COMBINED_MAX = 12000;
 
 const LS_TEMPLATES = 'fusion-studio-applicant-email-templates';
 const DRAFT_PREFIX = 'fusion-studio-applicant-email-draft:';
 const APPROVED_TEMPLATE_ID = 'tpl-applicant-approved-invitation';
-const ZOIA_APPROVAL_SIGNATURE_HTML = `<p style="margin:0 0 6px">Best Regards,</p>
-<p style="margin:0 0 4px;font-weight:700">Zoia Amadi</p>
-<p style="margin:0;color:#333">Communications Director at Fusion Intl.</p>`;
+const SLOT_NUDGE_TEMPLATE_ID = 'tpl-applicant-secure-slot-nudge';
+
+/**
+ * @param {string} displayName
+ * @param {string} [roleLine]
+ * @returns {string}
+ */
+function buildApplicantSignatureHtml(displayName, roleLine) {
+    const roleBlock = roleLine
+        ? `\n<p style="margin:0;color:#333">${roleLine}</p>\n`
+        : '\n';
+    return `<div style="padding-top:22px;">
+
+<p style="margin:0 0 6px">Best Regards,</p>
+<p style="margin:0 0 4px;font-weight:700">${displayName}</p>${roleBlock}
+    <img src="https://fusionart.world/email/Fusion-Logo-Sig-1.png" alt="Fusion" width="110" style="display:block;margin-bottom:16px;border:0">
+
+    <p style="margin:0 0 8px;font-size:13px;">
+      <a href="https://www.fusionart.world" style="color:#000000;text-decoration:none;border-bottom:1px solid #000000;">
+        fusionart.world
+      </a>
+    </p>
+
+    <p style="margin:0;font-size:12px;color:#4a4a4a;letter-spacing:0.05em;">
+      IG: @fusion_intl &nbsp;/&nbsp; TT: @fusion_intl &nbsp;/&nbsp; YT: @fusionartworld
+    </p>
+
+  </div>`;
+}
+
+const APPLICANT_DEFAULT_SIGNATURE_HTML = buildApplicantSignatureHtml(
+    'Zoia Amadi',
+    'Communications Director at Fusion Intl.',
+);
+const ZOIA_APPROVAL_SIGNATURE_HTML = APPLICANT_DEFAULT_SIGNATURE_HTML;
+const FUSION_TEAM_SIGNATURE_HTML = buildApplicantSignatureHtml('Fusion Team');
+const AKARI_SIGNATURE_HTML = buildApplicantSignatureHtml(
+    'Akari Koizumi',
+    'Events Coordinator / Interpreter',
+);
+const STARR_SIGNATURE_HTML = buildApplicantSignatureHtml('Starr Oge', 'Founding Director');
+const APPLICANT_SIGNATURES = [
+    { id: 'zoia', label: 'Zoia Amadi', html: APPLICANT_DEFAULT_SIGNATURE_HTML },
+    { id: 'fusion-team', label: 'Fusion Team', html: FUSION_TEAM_SIGNATURE_HTML },
+    { id: 'akari', label: 'Akari Koizumi', html: AKARI_SIGNATURE_HTML },
+    { id: 'starr', label: 'Starr Oge', html: STARR_SIGNATURE_HTML },
+];
 
 /**
  * @param {string} applicantId
@@ -70,7 +115,32 @@ function profileProgramsUrl() {
 }
 
 /**
- * @returns {{ id: string, name: string, subject: string, body: string, signatureHtml?: string, builtIn?: boolean }[]}
+ * @param {{ sentAt?: string, subject?: string, templateId?: string, templateName?: string }[]} entries
+ * @param {{ unavailable?: boolean }} [opts]
+ * @returns {string}
+ */
+function renderOutreachHistoryHtml(entries, opts = {}) {
+    if (opts.unavailable) {
+        return '<p class="studio-applicant-email-composer__hint">Correspondence log is unavailable until the backend is deployed and <code class="studio-code-inline">dfx generate fusion-app-backend</code> is run.</p>';
+    }
+    const sorted = [...(entries || [])].sort((a, b) =>
+        String(a.sentAt || '').localeCompare(String(b.sentAt || '')),
+    );
+    if (!sorted.length) {
+        return '<p class="studio-applicant-email-composer__hint">No emails logged yet.</p>';
+    }
+    return `<ol class="studio-applicant-email-composer__outreach-list">${sorted
+        .map((e) => {
+            const { label, title } = formatStudioDateWithTitle(e.sentAt);
+            const tpl = escapeHtmlText(e.templateName || 'Manual');
+            const subj = escapeHtmlText(e.subject || '—');
+            return `<li><span class="studio-applicant-email-composer__outreach-date" title="${escapeHtmlText(title)}">${escapeHtmlText(label)}</span> <strong>${tpl}</strong> <span class="studio-applicant-email-composer__outreach-subject">${subj}</span></li>`;
+        })
+        .join('')}</ol>`;
+}
+
+/**
+ * @returns {{ id: string, name: string, subject: string, body: string, signatureHtml?: string, signatureKey?: string, builtIn?: boolean }[]}
  */
 function builtInApplicantTemplates() {
     return [
@@ -79,10 +149,11 @@ function builtInApplicantTemplates() {
             name: 'Approved applicant invitation',
             subject: 'Fusion {{programLocation}} Program invitation',
             signatureHtml: ZOIA_APPROVAL_SIGNATURE_HTML,
+            signatureKey: 'zoia',
             builtIn: true,
             body: `Hi {{firstName}},
 
-It was a pleasure meeting you and hearing more about your work and the inspiration behind it. We reviewed your application and are thrilled to extend an invitation for the upcoming Fusion {{programLocation}} Program in {{programDate}}.
+It was a pleasure meeting you and hearing more about your work and the inspiration behind it. We reviewed your application and are thrilled to extend an invitation for the upcoming Fusion {{programLocation}} Program from {{programStartDate}} to {{programEndDate}}.
 
 Please see below for next steps. Spots are first come, first served, so submit your deposit or full payment to secure your spot in the program.
 
@@ -96,30 +167,51 @@ Next steps:
 After your payment is submitted, we will follow up with confirmation and future onboarding details.`,
         },
         {
+            id: SLOT_NUDGE_TEMPLATE_ID,
+            name: 'Secure your Fusion program slot',
+            subject: 'Secure your Fusion {{programLocation}} Program slot',
+            signatureHtml: FUSION_TEAM_SIGNATURE_HTML,
+            signatureKey: 'fusion-team',
+            builtIn: true,
+            body: `Hi {{firstName}},
+
+We are excited to move forward with your invitation to the Fusion {{programLocation}} Program from {{programStartDate}} to {{programEndDate}}.
+
+Your application has been approved, and the final step to secure your spot is submitting your deposit or full payment. Spots are first come, first served, so we recommend completing this as soon as possible.
+
+Next steps:
+1. Sign in to Fusion.
+2. Visit your Settings Profile page: {{profileProgramsUrl}}
+3. Open Programs, then select the Payments tab.
+4. Select the accepted {{programLocation}} program.
+5. Submit your deposit or full payment to secure your position.
+
+Once your payment is submitted, our team will follow up with confirmation and onboarding details.`,
+        },
+        {
             id: 'tpl-default-schedule',
             name: 'Schedule meeting',
             subject: '[Fusion] Program application — {{programId}}',
+            signatureKey: 'zoia',
             builtIn: true,
             body: `Hello {{fullName}},
 
 We would like to schedule a meeting to discuss your application for program {{programId}}.
 
-Please reply with your availability.
-
-— Fusion`,
+Please select a meeting slot through the link below.
+https://calendly.com/fusionart/30min`,
         },
         {
             id: 'tpl-default-confirmation',
             name: 'Application received',
             subject: '[Fusion] Program application — {{programId}}',
+            signatureKey: 'zoia',
             builtIn: true,
             body: `Hello {{fullName}},
 
 This confirms we have received your application for program {{programId}}.
 
-We will be in touch with next steps.
-
-— Fusion`,
+We will be in touch with next steps.`,
         },
     ];
 }
@@ -149,7 +241,7 @@ function readTemplates() {
 }
 
 /**
- * @returns {{ id: string, name: string, subject: string, body: string, signatureHtml?: string, builtIn?: boolean }[]}
+ * @returns {{ id: string, name: string, subject: string, body: string, signatureHtml?: string, signatureKey?: string, builtIn?: boolean }[]}
  */
 function seedDefaultTemplates() {
     return builtInApplicantTemplates();
@@ -174,6 +266,14 @@ function programFallbackTitle(programId) {
     return String(programId || 'upcoming program').trim() || 'upcoming program';
 }
 
+function nonEmptyString(...values) {
+    for (const value of values) {
+        const text = String(value ?? '').trim();
+        if (text) return text;
+    }
+    return '';
+}
+
 /**
  * @param {Record<string, unknown>} program
  */
@@ -184,24 +284,33 @@ function extractProgramTemplateInfo(program) {
             ? /** @type {Record<string, unknown>} */ (en.programPage)
             : {};
     const programLocation = String(en.location || en.place || pp.location || en.headline || en.focus || '').trim();
-    const programDate = String(
-        en.startDate ||
-            en.start ||
-            en.programStart ||
-            pp.startDate ||
-            pp.runDates ||
-            en.year ||
-            '',
-    ).trim();
-    return { programLocation, programDate };
+    const run = {
+        ...en,
+        startDate: nonEmptyString(en.startDate, en.start, en.programStart, pp.startDate),
+        endDate: nonEmptyString(en.endDate, en.end, en.programEnd, pp.endDate),
+        year: nonEmptyString(en.year, pp.year),
+    };
+    const dateLines = buildProgramRunSidebarDateLines(run, 'en');
+    const programStartDate = nonEmptyString(dateLines?.start, run.startDate);
+    const programEndDate = nonEmptyString(dateLines?.end, run.endDate);
+    const programDate =
+        programStartDate && programEndDate
+            ? `${programStartDate} to ${programEndDate}`
+            : nonEmptyString(programStartDate, programEndDate, pp.runDates, en.runDates, en.year);
+    return {
+        programLocation,
+        programDate,
+        programStartDate: programStartDate || programDate,
+        programEndDate: programEndDate || programDate,
+    };
 }
 
 /**
  * @param {object} row — applicant row
- * @param {{ onSent?: () => void | Promise<void> }} [opts]
+ * @param {{ onSent?: () => void | Promise<void>, canClearCorrespondence?: boolean }} [opts]
  */
 export async function openApplicantEmailModal(row, opts = {}) {
-    const { onSent } = opts;
+    const { onSent, canClearCorrespondence = false } = opts;
     const applicantId = String(row?.id ?? '').trim();
     const toEmail = String(row?.email ?? '').trim();
     const toValid = toEmail.toLowerCase().includes('@');
@@ -211,6 +320,8 @@ export async function openApplicantEmailModal(row, opts = {}) {
     const isAccepted = String(row?.status || '').toLowerCase() === 'accepted';
     let programLocation = programFallbackTitle(programId);
     let programDate = 'upcoming program date';
+    let programStartDate = 'upcoming program date';
+    let programEndDate = 'upcoming program date';
     try {
         const programs = await getPrograms();
         const program = (programs || []).find((p) => String(p?.id || '') === programId);
@@ -218,6 +329,8 @@ export async function openApplicantEmailModal(row, opts = {}) {
             const info = extractProgramTemplateInfo(/** @type {Record<string, unknown>} */ (program));
             programLocation = info.programLocation || programLocation;
             programDate = info.programDate || programDate;
+            programStartDate = info.programStartDate || programStartDate;
+            programEndDate = info.programEndDate || programEndDate;
         }
     } catch {
         /* keep fallbacks */
@@ -228,11 +341,14 @@ export async function openApplicantEmailModal(row, opts = {}) {
         programId,
         programLocation,
         programDate,
+        programStartDate,
+        programEndDate,
         profileProgramsUrl: profileProgramsUrl(),
         email: toEmail,
     };
 
     const title = 'Email applicant';
+    const initialOutreach = Array.isArray(row?.emailOutreach) ? row.emailOutreach : [];
 
     const inner = `
 <div class="studio-applicant-email-composer">
@@ -248,22 +364,39 @@ export async function openApplicantEmailModal(row, opts = {}) {
           <div><dt>Status</dt><dd>${escapeHtmlText(String(row?.status || 'pending'))}</dd></div>
         </dl>
       </section>
+      <section class="studio-applicant-email-composer__card studio-applicant-email-composer__outreach-card">
+        <div class="studio-applicant-email-composer__outreach-head">
+          <p class="studio-applicant-email-composer__eyebrow">Correspondence</p>
+          <button type="button" class="studio-btn-ghost" id="studio-ae-clear-correspondence" hidden>Clear correspondence</button>
+        </div>
+        <div id="studio-ae-outreach-list">${renderOutreachHistoryHtml(initialOutreach)}</div>
+      </section>
       <section class="studio-applicant-email-composer__card">
-        <p class="studio-applicant-email-composer__eyebrow">Template</p>
+        <p class="studio-applicant-email-composer__eyebrow">Built-in templates</p>
         <label class="studio-field studio-applicant-email-composer__field">
           <span>Choose template</span>
-          <select class="studio-select" id="studio-ae-template"></select>
+          <select class="studio-select" id="studio-ae-template-builtin"></select>
         </label>
         <div class="studio-applicant-email-composer__button-grid">
-          <button type="button" class="studio-btn-secondary" id="studio-ae-tpl-apply">Apply</button>
+          <button type="button" class="studio-btn-secondary" id="studio-ae-tpl-builtin-apply">Apply</button>
+        </div>
+      </section>
+      <section class="studio-applicant-email-composer__card">
+        <p class="studio-applicant-email-composer__eyebrow">Custom templates</p>
+        <label class="studio-field studio-applicant-email-composer__field">
+          <span>Choose template</span>
+          <select class="studio-select" id="studio-ae-template-custom"></select>
+        </label>
+        <div class="studio-applicant-email-composer__button-grid">
+          <button type="button" class="studio-btn-secondary" id="studio-ae-tpl-custom-apply">Apply</button>
           <button type="button" class="studio-btn-ghost" id="studio-ae-tpl-new">New</button>
           <button type="button" class="studio-btn-ghost" id="studio-ae-tpl-update">Update</button>
           <button type="button" class="studio-btn-ghost" id="studio-ae-tpl-delete">Delete</button>
         </div>
-        <p class="studio-applicant-email-composer__hint">Built-in templates stay available. Custom templates are saved in this browser.</p>
+        <p class="studio-applicant-email-composer__hint">Custom templates are saved in this browser.</p>
       </section>
       <section class="studio-applicant-email-composer__card">
-        <p class="studio-applicant-email-composer__eyebrow">Draft</p>
+        <p class="studio-applicant-email-composer__eyebrow">Applicant Draft</p>
         <div class="studio-applicant-email-composer__button-grid">
           <button type="button" class="studio-btn-ghost" id="studio-ae-load-draft">Load</button>
           <button type="button" class="studio-btn-secondary" id="studio-ae-save-draft">Save</button>
@@ -312,6 +445,13 @@ export async function openApplicantEmailModal(row, opts = {}) {
           <p class="studio-applicant-email-composer__eyebrow">Signature</p>
           <button type="button" class="studio-btn-ghost" id="studio-ae-sig-toggle" aria-expanded="false">Edit</button>
         </div>
+        <label class="studio-field studio-applicant-email-composer__field">
+          <span>Signature preset</span>
+          <select class="studio-select" id="studio-ae-signature-choice">
+            ${APPLICANT_SIGNATURES.map((sig) => `<option value="${escapeHtmlText(sig.id)}">${escapeHtmlText(sig.label)}</option>`).join('')}
+            <option value="custom">Custom</option>
+          </select>
+        </label>
         <div id="studio-ae-sig-preview" class="studio-send-blast-sig-preview" aria-hidden="false"></div>
         <div id="studio-ae-sig-editor" class="studio-send-blast-sig-editor" hidden>
           <label class="studio-field studio-applicant-email-composer__field">
@@ -344,66 +484,128 @@ export async function openApplicantEmailModal(row, opts = {}) {
     const sigEditor = root.querySelector('#studio-ae-sig-editor');
     const sigToggle = root.querySelector('#studio-ae-sig-toggle');
     const sigDone = root.querySelector('#studio-ae-sig-done');
+    const sigChoice = root.querySelector('#studio-ae-signature-choice');
     const saveDraftBtn = root.querySelector('#studio-ae-save-draft');
     const loadDraftBtn = root.querySelector('#studio-ae-load-draft');
     const deleteDraftBtn = root.querySelector('#studio-ae-delete-draft');
-    const tplSelect = root.querySelector('#studio-ae-template');
+    const tplBuiltinSelect = root.querySelector('#studio-ae-template-builtin');
+    const tplCustomSelect = root.querySelector('#studio-ae-template-custom');
+    const outreachListEl = root.querySelector('#studio-ae-outreach-list');
+    const clearCorrespondenceBtn = root.querySelector('#studio-ae-clear-correspondence');
 
     if (sigTextarea instanceof HTMLTextAreaElement) {
-        sigTextarea.value = DEFAULT_SIGNATURE_HTML;
+        sigTextarea.value = APPLICANT_DEFAULT_SIGNATURE_HTML;
     }
-    let signatureEditSnapshot = sigTextarea instanceof HTMLTextAreaElement ? sigTextarea.value : DEFAULT_SIGNATURE_HTML;
+    let signatureEditSnapshot = sigTextarea instanceof HTMLTextAreaElement ? sigTextarea.value : APPLICANT_DEFAULT_SIGNATURE_HTML;
+    /** @type {{ id: string, name: string } | null} */
+    let lastAppliedTemplate = null;
+    /** @type {{ sentAt: string, subject: string, templateId: string, templateName: string }[]} */
+    let outreachEntries = [...initialOutreach];
+    let outreachUnavailable = false;
+
+    const setSignaturePresetValue = (signatureKey) => {
+        if (!(sigChoice instanceof HTMLSelectElement)) return;
+        const key = String(signatureKey || '').trim();
+        sigChoice.value = APPLICANT_SIGNATURES.some((sig) => sig.id === key) ? key : 'custom';
+    };
+
+    const applySignaturePreset = (signatureKey) => {
+        const sig = APPLICANT_SIGNATURES.find((item) => item.id === signatureKey);
+        if (!sig || !(sigTextarea instanceof HTMLTextAreaElement)) return;
+        sigTextarea.value = sig.html;
+        signatureEditSnapshot = sigTextarea.value;
+        setSignaturePresetValue(sig.id);
+        renderSignaturePreview();
+    };
 
     const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || '';
     };
 
-    const fillTemplateSelect = (list, selectedId) => {
-        if (!(tplSelect instanceof HTMLSelectElement)) return;
+    const fillSelectOptions = (selectEl, rows, selectedId) => {
+        if (!(selectEl instanceof HTMLSelectElement)) return;
         const fr = document.createDocumentFragment();
         const o0 = document.createElement('option');
         o0.value = '';
         o0.textContent = '— Select template —';
         fr.appendChild(o0);
-        const builtIns = list.filter((x) => x.builtIn);
-        const custom = list.filter((x) => !x.builtIn);
-        const appendGroup = (label, rows) => {
-            if (!rows.length) return;
-            const group = document.createElement('optgroup');
-            group.label = label;
-            for (const t of rows) {
-                const o = document.createElement('option');
-                o.value = t.id;
-                o.textContent = t.name;
-                group.appendChild(o);
-            }
-            fr.appendChild(group);
-        };
-        appendGroup('Built-in', builtIns);
-        appendGroup('Custom', custom);
-        tplSelect.replaceChildren(fr);
-        if (selectedId && list.some((x) => x.id === selectedId)) {
-            tplSelect.value = selectedId;
+        for (const t of rows) {
+            const o = document.createElement('option');
+            o.value = t.id;
+            o.textContent = t.name;
+            fr.appendChild(o);
+        }
+        selectEl.replaceChildren(fr);
+        if (selectedId && rows.some((x) => x.id === selectedId)) {
+            selectEl.value = selectedId;
         }
     };
 
     const builtInIds = new Set(builtInApplicantTemplates().map((x) => x.id));
     let customTemplates = readTemplates().filter((x) => !builtInIds.has(x.id));
-    let templates = [...builtInApplicantTemplates(), ...customTemplates];
-    const defaultTemplateId = isAccepted ? APPROVED_TEMPLATE_ID : (templates[0]?.id || '');
-    fillTemplateSelect(templates, defaultTemplateId);
+    const builtInTemplates = builtInApplicantTemplates();
+    let templates = [...builtInTemplates, ...customTemplates];
+    const defaultBuiltinId = isAccepted ? APPROVED_TEMPLATE_ID : builtInTemplates[0]?.id || '';
 
-    const refreshTemplates = (selectedId = '') => {
+    const refreshTemplates = (selectedBuiltinId = '', selectedCustomId = '') => {
         customTemplates = readTemplates().filter((x) => !builtInIds.has(x.id));
         templates = [...builtInApplicantTemplates(), ...customTemplates];
-        fillTemplateSelect(templates, selectedId);
+        fillSelectOptions(tplBuiltinSelect, builtInApplicantTemplates(), selectedBuiltinId);
+        fillSelectOptions(tplCustomSelect, customTemplates, selectedCustomId);
     };
 
+    refreshTemplates(defaultBuiltinId, '');
+
     const getSelectedTemplate = () => {
-        if (!(tplSelect instanceof HTMLSelectElement)) return null;
-        const id = tplSelect.value;
+        const customId =
+            tplCustomSelect instanceof HTMLSelectElement ? tplCustomSelect.value.trim() : '';
+        const builtinId =
+            tplBuiltinSelect instanceof HTMLSelectElement ? tplBuiltinSelect.value.trim() : '';
+        const id = customId || builtinId;
         if (!id) return null;
         return templates.find((t) => t.id === id) || null;
+    };
+
+    const clearOtherTemplateSelect = (source) => {
+        if (source === 'builtin' && tplCustomSelect instanceof HTMLSelectElement) {
+            tplCustomSelect.value = '';
+        }
+        if (source === 'custom' && tplBuiltinSelect instanceof HTMLSelectElement) {
+            tplBuiltinSelect.value = '';
+        }
+    };
+
+    const renderOutreachList = () => {
+        if (outreachListEl instanceof HTMLElement) {
+            outreachListEl.innerHTML = renderOutreachHistoryHtml(outreachEntries, {
+                unavailable: outreachUnavailable,
+            });
+        }
+        syncClearCorrespondenceBtn();
+    };
+
+    const syncClearCorrespondenceBtn = () => {
+        if (!(clearCorrespondenceBtn instanceof HTMLButtonElement)) return;
+        const show =
+            canClearCorrespondence &&
+            !outreachUnavailable &&
+            outreachEntries.length > 0;
+        clearCorrespondenceBtn.hidden = !show;
+    };
+
+    const refreshOutreachFromServer = async () => {
+        if (!applicantId) return;
+        outreachUnavailable = getDataSource() === 'live' && !(await applicantEmailOutreachApiAvailable());
+        if (outreachUnavailable) {
+            renderOutreachList();
+            return;
+        }
+        try {
+            outreachEntries = await getApplicantEmailOutreachForStudio(applicantId);
+            renderOutreachList();
+        } catch {
+            renderOutreachList();
+        }
     };
 
     const applyTemplate = (t, message = 'Template applied.') => {
@@ -411,20 +613,27 @@ export async function openApplicantEmailModal(row, opts = {}) {
             setStatus('Select a template first.');
             return;
         }
+        lastAppliedTemplate = { id: t.id, name: t.name };
         if (subjectEl instanceof HTMLInputElement) {
             subjectEl.value = applyTemplateVars(t.subject, vars);
         }
         if (bodyEl instanceof HTMLTextAreaElement) {
             bodyEl.value = applyTemplateVars(t.body, vars);
         }
-        if (sigTextarea instanceof HTMLTextAreaElement && typeof t.signatureHtml === 'string') {
-            sigTextarea.value = applyTemplateVars(t.signatureHtml, vars);
-            signatureEditSnapshot = sigTextarea.value;
-            renderSignaturePreview();
-        } else if (sigTextarea instanceof HTMLTextAreaElement && t.builtIn) {
-            sigTextarea.value = DEFAULT_SIGNATURE_HTML;
-            signatureEditSnapshot = sigTextarea.value;
-            renderSignaturePreview();
+        if (sigTextarea instanceof HTMLTextAreaElement) {
+            if (typeof t.signatureHtml === 'string') {
+                sigTextarea.value = applyTemplateVars(t.signatureHtml, vars);
+                signatureEditSnapshot = sigTextarea.value;
+                setSignaturePresetValue(t.signatureKey || 'custom');
+                renderSignaturePreview();
+            } else if (t.signatureKey) {
+                applySignaturePreset(t.signatureKey);
+            } else if (t.builtIn) {
+                sigTextarea.value = APPLICANT_DEFAULT_SIGNATURE_HTML;
+                signatureEditSnapshot = sigTextarea.value;
+                setSignaturePresetValue('zoia');
+                renderSignaturePreview();
+            }
         }
         setStatus(message);
     };
@@ -527,12 +736,63 @@ export async function openApplicantEmailModal(row, opts = {}) {
     };
 
     renderSignaturePreview();
-    applyTemplate(getSelectedTemplate() || templates[0], '');
+    const initialTemplate =
+        builtInTemplates.find((t) => t.id === defaultBuiltinId) || builtInTemplates[0] || null;
+    if (initialTemplate) applyTemplate(initialTemplate, '');
     recomputeSendNow();
     syncDeleteDraftEnabled();
+    renderOutreachList();
+    void refreshOutreachFromServer();
 
-    root.querySelector('#studio-ae-tpl-apply')?.addEventListener('click', () => {
-        applyTemplate(getSelectedTemplate());
+    clearCorrespondenceBtn?.addEventListener('click', async () => {
+        if (!canClearCorrespondence || !applicantId || outreachEntries.length === 0) return;
+        const label = fullName || toEmail || applicantId;
+        if (
+            !window.confirm(
+                `Clear all logged outreach emails for ${label}? This cannot be undone.`,
+            )
+        ) {
+            return;
+        }
+        if (clearCorrespondenceBtn instanceof HTMLButtonElement) {
+            clearCorrespondenceBtn.disabled = true;
+        }
+        try {
+            await clearApplicantEmailOutreachStudio(applicantId);
+            outreachEntries = [];
+            renderOutreachList();
+            setStatus('Correspondence cleared.');
+            if (onSent) await onSent();
+        } catch (e) {
+            alert(e instanceof Error ? e.message : String(e));
+            syncClearCorrespondenceBtn();
+            if (clearCorrespondenceBtn instanceof HTMLButtonElement) {
+                clearCorrespondenceBtn.disabled = false;
+            }
+        }
+    });
+
+    tplBuiltinSelect?.addEventListener('change', () => {
+        if (tplBuiltinSelect instanceof HTMLSelectElement && tplBuiltinSelect.value) {
+            clearOtherTemplateSelect('builtin');
+        }
+    });
+    tplCustomSelect?.addEventListener('change', () => {
+        if (tplCustomSelect instanceof HTMLSelectElement && tplCustomSelect.value) {
+            clearOtherTemplateSelect('custom');
+        }
+    });
+
+    root.querySelector('#studio-ae-tpl-builtin-apply')?.addEventListener('click', () => {
+        const t = getSelectedTemplate();
+        if (t?.builtIn) applyTemplate(t);
+        else setStatus('Select a built-in template first.');
+    });
+
+    root.querySelector('#studio-ae-tpl-custom-apply')?.addEventListener('click', () => {
+        const t = getSelectedTemplate();
+        if (t && !t.builtIn) applyTemplate(t);
+        else setStatus('Select a custom template first.');
     });
 
     root.querySelector('#studio-ae-tpl-new')?.addEventListener('click', () => {
@@ -543,7 +803,9 @@ export async function openApplicantEmailModal(row, opts = {}) {
         const id = `tpl-${Date.now()}`;
         customTemplates = [...customTemplates, { id, name: String(name).trim(), subject: subj, body: bod, builtIn: false }];
         writeTemplates(customTemplates);
-        refreshTemplates(id);
+        refreshTemplates('', id);
+        if (tplCustomSelect instanceof HTMLSelectElement) tplCustomSelect.value = id;
+        clearOtherTemplateSelect('custom');
         setStatus('Template created.');
     });
 
@@ -563,7 +825,7 @@ export async function openApplicantEmailModal(row, opts = {}) {
             x.id === t.id ? { ...x, subject: subj, body: bod } : x,
         );
         writeTemplates(customTemplates);
-        refreshTemplates(t.id);
+        refreshTemplates('', t.id);
         setStatus('Template updated.');
     });
 
@@ -581,7 +843,7 @@ export async function openApplicantEmailModal(row, opts = {}) {
         const cur = t.id;
         customTemplates = customTemplates.filter((x) => x.id !== cur);
         writeTemplates(customTemplates);
-        refreshTemplates('');
+        refreshTemplates('', '');
         setStatus('Template deleted.');
     });
 
@@ -602,9 +864,16 @@ export async function openApplicantEmailModal(row, opts = {}) {
     sigDone?.addEventListener('click', () => {
         if (sigTextarea instanceof HTMLTextAreaElement) {
             signatureEditSnapshot = sigTextarea.value;
+            setSignaturePresetValue('custom');
         }
         renderSignaturePreview();
         setSignatureEditing(false);
+    });
+
+    sigChoice?.addEventListener('change', () => {
+        if (!(sigChoice instanceof HTMLSelectElement)) return;
+        if (sigChoice.value === 'custom') return;
+        applySignaturePreset(sigChoice.value);
     });
 
     saveDraftBtn?.addEventListener('click', () => {
@@ -634,8 +903,9 @@ export async function openApplicantEmailModal(row, opts = {}) {
         if (bodyEl instanceof HTMLTextAreaElement) bodyEl.value = String(o.message ?? '');
         if (sigTextarea instanceof HTMLTextAreaElement) {
             const sig = String(o.signatureHtml ?? '');
-            sigTextarea.value = sig || DEFAULT_SIGNATURE_HTML;
+            sigTextarea.value = sig || APPLICANT_DEFAULT_SIGNATURE_HTML;
             signatureEditSnapshot = sigTextarea.value;
+            setSignaturePresetValue('custom');
         }
         renderSignaturePreview();
         setStatus('Loaded draft from this browser.');
@@ -651,8 +921,9 @@ export async function openApplicantEmailModal(row, opts = {}) {
         if (subjectEl instanceof HTMLInputElement) subjectEl.value = '';
         if (bodyEl instanceof HTMLTextAreaElement) bodyEl.value = '';
         if (sigTextarea instanceof HTMLTextAreaElement) {
-            sigTextarea.value = DEFAULT_SIGNATURE_HTML;
+            sigTextarea.value = APPLICANT_DEFAULT_SIGNATURE_HTML;
             signatureEditSnapshot = sigTextarea.value;
+            setSignaturePresetValue('zoia');
         }
         renderSignaturePreview();
         setStatus('Draft deleted.');
@@ -756,6 +1027,22 @@ export async function openApplicantEmailModal(row, opts = {}) {
         setStatus('Sending…');
         try {
             await sendEmail({ to: toEmail, subject: subj, html: fullHtml() });
+            const tpl = lastAppliedTemplate || getSelectedTemplate();
+            await appendApplicantEmailOutreachStudio(applicantId, {
+                subject: subj,
+                templateId: tpl?.id || '',
+                templateName: tpl?.name || 'Manual',
+            });
+            outreachEntries = [
+                ...outreachEntries,
+                {
+                    sentAt: new Date().toISOString(),
+                    subject: subj,
+                    templateId: tpl?.id || '',
+                    templateName: tpl?.name || 'Manual',
+                },
+            ];
+            renderOutreachList();
             setStatus(`Sent to ${toEmail}.`);
             if (onSent) await onSent();
         } catch (e) {

@@ -112,5 +112,15 @@ export function normalizeDatabaseSnapshotV1(snapshot) {
     if (!Array.isArray(s.accountContactStable)) {
         s.accountContactStable = [];
     }
+    if (s.archivedApplicantsStable == null) {
+        s.archivedApplicantsStable = null;
+    } else if (!Array.isArray(s.archivedApplicantsStable)) {
+        s.archivedApplicantsStable = null;
+    }
+    if (s.applicantEmailOutreachStable == null) {
+        s.applicantEmailOutreachStable = null;
+    } else if (!Array.isArray(s.applicantEmailOutreachStable)) {
+        s.applicantEmailOutreachStable = null;
+    }
     return snapshot;
 }

@@ -13,11 +13,9 @@ import {
   pickPublicWorldField,
 } from "../utils/worldPublicPick.js";
 import posthog from "posthog-js";
+import { introSlotsFromWorld } from "../utils/memberProfileForm.js";
+import { probeImageSrc } from "../utils/imageProbe.js";
 
-/**
- * @param {HTMLElement | null} container
- * @param {unknown} items
- */
 /**
  * @param {HTMLElement | null} container
  * @param {unknown} links
@@ -48,42 +46,50 @@ function populateArtistLinks(container, links) {
   else container.removeAttribute("hidden");
 }
 
-function populateIntroGallery(container, items) {
+/**
+ * @param {HTMLElement | null} container
+ * @param {unknown} introGallery
+ */
+async function populateIntroGallery(container, introGallery) {
   if (!container) return;
   container.replaceChildren();
-  if (!Array.isArray(items) || items.length === 0) return;
-  for (const item of items) {
-    const src =
-      typeof item === "string"
-        ? item
-        : item && typeof item === "object" && item.src != null
-          ? String(item.src)
-          : "";
-    if (!src) continue;
-    const alt =
-      item && typeof item === "object" && item.alt != null
-        ? String(item.alt)
-        : "";
-    const caption =
-      item &&
-      typeof item === "object" &&
-      item.caption != null &&
-      item.caption !== ""
-        ? String(item.caption)
-        : "";
-    const figure = document.createElement("figure");
-    figure.className = "profile-intro-gallery-item";
-    const wrap = document.createElement("div");
-    wrap.className = "profile-intro-gallery-img-wrap";
-    const img = document.createElement("img");
-    img.src = src;
-    img.alt = withSeoImageAlt(alt);
-    /* At most 3 intro slots — load all so none stay blank below the fold on mobile */
-    img.loading = "eager";
-    img.decoding = "async";
-    wrap.appendChild(img);
-    figure.appendChild(wrap);
+  container.classList.remove("profile-images-container--empty");
+
+  const slots = introSlotsFromWorld({ introGallery });
+  const results = await Promise.all(
+    slots.map(async (slot, slotIndex) => {
+      const src = String(slot.src ?? "").trim();
+      if (!src) return null;
+      const ok = await probeImageSrc(src);
+      if (!ok) return null;
+
+      const figure = document.createElement("figure");
+      figure.className = `profile-intro-gallery-item profile-intro-gallery-item--slot-${slotIndex}`;
+      const wrap = document.createElement("div");
+      wrap.className = "profile-intro-gallery-img-wrap";
+      const img = document.createElement("img");
+      img.src = src;
+      img.alt = withSeoImageAlt(String(slot.alt ?? ""));
+      img.loading = "eager";
+      img.decoding = "async";
+      wrap.appendChild(img);
+      figure.appendChild(wrap);
+      return { slotIndex, figure };
+    }),
+  );
+
+  const valid = results
+    .filter((x) => x != null)
+    .sort((a, b) => a.slotIndex - b.slotIndex);
+  for (const { figure } of valid) {
     container.appendChild(figure);
+  }
+
+  if (valid.length === 0) {
+    container.setAttribute("hidden", "");
+    container.classList.add("profile-images-container--empty");
+  } else {
+    container.removeAttribute("hidden");
   }
 }
 
@@ -343,7 +349,7 @@ export default function initProfile() {
       veteranBannerEl.removeAttribute("data-program-ids");
       veteranBannerEl.removeAttribute("data-residency-year");
     }
-    populateIntroGallery(imagesContainer, null);
+    void populateIntroGallery(imagesContainer, null);
     show(article, false);
     show(notFound, false);
     show(indexHint, true);
@@ -368,7 +374,7 @@ export default function initProfile() {
         veteranBannerEl.removeAttribute("data-program-ids");
         veteranBannerEl.removeAttribute("data-residency-year");
       }
-      populateIntroGallery(imagesContainer, null);
+      void populateIntroGallery(imagesContainer, null);
       show(article, false);
       show(notFound, true);
       show(indexHint, false);
@@ -572,7 +578,7 @@ export default function initProfile() {
     }
 
     populateArtistLinks(artistLinksEl, loc.links);
-    populateIntroGallery(
+    void populateIntroGallery(
       imagesContainer,
       /** @type {unknown} */ (pickWorld("introGallery")),
     );

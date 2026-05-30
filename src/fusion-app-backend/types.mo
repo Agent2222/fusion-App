@@ -341,9 +341,11 @@ module {
     public type ApplicantStatus = {
         #pending;
         #reviewing;
+        #postInterviewReview;
         #needsInfo;
         #accepted;
         #rejected;
+        #pulledOut;
     };
 
     public type ApplicantRecord = {
@@ -354,6 +356,14 @@ module {
         status : ApplicantStatus;
         createdAt : Text;
         payloadJson : Text;
+    };
+
+    /// One staff email logged for an applicant (stored as JSON in `applicantEmailOutreachStable`).
+    public type ApplicantEmailOutreachEntry = {
+        sentAt : Text;
+        subject : Text;
+        templateId : Text;
+        templateName : Text;
     };
 
     /// Program payment summary shown in member dashboard and future Studio Finance views.
@@ -506,6 +516,8 @@ module {
         editionsStable : [(Text, EditionRecord)];
         contentPagesStable : [(Text, ContentPageRecord)];
         applicantsStable : [(Text, ApplicantRecord)];
+        /// Pulled-out applicants (rescinded); optional for backups before this field existed.
+        archivedApplicantsStable : ?[(Text, ApplicantRecord)];
         siteSettingsStable : [(Text, Text)];
         applicationByArtistProgramStable : [(Text, Text)];
         artistMostRecentProgramStable : [(Text, Text)];
@@ -525,5 +537,7 @@ module {
         programPaymentLedgerStable : ?[(Text, ProgramPaymentLedgerRow)];
         programPaymentPlansStable : ?[(Text, ProgramPaymentPlan)];
         programPaymentFlightPreferencesStable : ?[(Text, ProgramPaymentFlightPreference)];
+        /// Applicant id → JSON array of outreach entries; optional for backups before this field existed.
+        applicantEmailOutreachStable : ?[(Text, Text)];
     };
 };

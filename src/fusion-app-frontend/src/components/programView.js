@@ -284,8 +284,12 @@ function setProgramHeroMedia(container, url, alt, posterStillUrl) {
     v.className = "program-detail-hero-video";
     v.setAttribute("src", u);
     v.setAttribute("playsinline", "");
+    v.setAttribute("webkit-playsinline", "");
+    v.setAttribute("muted", "");
     v.setAttribute("poster", poster);
     v.preload = "auto";
+    v.playsInline = true;
+    v.defaultMuted = true;
     v.muted = true;
     v.autoplay = true;
     v.loop = true;
@@ -303,13 +307,18 @@ function setProgramHeroMedia(container, url, alt, posterStillUrl) {
         v.style.opacity = "1";
       });
     };
-    v.addEventListener("loadeddata", fadeIn, { once: true });
+    for (const ev of ["loadeddata", "loadedmetadata", "canplay"]) {
+      v.addEventListener(ev, fadeIn, { once: true });
+    }
     if (v.readyState >= 2) {
       fadeIn();
     }
+    window.setTimeout(() => fadeIn(), 2800);
 
     container.appendChild(posterImg);
     container.appendChild(v);
+    v.load();
+    void v.play().catch(() => {});
     wireProgramHeroVideoLightbox(container);
     return;
   }

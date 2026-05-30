@@ -648,6 +648,8 @@ function programPaymentBody(opts = {}) {
         principal: String(opts.principal || '').trim(),
         programId: String(opts.programId || '').trim(),
         applicationId: String(opts.applicationId || '').trim(),
+        email: String(opts.email || '').trim(),
+        applicantName: String(opts.applicantName || opts.fullName || '').trim(),
         amountCents: Math.round(Number(opts.amountCents || 0)),
         totalDueCents: Math.round(Number(opts.totalDueCents || 0)),
         depositAmountCents: Math.round(Number(opts.depositAmountCents || 0)),
@@ -657,7 +659,7 @@ function programPaymentBody(opts = {}) {
 }
 
 /**
- * @param {{ principal: string, programId: string, applicationId: string, paymentType: 'deposit' | 'full_payment' | 'manual', amountCents: number, totalDueCents: number, depositAmountCents: number, ownFlight?: boolean, flightCreditCents?: number }} opts
+ * @param {{ principal: string, programId: string, applicationId: string, paymentType: 'deposit' | 'full_payment' | 'manual', amountCents: number, totalDueCents: number, depositAmountCents: number, email?: string, applicantName?: string, ownFlight?: boolean, flightCreditCents?: number }} opts
  * @returns {Promise<{ clientSecret: string, paymentIntentId: string }>}
  */
 export async function createProgramPaymentIntent(opts) {

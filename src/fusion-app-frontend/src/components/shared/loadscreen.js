@@ -831,9 +831,13 @@ class LoadScreenComponent extends HTMLElement {
             footer.setAttribute('active', 'true');
         }
 
-        document.querySelectorAll('.main-cont').forEach(el => {
+        document.querySelectorAll('.main-cont').forEach((el) => {
             el.style.zIndex = '1';
             el.style.pointerEvents = 'none';
+        });
+        // Feed filter bar must stay interactive (do not use `.main-cont` on `#filterSystem`).
+        document.querySelectorAll('#filterSystem, app-feed-filter').forEach((el) => {
+            el.style.pointerEvents = 'auto';
         });
 
         this.shadowRoot.querySelector('.loadscreen-container').style.zIndex = '-1';

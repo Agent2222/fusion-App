@@ -473,6 +473,16 @@ button.studio-wordmark-btn:hover {
   }
 }
 
+.studio-dashboard-pending {
+  margin-top: 0.25rem;
+}
+
+.studio-dashboard-pending .studio-section-title-row {
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
 .studio-stat-card {
   background: var(--studio-card-bg);
   border-radius: var(--studio-card-radius);
@@ -2158,6 +2168,60 @@ a.studio-app-payload-link:hover {
   padding-bottom: 0.15rem;
 }
 
+.studio-app-workflow {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.8rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.studio-app-workflow legend {
+  padding: 0 0.25rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #334155;
+}
+
+.studio-app-workflow__step {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  min-height: 2.4rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 9px;
+  background: #f8fafc;
+}
+
+.studio-app-workflow__step input {
+  margin-top: 0.2rem;
+}
+
+.studio-app-workflow__step strong,
+.studio-app-workflow__step small {
+  display: block;
+}
+
+.studio-app-workflow__step strong {
+  color: #0f172a;
+  font-size: 0.88rem;
+}
+
+.studio-app-workflow__step small {
+  color: #64748b;
+  font-size: 0.76rem;
+}
+
+.studio-app-workflow__step--readonly {
+  opacity: 0.82;
+}
+
+.studio-app-workflow__decision {
+  padding: 0.45rem 0.55rem;
+}
+
 /* Services → Resend: new applicant notification + Send Test */
 .studio-svc-app-notify-row {
   display: flex;
@@ -2229,6 +2293,23 @@ a.studio-app-payload-link:hover {
 .studio-community__tab.is-active {
   background: rgba(255, 255, 255, 0.08);
   color: #fff;
+  border-left-color: #fff;
+}
+
+.studio-community__tabs .studio-tabs__tab,
+.studio-community__tabs .studio-community__tab {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.74);
+  border-color: transparent;
+}
+
+.studio-community__tabs .studio-tabs__tab:hover,
+.studio-community__tabs .studio-tabs__tab.is-active,
+.studio-community__tabs .studio-community__tab:hover,
+.studio-community__tabs .studio-community__tab.is-active {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border-color: transparent;
   border-left-color: #fff;
 }
 
@@ -2489,6 +2570,82 @@ a.studio-app-payload-link:hover {
 .studio-community__feature-grid {
   display: grid;
   gap: 1rem;
+}
+
+.studio-community__exclusive-workspace {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.studio-community__feature-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--studio-community-border);
+}
+
+.studio-community__feature-tab {
+  font: inherit;
+  font-size: 0.78rem;
+  font-variation-settings: var(--fv-label);
+  padding: 0.38rem 0.65rem;
+  border: 1px solid var(--studio-community-border);
+  background: var(--studio-card-bg, #fff);
+  color: var(--c2, #0f172a);
+  cursor: pointer;
+}
+
+.studio-community__feature-tab:hover {
+  border-color: color-mix(in srgb, var(--c2, #000) 35%, transparent);
+}
+
+.studio-community__feature-tab.is-active {
+  border-color: var(--c2, #111);
+  background: color-mix(in srgb, var(--c2, #000) 8%, var(--studio-card-bg, #fff));
+  font-variation-settings: var(--fv-label-strong);
+}
+
+.studio-community__feature-tab--hidden {
+  opacity: 0.62;
+}
+
+.studio-community__feature-visible {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  margin-bottom: 0.85rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--studio-community-border);
+  background: color-mix(in srgb, var(--c2, #000) 3%, var(--studio-card-bg, #fff));
+}
+
+.studio-community__feature-visible input {
+  margin-top: 0.15rem;
+}
+
+.studio-community__feature-visible span {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.studio-community__feature-visible strong {
+  font-size: 0.82rem;
+  font-variation-settings: var(--fv-label);
+  color: var(--c2, #0f172a);
+}
+
+.studio-community__feature-visible small {
+  color: var(--studio-muted);
+  font-size: 0.74rem;
+}
+
+.studio-community__feature-card--hidden .studio-community__feature-preview {
+  opacity: 0.55;
+}
+
+.studio-community__feature-panel[hidden] {
+  display: none;
 }
 
 .studio-community__feature-preview {
@@ -3412,6 +3569,14 @@ a.studio-app-payload-link:hover {
   background: #fee2e2;
   color: #991b1b;
 }
+.studio-status-pill--rescinded {
+  background: #fee2e2;
+  color: #991b1b;
+}
+.studio-status-pill--confirmed {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
 .studio-status-pill--neutral {
   background: #f1f5f9;
   color: #475569;
@@ -3964,6 +4129,68 @@ a.studio-app-payload-link:hover {
   }
 }
 
+.studio-applicant-email-composer__outreach-card {
+  min-height: 4.5rem;
+}
+
+.studio-applicant-email-composer__outreach-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.studio-applicant-email-composer__outreach-head .studio-applicant-email-composer__eyebrow {
+  margin-bottom: 0;
+}
+
+.studio-applicant-email-composer__outreach-list {
+  margin: 0.35rem 0 0;
+  padding-left: 1.15rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--c2, #0f172a);
+}
+
+.studio-applicant-email-composer__outreach-list li + li {
+  margin-top: 0.45rem;
+}
+
+.studio-applicant-email-composer__outreach-date {
+  color: #64748b;
+  margin-right: 0.35rem;
+}
+
+.studio-applicant-email-composer__outreach-subject {
+  display: block;
+  margin-top: 0.12rem;
+  color: #334155;
+}
+
+.studio-table tbody tr.studio-app-row {
+  cursor: pointer;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+
+.studio-table tbody tr.studio-app-row:hover {
+  background: #f4f6f8;
+  outline: 1px solid #cbd5e1;
+  outline-offset: -1px;
+}
+
+.studio-table tbody tr.studio-app-row:focus-visible {
+  outline: 2px solid var(--c2, #000);
+  outline-offset: -2px;
+}
+
+.studio-td-actions--stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+}
+
 /* Artists / Status tables: Email column action */
 .studio-td-email {
   white-space: nowrap;
@@ -4149,8 +4376,17 @@ a.studio-app-payload-link:hover {
   background: #16a34a;
 }
 
+.studio-user-sub-dot--warn {
+  background: #ca8a04;
+}
+
 .studio-user-sub-dot--err {
   background: #dc2626;
+}
+
+.studio-td-ready {
+  width: 2.5rem;
+  text-align: center;
 }
 
 /* Studio Settings — admin full database backup */

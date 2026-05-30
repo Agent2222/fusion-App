@@ -2,6 +2,7 @@
  * `/community` landing — CMS from canister (`getCommunityPagePublic`).
  */
 import { getCommunityArtistsPublic, getCommunityPagePublic } from '../utils/database.js';
+import { resolveCommunityHero, featureItemWithoutFlags } from '../utils/communityPageDefaults.js';
 import { captureCommunityEvent } from '../utils/communityPosthog.js';
 
 export function render() {
@@ -71,8 +72,10 @@ export default async function initCommunity() {
 
     const sections = data?.sections && typeof data.sections === 'object' ? data.sections : {};
     const active = (key) => /** @type {Record<string, unknown>} */ (sections)[key] !== false;
-    const h = data?.hero && typeof data.hero === 'object' ? data.hero : {};
+    const legacyHero = data?.hero && typeof data.hero === 'object' ? data.hero : {};
     const exclusive = Array.isArray(data?.exclusive) ? data.exclusive : [];
+    const { item: heroItem, index: heroIndex } = resolveCommunityHero(exclusive, legacyHero);
+    const visibleExclusiveCount = exclusive.filter((item) => item?.visible !== false).length;
     const connect = data?.connect && typeof data.connect === 'object' ? data.connect : {};
     const networkCards = Array.isArray(data?.networkCards) ? data.networkCards : [];
     const sessions = Array.isArray(data?.sessions) ? data.sessions : [];
@@ -87,6 +90,8 @@ export default async function initCommunity() {
         promo_active: active('promo'),
         join_active: active('join'),
         exclusive_count: exclusive.length,
+        exclusive_visible_count: visibleExclusiveCount,
+        hero_exclusive_index: heroIndex,
         network_card_count: networkCards.length,
         session_count: sessions.length,
         artist_count: artists.length,
@@ -99,8 +104,8 @@ export default async function initCommunity() {
         el.style.display = visible ? '' : 'none';
     };
 
-    const setActiveHero = (item, index = -1) => {
-        const activeItem = item && typeof item === 'object' ? item : h;
+    const setActiveHero = (item, index = heroIndex) => {
+        const activeItem = item && typeof item === 'object' ? item : heroItem;
         if (hero && typeof hero.setData === 'function') {
             hero.setData(activeItem, { artists, activeIndex: index });
         }
@@ -109,15 +114,19 @@ export default async function initCommunity() {
         }
     };
 
-    if (hero && typeof hero.setData === 'function') hero.setData(h, { artists, activeIndex: -1 });
-    if (exc && typeof exc.setData === 'function') exc.setData(exclusive, { activeIndex: -1 });
+    if (hero && typeof hero.setData === 'function') {
+        hero.setData(heroItem, { artists, activeIndex: heroIndex });
+    }
+    if (exc && typeof exc.setData === 'function') {
+        exc.setData(exclusive, { activeIndex: heroIndex });
+    }
     if (conn && typeof conn.setData === 'function') conn.setData(connect);
     if (net && typeof net.setData === 'function') net.setData(networkCards);
     if (sess && typeof sess.setData === 'function') sess.setData(sessions);
     if (promo && typeof promo.setData === 'function') promo.setData(promoData);
 
-    setVisible(hero, active('hero'));
-    setVisible(exc, active('exclusive'));
+    setVisible(hero, active('hero') && heroIndex >= 0);
+    setVisible(exc, active('exclusive') && visibleExclusiveCount > 0);
     setVisible(conn, active('connect'));
     setVisible(netSection, active('network'));
     setVisible(net, active('network'));
@@ -129,7 +138,9 @@ export default async function initCommunity() {
     exc?.addEventListener('fusion-community-feature-select', (event) => {
         const detail = event instanceof CustomEvent ? event.detail : {};
         const index = Number(detail?.index ?? -1);
-        const item = Number.isInteger(index) && index >= 0 ? exclusive[index] : detail?.item;
+        const item = Number.isInteger(index) && index >= 0
+            ? featureItemWithoutFlags(/** @type {Record<string, unknown>} */ (exclusive[index]))
+            : detail?.item;
         setActiveHero(item, index);
         const scrollTargets = [
             document.getElementById('communityMainContent'),

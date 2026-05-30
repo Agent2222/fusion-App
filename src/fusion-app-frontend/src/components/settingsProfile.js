@@ -1257,14 +1257,20 @@ function mpdArray(value) {
  */
 function normalizeMpdApplicationStatus(raw) {
   const s = mpdText(raw).toLowerCase().replace(/[\s_-]+/g, "-");
-  if (["reviewing", "review", "in-review", "under-review", "initial-review", "final-review"].includes(s)) {
-    return { key: "under-review", label: "Under review" };
+  if (["reviewing", "review", "in-review", "initial-review"].includes(s)) {
+    return { key: "initial-review", label: "Initial review" };
+  }
+  if (["postinterviewreview", "post-interview-review", "under-review", "final-review"].includes(s)) {
+    return { key: "post-interview-review", label: "Post interview review" };
   }
   if (["invited", "invite", "accepted", "approved", "payment-required", "deposit-due"].includes(s)) {
     return { key: "invited", label: "Invited" };
   }
   if (["not-selected", "rejected", "declined", "not-accepted"].includes(s)) {
     return { key: "not-selected", label: "Not selected" };
+  }
+  if (["pulledout", "pulled-out", "pulled_out", "rescinded"].includes(s)) {
+    return { key: "rescinded", label: "Rescinded" };
   }
   if (["withdrawn", "withdrew", "cancelled", "canceled"].includes(s)) {
     return { key: "withdrawn", label: "Withdrawn" };
@@ -1348,6 +1354,7 @@ function normalizeMpdMyProgramCard(program, programId, entry) {
     payload,
     status,
     paymentRequired,
+    slotSecured: Boolean(entry.slotSecured),
     teamNote,
     rawEntry: entry,
   };
@@ -1357,16 +1364,23 @@ function normalizeMpdMyProgramCard(program, programId, entry) {
 function mpdMyProgramTimeline(item) {
   const status = item.status.key;
   const progress =
-    status === "under-review"
+    status === "rescinded"
+      ? { completeThrough: 1, activeStep: 0 }
+      : status === "initial-review"
       ? { completeThrough: 2, activeStep: 3 }
+      : status === "post-interview-review"
+        ? { completeThrough: 3, activeStep: 4 }
       : status === "invited" || status === "not-selected" || status === "withdrawn"
         ? { completeThrough: 4, activeStep: 5 }
         : { completeThrough: item.submittedAt ? 1 : 0, activeStep: 0 };
-  return ["Submitted", "Initial review", "Under review", "Final review", "Decision"].map(
+  const slotSecured = Boolean(item.slotSecured);
+  return ["Submitted", "Initial review", "Post interview review", "Decision", "Slot secured"].map(
     (label, index) => {
       const step = index + 1;
       const state =
-        step <= progress.completeThrough
+        step === 5 && slotSecured
+          ? "complete"
+          : step <= progress.completeThrough
           ? "complete"
           : step === progress.activeStep
             ? "active"
@@ -1401,7 +1415,9 @@ function mpdTeamNoteForApplication(item) {
     return "You have been invited to continue. Payment details will appear here when the next step opens.";
   }
   switch (item.status.key) {
-    case "under-review":
+    case "initial-review":
+      return "Thank you for your application. Our team is completing the initial review.";
+    case "post-interview-review":
       return "Thank you for your application. Our team is currently reviewing submissions. You will be notified when a decision is ready.";
     case "invited":
       return "Your application has moved forward. Watch this space for next steps from the program team.";
@@ -1409,6 +1425,8 @@ function mpdTeamNoteForApplication(item) {
       return "Thank you for applying. This application was not selected for the current cycle.";
     case "withdrawn":
       return "This application has been withdrawn. No further action is needed.";
+    case "rescinded":
+      return "This application has been rescinded. Contact the program team if you have questions.";
     default:
       return "Your application has been received and is queued for review.";
   }
@@ -1472,7 +1490,7 @@ function renderMpdMyProgramCard(item) {
       </div>
       ${
         item.paymentRequired
-          ? `<div class="mpd-my-program-payment-callout"><strong>Payment required</strong><span>Payment details will appear here when this step is ready.</span></div>`
+          ? `<div class="mpd-my-program-payment-callout"><strong>Payment required</strong><span>Visit the Payments tab to submit your deposit or full payment and secure your slot.</span><button type="button" class="mpd-my-program-action" data-mpd-program-tab="payments">View payments</button></div>`
           : ""
       }
       <ol class="mpd-my-program-timeline" aria-label="Application progress for ${escapeHtmlMpd(item.title)}">
@@ -1563,6 +1581,26 @@ function mpdPaymentPlanFor(id, payments) {
   return (payments.plans || []).find((x) => String(x.id || "") === String(id)) || null;
 }
 
+function mpdSlotSecuredProgramIds(payments) {
+  const secured = new Set();
+  for (const summary of payments?.summaries || []) {
+    const status = String(summary?.depositStatus || "");
+    if (status === "paid" || status === "paid_full") {
+      const programId = String(summary?.programId || "");
+      if (programId) secured.add(programId);
+    }
+  }
+  for (const row of payments?.ledger || []) {
+    const type = String(row?.paymentType || "");
+    const status = String(row?.status || "").toLowerCase();
+    if ((type === "deposit" || type === "full_payment") && (status === "succeeded" || status === "paid")) {
+      const programId = String(row?.programId || "");
+      if (programId) secured.add(programId);
+    }
+  }
+  return secured;
+}
+
 function normalizeMpdProgramPaymentViewModels(programs, payments) {
   const approved = Array.isArray(payments.approvedPrograms) ? payments.approvedPrograms : [];
   return approved
@@ -1593,7 +1631,13 @@ function normalizeMpdProgramPaymentViewModels(programs, payments) {
       const ledger = (payments.ledger || [])
         .filter((x) => String(x.programId || "") === programId)
         .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+      const hasConfirmedSlotPayment = ledger.some((row) => {
+        const type = String(row.paymentType || "");
+        const status = String(row.status || "").toLowerCase();
+        return (type === "deposit" || type === "full_payment") && (status === "succeeded" || status === "paid");
+      });
       const paymentStarted = totalPaidCents > 0 || ledger.length > 0 || Boolean(activePlan);
+      const depositPaid = ["paid", "paid_full"].includes(String(summary?.depositStatus || "")) || hasConfirmedSlotPayment;
       return {
         programId,
         applicationId: String(approval.applicationId || ""),
@@ -1604,6 +1648,7 @@ function normalizeMpdProgramPaymentViewModels(programs, payments) {
         imageAlt,
         startText,
         email: String(approval.email || ""),
+        fullName: String(approval.fullName || ""),
         depositCents,
         baseTotalDueCents,
         ownFlight,
@@ -1612,7 +1657,7 @@ function normalizeMpdProgramPaymentViewModels(programs, payments) {
         totalPaidCents,
         outstandingCents,
         refundedCents: mpdCents(summary?.refundedCents),
-        depositPaid: ["paid", "paid_full"].includes(String(summary?.depositStatus || "")) || totalPaidCents > 0,
+        depositPaid,
         paidInFull: outstandingCents <= 0 && totalDueCents > 0,
         activePlan,
         paymentStarted,
@@ -1723,46 +1768,41 @@ function renderMpdPaymentsWorkspace() {
   const planButton = item.activePlan
     ? `<button type="button" class="studio-btn-primary" data-mpd-payment-action="cancel-plan">Cancel plan</button>`
     : `<button type="button" class="studio-btn-primary" data-mpd-payment-action="start-plan" ${item.outstandingCents <= 0 ? "disabled" : ""}>Start payment plan</button>`;
-  root.innerHTML = `
-    <div class="mpd-payments-shell">
-      ${renderMpdProgramPaymentPills(items)}
-      ${renderMpdFlightChoiceSection(item)}
-      ${
-        !item.depositPaid
-          ? `<div class="mpd-payment-choice-grid">
-              <article class="mpd-payment-choice-program">
-                <div class="mpd-payment-choice-program__media">
-                  ${
-                    item.imageSrc
-                      ? `<img src="${mpdEscapeAttr(item.imageSrc)}" alt="${mpdEscapeAttr(withSeoImageAlt(item.imageAlt || item.title))}" loading="lazy" />`
-                      : `<div class="mpd-payment-choice-program__placeholder">Fusion</div>`
-                  }
-                </div>
-                <div class="mpd-payment-choice-program__copy">
-                  <p class="mpd-payments-eyebrow">Confirm your program slot</p>
-                  <h3>${escapeHtmlMpd(item.title)}</h3>
-                  <p class="studio-muted">${escapeHtmlMpd(item.focus || "Choose how you would like to pay.")}</p>
-                </div>
-              </article>
-              <div class="mpd-payment-choice-stack">
-                <article class="mpd-payment-choice mpd-payment-choice--deposit">
-                  <h4>Deposit</h4>
-                  <span class="mpd-payment-choice__amount">${mpdUsd(item.depositCents)}</span>
-                  <p class="studio-muted">Secure your accepted program slot today. Remaining balance can be paid later.</p>
-                  <button type="button" class="studio-btn-primary" data-mpd-payment-action="deposit" ${canCharge ? "" : "disabled"}>Pay deposit</button>
-                </article>
-                <article class="mpd-payment-choice mpd-payment-choice--full mpd-payment-choice--recommended">
-                  <span class="mpd-payment-recommended">Recommended</span>
-                  <h4>${item.ownFlight ? "Total residency price (after flight credit)" : "Full payment"}</h4>
-                  <span class="mpd-payment-choice__amount">${mpdUsd(item.totalDueCents)}</span>
-                  <p class="studio-muted">Complete your program payment now. No payment plan needed.</p>
-                  <button type="button" class="studio-btn-primary" data-mpd-payment-action="full" ${canCharge ? "" : "disabled"}>Pay in full</button>
-                </article>
-              </div>
-            </div>`
-          : ""
-      }
-      <div class="mpd-payments-action-grid">
+  const prePaymentHtml = !item.depositPaid
+    ? `<div class="mpd-payment-choice-grid">
+        <article class="mpd-payment-choice-program">
+          <div class="mpd-payment-choice-program__media">
+            ${
+              item.imageSrc
+                ? `<img src="${mpdEscapeAttr(item.imageSrc)}" alt="${mpdEscapeAttr(withSeoImageAlt(item.imageAlt || item.title))}" loading="lazy" />`
+                : `<div class="mpd-payment-choice-program__placeholder">Fusion</div>`
+            }
+          </div>
+          <div class="mpd-payment-choice-program__copy">
+            <p class="mpd-payments-eyebrow">Confirm your program slot</p>
+            <h3>${escapeHtmlMpd(item.title)}</h3>
+            <p class="studio-muted">${escapeHtmlMpd(item.focus || "Choose how you would like to pay.")}</p>
+          </div>
+        </article>
+        <div class="mpd-payment-choice-stack">
+          <article class="mpd-payment-choice mpd-payment-choice--deposit">
+            <h4>Deposit</h4>
+            <span class="mpd-payment-choice__amount">${mpdUsd(item.depositCents)}</span>
+            <p class="studio-muted">Secure your accepted program slot today. Remaining balance can be paid later.</p>
+            <button type="button" class="studio-btn-primary" data-mpd-payment-action="deposit" ${canCharge ? "" : "disabled"}>Pay deposit</button>
+          </article>
+          <article class="mpd-payment-choice mpd-payment-choice--full mpd-payment-choice--recommended">
+            <span class="mpd-payment-recommended">Recommended</span>
+            <h4>${item.ownFlight ? "Total residency price (after flight credit)" : "Full payment"}</h4>
+            <span class="mpd-payment-choice__amount">${mpdUsd(item.totalDueCents)}</span>
+            <p class="studio-muted">Complete your program payment now. No payment plan needed.</p>
+            <button type="button" class="studio-btn-primary" data-mpd-payment-action="full" ${canCharge ? "" : "disabled"}>Pay in full</button>
+          </article>
+        </div>
+      </div>`
+    : "";
+  const postPaymentHtml = item.depositPaid
+    ? `<div class="mpd-payments-action-grid">
         <article class="mpd-payments-action-card mpd-payments-action-card--manual">
           ${mpdInlineIconHtml(manualPaymentIconUrl, "mpd-payments-action-card__icon mpd-payments-action-card__icon--manual")}
           <div class="mpd-payments-action-card__copy">
@@ -1819,7 +1859,14 @@ function renderMpdPaymentsWorkspace() {
               : `<div class="mpd-payments-empty"><h4>No upcoming payments.</h4><p class="studio-muted">Start a payment plan to schedule installments.</p></div>`
           }
         </section>
-      </div>
+      </div>`
+    : "";
+  root.innerHTML = `
+    <div class="mpd-payments-shell">
+      ${renderMpdProgramPaymentPills(items)}
+      ${renderMpdFlightChoiceSection(item)}
+      ${prePaymentHtml}
+      ${postPaymentHtml}
     </div>
   `;
 }
@@ -1955,6 +2002,8 @@ async function openMpdStripePaymentModal(item, paymentType, amountCents) {
       principal: snap.principal.toText(),
       programId: item.programId,
       applicationId: item.applicationId,
+      email: item.email,
+      applicantName: item.fullName,
       paymentType,
       amountCents,
       totalDueCents: item.totalDueCents,
@@ -2346,6 +2395,13 @@ async function hydrateProgramsPanel(rec, locales, active) {
     await hydrateProgramPaymentsPanel(programs);
     return;
   }
+  let paymentState = { approvedPrograms: [], summaries: [], ledger: [], plans: [] };
+  try {
+    paymentState = await getMyProgramPayments();
+  } catch {
+    /* keep empty payment state */
+  }
+  const slotSecuredProgramIds = mpdSlotSecuredProgramIds(paymentState);
   const cards = applicationIds
     .map((pid) => {
       const pr =
@@ -2354,7 +2410,7 @@ async function hydrateProgramsPanel(rec, locales, active) {
       return normalizeMpdMyProgramCard(
         /** @type {Record<string, unknown>} */ (pr),
         pid,
-        mpdObject(applied[pid]),
+        { ...mpdObject(applied[pid]), slotSecured: slotSecuredProgramIds.has(String(pid)) },
       );
     })
     .sort((a, b) => String(b.submittedAt || "").localeCompare(String(a.submittedAt || "")));
@@ -3017,7 +3073,8 @@ export function generateSettingsProfileContent() {
                                     <div class="mpd-my-program-filters" role="group" aria-label="Filter my programs by application status">
                                         <button type="button" class="mpd-my-program-filter is-active" data-mpd-my-program-filter="all" aria-pressed="true">All <span class="mpd-my-program-filter__count">0</span></button>
                                         <button type="button" class="mpd-my-program-filter" data-mpd-my-program-filter="submitted" aria-pressed="false">Submitted <span class="mpd-my-program-filter__count">0</span></button>
-                                        <button type="button" class="mpd-my-program-filter" data-mpd-my-program-filter="under-review" aria-pressed="false">Under review <span class="mpd-my-program-filter__count">0</span></button>
+                                        <button type="button" class="mpd-my-program-filter" data-mpd-my-program-filter="initial-review" aria-pressed="false">Initial review <span class="mpd-my-program-filter__count">0</span></button>
+                                        <button type="button" class="mpd-my-program-filter" data-mpd-my-program-filter="post-interview-review" aria-pressed="false">Post interview review <span class="mpd-my-program-filter__count">0</span></button>
                                         <button type="button" class="mpd-my-program-filter" data-mpd-my-program-filter="invited" aria-pressed="false">Invited <span class="mpd-my-program-filter__count">0</span></button>
                                         <button type="button" class="mpd-my-program-filter" data-mpd-my-program-filter="not-selected" aria-pressed="false">Not selected <span class="mpd-my-program-filter__count">0</span></button>
                                         <button type="button" class="mpd-my-program-filter" data-mpd-my-program-filter="withdrawn" aria-pressed="false">Withdrawn <span class="mpd-my-program-filter__count">0</span></button>

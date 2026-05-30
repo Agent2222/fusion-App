@@ -6,7 +6,9 @@
 import { ARTIST_LOCATION_OPTIONS, disciplineButtonIdToKey } from '../../utils/feedFilterApply.js';
 
 const SCROLL_DELTA_PX = 4;
-const SCROLL_COLLAPSE_IGNORE_AFTER_OPEN_MS = 550;
+const SCROLL_COLLAPSE_IGNORE_AFTER_OPEN_MS = 1200;
+/** Block scroll-collapse briefly after the user opens the filter (layout / momentum). */
+const SCROLL_COLLAPSE_GUARD_AFTER_CLICK_MS = 1400;
 
 const EVENT_NAME = 'fusion-feed-filter';
 
@@ -17,20 +19,29 @@ const EDITION_CAT_ID_TO_KEY = {
     editionCatOther: 'other',
 };
 
-function setupFilterSystemAndScrollCollapse(scrollRootId) {
-    const filterSystem = document.getElementById('filterSystem');
-    const filterToggle = document.getElementById('filterToggle');
+/**
+ * @param {string} scrollRootId
+ * @param {HTMLElement} [host] `app-feed-filter` instance (scoped queries)
+ */
+function setupFilterSystemAndScrollCollapse(scrollRootId, host) {
+    const root = host instanceof HTMLElement ? host : document;
+    const filterSystem = root.querySelector('#filterSystem');
+    const filterToggle = root.querySelector('#filterToggle');
     if (!filterSystem || !filterToggle) return;
 
     const lastScrollTopById = {};
     let ignoreScrollCollapseUntil = 0;
+    let guardScrollCollapseUntil = 0;
 
-    const scrollPairs = () =>
-        [
-            [scrollRootId, document.getElementById(scrollRootId)],
-            ['mainContent', document.getElementById('mainContent')],
-            ['window', window],
-        ].filter(([, node]) => node);
+    const scrollPairs = () => {
+        /** @type {[string, Element | Window][]} */
+        const pairs = [];
+        const main = document.getElementById('mainContent');
+        if (main) pairs.push(['mainContent', main]);
+        const primary = document.getElementById(scrollRootId);
+        if (primary && primary !== main) pairs.push([scrollRootId, primary]);
+        return pairs.length ? pairs : [['window', window]];
+    };
 
     const readScrollTop = (el) =>
         el === window ? window.pageYOffset || document.documentElement.scrollTop : el.scrollTop;
@@ -42,23 +53,32 @@ function setupFilterSystemAndScrollCollapse(scrollRootId) {
     };
 
     const beginIgnoreScrollCollapseAfterOpen = () => {
-        ignoreScrollCollapseUntil = performance.now() + SCROLL_COLLAPSE_IGNORE_AFTER_OPEN_MS;
+        const now = performance.now();
+        ignoreScrollCollapseUntil = now + SCROLL_COLLAPSE_IGNORE_AFTER_OPEN_MS;
+        guardScrollCollapseUntil = now + SCROLL_COLLAPSE_GUARD_AFTER_CLICK_MS;
         syncScrollBaselines();
     };
 
+    /** Keep #filterSystem and #filterToggle in sync (scroll-collapse used to drop only one). */
+    const setFilterExpanded = (open) => {
+        filterSystem.classList.toggle('active', open);
+        filterToggle.classList.toggle('active', open);
+        if (open) beginIgnoreScrollCollapseAfterOpen();
+    };
+
     const collapseFilterIfActive = () => {
+        if (performance.now() < guardScrollCollapseUntil) return;
         if (!filterSystem.classList.contains('active')) return;
-        filterSystem.classList.remove('active');
-        setTimeout(() => filterToggle.classList.remove('active'), 300);
+        setFilterExpanded(false);
     };
 
     filterToggle.addEventListener('click', () => {
-        filterSystem.classList.toggle('active');
-        if (filterSystem.classList.contains('active')) {
-            filterToggle.classList.add('active');
-            beginIgnoreScrollCollapseAfterOpen();
+        const open = !filterSystem.classList.contains('active');
+        if (open) {
+            setFilterExpanded(true);
         } else {
-            setTimeout(() => filterToggle.classList.remove('active'), 300);
+            guardScrollCollapseUntil = 0;
+            setFilterExpanded(false);
         }
     });
 
@@ -66,7 +86,7 @@ function setupFilterSystemAndScrollCollapse(scrollRootId) {
         const st = readScrollTop(el);
         const now = performance.now();
 
-        if (now < ignoreScrollCollapseUntil) {
+        if (now < ignoreScrollCollapseUntil || now < guardScrollCollapseUntil) {
             lastScrollTopById[id] = st;
             return;
         }
@@ -116,7 +136,7 @@ function locationModalOptionsHtml() {
 
 function templateArtists() {
     return `
-        <div id="filterSystem" class="main-cont active">
+        <div id="filterSystem" class="feed-filter-system active">
             <div id="filterToggle" class="active">Filter Artists</div>
             <div id="filterContent">
                 <div id="leftFilter" class="filterBlock">
@@ -172,7 +192,7 @@ function templateArtists() {
 
 function templateEditions() {
     return `
-        <div id="filterSystem" class="main-cont">
+        <div id="filterSystem" class="feed-filter-system">
             <div id="filterToggle">Filter Editions</div>
             <div id="filterContent">
                 <div id="leftFilter" class="filterBlock">
@@ -211,7 +231,7 @@ function templateEditions() {
 
 function templateGalleryAccess() {
     return `
-        <div id="filterSystem" class="main-cont">
+        <div id="filterSystem" class="feed-filter-system">
             <div id="filterToggle">Filter Gallery Access</div>
             <div id="filterContent">
                 <div id="leftFilter" class="filterBlock">
@@ -583,7 +603,7 @@ class FeedFilterComponent extends HTMLElement {
         this.innerHTML = template;
 
         wireFilterLogic(this, filterState);
-        queueMicrotask(() => setupFilterSystemAndScrollCollapse(scrollRootId));
+        queueMicrotask(() => setupFilterSystemAndScrollCollapse(scrollRootId, this));
     }
 }
 

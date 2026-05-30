@@ -63,6 +63,9 @@ persistent actor {
   stable var editionsStable : [(Text, Types.EditionRecord)] = [];
   stable var contentPagesStable : [(Text, Types.ContentPageRecord)] = [];
   stable var applicantsStable : [(Text, Types.ApplicantRecord)] = [];
+  stable var archivedApplicantsStable : [(Text, Types.ApplicantRecord)] = [];
+  /// Applicant id → JSON array of `ApplicantEmailOutreachEntry` (separate from `ApplicantRecord`).
+  stable var applicantEmailOutreachStable : [(Text, Text)] = [];
   stable var programPaymentSummariesStable : [(Text, Types.ProgramPaymentSummary)] = [];
   stable var programPaymentLedgerStable : [(Text, Types.ProgramPaymentLedgerRow)] = [];
   stable var programPaymentPlansStable : [(Text, Types.ProgramPaymentPlan)] = [];
@@ -195,6 +198,12 @@ persistent actor {
 
   transient var applicantsById : _HashMap.HashMap<Text, Types.ApplicantRecord> =
     _HashMap.HashMap<Text, Types.ApplicantRecord>(0, Text.equal, Text.hash);
+
+  transient var archivedApplicantsById : _HashMap.HashMap<Text, Types.ApplicantRecord> =
+    _HashMap.HashMap<Text, Types.ApplicantRecord>(0, Text.equal, Text.hash);
+
+  transient var applicantEmailOutreachById : _HashMap.HashMap<Text, Text> =
+    _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
 
   transient var programPaymentSummariesByKey : _HashMap.HashMap<Text, Types.ProgramPaymentSummary> =
     _HashMap.HashMap<Text, Types.ProgramPaymentSummary>(0, Text.equal, Text.hash);
@@ -368,6 +377,12 @@ persistent actor {
   };
   for (entry in applicantsStable.vals()) {
     applicantsById.put(entry.0, entry.1);
+  };
+  for (entry in archivedApplicantsStable.vals()) {
+    archivedApplicantsById.put(entry.0, entry.1);
+  };
+  for (entry in applicantEmailOutreachStable.vals()) {
+    applicantEmailOutreachById.put(entry.0, entry.1);
   };
   for (entry in siteSettingsStable.vals()) {
     siteSettingsByKey.put(entry.0, entry.1);
@@ -1127,6 +1142,7 @@ persistent actor {
     editionsStable := _Iter.toArray(editionsById.entries());
     contentPagesStable := _Iter.toArray(contentBySlug.entries());
     applicantsStable := _Iter.toArray(applicantsById.entries());
+    archivedApplicantsStable := _Iter.toArray(archivedApplicantsById.entries());
     programPaymentSummariesStable := _Iter.toArray(programPaymentSummariesByKey.entries());
     programPaymentLedgerStable := _Iter.toArray(programPaymentLedgerById.entries());
     programPaymentPlansStable := _Iter.toArray(programPaymentPlansById.entries());
@@ -1146,6 +1162,7 @@ persistent actor {
     accountContactStable := _Iter.toArray(accountContactByPrincipal.entries());
     artistHeroProfileImageStable := _Iter.toArray(artistHeroProfileImageById.entries());
     emailCampaignsStable := _Iter.toArray(emailCampaignsById.entries());
+    applicantEmailOutreachStable := _Iter.toArray(applicantEmailOutreachById.entries());
   };
 
   system func postupgrade() {
@@ -1307,6 +1324,22 @@ persistent actor {
       applicantsById.put(entry.0, entry.1);
     };
     applicantsStable := [];
+
+    archivedApplicantsById := _HashMap.HashMap<Text, Types.ApplicantRecord>(0, Text.equal, Text.hash);
+    for (entry in archivedApplicantsStable.vals()) {
+      archivedApplicantsById.put(entry.0, entry.1);
+    };
+    archivedApplicantsStable := [];
+
+    applicantEmailOutreachById := _HashMap.HashMap<Text, Text>(
+      applicantEmailOutreachStable.size(),
+      Text.equal,
+      Text.hash
+    );
+    for (entry in applicantEmailOutreachStable.vals()) {
+      applicantEmailOutreachById.put(entry.0, entry.1);
+    };
+    applicantEmailOutreachStable := [];
 
     programPaymentSummariesByKey := _HashMap.HashMap<Text, Types.ProgramPaymentSummary>(0, Text.equal, Text.hash);
     for (entry in programPaymentSummariesStable.vals()) {
@@ -1487,6 +1520,20 @@ persistent actor {
       applicantsById.put(entry.0, entry.1);
     };
 
+    archivedApplicantsById := _HashMap.HashMap<Text, Types.ApplicantRecord>(0, Text.equal, Text.hash);
+    for (entry in archivedApplicantsStable.vals()) {
+      archivedApplicantsById.put(entry.0, entry.1);
+    };
+
+    applicantEmailOutreachById := _HashMap.HashMap<Text, Text>(
+      applicantEmailOutreachStable.size(),
+      Text.equal,
+      Text.hash
+    );
+    for (entry in applicantEmailOutreachStable.vals()) {
+      applicantEmailOutreachById.put(entry.0, entry.1);
+    };
+
     programPaymentSummariesByKey := _HashMap.HashMap<Text, Types.ProgramPaymentSummary>(0, Text.equal, Text.hash);
     for (entry in programPaymentSummariesStable.vals()) {
       programPaymentSummariesByKey.put(entry.0, entry.1);
@@ -1574,6 +1621,7 @@ persistent actor {
       editionsStable = _Iter.toArray(editionsById.entries());
       contentPagesStable = _Iter.toArray(contentBySlug.entries());
       applicantsStable = _Iter.toArray(applicantsById.entries());
+      archivedApplicantsStable = ?(_Iter.toArray(archivedApplicantsById.entries()));
       programPaymentSummariesStable = ?(_Iter.toArray(programPaymentSummariesByKey.entries()));
       programPaymentLedgerStable = ?(_Iter.toArray(programPaymentLedgerById.entries()));
       programPaymentPlansStable = ?(_Iter.toArray(programPaymentPlansById.entries()));
@@ -1589,6 +1637,7 @@ persistent actor {
       studioPermissionOverridesStable = _Iter.toArray(studioPermissionOverridesByPrincipal.entries());
       superStaffPrincipalsStable = superStaffPrincipalsAsArray();
       accountContactStable = ?_Iter.toArray(accountContactByPrincipal.entries());
+      applicantEmailOutreachStable = ?(_Iter.toArray(applicantEmailOutreachById.entries()));
     };
   };
 
@@ -1621,6 +1670,10 @@ persistent actor {
     editionsStable := snapshot.editionsStable;
     contentPagesStable := snapshot.contentPagesStable;
     applicantsStable := snapshot.applicantsStable;
+    archivedApplicantsStable := switch (snapshot.archivedApplicantsStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
     programPaymentSummariesStable := switch (snapshot.programPaymentSummariesStable) {
       case null { [] };
       case (?rows) { rows };
@@ -1651,6 +1704,10 @@ persistent actor {
     studioPermissionOverridesStable := snapshot.studioPermissionOverridesStable;
     superStaffPrincipalsStable := snapshot.superStaffPrincipalsStable;
     accountContactStable := switch (snapshot.accountContactStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    applicantEmailOutreachStable := switch (snapshot.applicantEmailOutreachStable) {
       case null { [] };
       case (?rows) { rows };
     };
@@ -2329,9 +2386,76 @@ persistent actor {
     switch (status) {
       case (#pending) { "pending" };
       case (#reviewing) { "reviewing" };
+      case (#postInterviewReview) { "postInterviewReview" };
       case (#needsInfo) { "needsInfo" };
       case (#accepted) { "accepted" };
       case (#rejected) { "rejected" };
+      case (#pulledOut) { "pulledOut" };
+    };
+  };
+
+  private let maxApplicantOutreachFieldChars : Nat = 512;
+  private let maxApplicantOutreachJsonChars : Nat = 65536;
+
+  private func assertApplicantOutreachFieldLen(t : Text) {
+    if (Text.size(t) > maxApplicantOutreachFieldChars) {
+      Debug.trap("Outreach field too long");
+    };
+  };
+
+  private func applicantOutreachSentAtText() : Text {
+    Int.toText(Int.abs(Time.now() / 1_000_000_000));
+  };
+
+  private func applicantEmailOutreachEntryJson(
+    sentAt : Text,
+    subject : Text,
+    templateId : Text,
+    templateName : Text,
+  ) : Text {
+    "{"
+    # "\"sentAt\":" # jsonText(sentAt)
+    # ",\"subject\":" # jsonText(subject)
+    # ",\"templateId\":" # jsonText(templateId)
+    # ",\"templateName\":" # jsonText(templateName)
+    # "}";
+  };
+
+  private func textDropLastChar(t : Text) : Text {
+    let size = Text.size(t);
+    if (size == 0) {
+      return t;
+    };
+    let buf = Buffer.Buffer<Char>(size);
+    var i : Nat = 0;
+    label drop for (c in Text.toIter(t)) {
+      if (i + 1 >= size) {
+        break drop;
+      };
+      buf.add(c);
+      i += 1;
+    };
+    Text.fromIter(buf.vals());
+  };
+
+  private func appendOutreachJsonArray(existing : Text, entryJson : Text) : Text {
+    let trimmed = Text.trim(existing, #char ' ');
+    if (trimmed.size() == 0 or trimmed == "[]") {
+      return "[" # entryJson # "]";
+    };
+    let body = textDropLastChar(trimmed);
+    body # "," # entryJson # "]";
+  };
+
+  private func applicantExistsForOutreach(applicantId : Text) : Bool {
+    switch (applicantsById.get(applicantId)) {
+      case (?_) { true };
+      case null {
+        switch (archivedApplicantsById.get(applicantId)) {
+          case (?_) { true };
+          case null { false };
+        };
+      };
     };
   };
 
@@ -2963,6 +3087,7 @@ persistent actor {
       status = #pending;
       createdAt = submittedAt;
       payloadJson = payloadJson;
+      emailOutreachJson = "[]";
     };
     applicantsById.put(key, applicant);
   };
@@ -3294,21 +3419,87 @@ persistent actor {
 
   private let maxApplicationEntryChars : Nat = 100_000;
 
+  private func applicantPayloadJsonObject(payloadJson : Text) : Text {
+    let trimmed = Text.trim(payloadJson, #char ' ');
+    if (Text.startsWith(trimmed, #char('{'))) { trimmed } else { "{}" };
+  };
+
+  private func applicantApplicationEntryJson(rec : Types.ApplicantRecord) : Text {
+    "{\"submittedAt\":" # jsonText(rec.createdAt)
+      # ",\"status\":" # jsonText(applicantStatusText(rec.status))
+      # ",\"applicationStatus\":" # jsonText(applicantStatusText(rec.status))
+      # ",\"payload\":" # applicantPayloadJsonObject(rec.payloadJson)
+      # "}";
+  };
+
   private func buildAppliedJsonForArtist(aid : Text) : ?Text {
     let prefix = aid # "|";
     var inner : Text = "";
     var first : Bool = true;
+    for ((k, rec) in applicantsById.entries()) {
+      if (Text.startsWith(k, #text prefix)) {
+        let pid = if (rec.programId.size() > 0) {
+          rec.programId
+        } else {
+          switch (Text.stripStart(k, #text prefix)) {
+            case (?stripped) { stripped };
+            case null { "" };
+          };
+        };
+        if (pid.size() > 0) {
+          if (not first) {
+            inner := inner # ",";
+          };
+          first := false;
+          inner := inner # jsonText(pid) # ":" # applicantApplicationEntryJson(rec);
+        };
+      };
+    };
+    for ((k, rec) in archivedApplicantsById.entries()) {
+      if (Text.startsWith(k, #text prefix)) {
+        switch (applicantsById.get(k)) {
+          case (?_) {};
+          case null {
+            let pid = if (rec.programId.size() > 0) {
+              rec.programId
+            } else {
+              switch (Text.stripStart(k, #text prefix)) {
+                case (?stripped) { stripped };
+                case null { "" };
+              };
+            };
+            if (pid.size() > 0) {
+              if (not first) {
+                inner := inner # ",";
+              };
+              first := false;
+              inner := inner # jsonText(pid) # ":" # applicantApplicationEntryJson(rec);
+            };
+          };
+        };
+      };
+    };
     for ((k, v) in applicationByArtistProgram.entries()) {
       if (Text.startsWith(k, #text prefix)) {
-        switch (Text.stripStart(k, #text prefix)) {
-          case (?pid) {
-            if (not first) {
-              inner := inner # ",";
+        switch (applicantsById.get(k)) {
+          case (?_) {};
+          case null {
+            switch (archivedApplicantsById.get(k)) {
+              case (?_) {};
+              case null {
+                switch (Text.stripStart(k, #text prefix)) {
+                  case (?pid) {
+                    if (not first) {
+                      inner := inner # ",";
+                    };
+                    first := false;
+                    inner := inner # jsonText(pid) # ":" # v;
+                  };
+                  case null {};
+                };
+              };
             };
-            first := false;
-            inner := inner # "\"" # pid # "\":" # v;
           };
-          case null {};
         };
       };
     };
@@ -3760,16 +3951,29 @@ persistent actor {
   public shared query (msg) func listApplicants() : async [Types.ApplicantRecord] {
     assertStaffOrAdmin(msg.caller);
     assertStudioFeatureVisible(msg.caller, "applicants");
-    let out = Buffer.Buffer<Types.ApplicantRecord>(applicantsById.size());
+    let out = Buffer.Buffer<Types.ApplicantRecord>(
+      applicantsById.size() + archivedApplicantsById.size(),
+    );
     for (row in applicantsById.vals()) {
       out.add(row);
+    };
+    for (row in archivedApplicantsById.vals()) {
+      switch (applicantsById.get(row.id)) {
+        case (?_) {};
+        case null { out.add(row) };
+      };
     };
     // Backfill older applications that were stored only in applicationByArtistProgram.
     for ((key, entry) in applicationByArtistProgram.entries()) {
       switch (applicantsById.get(key)) {
         case (?_) {};
         case null {
-          out.add(applicantRecordFromLegacyApplicationEntry(key, entry));
+          switch (archivedApplicantsById.get(key)) {
+            case (?_) {};
+            case null {
+              out.add(applicantRecordFromLegacyApplicationEntry(key, entry));
+            };
+          };
         };
       };
     };
@@ -3782,10 +3986,82 @@ persistent actor {
     );
   };
 
+  private func principalForArtistId(artistId : Text) : ?Principal {
+    for ((principal, account) in accountsByPrincipal.entries()) {
+      switch (account.linkedArtistId) {
+        case (?linkedId) {
+          if (linkedId == artistId) return ?principal;
+        };
+        case null {};
+      };
+    };
+    null;
+  };
+
+  private func applicantArtistId(applicantId : Text) : Text {
+    switch (Text.split(applicantId, #char('|')).next()) {
+      case (?artistId) { artistId };
+      case null { applicantId };
+    };
+  };
+
+  public shared query (msg) func staffIsApplicantSlotSecured(applicantId : Text, programId : Text) : async Bool {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "applicants");
+    let artistId = applicantArtistId(applicantId);
+    let principal = switch (principalForArtistId(artistId)) {
+      case null { return false };
+      case (?p) { p };
+    };
+    let key = programPaymentKey(principal, programId);
+    switch (programPaymentSummariesByKey.get(key)) {
+      case (?summary) {
+        if (summary.depositStatus == "paid" or summary.depositStatus == "paid_full") return true;
+      };
+      case null {};
+    };
+    for ((_, row) in programPaymentLedgerById.entries()) {
+      if (
+        Principal.equal(row.principal, principal)
+        and row.programId == programId
+        and (row.paymentType == "deposit" or row.paymentType == "full_payment")
+        and (row.status == "succeeded" or row.status == "paid")
+      ) {
+        return true;
+      };
+    };
+    false;
+  };
+
   public shared (msg) func upsertApplicant(rec : Types.ApplicantRecord) : async () {
     assertStaffOrAdmin(msg.caller);
     assertStudioFeatureEdit(msg.caller, "applicants");
-    applicantsById.put(rec.id, rec);
+    switch (rec.status) {
+      case (#pulledOut) {
+        let archived = { rec with status = #pulledOut };
+        archivedApplicantsById.put(rec.id, archived);
+        ignore applicantsById.remove(rec.id);
+        if (rec.id.size() > 0 and rec.programId.size() > 0 and Text.contains(rec.id, #char('|'))) {
+          let entry = applicantApplicationEntryJson(archived);
+          if (entry.size() <= maxApplicationEntryChars) {
+            applicationByArtistProgram.put(rec.id, entry);
+          };
+        };
+      };
+      case _ {
+        ignore archivedApplicantsById.remove(rec.id);
+        applicantsById.put(rec.id, rec);
+        if (rec.id.size() > 0 and rec.programId.size() > 0 and Text.contains(rec.id, #char('|'))) {
+          let payloadTrimmed = Text.trim(rec.payloadJson, #char ' ');
+          if (Text.startsWith(payloadTrimmed, #char('{'))) {
+            let entry = "{\"submittedAt\":\"" # rec.createdAt # "\",\"payload\":" # payloadTrimmed # "}";
+            if (entry.size() <= maxApplicationEntryChars) {
+              applicationByArtistProgram.put(rec.id, entry);
+            };
+          };
+        };
+      };
+    };
   };
 
   public shared (msg) func deleteApplicant(applicantId : Text) : async Bool {
@@ -3794,11 +4070,60 @@ persistent actor {
       case null { false };
       case (?_) { true };
     };
+    let removedArchived = switch (archivedApplicantsById.remove(applicantId)) {
+      case null { false };
+      case (?_) { true };
+    };
     let removedApplication = switch (applicationByArtistProgram.remove(applicantId)) {
       case null { false };
       case (?_) { true };
     };
-    removedApplicant or removedApplication;
+    ignore applicantEmailOutreachById.remove(applicantId);
+    removedApplicant or removedArchived or removedApplication;
+  };
+
+  public shared query (msg) func listApplicantEmailOutreach() : async [(Text, Text)] {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "applicants");
+    _Iter.toArray(applicantEmailOutreachById.entries());
+  };
+
+  public shared (msg) func appendApplicantEmailOutreach(
+    applicantId : Text,
+    subject : Text,
+    templateId : Text,
+    templateName : Text,
+  ) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "applicants");
+    if (applicantId.size() == 0) {
+      Debug.trap("applicantId required");
+    };
+    if (not applicantExistsForOutreach(applicantId)) {
+      Debug.trap("Applicant not found");
+    };
+    assertApplicantOutreachFieldLen(subject);
+    assertApplicantOutreachFieldLen(templateId);
+    assertApplicantOutreachFieldLen(templateName);
+    let sentAt = applicantOutreachSentAtText();
+    let entryJson = applicantEmailOutreachEntryJson(sentAt, subject, templateId, templateName);
+    let existing = switch (applicantEmailOutreachById.get(applicantId)) {
+      case null { "[]" };
+      case (?json) { json };
+    };
+    let next = appendOutreachJsonArray(existing, entryJson);
+    if (Text.size(next) > maxApplicantOutreachJsonChars) {
+      Debug.trap("Outreach log too large for this applicant");
+    };
+    applicantEmailOutreachById.put(applicantId, next);
+  };
+
+  public shared (msg) func clearApplicantEmailOutreach(applicantId : Text) : async () {
+    assertAdmin(msg.caller);
+    if (applicantId.size() == 0) {
+      Debug.trap("applicantId required");
+    };
+    ignore applicantEmailOutreachById.remove(applicantId);
   };
 
   // ===== Site settings (key/value text) =====

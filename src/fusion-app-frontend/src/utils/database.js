@@ -33,6 +33,7 @@ import {
     toMotokoArtistRecord,
 } from './studioBatchImport.js';
 import {
+    hasFirebaseIntroGalleryUrl,
     legacyHeroUrl,
     legacyIntroUrl,
     legacyProfileFileStem,
@@ -91,6 +92,7 @@ export const SITE_SETTING_APPLICATION_PAYMENT_GLOBAL = 'applicationPaymentGlobal
 /** localStorage keys (Studio test mode overlays). */
 const LS_SUBSCRIBERS = 'subscribers';
 const LS_APPLICANTS = 'applicants';
+const LS_APPLICANT_EMAIL_OUTREACH = 'fusion-studio-applicant-email-outreach';
 /** Per-id artist field overrides (imported, accessCode, locales, …). */
 const LS_ARTISTS_OVERLAY = 'artistsOverlay';
 const LS_PROGRAMS_BLOCK = 'allProgramsBlock';
@@ -1311,8 +1313,8 @@ export async function batchImportArtistsFromJson(parsed) {
  */
 /**
  * Temporary migration helper (remove when legacy S3 sync is retired — see docs/delete-later.md).
- * Clears **all** roster artists’ profile hero `image`, then sets each to the legacy HTTPS URL:
- * `https://fusionart-bucket.s3.us-east-2.amazonaws.com/uploads/legacyProfiles/<stem>-hero.jpg`
+ * Clears **all** roster artists’ profile hero `image`, then sets each to the legacy CDN URL:
+ * `https://cdn.fusionart.world/uploads/legacyProfiles/<stem>-hero.jpg`
  * (`<stem>` from {@link legacyProfileFileStem}).
  *
  * Studio: **Sync Profile Images** (`panels.js` / `#studio-artists-sync-hero`).
@@ -1367,70 +1369,92 @@ export async function syncStudioArtistsLegacyHeroImages() {
 }
 
 /**
- * Fill empty EN intro gallery (and mirror EN→JA) with legacy S3 URLs (Studio → Sync Gallery).
- * @returns {Promise<number>} number of artists updated
+ * @param {object} row
+ * @param {Set<string>} pool
  */
-export async function syncStudioArtistsLegacyIntroGalleries() {
+function buildArtistRowWithLegacyIntroGallery(row, pool) {
+    const stem = legacyProfileFileStem(row);
+    const makeSlots = () =>
+        [0, 1, 2].map((i) => ({
+            src: legacyIntroUrl(stem, i),
+            alt: '',
+            caption: '',
+        }));
+    const localesRaw = row.locales && typeof row.locales === 'object' ? row.locales : { en: {}, ja: {} };
+    const locales = /** @type {Record<string, unknown>} */ (JSON.parse(JSON.stringify(localesRaw)));
+    if (!locales.en || typeof locales.en !== 'object') locales.en = {};
+    if (!locales.ja || typeof locales.ja !== 'object') locales.ja = {};
+    for (const code of ['en', 'ja']) {
+        const block = /** @type {Record<string, unknown>} */ (locales)[code];
+        const b =
+            block && typeof block === 'object' && !Array.isArray(block)
+                ? { ...block }
+                : /** @type {Record<string, unknown>} */ ({});
+        const w =
+            b.world && typeof b.world === 'object' && !Array.isArray(b.world)
+                ? { .../** @type {Record<string, unknown>} */ (b.world) }
+                : {};
+        w.introGallery = makeSlots();
+        b.world = w;
+        locales[code] = b;
+    }
+    const normalized = normalizeLocalesWorldForStorage(locales);
+    return normalizeArtistImportRow(
+        {
+            id: row.id,
+            slug: row.slug,
+            image: row.image,
+            heroProfileImage: String(/** @type {Record<string, unknown>} */ (row).heroProfileImage ?? row.hero_profile_image ?? ''),
+            featuredOrder: row.featuredOrder,
+            visibility: row.visibility,
+            updatedAt: new Date().toISOString(),
+            contactEmail: row.contactEmail,
+            filter: row.filter,
+            galleryFilter: row.galleryFilter,
+            locales: normalized,
+            imported: row.imported,
+            accessCode: row.accessCode,
+        },
+        pool,
+        { forceImported: false }
+    );
+}
+
+/**
+ * @param {(locales: Record<string, unknown> | null | undefined) => boolean} matchLocales
+ * @returns {Promise<number>}
+ */
+async function applyLegacyIntroGalleryToMatchingRows(matchLocales) {
     const rows = await getArtistsForStudio();
     const pool = collectAccessCodesFromArtists(rows);
     /** @type {object[]} */
     const updates = [];
     for (const row of rows) {
         if (!row || typeof row !== 'object') continue;
-        if (!needsIntroGallerySync(row.locales)) continue;
-        const stem = legacyProfileFileStem(row);
-        const makeSlots = () =>
-            [0, 1, 2].map((i) => ({
-                src: legacyIntroUrl(stem, i),
-                alt: '',
-                caption: '',
-            }));
-        const localesRaw = row.locales && typeof row.locales === 'object' ? row.locales : { en: {}, ja: {} };
-        const locales = /** @type {Record<string, unknown>} */ (JSON.parse(JSON.stringify(localesRaw)));
-        if (!locales.en || typeof locales.en !== 'object') locales.en = {};
-        if (!locales.ja || typeof locales.ja !== 'object') locales.ja = {};
-        for (const code of ['en', 'ja']) {
-            const block = /** @type {Record<string, unknown>} */ (locales)[code];
-            const b =
-                block && typeof block === 'object' && !Array.isArray(block)
-                    ? { ...block }
-                    : /** @type {Record<string, unknown>} */ ({});
-            const w =
-                b.world && typeof b.world === 'object' && !Array.isArray(b.world)
-                    ? { .../** @type {Record<string, unknown>} */ (b.world) }
-                    : {};
-            w.introGallery = makeSlots();
-            b.world = w;
-            locales[code] = b;
-        }
-        const normalized = normalizeLocalesWorldForStorage(locales);
-        updates.push(
-            normalizeArtistImportRow(
-                {
-                    id: row.id,
-                    slug: row.slug,
-                    image: row.image,
-                    heroProfileImage: String(/** @type {Record<string, unknown>} */ (row).heroProfileImage ?? row.hero_profile_image ?? ''),
-                    featuredOrder: row.featuredOrder,
-                    visibility: row.visibility,
-                    updatedAt: new Date().toISOString(),
-                    contactEmail: row.contactEmail,
-                    filter: row.filter,
-                    galleryFilter: row.galleryFilter,
-                    locales: normalized,
-                    imported: row.imported,
-                    accessCode: row.accessCode,
-                },
-                pool,
-                { forceImported: false }
-            )
-        );
+        if (!matchLocales(row.locales)) continue;
+        updates.push(buildArtistRowWithLegacyIntroGallery(row, pool));
     }
     if (!updates.length) {
         return 0;
     }
     await bulkUpsertArtistsStudio(updates);
     return updates.length;
+}
+
+/**
+ * Fill empty EN intro gallery (and mirror EN→JA) with legacy CDN URLs (Studio → Sync Gallery).
+ * @returns {Promise<number>} number of artists updated
+ */
+export async function syncStudioArtistsLegacyIntroGalleries() {
+    return applyLegacyIntroGalleryToMatchingRows(needsIntroGallerySync);
+}
+
+/**
+ * One-off: replace EN+JA intro gallery when any EN slot uses dead Firebase Storage URLs.
+ * @returns {Promise<number>} number of artists updated
+ */
+export async function migrateStudioArtistsFirebaseIntroGalleries() {
+    return applyLegacyIntroGalleryToMatchingRows(hasFirebaseIntroGalleryUrl);
 }
 
 export async function bulkUpsertArtistsStudio(records) {
@@ -3732,22 +3756,206 @@ export async function getContentSummaryForSurface(surface) {
 }
 
 /**
+ * @param {unknown} raw
+ * @returns {{ sentAt: string, subject: string, templateId: string, templateName: string }[]}
+ */
+export function parseApplicantEmailOutreachJson(raw) {
+    if (typeof raw !== 'string' || !raw.trim()) return [];
+    try {
+        const arr = JSON.parse(raw);
+        if (!Array.isArray(arr)) return [];
+        return arr
+            .filter((x) => x && typeof x === 'object')
+            .map((x) => ({
+                sentAt: String(x.sentAt ?? x.sent_at ?? ''),
+                subject: String(x.subject ?? ''),
+                templateId: String(x.templateId ?? x.template_id ?? ''),
+                templateName: String(x.templateName ?? x.template_name ?? ''),
+            }))
+            .filter((x) => x.sentAt || x.subject || x.templateName);
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * @returns {Record<string, { sentAt: string, subject: string, templateId: string, templateName: string }[]>}
+ */
+function readTestApplicantEmailOutreachMap() {
+    const raw = readStudioLs(LS_APPLICANT_EMAIL_OUTREACH);
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    return /** @type {Record<string, object[]>} */ (raw);
+}
+
+/**
+ * @param {Record<string, unknown>} map
+ */
+function writeTestApplicantEmailOutreachMap(map) {
+    writeStudioLs(LS_APPLICANT_EMAIL_OUTREACH, map);
+}
+
+/**
+ * @param {unknown} row
+ * @returns {{ id: string, json: string } | null}
+ */
+function parseApplicantEmailOutreachStablePair(row) {
+    if (Array.isArray(row) && row.length >= 2) {
+        return {
+            id: String(row[0] ?? '').trim(),
+            json: String(row[1] ?? '[]'),
+        };
+    }
+    if (row && typeof row === 'object') {
+        const o = /** @type {Record<string, unknown>} */ (row);
+        const id = String(o[0] ?? o['0'] ?? o._0_ ?? o.applicantId ?? o.applicant_id ?? '').trim();
+        const json = String(o[1] ?? o['1'] ?? o._1_ ?? o.json ?? o.email_outreach_json ?? '[]');
+        if (id) return { id, json };
+    }
+    return null;
+}
+
+/**
+ * @returns {Promise<boolean>}
+ */
+export async function applicantEmailOutreachApiAvailable() {
+    if (getDataSource() === 'test') return true;
+    try {
+        const actor = await getStudioAuthenticatedActor();
+        return typeof actor.listApplicantEmailOutreach === 'function';
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * @param {string} applicantId
+ * @returns {Promise<{ sentAt: string, subject: string, templateId: string, templateName: string }[]>}
+ */
+export async function getApplicantEmailOutreachForStudio(applicantId) {
+    const id = String(applicantId || '').trim();
+    if (!id) return [];
+    const map = await listApplicantEmailOutreachStudio();
+    return map[id] || [];
+}
+
+/**
+ * @returns {Promise<Record<string, { sentAt: string, subject: string, templateId: string, templateName: string }[]>>}
+ */
+export async function listApplicantEmailOutreachStudio() {
+    if (getDataSource() === 'test') {
+        const map = readTestApplicantEmailOutreachMap();
+        /** @type {Record<string, ReturnType<typeof parseApplicantEmailOutreachJson>>} */
+        const out = {};
+        for (const [id, entries] of Object.entries(map)) {
+            out[id] = Array.isArray(entries)
+                ? entries.map((x) => ({
+                      sentAt: String(x?.sentAt ?? ''),
+                      subject: String(x?.subject ?? ''),
+                      templateId: String(x?.templateId ?? ''),
+                      templateName: String(x?.templateName ?? ''),
+                  }))
+                : [];
+        }
+        return out;
+    }
+    try {
+        const actor = await getStudioAuthenticatedActor();
+        if (typeof actor.listApplicantEmailOutreach !== 'function') return {};
+        const rows = await actor.listApplicantEmailOutreach();
+        if (!Array.isArray(rows)) return {};
+        /** @type {Record<string, ReturnType<typeof parseApplicantEmailOutreachJson>>} */
+        const out = {};
+        for (const row of rows) {
+            const pair = parseApplicantEmailOutreachStablePair(row);
+            if (pair?.id) out[pair.id] = parseApplicantEmailOutreachJson(pair.json);
+        }
+        return out;
+    } catch {
+        return {};
+    }
+}
+
+/**
+ * @param {string} applicantId
+ * @param {{ subject: string, templateId?: string, templateName?: string }} entry
+ */
+export async function appendApplicantEmailOutreachStudio(applicantId, entry) {
+    const id = String(applicantId || '').trim();
+    if (!id) throw new Error('applicant id required');
+    const subject = String(entry?.subject ?? '').trim();
+    const templateId = String(entry?.templateId ?? '').trim();
+    const templateName = String(entry?.templateName ?? 'Manual').trim() || 'Manual';
+    if (!subject) throw new Error('subject required');
+    if (getDataSource() === 'test') {
+        const map = readTestApplicantEmailOutreachMap();
+        const prev = Array.isArray(map[id]) ? [...map[id]] : [];
+        prev.push({
+            sentAt: new Date().toISOString(),
+            subject,
+            templateId,
+            templateName,
+        });
+        map[id] = prev;
+        writeTestApplicantEmailOutreachMap(map);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.appendApplicantEmailOutreach !== 'function') {
+        throw new Error('appendApplicantEmailOutreach missing — run dfx generate fusion-app-backend.');
+    }
+    await actor.appendApplicantEmailOutreach(id, subject, templateId, templateName);
+}
+
+/**
+ * @param {string} applicantId
+ */
+export async function clearApplicantEmailOutreachStudio(applicantId) {
+    const id = String(applicantId || '').trim();
+    if (!id) throw new Error('applicant id required');
+    if (getDataSource() === 'test') {
+        const map = readTestApplicantEmailOutreachMap();
+        delete map[id];
+        writeTestApplicantEmailOutreachMap(map);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.clearApplicantEmailOutreach !== 'function') {
+        throw new Error('clearApplicantEmailOutreach missing — run dfx generate fusion-app-backend.');
+    }
+    await actor.clearApplicantEmailOutreach(id);
+}
+
+/**
  * @returns {Promise<object[]>}
  */
 export async function getApplicants() {
     if (getDataSource() === 'test') {
         const ls = readStudioLs(LS_APPLICANTS);
+        const outreachMap = await listApplicantEmailOutreachStudio();
         if (Array.isArray(ls) && ls.length) {
-            return ls.map((a) => ({ ...a }));
+            return ls.map((a) => ({
+                ...a,
+                emailOutreach: outreachMap[String(a.id || '')] || [],
+            }));
         }
-        return MOCK_APPLICANTS_TEST.map((a) => ({ ...a }));
+        return MOCK_APPLICANTS_TEST.map((a) => ({
+            ...a,
+            emailOutreach: outreachMap[String(a.id || '')] || [],
+        }));
     }
     try {
         const actor = await getStudioAuthenticatedActor();
         if (typeof actor.listApplicants !== 'function') return [];
-        const rows = await actor.listApplicants();
+        const [rows, outreachMap] = await Promise.all([
+            actor.listApplicants(),
+            listApplicantEmailOutreachStudio(),
+        ]);
         if (!Array.isArray(rows)) return [];
-        return rows.map(mapApplicantToJs);
+        return rows.map((r) => {
+            const row = mapApplicantToJs(r);
+            row.emailOutreach = outreachMap[row.id] || [];
+            return row;
+        });
     } catch {
         return [];
     }
@@ -4006,7 +4214,7 @@ export async function getSubscribersCsv() {
  */
 export function applicantStatusToVariant(status) {
     const s = String(status || 'pending');
-    const allowed = ['pending', 'reviewing', 'needsInfo', 'accepted', 'rejected'];
+    const allowed = ['pending', 'reviewing', 'postInterviewReview', 'needsInfo', 'accepted', 'rejected', 'pulledOut'];
     const k = allowed.includes(s) ? s : 'pending';
     return { [k]: null };
 }
@@ -4936,6 +5144,21 @@ export async function deleteApplicantStudio(applicantId) {
     const actor = await getStudioAuthenticatedActor();
     if (typeof actor.deleteApplicant !== 'function') return false;
     return actor.deleteApplicant(id);
+}
+
+/**
+ * Staff/admin helper for read-only applicant timeline slot-secured display.
+ * @param {string} applicantId
+ * @param {string} programId
+ */
+export async function getApplicantSlotSecuredStudio(applicantId, programId) {
+    const id = String(applicantId || '').trim();
+    const pid = String(programId || '').trim();
+    if (!id || !pid) return false;
+    if (getDataSource() === 'test') return false;
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.staffIsApplicantSlotSecured !== 'function') return false;
+    return Boolean(await actor.staffIsApplicantSlotSecured(id, pid));
 }
 
 /**

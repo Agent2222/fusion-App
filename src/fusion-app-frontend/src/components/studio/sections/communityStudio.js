@@ -12,6 +12,7 @@ import { toCloudFrontAssetUrl } from '../../../utils/assetDistribution.js';
 import { uploadBlobToS3 } from '../../../utils/studioS3Upload.js';
 import { studioPageHeaderHtml } from '../../../utils/studioCategoryLayout.js';
 import { studioFeatureAccess } from '../../../utils/studioShellState.js';
+import { finalizeCommunityExclusiveForSave, resolveCommunityHero } from '../../../utils/communityPageDefaults.js';
 
 function escapeHtml(s) {
     return String(s ?? '')
@@ -175,11 +176,27 @@ function comparableAssetUrl(url) {
     return toCloudFrontAssetUrl(url).trim();
 }
 
+/**
+ * @param {Record<string, unknown>} item
+ */
+function exclusiveTabSuffix(item) {
+    const badges = [];
+    if (item.isHero === true) badges.push('Hero');
+    if (item.visible === false) badges.push('Hidden');
+    return badges.length ? ` · ${badges.join(' · ')}` : '';
+}
+
+/**
+ * @param {string} label
+ */
+function exclusiveTabLabelBase(label) {
+    return String(label ?? '').replace(/\s·\s(Hero|Hidden)(?:\s·\s(Hero|Hidden))*$/, '').trim();
+}
+
 /** @returns {string} */
 export function renderCommunitySection() {
     const tabs = [
         ['overview', 'Overview'],
-        ['hero', 'Hero'],
         ['exclusive', 'Exclusive'],
         ['connect', 'Connect'],
         ['network', 'Network'],
@@ -190,7 +207,7 @@ export function renderCommunitySection() {
         <div class="studio-section-stack studio-category-page studio-community">
             ${studioPageHeaderHtml({
                 title: 'Community',
-                subtitle: '/community landing — hero video, exclusive row, connect, network cards, sessions, promo',
+                subtitle: '/community landing — landing hero from exclusive features, connect, network cards, sessions, promo',
                 countId: 'studio-community-header-count',
                 countLabel: '',
             })}
@@ -221,7 +238,7 @@ export function renderCommunitySection() {
 }
 
 const COMMUNITY_SECTION_TOGGLES = [
-    ['hero', 'Hero video'],
+    ['hero', 'Landing hero'],
     ['exclusive', 'Exclusive content row'],
     ['connect', 'Connect section'],
     ['network', 'Network cards'],
@@ -245,12 +262,17 @@ function communitySectionActive(sections, key) {
  */
 function renderSectionToggles(bundle) {
     const sections = bundle.sections && typeof bundle.sections === 'object' ? bundle.sections : {};
+    const exclusive = Array.isArray(bundle.exclusive) ? bundle.exclusive : [];
+    const { index: heroIndex } = resolveCommunityHero(
+        exclusive,
+        bundle.hero && typeof bundle.hero === 'object' ? bundle.hero : {},
+    );
     const activeCount = COMMUNITY_SECTION_TOGGLES.filter(([key]) => communitySectionActive(sections, key)).length;
     return `
         <div class="studio-community__section-head">
             <p class="studio-kicker">Page map</p>
             <h3 class="studio-subheading">Community page structure</h3>
-            <p class="studio-muted">Start here to decide what appears publicly. Then edit each module in its own tab.</p>
+            <p class="studio-muted">Start here to decide what appears publicly. Mark one exclusive feature as the landing hero in the Exclusive tab.</p>
         </div>
         <div class="studio-community__overview-grid">
             <div class="studio-community__summary-card">
@@ -258,8 +280,12 @@ function renderSectionToggles(bundle) {
                 <span>Sections active</span>
             </div>
             <div class="studio-community__summary-card">
-                <strong>${escapeHtml(String(Array.isArray(bundle.exclusive) ? bundle.exclusive.length : 0))}</strong>
-                <span>Exclusive features</span>
+                <strong>${escapeHtml(String(exclusive.filter((item) => item && typeof item === 'object' && item.visible !== false).length))}/${escapeHtml(String(exclusive.length || 6))}</strong>
+                <span>Exclusive features visible</span>
+            </div>
+            <div class="studio-community__summary-card">
+                <strong>${heroIndex >= 0 ? `Feature ${heroIndex + 1}` : 'None'}</strong>
+                <span>Landing hero</span>
             </div>
             <div class="studio-community__summary-card">
                 <strong>${escapeHtml(String(Array.isArray(bundle.sessions) ? bundle.sessions.length : 0))}</strong>
@@ -283,129 +309,34 @@ function renderSectionToggles(bundle) {
 }
 
 /**
- * @param {Record<string, unknown>} bundle
+ * @param {Record<string, unknown>} c
+ * @param {number} i
  * @param {Array<Record<string, unknown>>} artists
+ * @param {(id: string, label: string, val: unknown) => string} field
  */
-function renderHeroForm(bundle, artists) {
-    const h = bundle.hero && typeof bundle.hero === 'object' ? /** @type {Record<string, unknown>} */ (bundle.hero) : {};
-    const exclusive = Array.isArray(bundle.exclusive) ? bundle.exclusive : [];
-    const field = (id, label, val) => `
-        <label class="studio-field">
-            <span>${escapeHtml(label)}</span>
-            <input type="text" id="${id}" class="studio-input" value="${escapeHtml(String(val ?? ''))}" />
-        </label>`;
-    const poster = String(h.posterUrl ?? h.imageUrl ?? '').trim();
-    const headline = String(h.headlineEn ?? 'Community hero').trim();
-    const body = String(h.bodyEn ?? '').trim();
+function renderExclusiveFeatureCard(c, i, artists, field) {
+    const n = i + 1;
+    const visible = c.visible !== false;
+    const isHero = c.isHero === true;
+    const image = String(c.imageUrl ?? c.posterUrl ?? '').trim();
+    const headline = String(c.headlineEn ?? c.lineEn ?? `Feature ${n}`).trim();
+    const line = String(c.lineEn ?? '').trim();
     return `
-        <div class="studio-community__panel-intro">
-            <div>
-                <p class="studio-kicker">Hero</p>
-                <h3 class="studio-subheading">Main community video</h3>
-                <p class="studio-muted">Edit the public first impression. Primary fields are first; technical fallback fields live in Advanced.</p>
-            </div>
-        </div>
-        <div class="studio-community__hero-preview" style="${poster ? `background-image:url(${escapeHtml(poster)})` : ''}">
-            <div>
-                <span>${escapeHtml(String(h.kickerEn ?? 'Community'))}</span>
-                <strong>${escapeHtml(headline || 'Community hero')}</strong>
-                <p>${escapeHtml(body || 'Add body copy for the hero.')}</p>
-            </div>
-        </div>
-        <section class="studio-community__edit-card">
-            <h4>Media</h4>
-            <div class="studio-community__editorial">
-                ${field('st-com-hero-preview-video', 'Public preview video URL', h.previewVideoUrl)}
-                ${field('st-com-hero-poster', 'Poster image URL', h.posterUrl)}
-                ${field('st-com-hero-full-key', 'Members-only full video key', h.fullVideoKey)}
-                ${field('st-com-hero-full-name', 'Members-only full video file name', h.fullVideoFileName)}
-            </div>
-            <div class="studio-community__file-actions">
-                <label class="studio-file-label studio-btn-ghost">
-                    <input type="file" id="st-com-hero-poster-file" accept="image/*" class="studio-file-input" />
-                    Upload poster
+            <article class="studio-community__feature-card${visible ? '' : ' studio-community__feature-card--hidden'}">
+                <label class="studio-community__feature-visible">
+                    <input type="checkbox" id="st-com-ex-${i}-hero" ${isHero ? 'checked' : ''} data-feature-hero="${i}" />
+                    <span>
+                        <strong>Use as landing hero</strong>
+                        <small>${isHero ? 'Shown as the main community video on page load' : 'Select to use this feature as the landing hero'}</small>
+                    </span>
                 </label>
-                <label class="studio-file-label studio-btn-ghost">
-                    <input type="file" id="st-com-hero-preview-file" accept="video/*,.mp4,.webm,.mov" class="studio-file-input" />
-                    Upload preview video
+                <label class="studio-community__feature-visible">
+                    <input type="checkbox" id="st-com-ex-${i}-visible" ${visible ? 'checked' : ''} data-feature-visible="${i}" ${isHero ? 'disabled' : ''} />
+                    <span>
+                        <strong>Visible on community page</strong>
+                        <small>${isHero ? 'Landing hero is always visible in the exclusive row' : visible ? 'Shown in the exclusive content row' : 'Hidden from the public page'}</small>
+                    </span>
                 </label>
-                <label class="studio-file-label studio-btn-ghost">
-                    <input type="file" id="st-com-hero-full-file" accept="video/*,.mp4,.webm,.mov" class="studio-file-input" />
-                    Upload full video
-                </label>
-            </div>
-        </section>
-        <section class="studio-community__edit-card">
-            <h4>Copy</h4>
-            <div class="studio-community__editorial">
-                ${field('st-com-hero-k-en', 'Kicker EN', h.kickerEn)}
-                ${field('st-com-hero-k-ja', 'Kicker JA', h.kickerJa)}
-                ${field('st-com-hero-h-en', 'Headline EN', h.headlineEn)}
-                ${field('st-com-hero-h-ja', 'Headline JA', h.headlineJa)}
-                <label class="studio-field"><span>Body EN</span><textarea id="st-com-hero-b-en" class="studio-input" rows="3">${escapeHtml(String(h.bodyEn ?? ''))}</textarea></label>
-                <label class="studio-field"><span>Body JA</span><textarea id="st-com-hero-b-ja" class="studio-input" rows="3">${escapeHtml(String(h.bodyJa ?? ''))}</textarea></label>
-                ${field('st-com-hero-cta-join-en', 'CTA Join EN', h.ctaJoinLabelEn)}
-                ${field('st-com-hero-cta-join-ja', 'CTA Join JA', h.ctaJoinLabelJa)}
-                ${field('st-com-hero-cta-watch-en', 'CTA Watch EN', h.ctaWatchLabelEn)}
-                ${field('st-com-hero-cta-watch-ja', 'CTA Watch JA', h.ctaWatchLabelJa)}
-            </div>
-        </section>
-        <section class="studio-community__edit-card">
-            <h4>Timestamps</h4>
-            <div class="studio-community__adopt-card">
-                <div>
-                    <strong>Adopt from Exclusive video</strong>
-                    <p class="studio-muted">Copy People timestamps or Ideas from an Exclusive feature into the Hero, including preview and full video timelines.</p>
-                </div>
-                <label class="studio-field">
-                    <span>Source feature</span>
-                    <select id="st-com-hero-adopt-feature" class="studio-select">
-                        ${exclusive.slice(0, 3).map((raw, i) => {
-                            const item = raw && typeof raw === 'object' ? /** @type {Record<string, unknown>} */ (raw) : {};
-                            const label = String(item.headlineEn ?? item.lineEn ?? `Feature ${i + 1}`).trim() || `Feature ${i + 1}`;
-                            return `<option value="${i}">${escapeHtml(label)}</option>`;
-                        }).join('')}
-                    </select>
-                </label>
-                <div class="studio-community__file-actions">
-                    <button type="button" class="studio-btn-ghost st-com-hero-adopt" data-kind="chapters">Adopt people timestamps</button>
-                    <button type="button" class="studio-btn-ghost st-com-hero-adopt" data-kind="topics">Adopt idea timestamps</button>
-                </div>
-            </div>
-            ${renderTimestampEditor('hero', h, artists)}
-        </section>
-        <details class="studio-community__advanced">
-            <summary>Advanced fallback fields</summary>
-            <div class="studio-community__editorial">
-                ${field('st-com-hero-video', 'Legacy public video URL', h.videoUrl)}
-                ${field('st-com-hero-ov-title', 'Overlay line 1', h.overlayTitle)}
-                ${field('st-com-hero-ov-guests', 'Overlay guests', h.overlayGuests)}
-                ${field('st-com-hero-ov-dur', 'Overlay duration text', h.overlayDuration)}
-            </div>
-        </details>
-    `;
-}
-
-/**
- * @param {Record<string, unknown>} bundle
- * @param {Array<Record<string, unknown>>} artists
- */
-function renderExclusiveForm(bundle, artists) {
-    const ex = Array.isArray(bundle.exclusive) ? bundle.exclusive : [{}, {}, {}];
-    while (ex.length < 3) ex.push({});
-    const field = (id, label, val) => `
-        <label class="studio-field">
-            <span>${escapeHtml(label)}</span>
-            <input type="text" id="${id}" class="studio-input" value="${escapeHtml(String(val ?? ''))}" />
-        </label>`;
-    const cards = ex.slice(0, 3).map((raw, i) => {
-        const c = raw && typeof raw === 'object' ? /** @type {Record<string, unknown>} */ (raw) : {};
-        const n = i + 1;
-        const image = String(c.imageUrl ?? c.posterUrl ?? '').trim();
-        const headline = String(c.headlineEn ?? c.lineEn ?? `Feature ${n}`).trim();
-        const line = String(c.lineEn ?? '').trim();
-        return `
-            <article class="studio-community__feature-card">
                 <div class="studio-community__feature-preview" style="${image ? `background-image:url(${escapeHtml(image)})` : ''}">
                     <div>
                         <span>Feature ${n}</span>
@@ -423,20 +354,20 @@ function renderExclusiveForm(bundle, artists) {
                         ${field(`st-com-ex-${i}-full-name`, 'Members-only full video file name', c.fullVideoFileName)}
                     </div>
                     <div class="studio-community__file-actions">
-                        <label class="studio-file-label studio-btn-ghost">
-                            <input type="file" id="st-com-ex-${i}-image-file" accept="image/*" class="studio-file-input" data-card-idx="${i}" />
+                        <label class="studio-file-label studio-btn-ghost" for="st-com-ex-${i}-image-file">
+                            <input type="file" id="st-com-ex-${i}-image-file" accept="image/*" class="studio-file-input" data-feature-index="${i}" data-upload-kind="image" />
                             Upload image
                         </label>
-                        <label class="studio-file-label studio-btn-ghost">
-                            <input type="file" id="st-com-ex-${i}-poster-file" accept="image/*" class="studio-file-input" data-card-idx="${i}" />
+                        <label class="studio-file-label studio-btn-ghost" for="st-com-ex-${i}-poster-file">
+                            <input type="file" id="st-com-ex-${i}-poster-file" accept="image/*" class="studio-file-input" data-feature-index="${i}" data-upload-kind="poster" />
                             Upload poster
                         </label>
-                        <label class="studio-file-label studio-btn-ghost">
-                            <input type="file" id="st-com-ex-${i}-preview-file" accept="video/*,.mp4,.webm,.mov" class="studio-file-input" data-card-idx="${i}" />
+                        <label class="studio-file-label studio-btn-ghost" for="st-com-ex-${i}-preview-file">
+                            <input type="file" id="st-com-ex-${i}-preview-file" accept="video/*,.mp4,.webm,.mov" class="studio-file-input" data-feature-index="${i}" data-upload-kind="preview" />
                             Upload preview video
                         </label>
-                        <label class="studio-file-label studio-btn-ghost">
-                            <input type="file" id="st-com-ex-${i}-full-file" accept="video/*,.mp4,.webm,.mov" class="studio-file-input" data-card-idx="${i}" />
+                        <label class="studio-file-label studio-btn-ghost" for="st-com-ex-${i}-full-file">
+                            <input type="file" id="st-com-ex-${i}-full-file" accept="video/*,.mp4,.webm,.mov" class="studio-file-input" data-feature-index="${i}" data-upload-kind="full" />
                             Upload full video
                         </label>
                     </div>
@@ -472,16 +403,55 @@ function renderExclusiveForm(bundle, artists) {
                     </div>
                 </details>
             </article>`;
+}
+
+/**
+ * @param {Record<string, unknown>} bundle
+ * @param {Array<Record<string, unknown>>} artists
+ * @param {number} [activeIndex]
+ */
+function renderExclusiveForm(bundle, artists, activeIndex = 0) {
+    const ex = Array.isArray(bundle.exclusive) ? bundle.exclusive : [{}, {}, {}, {}, {}, {}];
+    while (ex.length < 6) ex.push({});
+    const field = (id, label, val) => `
+        <label class="studio-field">
+            <span>${escapeHtml(label)}</span>
+            <input type="text" id="${id}" class="studio-input" value="${escapeHtml(String(val ?? ''))}" />
+        </label>`;
+    const safeActive = Number.isInteger(activeIndex) && activeIndex >= 0 && activeIndex < 6 ? activeIndex : 0;
+    const tabs = ex.slice(0, 6).map((raw, i) => {
+        const c = raw && typeof raw === 'object' ? /** @type {Record<string, unknown>} */ (raw) : {};
+        const label = String(c.headlineEn ?? c.lineEn ?? `Feature ${i + 1}`).trim() || `Feature ${i + 1}`;
+        const hidden = c.visible === false;
+        const suffix = exclusiveTabSuffix(c);
+        return `
+            <button type="button" class="studio-community__feature-tab ${i === safeActive ? 'is-active' : ''}${hidden ? ' studio-community__feature-tab--hidden' : ''}" role="tab" aria-selected="${i === safeActive ? 'true' : 'false'}" aria-controls="studio-com-ex-panel-${i}" data-feature-tab="${i}">
+                ${escapeHtml(label.length > 28 ? `${label.slice(0, 28)}…` : label)}${suffix}
+            </button>`;
+    });
+    const panels = ex.slice(0, 6).map((raw, i) => {
+        const c = raw && typeof raw === 'object' ? /** @type {Record<string, unknown>} */ (raw) : {};
+        return `
+            <section id="studio-com-ex-panel-${i}" class="studio-community__feature-panel ${i === safeActive ? 'is-active' : ''}" role="tabpanel" ${i === safeActive ? '' : 'hidden'} aria-label="Feature ${i + 1}">
+                ${renderExclusiveFeatureCard(c, i, artists, field)}
+            </section>`;
     });
     return `
         <div class="studio-community__panel-intro">
             <div>
                 <p class="studio-kicker">Exclusive</p>
                 <h3 class="studio-subheading">Featured content cards</h3>
-                <p class="studio-muted">Each card can swap the hero. Edit cards as content modules instead of scanning one long field list.</p>
+                <p class="studio-muted">Upload media and copy once per feature. Check one feature as the landing hero; visitors can still click other cards to preview them in the hero.</p>
             </div>
         </div>
-        <div class="studio-community__feature-grid">${cards.join('')}</div>
+        <div class="studio-community__exclusive-workspace" data-studio-tabs="community-exclusive">
+            <nav class="studio-community__feature-tabs" role="tablist" aria-label="Exclusive features">
+                ${tabs.join('')}
+            </nav>
+            <div class="studio-community__feature-panels">
+                ${panels.join('')}
+            </div>
+        </div>
     `;
 }
 
@@ -717,11 +687,14 @@ export async function initCommunitySection(mainEl) {
         return;
     }
 
+    bindExclusiveMediaUploadHandlers();
+
     /** @type {Record<string, unknown>} */
     let bundle = {};
     /** @type {Array<Record<string, unknown>>} */
     let studioArtists = [];
     let openDetails = new Set();
+    let activeExclusiveTab = 0;
 
     const root = mainEl.querySelector('[data-studio-tabs="community"]');
     if (root) {
@@ -783,34 +756,9 @@ export async function initCommunitySection(mainEl) {
             COMMUNITY_SECTION_TOGGLES.map(([key]) => [key, checked(`st-com-section-${key}`)]),
         );
 
-        const hero = {
-            videoUrl: val('st-com-hero-video'),
-            previewVideoUrl: val('st-com-hero-preview-video'),
-            fullVideoKey: val('st-com-hero-full-key'),
-            fullVideoFileName: val('st-com-hero-full-name'),
-            posterUrl: val('st-com-hero-poster'),
-            overlayTitle: val('st-com-hero-ov-title'),
-            overlayGuests: val('st-com-hero-ov-guests'),
-            overlayDuration: val('st-com-hero-ov-dur'),
-            kickerEn: val('st-com-hero-k-en'),
-            kickerJa: val('st-com-hero-k-ja'),
-            headlineEn: val('st-com-hero-h-en'),
-            headlineJa: val('st-com-hero-h-ja'),
-            bodyEn: val('st-com-hero-b-en'),
-            bodyJa: val('st-com-hero-b-ja'),
-            ctaJoinLabelEn: val('st-com-hero-cta-join-en'),
-            ctaJoinLabelJa: val('st-com-hero-cta-join-ja'),
-            ctaWatchLabelEn: val('st-com-hero-cta-watch-en'),
-            ctaWatchLabelJa: val('st-com-hero-cta-watch-ja'),
-            chapters: chaptersFor('hero-preview'),
-            topics: topicsFor('hero-preview'),
-            previewChapters: chaptersFor('hero-preview'),
-            previewTopics: topicsFor('hero-preview'),
-            fullChapters: chaptersFor('hero-full'),
-            fullTopics: topicsFor('hero-full'),
-        };
-
-        const exclusive = [0, 1, 2].map((i) => ({
+        const exclusiveDraft = [0, 1, 2, 3, 4, 5].map((i) => ({
+            isHero: checked(`st-com-ex-${i}-hero`),
+            visible: checked(`st-com-ex-${i}-visible`),
             imageUrl: val(`st-com-ex-${i}-img`),
             posterUrl: val(`st-com-ex-${i}-poster`),
             previewVideoUrl: val(`st-com-ex-${i}-preview-video`),
@@ -839,6 +787,7 @@ export async function initCommunitySection(mainEl) {
             fullChapters: chaptersFor(`ex-${i}-full`),
             fullTopics: topicsFor(`ex-${i}-full`),
         }));
+        const { exclusive, hero } = finalizeCommunityExclusiveForSave(exclusiveDraft);
 
         const bites = [0, 1, 2].map((i) => ({
             titleEn: val(`st-com-cn-b${i}-ten`),
@@ -901,17 +850,94 @@ export async function initCommunitySection(mainEl) {
         };
     }
 
+    /**
+     * @param {HTMLElement | null} card
+     * @param {string} url
+     */
+    function updateExclusiveFeaturePreview(card, url) {
+        const preview = card?.querySelector('.studio-community__feature-preview');
+        if (preview instanceof HTMLElement && url) {
+            preview.style.backgroundImage = `url("${encodeURI(url)}")`;
+        }
+    }
+
+    function bindExclusiveMediaUploadHandlers() {
+        const root = mainEl.querySelector('#studio-com-form-exclusive');
+        if (!root || root.dataset.exclusiveUploadBound === '1') return;
+        root.dataset.exclusiveUploadBound = '1';
+        root.addEventListener('change', async (ev) => {
+            const input = ev.target;
+            if (!(input instanceof HTMLInputElement) || input.type !== 'file') return;
+            const file = input.files?.[0];
+            if (!file) return;
+
+            const match = /^st-com-ex-(\d+)-(image|poster|preview|full)-file$/.exec(input.id || '');
+            const featureIndex = Number(match?.[1] ?? input.dataset.featureIndex ?? -1);
+            const kind = String(match?.[2] ?? input.dataset.uploadKind ?? '').trim();
+            if (!Number.isInteger(featureIndex) || featureIndex < 0 || featureIndex > 5 || !kind) return;
+
+            const card = input.closest('.studio-community__feature-card');
+            const i = featureIndex;
+            const urlField =
+                kind === 'poster'
+                    ? card?.querySelector(`#st-com-ex-${i}-poster`)
+                    : kind === 'preview'
+                      ? card?.querySelector(`#st-com-ex-${i}-preview-video`)
+                      : kind === 'image'
+                        ? card?.querySelector(`#st-com-ex-${i}-img`)
+                        : null;
+
+            try {
+                show(`Uploading Feature ${i + 1} ${kind}…`, 'info');
+                if (kind === 'full') {
+                    const keyIn = card?.querySelector(`#st-com-ex-${i}-full-key`);
+                    const nameIn = card?.querySelector(`#st-com-ex-${i}-full-name`);
+                    const signed = await presignPrivateVideoUpload({
+                        contentId: `community-exclusive-${i + 1}`,
+                        fileName: file.name,
+                        contentType: file.type || 'application/octet-stream',
+                    });
+                    const put = await fetch(signed.putUrl, {
+                        method: 'PUT',
+                        body: file,
+                        headers: { 'Content-Type': file.type || 'application/octet-stream' },
+                    });
+                    if (!put.ok) throw new Error(`Private video upload failed: HTTP ${put.status}`);
+                    if (keyIn instanceof HTMLInputElement) keyIn.value = signed.key;
+                    if (nameIn instanceof HTMLInputElement) nameIn.value = signed.fileName || file.name;
+                    show(`Feature ${i + 1} members-only full video uploaded.`, 'info');
+                } else {
+                    const url = await uploadBlobToS3(
+                        file,
+                        urlField instanceof HTMLInputElement ? urlField : null,
+                        {
+                            area: 'studio/community',
+                            entityType: 'community',
+                            entityId: `exclusive-${i + 1}`,
+                            fieldKey: kind === 'preview' ? 'preview-video' : kind,
+                        },
+                    );
+                    if (kind === 'image' || kind === 'poster') {
+                        updateExclusiveFeaturePreview(card, url);
+                    }
+                    show(`Feature ${i + 1} ${kind} uploaded.`, 'info');
+                }
+            } catch (err) {
+                show(err instanceof Error ? err.message : String(err), 'warn');
+            }
+            input.value = '';
+        });
+    }
+
     function fillForms() {
         const fs = mainEl.querySelector('#studio-com-form-overview');
-        const fh = mainEl.querySelector('#studio-com-form-hero');
         const fe = mainEl.querySelector('#studio-com-form-exclusive');
         const fc = mainEl.querySelector('#studio-com-form-connect');
         const fn = mainEl.querySelector('#studio-com-form-network');
         const fss = mainEl.querySelector('#studio-com-form-sessions');
         const fp = mainEl.querySelector('#studio-com-form-promo');
         if (fs) fs.innerHTML = renderSectionToggles(bundle);
-        if (fh) fh.innerHTML = renderHeroForm(bundle, studioArtists);
-        if (fe) fe.innerHTML = renderExclusiveForm(bundle, studioArtists);
+        if (fe) fe.innerHTML = renderExclusiveForm(bundle, studioArtists, activeExclusiveTab);
         if (fc) fc.innerHTML = renderConnectForm(bundle);
         if (fn) fn.innerHTML = renderNetworkForm(bundle);
         if (fss) fss.innerHTML = renderSessionsForm(bundle);
@@ -931,16 +957,10 @@ export async function initCommunitySection(mainEl) {
     }
 
     function timestampOwnerFor(featureKey) {
-        const m = /^(hero|ex-\d+)-(preview|full)$/.exec(String(featureKey || ''));
+        const m = /^ex-(\d+)-(preview|full)$/.exec(String(featureKey || ''));
         if (!m) return null;
-        const baseKey = m[1];
+        const idx = Number(m[1]);
         const mode = m[2];
-        if (baseKey === 'hero') {
-            const hero = bundle.hero && typeof bundle.hero === 'object' ? /** @type {Record<string, unknown>} */ (bundle.hero) : {};
-            bundle.hero = hero;
-            return { owner: hero, mode };
-        }
-        const idx = Number(/^ex-(\d+)$/.exec(baseKey)?.[1] ?? -1);
         if (idx < 0) return null;
         const exclusive = Array.isArray(bundle.exclusive) ? [...bundle.exclusive] : [];
         const item = exclusive[idx] && typeof exclusive[idx] === 'object' ? /** @type {Record<string, unknown>} */ (exclusive[idx]) : {};
@@ -991,9 +1011,96 @@ export async function initCommunitySection(mainEl) {
         restoreOpenDetails();
     }
 
+    function syncExclusiveFeatureTab(idx) {
+        const heroInput = mainEl.querySelector(`#st-com-ex-${idx}-hero`);
+        const visibleInput = mainEl.querySelector(`#st-com-ex-${idx}-visible`);
+        const isHero = heroInput instanceof HTMLInputElement && heroInput.checked;
+        const visible = isHero || (visibleInput instanceof HTMLInputElement && visibleInput.checked);
+        const tab = mainEl.querySelector(`.studio-community__feature-tab[data-feature-tab="${idx}"]`);
+        const panel = mainEl.querySelector(`#studio-com-ex-panel-${idx} .studio-community__feature-card`);
+        const headlineInput = mainEl.querySelector(`#st-com-ex-${idx}-h-en`) || mainEl.querySelector(`#st-com-ex-${idx}-en`);
+        const label = exclusiveTabLabelBase(String(headlineInput?.value ?? `Feature ${idx + 1}`));
+        if (tab instanceof HTMLElement) {
+            tab.classList.toggle('studio-community__feature-tab--hidden', !visible);
+            tab.textContent = `${label}${exclusiveTabSuffix({ isHero, visible })}`;
+        }
+        if (panel instanceof HTMLElement) {
+            panel.classList.toggle('studio-community__feature-card--hidden', !visible);
+            const heroNote = heroInput?.closest('.studio-community__feature-visible')?.querySelector('small');
+            const visibleEl = panel.querySelector('[data-feature-visible]');
+            const visibleNote = visibleEl?.closest('.studio-community__feature-visible')?.querySelector('small');
+            if (heroNote) {
+                heroNote.textContent = isHero
+                    ? 'Shown as the main community video on page load'
+                    : 'Select to use this feature as the landing hero';
+            }
+            if (visibleEl instanceof HTMLInputElement) {
+                visibleEl.disabled = isHero;
+                if (isHero) visibleEl.checked = true;
+            }
+            if (visibleNote) {
+                visibleNote.textContent = isHero
+                    ? 'Landing hero is always visible in the exclusive row'
+                    : visible
+                      ? 'Shown in the exclusive content row'
+                      : 'Hidden from the public page';
+            }
+        }
+    }
+
+    mainEl.addEventListener('change', (e) => {
+        const t = e.target;
+        if (!(t instanceof HTMLInputElement)) return;
+
+        const heroMatch = /^st-com-ex-(\d+)-hero$/.exec(t.id);
+        if (heroMatch) {
+            const idx = Number(heroMatch[1]);
+            if (!Number.isInteger(idx) || idx < 0) return;
+            if (!t.checked) {
+                t.checked = true;
+                return;
+            }
+            [0, 1, 2, 3, 4, 5].forEach((i) => {
+                if (i === idx) return;
+                const other = mainEl.querySelector(`#st-com-ex-${i}-hero`);
+                if (other instanceof HTMLInputElement) other.checked = false;
+                syncExclusiveFeatureTab(i);
+            });
+            syncExclusiveFeatureTab(idx);
+            return;
+        }
+
+        const visibleMatch = /^st-com-ex-(\d+)-visible$/.exec(t.id);
+        if (!visibleMatch) return;
+        const idx = Number(visibleMatch[1]);
+        if (!Number.isInteger(idx) || idx < 0) return;
+        syncExclusiveFeatureTab(idx);
+    });
+
     mainEl.addEventListener('click', (e) => {
         const t = e.target;
         if (!(t instanceof HTMLElement)) return;
+        const featureTab = t.closest('.studio-community__feature-tab[data-feature-tab]');
+        if (featureTab instanceof HTMLElement) {
+            e.preventDefault();
+            const idx = Number(featureTab.getAttribute('data-feature-tab'));
+            if (!Number.isInteger(idx) || idx < 0 || idx > 5) return;
+            activeExclusiveTab = idx;
+            const workspace = mainEl.querySelector('[data-studio-tabs="community-exclusive"]');
+            if (!workspace) return;
+            const tabs = workspace.querySelectorAll('.studio-community__feature-tab[role="tab"]');
+            const panels = workspace.querySelectorAll('.studio-community__feature-panel[role="tabpanel"]');
+            tabs.forEach((tab, j) => {
+                const on = j === idx;
+                tab.classList.toggle('is-active', on);
+                tab.setAttribute('aria-selected', on ? 'true' : 'false');
+                if (panels[j]) {
+                    panels[j].classList.toggle('is-active', on);
+                    panels[j].toggleAttribute('hidden', !on);
+                }
+            });
+            return;
+        }
         if (t.id === 'st-com-net-add') {
             e.preventDefault();
             bundle = collectFromDom();
@@ -1066,40 +1173,6 @@ export async function initCommunitySection(mainEl) {
             refillFormsPreservingDetails();
             return;
         }
-        if (t.classList.contains('st-com-hero-adopt')) {
-            e.preventDefault();
-            bundle = collectFromDom();
-            const select = /** @type {HTMLSelectElement | null} */ (mainEl.querySelector('#st-com-hero-adopt-feature'));
-            const idx = Number(select?.value ?? -1);
-            const kind = t.getAttribute('data-kind') === 'topics' ? 'topics' : 'chapters';
-            const exclusive = Array.isArray(bundle.exclusive) ? bundle.exclusive : [];
-            const source = exclusive[idx] && typeof exclusive[idx] === 'object'
-                ? /** @type {Record<string, unknown>} */ (exclusive[idx])
-                : null;
-            const hero = bundle.hero && typeof bundle.hero === 'object'
-                ? /** @type {Record<string, unknown>} */ (bundle.hero)
-                : {};
-            if (source) {
-                if (kind === 'topics') {
-                    const preview = JSON.parse(JSON.stringify(Array.isArray(source.previewTopics) ? source.previewTopics : source.topics || []));
-                    const full = JSON.parse(JSON.stringify(Array.isArray(source.fullTopics) ? source.fullTopics : []));
-                    hero.previewTopics = preview;
-                    hero.topics = preview;
-                    hero.fullTopics = full;
-                    show(`Hero idea timestamps adopted from Exclusive ${idx + 1}.`, 'info');
-                } else {
-                    const preview = JSON.parse(JSON.stringify(Array.isArray(source.previewChapters) ? source.previewChapters : source.chapters || []));
-                    const full = JSON.parse(JSON.stringify(Array.isArray(source.fullChapters) ? source.fullChapters : []));
-                    hero.previewChapters = preview;
-                    hero.chapters = preview;
-                    hero.fullChapters = full;
-                    show(`Hero people timestamps adopted from Exclusive ${idx + 1}.`, 'info');
-                }
-                bundle.hero = hero;
-                refillFormsPreservingDetails();
-            }
-            return;
-        }
         if (t.classList.contains('st-com-net-del')) {
             e.preventDefault();
             const tr = t.closest('tr');
@@ -1122,126 +1195,6 @@ export async function initCommunitySection(mainEl) {
             if (idx >= 0) arr.splice(idx, 1);
             bundle.sessions = arr;
             fillForms();
-        }
-    });
-
-    mainEl.addEventListener('change', async (ev) => {
-        const t = ev.target;
-        if (!(t instanceof HTMLInputElement) || t.type !== 'file') return;
-        const f = t.files?.[0];
-        if (!f) return;
-        if (t.id === 'st-com-hero-poster-file') {
-            try {
-                const posterIn = /** @type {HTMLInputElement | null} */ (mainEl.querySelector('#st-com-hero-poster'));
-                const url = await uploadBlobToS3(f, posterIn, { area: 'studio/community' });
-                if (posterIn) posterIn.value = url;
-                show('Poster uploaded.', 'info');
-            } catch (err) {
-                show(err instanceof Error ? err.message : String(err), 'warn');
-            }
-            t.value = '';
-            return;
-        }
-        if (t.id === 'st-com-hero-preview-file') {
-            try {
-                const previewIn = /** @type {HTMLInputElement | null} */ (mainEl.querySelector('#st-com-hero-preview-video'));
-                const url = await uploadBlobToS3(f, previewIn, {
-                    area: 'studio/community',
-                    entityType: 'community',
-                    entityId: 'hero',
-                    fieldKey: 'preview-video',
-                });
-                if (previewIn) previewIn.value = url;
-                show('Public preview video uploaded.', 'info');
-            } catch (err) {
-                show(err instanceof Error ? err.message : String(err), 'warn');
-            }
-            t.value = '';
-            return;
-        }
-        if (t.id === 'st-com-hero-full-file') {
-            try {
-                const keyIn = /** @type {HTMLInputElement | null} */ (mainEl.querySelector('#st-com-hero-full-key'));
-                const nameIn = /** @type {HTMLInputElement | null} */ (mainEl.querySelector('#st-com-hero-full-name'));
-                const signed = await presignPrivateVideoUpload({
-                    contentId: 'community-hero',
-                    fileName: f.name,
-                    contentType: f.type || 'application/octet-stream',
-                });
-                const put = await fetch(signed.putUrl, {
-                    method: 'PUT',
-                    body: f,
-                    headers: { 'Content-Type': f.type || 'application/octet-stream' },
-                });
-                if (!put.ok) throw new Error(`Private video upload failed: HTTP ${put.status}`);
-                if (keyIn) keyIn.value = signed.key;
-                if (nameIn) nameIn.value = signed.fileName || f.name;
-                show('Members-only full video uploaded.', 'info');
-            } catch (err) {
-                show(err instanceof Error ? err.message : String(err), 'warn');
-            }
-            t.value = '';
-            return;
-        }
-        const featureUpload = /^st-com-ex-(\d+)-(image|poster|preview|full)-file$/.exec(t.id || '');
-        if (featureUpload) {
-            const i = Number(featureUpload[1]);
-            const kind = featureUpload[2];
-            try {
-                if (kind === 'full') {
-                    const keyIn = /** @type {HTMLInputElement | null} */ (mainEl.querySelector(`#st-com-ex-${i}-full-key`));
-                    const nameIn = /** @type {HTMLInputElement | null} */ (mainEl.querySelector(`#st-com-ex-${i}-full-name`));
-                    const signed = await presignPrivateVideoUpload({
-                        contentId: `community-exclusive-${i + 1}`,
-                        fileName: f.name,
-                        contentType: f.type || 'application/octet-stream',
-                    });
-                    const put = await fetch(signed.putUrl, {
-                        method: 'PUT',
-                        body: f,
-                        headers: { 'Content-Type': f.type || 'application/octet-stream' },
-                    });
-                    if (!put.ok) throw new Error(`Private video upload failed: HTTP ${put.status}`);
-                    if (keyIn) keyIn.value = signed.key;
-                    if (nameIn) nameIn.value = signed.fileName || f.name;
-                    show(`Feature ${i + 1} members-only full video uploaded.`, 'info');
-                } else {
-                    const inputId =
-                        kind === 'poster'
-                            ? `st-com-ex-${i}-poster`
-                            : kind === 'preview'
-                              ? `st-com-ex-${i}-preview-video`
-                              : `st-com-ex-${i}-img`;
-                    const input = /** @type {HTMLInputElement | null} */ (mainEl.querySelector(`#${inputId}`));
-                    const url = await uploadBlobToS3(f, input, {
-                        area: 'studio/community',
-                        entityType: 'community',
-                        entityId: `exclusive-${i + 1}`,
-                        fieldKey: kind === 'preview' ? 'preview-video' : kind,
-                    });
-                    if (input) input.value = url;
-                    show(`Feature ${i + 1} ${kind} uploaded.`, 'info');
-                }
-            } catch (err) {
-                show(err instanceof Error ? err.message : String(err), 'warn');
-            }
-            t.value = '';
-            return;
-        }
-        const m = /^st-com-ex-(\d+)-file$/.exec(t.id || '');
-        if (m) {
-            const i = Number(m[1]);
-            try {
-                const imgIn = /** @type {HTMLInputElement | null} */ (
-                    mainEl.querySelector(`#st-com-ex-${i}-img`)
-                );
-                const url = await uploadBlobToS3(f, imgIn, { area: 'studio/community' });
-                if (imgIn) imgIn.value = url;
-                show(`Card ${i + 1} image uploaded.`, 'info');
-            } catch (err) {
-                show(err instanceof Error ? err.message : String(err), 'warn');
-            }
-            t.value = '';
         }
     });
 

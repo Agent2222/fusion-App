@@ -373,10 +373,68 @@ function safeStripeMetaValue(value, max = 500) {
     return String(value ?? '').trim().slice(0, max);
 }
 
+function escapeEmailHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function formatUsd(cents) {
+    return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+    }).format(Math.max(0, Math.round(Number(cents || 0))) / 100);
+}
+
+function paymentTypeLabel(paymentType) {
+    return paymentType === 'full_payment' ? 'full payment' : 'deposit';
+}
+
+function fusionTransactionalEmailHtml(innerHtml, signatureHtml = '<p style="margin:0">— Fusion Team</p>') {
+    return `<div style="font-family:system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;padding:40px 28px 44px;background:#fff;color:#111;line-height:1.5">
+<div style="text-align:center;margin:0 0 32px;padding:0 0 8px">
+<img src="https://fusionart.world/email/Fusion-X-logo-02.png" alt="Fusion" width="220" height="auto" style="display:inline-block;max-width:100%;height:auto;border:0" />
+</div>
+<div style="margin:0 0 34px;padding:0">
+${innerHtml}
+</div>
+<div style="margin:0;padding:32px 0 0;border-top:1px solid #e5e2df;color:#111">
+${signatureHtml}
+</div>
+</div>`;
+}
+
+async function sendProgramPaymentEmail({ to, subject, html }) {
+    if (!resend) {
+        return { ok: false, reason: 'resend_not_configured' };
+    }
+    const toText = safeStripeMetaValue(to, 320);
+    if (!toText.includes('@')) {
+        return { ok: false, reason: 'invalid_to' };
+    }
+    if (!resendFrom) {
+        return { ok: false, reason: 'missing_from' };
+    }
+    const { data, error } = await resend.emails.send({
+        from: resendFrom,
+        to: [toText],
+        subject: safeStripeMetaValue(subject, 998),
+        html: maybeApplyFusionLogoUrl(html),
+    });
+    if (error) {
+        return { ok: false, reason: error.message || 'resend_error' };
+    }
+    return { ok: true, id: data?.id || '' };
+}
+
 function programPaymentMetadata(body, paymentType, amountCents) {
     const principal = safeStripeMetaValue(body?.principal);
     const programId = safeStripeMetaValue(body?.programId, 120);
     const applicationId = safeStripeMetaValue(body?.applicationId, 240);
+    const applicantEmail = safeStripeMetaValue(body?.email || body?.applicantEmail, 320);
+    const applicantName = safeStripeMetaValue(body?.applicantName || body?.fullName, 160);
     if (!principal) throw new Error('principal required');
     Principal.fromText(principal);
     if (!programId) throw new Error('programId required');
@@ -393,6 +451,8 @@ function programPaymentMetadata(body, paymentType, amountCents) {
         depositAmountCents: String(Math.max(0, Math.round(Number(body?.depositAmountCents || 0)))),
         ownFlight: ownFlight ? 'true' : 'false',
         flightCreditCents: String(flightCreditCents),
+        applicantEmail,
+        applicantName,
         source: 'program_payments_tab',
     };
 }
@@ -496,6 +556,92 @@ async function addConfirmedArtistToProgram(actor, principalText, programId, upda
     return { ok: true, artistName };
 }
 
+function buildApplicantPaymentConfirmationHtml(details) {
+    const label = paymentTypeLabel(details.paymentType);
+    const receipt = details.receiptUrl
+        ? `<p style="margin:18px 0 0"><a href="${escapeEmailHtml(details.receiptUrl)}" style="color:#000;text-decoration:none;border-bottom:1px solid #000">View receipt</a></p>`
+        : '';
+    return fusionTransactionalEmailHtml(`<h1 style="font-size:22px;line-height:1.18;margin:0 0 14px">Payment received</h1>
+<p style="margin:0 0 14px">Hi ${escapeEmailHtml(details.firstName || 'there')},</p>
+<p style="margin:0 0 14px">Thank you. We received your Fusion program ${escapeEmailHtml(label)} of <strong>${escapeEmailHtml(formatUsd(details.amountCents))}</strong>.</p>
+<div style="margin:18px 0;padding:16px;border:1px solid #e5e2df;border-radius:10px;background:#fafafa">
+  <p style="margin:0 0 6px"><strong>Program:</strong> ${escapeEmailHtml(details.programId)}</p>
+  <p style="margin:0 0 6px"><strong>Payment type:</strong> ${escapeEmailHtml(label)}</p>
+  <p style="margin:0"><strong>Amount:</strong> ${escapeEmailHtml(formatUsd(details.amountCents))}</p>
+</div>
+<p style="margin:0">Your payment has been recorded and our team will follow up with confirmation and next steps.</p>
+${receipt}`);
+}
+
+function financeRow(label, value) {
+    return `<tr><td style="padding:6px 10px 6px 0;color:#555;vertical-align:top">${escapeEmailHtml(label)}</td><td style="padding:6px 0;vertical-align:top"><strong>${escapeEmailHtml(value || 'Unknown')}</strong></td></tr>`;
+}
+
+function buildTeamPaymentNotificationHtml(details) {
+    const outstanding = Math.max(0, Math.round(Number(details.totalDueCents || 0)) - Math.round(Number(details.totalPaidCents || 0)));
+    const receipt = details.receiptUrl
+        ? `<p style="margin:18px 0 0"><a href="${escapeEmailHtml(details.receiptUrl)}" style="color:#000;text-decoration:none;border-bottom:1px solid #000">Stripe receipt</a></p>`
+        : '';
+    return fusionTransactionalEmailHtml(`<h1 style="font-size:22px;line-height:1.18;margin:0 0 14px">Program payment recorded</h1>
+<p style="margin:0 0 14px">A verified ${escapeEmailHtml(paymentTypeLabel(details.paymentType))} payment was recorded for a program applicant.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin:16px 0">
+  <tbody>
+    ${financeRow('Applicant', details.applicantName)}
+    ${financeRow('Email', details.applicantEmail)}
+    ${financeRow('Program ID', details.programId)}
+    ${financeRow('Application ID', details.applicationId)}
+    ${financeRow('Payment type', paymentTypeLabel(details.paymentType))}
+    ${financeRow('Amount paid', formatUsd(details.amountCents))}
+    ${financeRow('Total due', formatUsd(details.totalDueCents))}
+    ${financeRow('Outstanding balance', formatUsd(outstanding))}
+    ${financeRow('Own flight', details.ownFlight ? 'Yes' : 'No')}
+    ${financeRow('Flight credit', formatUsd(details.flightCreditCents))}
+    ${financeRow('Stripe PaymentIntent', details.paymentIntentId)}
+    ${financeRow('Stripe charge', details.chargeId)}
+  </tbody>
+</table>
+${receipt}`, '<p style="margin:0">Fusion Integration API</p>');
+}
+
+async function sendProgramPaymentConfirmationEmails(details) {
+    const applicantEmail = safeStripeMetaValue(details.applicantEmail, 320);
+    if (applicantEmail.includes('@')) {
+        const applicantResult = await sendProgramPaymentEmail({
+            to: applicantEmail,
+            subject: `Fusion payment received: ${formatUsd(details.amountCents)}`,
+            html: buildApplicantPaymentConfirmationHtml(details),
+        });
+        if (!applicantResult.ok) {
+            console.warn('[stripe] applicant payment confirmation email skipped:', applicantResult.reason);
+        }
+    } else {
+        console.warn('[stripe] applicant payment confirmation email skipped: missing applicant email');
+    }
+
+    const teamResult = await sendProgramPaymentEmail({
+        to: 'info@fusionart.world',
+        subject: `Program ${paymentTypeLabel(details.paymentType)} received: ${formatUsd(details.amountCents)}`,
+        html: buildTeamPaymentNotificationHtml(details),
+    });
+    if (!teamResult.ok) {
+        console.warn('[stripe] team payment notification email skipped:', teamResult.reason);
+    }
+}
+
+async function markProgramPaymentEmailsSent(paymentIntentId) {
+    if (!stripe || !paymentIntentId) return;
+    try {
+        await stripe.paymentIntents.update(paymentIntentId, {
+            metadata: {
+                programPaymentEmailsSent: 'true',
+                programPaymentEmailsSentAt: new Date().toISOString(),
+            },
+        });
+    } catch (e) {
+        console.warn('[stripe] failed to mark program payment emails sent:', e);
+    }
+}
+
 async function recordVerifiedProgramPayment(paymentIntent) {
     const actor = await getIntegrationActor();
     if (!actor) {
@@ -506,6 +652,7 @@ async function recordVerifiedProgramPayment(paymentIntent) {
     const programId = safeStripeMetaValue(meta.programId, 120);
     const applicationId = safeStripeMetaValue(meta.applicationId, 240);
     const paymentType = safeStripeMetaValue(meta.paymentType, 80);
+    const emailsAlreadySent = String(meta.programPaymentEmailsSent || '').toLowerCase() === 'true';
     Principal.fromText(principalText);
     if (!programId || !applicationId || !paymentType) {
         throw new Error('PaymentIntent missing program payment metadata');
@@ -525,6 +672,12 @@ async function recordVerifiedProgramPayment(paymentIntent) {
     const depositAmountCents = Math.max(0, Math.round(Number(meta.depositAmountCents || 0)));
     const ownFlight = String(meta.ownFlight || '').toLowerCase() === 'true';
     const flightCreditCents = Math.max(0, Math.round(Number(meta.flightCreditCents || 0)));
+    const applicantEmail = safeStripeMetaValue(
+        meta.applicantEmail || paymentIntent.receipt_email || charge?.billing_details?.email,
+        320,
+    );
+    const applicantName = safeStripeMetaValue(meta.applicantName || charge?.billing_details?.name || 'Unknown', 160);
+    const firstName = applicantName && applicantName !== 'Unknown' ? applicantName.split(/\s+/).filter(Boolean)[0] : '';
     const row = {
         id: paymentIntent.id,
         principal: Principal.fromText(principalText),
@@ -565,6 +718,29 @@ async function recordVerifiedProgramPayment(paymentIntent) {
             console.warn('[stripe] program confirmed artist update failed:', e);
         }
         await cancelPlatformSubscriptionImmediately(principalText);
+        if (!emailsAlreadySent) {
+            try {
+                await sendProgramPaymentConfirmationEmails({
+                    applicantEmail,
+                    applicantName,
+                    firstName,
+                    programId,
+                    applicationId,
+                    paymentType,
+                    amountCents,
+                    totalPaidCents: amountCents,
+                    totalDueCents,
+                    ownFlight,
+                    flightCreditCents,
+                    receiptUrl,
+                    paymentIntentId: paymentIntent.id,
+                    chargeId,
+                });
+                await markProgramPaymentEmailsSent(paymentIntent.id);
+            } catch (e) {
+                console.warn('[stripe] program payment confirmation emails failed:', e);
+            }
+        }
     }
     if (paymentType === 'plan_installment') {
         const planId = safeStripeMetaValue(meta.planId, 120);
@@ -1201,6 +1377,37 @@ async function getStripeSubscriptionStatusByEmail(stripeClient, email) {
 }
 
 /**
+ * Full Stripe subscription payload for canister push (includes current_period_end for Renews).
+ * @param {import('stripe').Stripe} stripeClient
+ * @param {import('stripe').Stripe.Subscription} best
+ * @param {string} principalText
+ * @param {import('stripe').Stripe.Customer} customer
+ */
+async function subscriptionWithPrincipalForPush(stripeClient, best, principalText, customer) {
+    const trimmed = String(principalText ?? '').trim();
+    const meta =
+        best.metadata && typeof best.metadata === 'object'
+            ? /** @type {Record<string, string>} */ ({ ...best.metadata })
+            : {};
+    meta.principal = trimmed;
+    let sub = /** @type {import('stripe').Stripe.Subscription} */ ({
+        ...best,
+        metadata: meta,
+        customer: customer.id,
+    });
+    const cpe = sub.current_period_end;
+    if (typeof cpe !== 'number' || !Number.isFinite(cpe)) {
+        try {
+            const full = await stripeClient.subscriptions.retrieve(best.id);
+            sub = { ...full, metadata: meta };
+        } catch {
+            /* use list payload */
+        }
+    }
+    return sub;
+}
+
+/**
  * Push best subscription for Stripe customer (found by email) to the canister with `metadata.principal`.
  * @param {import('stripe').Stripe} stripeClient
  * @param {string} email
@@ -1216,17 +1423,7 @@ async function syncStripeSubscriptionByEmailAndPrincipal(stripeClient, email, pr
         return { synced: false, reason: 'invalid_principal' };
     }
     const { customer, subscription: best } = picked;
-    const meta =
-        best.metadata && typeof best.metadata === 'object'
-            ? /** @type {Record<string, string>} */ ({ ...best.metadata })
-            : {};
-    meta.principal = trimmed;
-    const subForPush = {
-        id: best.id,
-        status: best.status,
-        customer: customer.id,
-        metadata: meta,
-    };
+    const subForPush = await subscriptionWithPrincipalForPush(stripeClient, best, trimmed, customer);
     await pushSubscriptionToCanister(subForPush, customer.id);
     return {
         synced: true,
@@ -1298,17 +1495,7 @@ async function syncStripeSubscriptionForPrincipal(stripeClient, principalText) {
         };
     }
     const { customer, subscription: best } = picked;
-    const meta =
-        best.metadata && typeof best.metadata === 'object'
-            ? /** @type {Record<string, string>} */ ({ ...best.metadata })
-            : {};
-    meta.principal = trimmed;
-    const subForPush = {
-        id: best.id,
-        status: best.status,
-        customer: customer.id,
-        metadata: meta,
-    };
+    const subForPush = await subscriptionWithPrincipalForPush(stripeClient, best, trimmed, customer);
     await pushSubscriptionToCanister(subForPush, customer.id);
     return {
         synced: true,

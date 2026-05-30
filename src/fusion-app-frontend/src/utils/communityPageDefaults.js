@@ -49,10 +49,34 @@ export function defaultCommunityPage() {
         },
         exclusive: [
             {
+                isHero: true,
+                visible: true,
                 imageUrl: '',
                 lineEn: 'VIDEO · Studio Visit · Artist · 18 min',
                 lineJa: '動画 · スタジオ訪問 · アーティスト · 18分',
                 href: '/journal',
+                previewVideoUrl: '',
+                fullVideoKey: '',
+                fullVideoFileName: '',
+                posterUrl: '',
+                kickerEn: 'COMMUNITY',
+                kickerJa: 'コミュニティ',
+                headlineEn: 'Exclusive Content. Meaningful Connection.',
+                headlineJa: '独占コンテンツ。意味のあるつながり。',
+                bodyEn:
+                    'Join members for studio visits, conversations, and sessions—online and on the ground.',
+                bodyJa:
+                    'メンバーとして、スタジオ訪問や対話、オンライン／現地のセッションにご参加ください。',
+                ctaJoinLabelEn: 'JOIN THE COMMUNITY',
+                ctaJoinLabelJa: 'コミュニティに参加',
+                ctaWatchLabelEn: 'WATCH NOW',
+                ctaWatchLabelJa: '視聴する',
+                chapters: [],
+                topics: [],
+                previewChapters: [],
+                previewTopics: [],
+                fullChapters: [],
+                fullTopics: [],
             },
             {
                 imageUrl: '',
@@ -64,6 +88,24 @@ export function defaultCommunityPage() {
                 imageUrl: '',
                 lineEn: 'VIDEO · Process · Artist · 15 min',
                 lineJa: '動画 · プロセス · アーティスト · 15分',
+                href: '/journal',
+            },
+            {
+                imageUrl: '',
+                lineEn: 'VIDEO · Conversation · Artist · 20 min',
+                lineJa: '動画 · 対話 · アーティスト · 20分',
+                href: '/journal',
+            },
+            {
+                imageUrl: '',
+                lineEn: 'AUDIO · Studio Notes · Artist · 12 min',
+                lineJa: '音声 · スタジオノート · アーティスト · 12分',
+                href: '/journal',
+            },
+            {
+                imageUrl: '',
+                lineEn: 'VIDEO · Exhibition · Artist · 22 min',
+                lineJa: '動画 · 展示 · アーティスト · 22分',
                 href: '/journal',
             },
         ],
@@ -127,28 +169,100 @@ export function normalizeCommunityPage(raw) {
 }
 
 /**
+ * @param {Record<string, unknown>} item
+ * @returns {Record<string, unknown>}
+ */
+export function featureItemWithoutFlags(item) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return {};
+    const { isHero: _isHero, visible: _visible, ...rest } = /** @type {Record<string, unknown>} */ (item);
+    return { ...rest };
+}
+
+/**
+ * @param {unknown} exclusive
+ * @param {Record<string, unknown>} [legacyHero]
+ * @returns {{ item: Record<string, unknown>, index: number }}
+ */
+export function resolveCommunityHero(exclusive, legacyHero = {}) {
+    const list = Array.isArray(exclusive) ? exclusive : [];
+    let index = list.findIndex((raw) => raw && typeof raw === 'object' && raw.isHero === true);
+    if (index < 0 && list.length) index = 0;
+    const item = index >= 0 && list[index] && typeof list[index] === 'object'
+        ? featureItemWithoutFlags(/** @type {Record<string, unknown>} */ (list[index]))
+        : legacyHero && typeof legacyHero === 'object'
+          ? { ...legacyHero }
+          : {};
+    return { item, index: list.length ? index : -1 };
+}
+
+/**
+ * @param {Record<string, unknown>} hero
+ */
+function legacyHeroHasContent(hero) {
+    return Boolean(
+        String(hero.previewVideoUrl ?? '').trim()
+        || String(hero.posterUrl ?? hero.imageUrl ?? '').trim()
+        || String(hero.fullVideoKey ?? '').trim()
+        || String(hero.headlineEn ?? '').trim()
+        || String(hero.bodyEn ?? '').trim(),
+    );
+}
+
+/**
  * @param {Record<string, unknown>} bundle
  */
 function normalizeCommunityFeatureItems(bundle) {
-    const hero = normalizeFeatureItem(bundle.hero, {});
-    bundle.hero = hero;
+    const legacyHero = normalizeFeatureItem(bundle.hero, {});
     const rawExclusive = Array.isArray(bundle.exclusive) ? bundle.exclusive : [];
     const fallbackItems = defaultCommunityPage().exclusive;
-    bundle.exclusive = rawExclusive.slice(0, 6).map((item, i) =>
-        normalizeFeatureItem(item, {
-            ...hero,
+    const exclusive = rawExclusive.slice(0, 6).map((item, i) => {
+        const raw = item && typeof item === 'object' && !Array.isArray(item)
+            ? /** @type {Record<string, unknown>} */ (item)
+            : {};
+        const normalized = normalizeFeatureItem(item, {
+            ...legacyHero,
             ...(fallbackItems[i] && typeof fallbackItems[i] === 'object' ? fallbackItems[i] : {}),
-        }),
-    );
-    while (bundle.exclusive.length < 3) {
-        const i = bundle.exclusive.length;
-        bundle.exclusive.push(
-            normalizeFeatureItem(fallbackItems[i] || {}, {
-                ...hero,
-                ...(fallbackItems[i] && typeof fallbackItems[i] === 'object' ? fallbackItems[i] : {}),
-            }),
-        );
+        });
+        normalized.visible = raw.visible !== false;
+        normalized.isHero = raw.isHero === true;
+        return normalized;
+    });
+    while (exclusive.length < 6) {
+        const i = exclusive.length;
+        const fb = fallbackItems[i] && typeof fallbackItems[i] === 'object' ? fallbackItems[i] : {};
+        const normalized = normalizeFeatureItem(fb, {
+            ...legacyHero,
+            ...fb,
+        });
+        normalized.visible = fb.visible !== false;
+        normalized.isHero = fb.isHero === true;
+        exclusive.push(normalized);
     }
+
+    let heroIndices = exclusive.map((item, i) => (item.isHero ? i : -1)).filter((i) => i >= 0);
+    if (heroIndices.length === 0) {
+        if (legacyHeroHasContent(legacyHero)) {
+            exclusive[0] = normalizeFeatureItem(
+                { ...legacyHero, ...exclusive[0], isHero: true, visible: true },
+                legacyHero,
+            );
+            exclusive[0].visible = true;
+            exclusive[0].isHero = true;
+        } else {
+            exclusive[0].isHero = true;
+        }
+        heroIndices = [0];
+    } else if (heroIndices.length > 1) {
+        heroIndices.slice(1).forEach((idx) => {
+            exclusive[idx].isHero = false;
+        });
+        heroIndices = [heroIndices[0]];
+    }
+
+    const heroIdx = heroIndices[0];
+    exclusive[heroIdx].visible = true;
+    bundle.exclusive = exclusive;
+    bundle.hero = featureItemWithoutFlags(exclusive[heroIdx]);
 }
 
 /**
@@ -206,6 +320,29 @@ function normalizeFeatureItem(raw, fallback) {
         previewTopics,
         fullChapters,
         fullTopics,
+    };
+}
+
+/**
+ * @param {Array<Record<string, unknown>>} exclusive
+ * @returns {{ exclusive: Array<Record<string, unknown>>, hero: Record<string, unknown> }}
+ */
+export function finalizeCommunityExclusiveForSave(exclusive) {
+    const list = (Array.isArray(exclusive) ? exclusive : []).slice(0, 6).map((raw) => (
+        raw && typeof raw === 'object' ? { ...raw } : {}
+    ));
+    while (list.length < 6) list.push({});
+
+    let heroIdx = list.findIndex((item) => item.isHero === true);
+    if (heroIdx < 0) heroIdx = 0;
+    list.forEach((item, i) => {
+        item.isHero = i === heroIdx;
+        if (i === heroIdx) item.visible = true;
+    });
+
+    return {
+        exclusive: list,
+        hero: featureItemWithoutFlags(list[heroIdx]),
     };
 }
 

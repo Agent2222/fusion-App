@@ -56,6 +56,7 @@ import {
     getResendSegmentConfigFromCanister,
     getSubscribers as loadSubscribersFromDataSource,
     getSubscribersCsv,
+    getApplicantSlotSecuredStudio,
     setDataSource,
     setResendSegmentConfigOnCanister,
     setSubscriberAudiencesForStudio,
@@ -71,6 +72,7 @@ import {
     studioTranslateEnToJa,
     syncStudioArtistsLegacyHeroImages,
     syncStudioArtistsLegacyIntroGalleries,
+    migrateStudioArtistsFirebaseIntroGalleries,
     upsertContentPageStudio,
     generateAndUpsertArtistWorldFromBio,
 } from '../../utils/database.js';
@@ -169,6 +171,14 @@ import {
     studioDataTabsHtml,
     studioPaginationBarHtml,
 } from '../../utils/studioCategoryLayout.js';
+import {
+    applyArtistReadinessDot,
+    artistReadinessDotClass,
+    artistReadinessTitle,
+    artistRowHasProbeableImages,
+    getArtistProfileReadiness,
+    probeArtistProfileImages,
+} from '../../utils/artistProfileReadiness.js';
 
 /**
  * Grouped sidebar model (excludes `#dashboard` and admin-only `team` / `permissions`).
@@ -326,6 +336,13 @@ function renderDashboard() {
                 Loading metrics…
             </p>
             <div class="studio-stats-row" id="studio-dashboard-stats"></div>
+            <div id="studio-dashboard-pending-wrap" class="studio-dashboard-pending" hidden>
+                <div class="studio-section-title-row">
+                    <h2>Pending visibility</h2>
+                    <a href="#pending-approval" class="studio-quick-link">View Status queue</a>
+                </div>
+                <div id="studio-dashboard-pending-list" class="studio-table-wrap"></div>
+            </div>
             <div>
                 <div class="studio-section-title-row">
                     <h2>Audience pipeline</h2>
@@ -421,7 +438,8 @@ function renderApplicants() {
                 tabs: [
                     { id: 'studio-app-tab-all', label: 'All', value: 'all', active: true },
                     { id: 'studio-app-tab-pending', label: 'Pending', value: 'pending' },
-                    { id: 'studio-app-tab-reviewing', label: 'Under review', value: 'reviewing' },
+                    { id: 'studio-app-tab-reviewing', label: 'Initial review', value: 'reviewing' },
+                    { id: 'studio-app-tab-post-interview', label: 'Post interview review', value: 'postInterviewReview' },
                     { id: 'studio-app-tab-needs', label: 'Needs info', value: 'needsInfo' },
                     { id: 'studio-app-tab-accepted', label: 'Approved', value: 'accepted' },
                     { id: 'studio-app-tab-rejected', label: 'Denied', value: 'rejected' },
@@ -438,6 +456,11 @@ function renderApplicants() {
             <div class="studio-applicant-add">
                 <h3 class="studio-subheading">Add applicant</h3>
                 <div class="studio-form-grid">
+                    <label class="studio-field studio-field--full"><span>Pick veteran artist</span>
+                        <select id="studio-app-new-artist" class="studio-select">
+                            <option value="">Manual applicant</option>
+                        </select>
+                    </label>
                     <label class="studio-field"><span>Applicant reference</span><input type="text" id="studio-app-new-id" class="studio-input" placeholder="Unique reference for this record" /></label>
                     <label class="studio-field"><span>Program ID</span><input type="text" id="studio-app-new-program" class="studio-input" /></label>
                     <label class="studio-field"><span>Email</span><input type="email" id="studio-app-new-email" class="studio-input" /></label>
@@ -445,7 +468,8 @@ function renderApplicants() {
                     <label class="studio-field"><span>Status</span>
                         <select id="studio-app-new-status" class="studio-select">
                             <option value="pending">Pending</option>
-                            <option value="reviewing">Reviewing</option>
+                            <option value="reviewing">Initial review</option>
+                            <option value="postInterviewReview">Post interview review</option>
                             <option value="needsInfo">Needs info</option>
                             <option value="accepted">Approved</option>
                             <option value="rejected">Denied</option>
@@ -463,6 +487,7 @@ function renderApplicants() {
                             <th>Name</th>
                             <th>Program</th>
                             <th>Status</th>
+                            <th>Slot secured</th>
                             <th>Created</th>
                             <th>Profile</th>
                             <th class="studio-th-actions">View</th>
@@ -470,7 +495,7 @@ function renderApplicants() {
                             <th class="studio-th-actions">Actions</th>
                         </tr>
                     </thead>
-                    <tbody id="studio-applicants-tbody"><tr><td colspan="9">Loading…</td></tr></tbody>
+                    <tbody id="studio-applicants-tbody"><tr><td colspan="10">Loading…</td></tr></tbody>
                 </table>
             </div>
             ${studioPaginationBarHtml({
@@ -531,6 +556,7 @@ function renderArtists() {
                         <button type="button" class="studio-btn-secondary" id="studio-artists-gen-invite">Generate artist join invite</button>
                         <button type="button" class="studio-btn-ghost" id="studio-artists-sync-hero">Sync Profile Images</button>
                         <button type="button" class="studio-btn-ghost" id="studio-artists-sync-gallery">Sync Gallery</button>
+                        <button type="button" class="studio-btn-ghost" id="studio-artists-migrate-firebase-gallery">Migrate Firebase Gallery</button>
                     </div>
                     <p class="studio-muted">Public <strong>/artists</strong> page — headline above the featured strip (plain text; line breaks preserved). Also listed under <strong>Content</strong>.</p>
                     <div id="studio-artists-shout-fields" class="studio-content-fields"></div>
@@ -560,6 +586,7 @@ function renderArtists() {
                 <table class="studio-table studio-table--dense">
                     <thead>
                         <tr>
+                            <th scope="col" aria-label="Profile readiness">Ready</th>
                             <th>Slug</th>
                             <th>ID</th>
                             <th>Email</th>
@@ -573,7 +600,7 @@ function renderArtists() {
                             <th class="studio-td-actions">Manage</th>
                         </tr>
                     </thead>
-                    <tbody id="studio-artists-tbody"><tr><td colspan="11">Loading…</td></tr></tbody>
+                    <tbody id="studio-artists-tbody"><tr><td colspan="12">Loading…</td></tr></tbody>
                 </table>
             </div>
             </section>
@@ -1084,6 +1111,19 @@ function renderUsers() {
                         <option value="pending">pending</option>
                         <option value="active">active</option>
                         <option value="suspended">suspended</option>
+                    </select>
+                </label>
+                <label class="studio-field"><span>Membership</span>
+                    <select id="studio-users-filter-membership" class="studio-select">
+                        <option value="">All</option>
+                        <option value="exempt">Exempt (manual)</option>
+                        <option value="trial_active">Trial active</option>
+                        <option value="trial_expired">Trial expired</option>
+                        <option value="active">Active (Stripe)</option>
+                        <option value="trialing">Trialing</option>
+                        <option value="past_due">Past due</option>
+                        <option value="canceled">Canceled</option>
+                        <option value="none">No subscription</option>
                     </select>
                 </label>
                 </div>
@@ -1956,6 +1996,57 @@ function formatSyncAttempts(emailRes, principalRes) {
     return parts.join(' ');
 }
 
+/**
+ * @param {unknown} row
+ * @param {string} wantMembership
+ */
+function studioMembershipFilterMatch(row, wantMembership) {
+    const want = String(wantMembership || '').trim();
+    if (!want) return true;
+    const r = row && typeof row === 'object' ? /** @type {Record<string, unknown>} */ (row) : {};
+    if (want === 'exempt') return Boolean(r.membershipExemptManual);
+    const trial = studioTrialState(row);
+    if (want === 'trial_active') return trial === 'active';
+    if (want === 'trial_expired') return trial === 'expired';
+    const stripeStatus = String(r.stripeSubscriptionStatus || '').toLowerCase();
+    if (want === 'active') return !r.membershipExemptManual && stripeStatus === 'active';
+    if (want === 'trialing') return !r.membershipExemptManual && stripeStatus === 'trialing';
+    if (want === 'past_due') return !r.membershipExemptManual && stripeStatus === 'past_due';
+    if (want === 'canceled') return !r.membershipExemptManual && stripeStatus === 'canceled';
+    if (want === 'none') {
+        if (r.membershipExemptManual) return false;
+        if (trial !== 'none') return false;
+        return !stripeStatus;
+    }
+    return true;
+}
+
+/**
+ * Push Stripe subscription to canister: email lookup first, then principal metadata.
+ * @param {string} principal
+ * @param {string} [email]
+ */
+async function pushSubscriptionToCanisterForStudioRow(principal, email) {
+    let emailRes =
+        /** @type {{ synced?: boolean; reason?: string } | undefined} */ (undefined);
+    let principalRes =
+        /** @type {{ synced?: boolean; reason?: string } | undefined} */ (undefined);
+    let anySynced = false;
+    if (!getIntegrationBaseUrl()) {
+        return { emailRes, principalRes, anySynced };
+    }
+    const emailStr = String(email ?? '').trim();
+    if (emailStr.includes('@')) {
+        emailRes = await syncSubscriptionFromStripeByEmail(emailStr, principal);
+        anySynced = emailRes?.synced === true;
+    }
+    if (!anySynced) {
+        principalRes = await syncSubscriptionFromStripe(principal);
+        anySynced = principalRes?.synced === true;
+    }
+    return { emailRes, principalRes, anySynced };
+}
+
 /** @param {string | undefined} iso */
 function formatSubscriptionPeriodEnd(iso) {
     return formatStudioDate(iso);
@@ -1988,6 +2079,27 @@ function buildApplicantEmailToSlugMap(artists) {
         }
     }
     return m;
+}
+
+function studioArtistApplicantName(artist) {
+    const locales = artist && typeof artist === 'object' ? artist.locales : null;
+    const en = locales && typeof locales === 'object' && locales.en && typeof locales.en === 'object' ? locales.en : {};
+    return String(artist?.fullName || artist?.name || en.name || artist?.slug || artist?.id || '').trim();
+}
+
+function studioArtistApplicantEmail(artist) {
+    return String(artist?.contactEmail || artist?.email || '').trim();
+}
+
+function buildApplicantArtistOptions(artists) {
+    return (Array.isArray(artists) ? artists : [])
+        .map((artist) => ({
+            id: String(artist?.id || '').trim(),
+            name: studioArtistApplicantName(artist),
+            email: studioArtistApplicantEmail(artist),
+        }))
+        .filter((artist) => artist.id && artist.name)
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
 }
 
 /**
@@ -2223,13 +2335,129 @@ function programCardScalars(p) {
  */
 function applicantStatusPillHtml(status) {
     const s = String(status || '');
+    const label =
+        s === 'postInterviewReview'
+            ? 'Post interview review'
+            : s === 'needsInfo'
+              ? 'Needs info'
+              : s === 'accepted'
+                ? 'Approved'
+                : s === 'rejected'
+                  ? 'Denied'
+                  : s === 'pulledOut'
+                    ? 'Pulled out'
+                  : s === 'reviewing'
+                    ? 'Initial review'
+                    : s === 'pending'
+                      ? 'Pending'
+                      : s;
     let cls = 'studio-status-pill--neutral';
     if (s === 'pending') cls = 'studio-status-pill--pending';
     else if (s === 'reviewing') cls = 'studio-status-pill--reviewing';
+    else if (s === 'postInterviewReview') cls = 'studio-status-pill--reviewing';
     else if (s === 'needsInfo') cls = 'studio-status-pill--needs';
     else if (s === 'accepted') cls = 'studio-status-pill--accepted';
     else if (s === 'rejected') cls = 'studio-status-pill--rejected';
-    return `<span class="studio-status-pill ${cls}">${escapeHtml(s)}</span>`;
+    else if (s === 'pulledOut') cls = 'studio-status-pill--rescinded';
+    return `<span class="studio-status-pill ${cls}">${escapeHtml(label)}</span>`;
+}
+
+function applicantSlotSecuredPillHtml(slotSecured) {
+    return slotSecured
+        ? '<span class="studio-status-pill studio-status-pill--confirmed">Confirmed</span>'
+        : '<span class="studio-muted">—</span>';
+}
+
+const APPLICANT_DECISION_STATUSES = new Set(['accepted', 'rejected', 'needsInfo', 'pulledOut']);
+
+function applicantDecisionValue(status) {
+    return APPLICANT_DECISION_STATUSES.has(String(status || '')) ? String(status) : 'accepted';
+}
+
+function applicantWorkflowState(status, slotSecured = false) {
+    const s = String(status || 'pending');
+    return {
+        submitted: true,
+        reviewing: ['reviewing', 'postInterviewReview', 'accepted', 'rejected', 'needsInfo', 'pulledOut'].includes(s),
+        postInterviewReview: ['postInterviewReview', 'accepted', 'rejected', 'needsInfo', 'pulledOut'].includes(s),
+        decision: APPLICANT_DECISION_STATUSES.has(s),
+        decisionValue: applicantDecisionValue(s),
+        slotSecured: Boolean(slotSecured),
+    };
+}
+
+function applicantWorkflowStatusFromRoot(root) {
+    const decision = root.querySelector('#studio-app-workflow-decision');
+    const post = root.querySelector('#studio-app-step-postInterviewReview');
+    const review = root.querySelector('#studio-app-step-reviewing');
+    if (decision instanceof HTMLInputElement && decision.checked) {
+        const decisionSelect = root.querySelector('#studio-app-decision-status');
+        return decisionSelect instanceof HTMLSelectElement ? decisionSelect.value : 'accepted';
+    }
+    if (post instanceof HTMLInputElement && post.checked) return 'postInterviewReview';
+    if (review instanceof HTMLInputElement && review.checked) return 'reviewing';
+    return 'pending';
+}
+
+function syncApplicantWorkflowControl(root) {
+    const review = root.querySelector('#studio-app-step-reviewing');
+    const post = root.querySelector('#studio-app-step-postInterviewReview');
+    const decision = root.querySelector('#studio-app-workflow-decision');
+    if (decision instanceof HTMLInputElement && decision.checked) {
+        if (review instanceof HTMLInputElement) review.checked = true;
+        if (post instanceof HTMLInputElement) post.checked = true;
+    }
+    if (post instanceof HTMLInputElement && post.checked && review instanceof HTMLInputElement) {
+        review.checked = true;
+    }
+    if (review instanceof HTMLInputElement && !review.checked) {
+        if (post instanceof HTMLInputElement) post.checked = false;
+        if (decision instanceof HTMLInputElement) decision.checked = false;
+    }
+    if (post instanceof HTMLInputElement && !post.checked && decision instanceof HTMLInputElement) {
+        decision.checked = false;
+    }
+    const decisionField = root.querySelector('#studio-app-decision-field');
+    if (decisionField instanceof HTMLElement && decision instanceof HTMLInputElement) {
+        decisionField.hidden = !decision.checked;
+    }
+}
+
+function applicantWorkflowControlHtml(status, slotSecured = false) {
+    const state = applicantWorkflowState(status, slotSecured);
+    const checked = (value) => (value ? 'checked' : '');
+    return `<fieldset class="studio-app-workflow" aria-label="Applicant workflow">
+      <legend>Program status timeline</legend>
+      <label class="studio-app-workflow__step">
+        <input type="checkbox" id="studio-app-step-submitted" checked disabled />
+        <span><strong>Submitted</strong><small>Connected to Pending</small></span>
+      </label>
+      <label class="studio-app-workflow__step">
+        <input type="checkbox" id="studio-app-step-reviewing" ${checked(state.reviewing)} />
+        <span><strong>Initial review</strong><small>Connected to Reviewing</small></span>
+      </label>
+      <label class="studio-app-workflow__step">
+        <input type="checkbox" id="studio-app-step-postInterviewReview" ${checked(state.postInterviewReview)} />
+        <span><strong>Post interview review</strong><small>Connected to Post interview review</small></span>
+      </label>
+      <label class="studio-app-workflow__step">
+        <input type="checkbox" id="studio-app-workflow-decision" ${checked(state.decision)} />
+        <span><strong>Decision</strong><small>Approved, denied, needs info, or pulled out</small></span>
+      </label>
+      <label class="studio-field studio-app-workflow__decision" id="studio-app-decision-field" ${state.decision ? '' : 'hidden'}>
+        <span>Decision result</span>
+        <select id="studio-app-decision-status" class="studio-select">
+          <option value="accepted" ${state.decisionValue === 'accepted' ? 'selected' : ''}>Approved</option>
+          <option value="rejected" ${state.decisionValue === 'rejected' ? 'selected' : ''}>Denied</option>
+          <option value="needsInfo" ${state.decisionValue === 'needsInfo' ? 'selected' : ''}>Needs info</option>
+          <option value="pulledOut" ${state.decisionValue === 'pulledOut' ? 'selected' : ''}>Pulled out</option>
+        </select>
+      </label>
+      <label class="studio-app-workflow__step studio-app-workflow__step--readonly">
+        <input type="checkbox" id="studio-app-step-slot-secured" ${checked(state.slotSecured)} disabled />
+        <span><strong>Slot secured</strong><small>Completed after deposit or full payment</small></span>
+      </label>
+    </fieldset>`;
 }
 
 /** @type {Record<string, (mainEl: HTMLElement) => Promise<void>>} */
@@ -2289,6 +2517,57 @@ async function initDashboard(mainEl) {
                 statCard(String(m.editionCount), 'Editions', '', 'Products'),
                 statCard(String(m.applicantCount), 'Applicants', '', 'Pipeline'),
             ].join('');
+        }
+        const pendingWrap = mainEl.querySelector('#studio-dashboard-pending-wrap');
+        const pendingList = mainEl.querySelector('#studio-dashboard-pending-list');
+        if (pendingWrap && pendingList && studioFeatureAccess('artists').visible) {
+            try {
+                const all = await getArtistsForStudio();
+                const pending = all.filter(
+                    (a) => normalizeArtistRosterVisibility(/** @type {unknown} */ (a).visibility) === 'pending',
+                );
+                pendingWrap.hidden = false;
+                if (!pending.length) {
+                    pendingList.innerHTML =
+                        '<p class="studio-muted">No artists awaiting visibility review.</p>';
+                } else {
+                    pendingList.innerHTML = `
+                        <table class="studio-table studio-table--dense">
+                            <thead>
+                                <tr>
+                                    <th>Name / slug</th>
+                                    <th>ID</th>
+                                    <th>Status</th>
+                                    <th class="studio-td-actions">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${pending
+                                    .map((a) => {
+                                        const slugRaw = String(a.slug || '');
+                                        const slug = escapeHtml(slugRaw);
+                                        const id = escapeHtml(String(a.id || ''));
+                                        return `<tr>
+                                            <td>${slug}</td>
+                                            <td><code class="studio-code-inline">${id}</code></td>
+                                            <td>${rosterVisibilityBadgeHtml(a.visibility)}</td>
+                                            <td class="studio-td-actions">
+                                                <a href="#pending-approval" class="studio-quick-link">Review</a>
+                                                ${
+                                                    slugRaw
+                                                        ? `<a class="studio-action-link" href="/profile/${encodeURIComponent(slugRaw)}" target="_blank" rel="noopener">Profile</a>`
+                                                        : ''
+                                                }
+                                            </td>
+                                        </tr>`;
+                                    })
+                                    .join('')}
+                            </tbody>
+                        </table>`;
+                }
+            } catch {
+                pendingWrap.hidden = true;
+            }
         }
         mainEl.querySelectorAll('.studio-quick-link').forEach((a) => {
             a.addEventListener('click', (e) => {
@@ -2698,10 +2977,12 @@ async function initApplicants(mainEl) {
     /** @type {object[]} */
     let allRows = [];
     let page = 0;
-    /** @type {'all' | 'pending' | 'reviewing' | 'needsInfo' | 'accepted' | 'rejected'} */
+    /** @type {'all' | 'pending' | 'reviewing' | 'postInterviewReview' | 'needsInfo' | 'accepted' | 'rejected'} */
     let statusTab = 'all';
     /** @type {Map<string, string>} */
     let applicantEmailToSlug = new Map();
+    /** @type {{ id: string, name: string, email: string }[]} */
+    let applicantArtistOptions = [];
 
     let canDeleteApplicants = false;
     if (getDataSource() === 'test') {
@@ -2783,7 +3064,7 @@ async function initApplicants(mainEl) {
         const start = page * APPLICANTS_PAGE_SIZE;
         const slice = rows.slice(start, start + APPLICANTS_PAGE_SIZE);
         if (!slice.length) {
-            tbody.innerHTML = `<tr><td colspan="9">${allRows.length ? 'No applicants match filters.' : 'No applicants.'}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="10">${allRows.length ? 'No applicants match filters.' : 'No applicants.'}</td></tr>`;
         } else {
             const origin = getPublicSiteOrigin();
             const delBtn = (id) =>
@@ -2805,6 +3086,7 @@ async function initApplicants(mainEl) {
             <td>${escapeHtml(r.fullName || '')}</td>
             <td>${escapeHtml(r.programId)}</td>
             <td>${applicantStatusPillHtml(r.status)}</td>
+            <td>${applicantSlotSecuredPillHtml(Boolean(r.slotSecured))}</td>
             <td><span class="studio-muted" title="${escapeHtml(r.createdAt || '')}">${escapeHtml(formatStudioDate(r.createdAt))}</span></td>
             <td>${profileCell}</td>
             <td class="studio-td-actions"><button type="button" class="studio-btn-ghost studio-app-view" data-id="${escapeHtml(r.id)}">View</button></td>
@@ -2860,13 +3142,56 @@ async function initApplicants(mainEl) {
 
     const reload = async () => {
         allRows = await getApplicants();
+        allRows = await Promise.all(
+            allRows.map(async (row) => ({
+                ...row,
+                slotSecured: await getApplicantSlotSecuredStudio(row.id, row.programId),
+            })),
+        );
         try {
             const artists = await getArtistsForStudio();
             applicantEmailToSlug = buildApplicantEmailToSlugMap(artists);
+            applicantArtistOptions = buildApplicantArtistOptions(artists);
+            populateApplicantArtistSelect();
         } catch {
             applicantEmailToSlug = new Map();
+            applicantArtistOptions = [];
+            populateApplicantArtistSelect();
         }
         renderPage();
+    };
+
+    const populateApplicantArtistSelect = () => {
+        const select = mainEl.querySelector('#studio-app-new-artist');
+        if (!(select instanceof HTMLSelectElement)) return;
+        const current = select.value;
+        select.innerHTML = '<option value="">Manual applicant</option>';
+        for (const artist of applicantArtistOptions) {
+            const option = document.createElement('option');
+            option.value = artist.id;
+            option.textContent = artist.email ? `${artist.name} (${artist.email})` : artist.name;
+            select.appendChild(option);
+        }
+        if (current && applicantArtistOptions.some((artist) => artist.id === current)) {
+            select.value = current;
+        }
+    };
+
+    const syncApplicantArtistFields = () => {
+        const select = mainEl.querySelector('#studio-app-new-artist');
+        if (!(select instanceof HTMLSelectElement) || !select.value) return;
+        const artist = applicantArtistOptions.find((item) => item.id === select.value);
+        if (!artist) return;
+        const programInput = mainEl.querySelector('#studio-app-new-program');
+        const idInput = mainEl.querySelector('#studio-app-new-id');
+        const emailInput = mainEl.querySelector('#studio-app-new-email');
+        const nameInput = mainEl.querySelector('#studio-app-new-name');
+        const statusInput = mainEl.querySelector('#studio-app-new-status');
+        const programId = String(programInput?.value || '').trim();
+        if (idInput instanceof HTMLInputElement && programId) idInput.value = `${artist.id}|${programId}`;
+        if (emailInput instanceof HTMLInputElement) emailInput.value = artist.email;
+        if (nameInput instanceof HTMLInputElement) nameInput.value = artist.name;
+        if (statusInput instanceof HTMLSelectElement) statusInput.value = 'accepted';
     };
 
     const openApplicantViewModal = (id) => {
@@ -2900,7 +3225,10 @@ async function initApplicants(mainEl) {
     const openApplicantEmailModal = (id) => {
         const r = allRows.find((x) => x.id === id);
         if (!r) return;
-        void openApplicantEmailComposer(r, { onSent: reload });
+        void openApplicantEmailComposer(r, {
+            onSent: reload,
+            canClearCorrespondence: canDeleteApplicants,
+        });
     };
 
     const openApplicantModal = (id) => {
@@ -2930,15 +3258,7 @@ async function initApplicants(mainEl) {
             <h3 class="studio-subheading">Application</h3>
             ${appBlock}
             <div class="studio-app-status-with-email">
-              <label class="studio-field studio-app-status-with-email__status"><span>Status</span>
-                <select id="studio-app-modal-status" class="studio-select">
-                  <option value="pending">Pending</option>
-                  <option value="reviewing">Reviewing</option>
-                  <option value="needsInfo">Needs info</option>
-                  <option value="accepted">Approved</option>
-                  <option value="rejected">Denied</option>
-                </select>
-              </label>
+              <div class="studio-app-status-with-email__status">${applicantWorkflowControlHtml(r.status, false)}</div>
               <div class="studio-app-status-with-email__send">
                 <span class="studio-sr-only">Send email to applicant</span>
                 <button type="button" class="studio-btn-ghost" id="studio-app-modal-send-email">Send email</button>
@@ -2954,8 +3274,6 @@ async function initApplicants(mainEl) {
             title: `Applicant — ${escapeHtml(r.email)}`,
             wide: true,
         });
-        const sel = root.querySelector('#studio-app-modal-status');
-        if (sel) sel.value = r.status;
         const notesTa = root.querySelector('#studio-app-modal-notes');
         if (notesTa instanceof HTMLTextAreaElement) {
             notesTa.value = initialNotes;
@@ -2969,51 +3287,21 @@ async function initApplicants(mainEl) {
         };
 
         root.querySelector('#studio-app-modal-send-email')?.addEventListener('click', () => {
-            void openApplicantEmailComposer(r, { onSent: reload });
-        });
-        sel?.addEventListener('change', () => {
-            if (!(sel instanceof HTMLSelectElement)) return;
-            if (sel.value === statusAtOpen) return;
-            let promptResolved = false;
-            const { close: closePrompt, root: pr } = openStudioModal(
-                `<p>Save this status change and open the email composer?</p>
-            <div class="studio-modal-actions" style="gap:0.5rem;flex-wrap:wrap">
-              <button type="button" class="studio-btn-primary" id="studio-app-status-prompt-yes">Save and send email</button>
-              <button type="button" class="studio-btn-secondary" id="studio-app-status-prompt-no">Cancel</button>
-            </div>`,
-                {
-                    title: 'Status changed',
-                    compact: true,
-                    onClose: () => {
-                        if (promptResolved) return;
-                        if (sel instanceof HTMLSelectElement) sel.value = statusAtOpen;
-                    },
-                },
-            );
-            pr.querySelector('#studio-app-status-prompt-yes')?.addEventListener('click', async () => {
-                promptResolved = true;
-                closePrompt();
-                const status = sel.value;
-                const payloadJson = makePayloadForSave();
-                try {
-                    await upsertApplicantStudio({ ...r, status, payloadJson });
-                    statusAtOpen = status;
-                    close();
-                    await reload();
-                    const fresh = allRows.find((x) => x.id === r.id);
-                    if (fresh) void openApplicantEmailComposer(fresh, { onSent: reload });
-                } catch (e) {
-                    alert(e instanceof Error ? e.message : String(e));
-                }
-            });
-            pr.querySelector('#studio-app-status-prompt-no')?.addEventListener('click', () => {
-                promptResolved = true;
-                if (sel instanceof HTMLSelectElement) sel.value = statusAtOpen;
-                closePrompt();
+            void openApplicantEmailComposer(r, {
+                onSent: reload,
+                canClearCorrespondence: canDeleteApplicants,
             });
         });
+        root.querySelectorAll('.studio-app-workflow input, #studio-app-decision-status').forEach((el) => {
+            el.addEventListener('change', () => syncApplicantWorkflowControl(root));
+        });
+        void (async () => {
+            const slotSecured = await getApplicantSlotSecuredStudio(r.id, r.programId);
+            const slotInput = root.querySelector('#studio-app-step-slot-secured');
+            if (slotInput instanceof HTMLInputElement) slotInput.checked = slotSecured;
+        })();
         root.querySelector('#studio-app-modal-save')?.addEventListener('click', async () => {
-            const status = sel?.value || 'pending';
+            const status = applicantWorkflowStatusFromRoot(root);
             const payloadJson = makePayloadForSave();
             try {
                 await upsertApplicantStudio({ ...r, status, payloadJson });
@@ -3105,8 +3393,14 @@ async function initApplicants(mainEl) {
         }
     });
 
+    mainEl.querySelector('#studio-app-new-artist')?.addEventListener('change', syncApplicantArtistFields);
+    mainEl.querySelector('#studio-app-new-program')?.addEventListener('input', syncApplicantArtistFields);
+
     mainEl.querySelector('#studio-app-new-save')?.addEventListener('click', async () => {
-        const id = mainEl.querySelector('#studio-app-new-id')?.value?.trim();
+        syncApplicantArtistFields();
+        const selectedArtistId = mainEl.querySelector('#studio-app-new-artist')?.value?.trim();
+        const programId = mainEl.querySelector('#studio-app-new-program')?.value?.trim() || '';
+        const id = mainEl.querySelector('#studio-app-new-id')?.value?.trim() || (selectedArtistId && programId ? `${selectedArtistId}|${programId}` : '');
         if (!id) {
             alert('ID required');
             return;
@@ -3116,10 +3410,10 @@ async function initApplicants(mainEl) {
         try {
             await upsertApplicantStudio({
                 id,
-                programId: mainEl.querySelector('#studio-app-new-program')?.value || '',
+                programId,
                 email: mainEl.querySelector('#studio-app-new-email')?.value || '',
                 fullName: mainEl.querySelector('#studio-app-new-name')?.value || '',
-                status: mainEl.querySelector('#studio-app-new-status')?.value || 'pending',
+                status: selectedArtistId ? 'accepted' : mainEl.querySelector('#studio-app-new-status')?.value || 'pending',
                 createdAt: new Date().toISOString(),
                 payloadJson,
             });
@@ -3219,6 +3513,27 @@ async function initArtists(mainEl) {
     let allArtists = [];
     /** @type {'all' | 'featurable' | 'featured'} */
     let quickFilter = 'all';
+    let artistReadinessProbeGen = 0;
+    const READINESS_PROBE_BATCH = 6;
+
+    const refreshArtistReadinessDots = async (artists) => {
+        if (!tbody) return;
+        const gen = ++artistReadinessProbeGen;
+        const targets = artists.filter((a) => artistRowHasProbeableImages(a));
+        for (let i = 0; i < targets.length; i += READINESS_PROBE_BATCH) {
+            if (gen !== artistReadinessProbeGen) return;
+            const batch = targets.slice(i, i + READINESS_PROBE_BATCH);
+            await Promise.all(
+                batch.map(async (a) => {
+                    const probes = await probeArtistProfileImages(a);
+                    if (gen !== artistReadinessProbeGen) return;
+                    const id = String(a.id ?? '');
+                    const dot = tbody.querySelector(`.studio-artist-ready-dot[data-artist-id="${CSS.escape(id)}"]`);
+                    applyArtistReadinessDot(dot, getArtistProfileReadiness(a, probes));
+                }),
+            );
+        }
+    };
 
     const wireArtistTableRowActions = () => {
         if (!tbody) return;
@@ -3312,7 +3627,7 @@ async function initArtists(mainEl) {
             );
         }
         if (!artists.length) {
-            tbody.innerHTML = `<tr><td colspan="11">${allArtists.length ? 'No rows match filters.' : 'No artists.'}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="12">${allArtists.length ? 'No rows match filters.' : 'No artists.'}</td></tr>`;
             return;
         }
         const emailPermTitle = 'Email (requires Edit permission for Artists in Studio → Permissions)';
@@ -3333,7 +3648,13 @@ async function initArtists(mainEl) {
                 const mrpVal = escapeHtml(String(a.mostRecentProgram ?? ''));
                 const feat = a.featured === true ? 'checked' : '';
                 const featur = a.featurable === true ? 'checked' : '';
+                const readiness = getArtistProfileReadiness(a);
+                const readyDotClass = artistReadinessDotClass(readiness.status);
+                const readyTitle = artistReadinessTitle(readiness);
                 return `<tr>
+                <td class="studio-td-ready"><span class="studio-user-sub-dot ${readyDotClass} studio-artist-ready-dot" data-artist-id="${idEsc}" title="${escapeHtml(
+                    readyTitle,
+                )}" aria-label="${escapeHtml(readyTitle)}"></span></td>
                 <td>${slug}</td>
                 <td>${idEsc}</td>
                 <td class="studio-td-actions studio-td-email">
@@ -3353,6 +3674,7 @@ async function initArtists(mainEl) {
             })
             .join('');
         wireArtistTableRowActions();
+        void refreshArtistReadinessDots(artists);
     };
 
     const manageHost = mainEl.querySelector('#studio-artist-manage-surface');
@@ -3413,9 +3735,10 @@ async function initArtists(mainEl) {
         }
     });
 
-    /** @param {{ hero?: boolean }} [opts] */
+    /** @param {{ hero?: boolean, firebaseGallery?: boolean }} [opts] */
     const runLegacySync = async (label, fn, opts = {}) => {
         const isHeroSync = opts.hero === true;
+        const isFirebaseGallery = opts.firebaseGallery === true;
         if (!banner) return;
         banner.className = 'studio-banner studio-banner--info';
         banner.textContent = `${label}…`;
@@ -3424,12 +3747,14 @@ async function initArtists(mainEl) {
             banner.className = 'studio-banner studio-banner--ok';
             if (n > 0) {
                 banner.textContent = isHeroSync
-                    ? `${label}: cleared all profile hero images and set legacy URLs for ${n} artist(s). Upload matching files to S3 under uploads/legacyProfiles/ if needed.`
-                    : `${label}: updated ${n} artist(s). Upload matching files to S3 under uploads/legacyProfiles/ if needed.`;
+                    ? `${label}: cleared all profile hero images and set legacy CDN URLs for ${n} artist(s). Ensure files exist at cdn.fusionart.world/uploads/legacyProfiles/ if needed.`
+                    : `${label}: updated ${n} artist(s). Ensure files exist at cdn.fusionart.world/uploads/legacyProfiles/ if needed.`;
             } else {
                 banner.textContent = isHeroSync
                     ? `${label}: no artists in roster.`
-                    : `${label}: no artists needed updates (already have URLs or gallery).`;
+                    : isFirebaseGallery
+                      ? `${label}: no artists had Firebase intro gallery URLs.`
+                      : `${label}: no artists needed updates (already have URLs or gallery).`;
             }
             await load();
         } catch (e) {
@@ -3440,10 +3765,17 @@ async function initArtists(mainEl) {
 
     const openLegacySyncConfirm = (kind) => {
         const isHero = kind === 'hero';
-        const title = isHero ? 'Sync Profile Images' : 'Sync Gallery';
+        const isFirebaseGallery = kind === 'firebase-gallery';
+        const title = isHero
+            ? 'Sync Profile Images'
+            : isFirebaseGallery
+              ? 'Migrate Firebase Gallery'
+              : 'Sync Gallery';
         const intro = isHero
-            ? 'This clears every artist’s profile hero image, then sets each to the legacy S3 URL below (all roster artists). Matching files should exist on S3 (or URLs will 404 until uploaded). Temporary tool — see docs/delete-later.md.'
-            : 'This fills English and Japanese intro gallery slots when all three slots have no image URL. Matching files should exist on S3 (or URLs will 404 until uploaded).';
+            ? 'This clears every artist’s profile hero image, then sets each to the legacy CDN URL below (all roster artists). Matching files should exist on the CDN (or URLs will 404 until uploaded). Temporary tool — see docs/delete-later.md.'
+            : isFirebaseGallery
+              ? 'One-off migration: for each artist whose English intro gallery has any Firebase Storage URL, replace all three intro slots (EN and JA) with the legacy CDN URLs below. Artists with S3/CDN or empty galleries are unchanged. Run once on live, then remove this button when done — see docs/delete-later.md.'
+              : 'This fills English and Japanese intro gallery slots when all three slots have no image URL. Matching files should exist on the CDN (or URLs will 404 until uploaded).';
         const urlHelp = isHero
             ? `<p class="studio-muted" style="margin:0 0 0.5rem"><strong>URL format</strong> — one file per artist:</p>
 <pre class="studio-code-block" style="margin:0 0 0.75rem;white-space:pre-wrap;word-break:break-all">${escapeHtml(
@@ -3466,8 +3798,12 @@ ${urlHelp}
             close();
             void runLegacySync(
                 title,
-                isHero ? syncStudioArtistsLegacyHeroImages : syncStudioArtistsLegacyIntroGalleries,
-                isHero ? { hero: true } : {}
+                isHero
+                    ? syncStudioArtistsLegacyHeroImages
+                    : isFirebaseGallery
+                      ? migrateStudioArtistsFirebaseIntroGalleries
+                      : syncStudioArtistsLegacyIntroGalleries,
+                isHero ? { hero: true } : isFirebaseGallery ? { firebaseGallery: true } : {}
             );
         });
     };
@@ -3477,6 +3813,9 @@ ${urlHelp}
     });
     mainEl.querySelector('#studio-artists-sync-gallery')?.addEventListener('click', () => {
         openLegacySyncConfirm('gallery');
+    });
+    mainEl.querySelector('#studio-artists-migrate-firebase-gallery')?.addEventListener('click', () => {
+        openLegacySyncConfirm('firebase-gallery');
     });
 
     mainEl.querySelector('#studio-artists-gen-invite')?.addEventListener('click', async () => {
@@ -5696,22 +6035,8 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
         stripeIdsEl.hidden = false;
     };
 
-    const runPushSubscriptionToCanister = async (emailStr) => {
-        let emailRes =
-            /** @type {{ synced?: boolean; reason?: string } | undefined} */ (undefined);
-        let principalRes =
-            /** @type {{ synced?: boolean; reason?: string } | undefined} */ (undefined);
-        let anySynced = false;
-        if (getIntegrationBaseUrl()) {
-            emailRes = await syncSubscriptionFromStripeByEmail(emailStr, principal);
-            anySynced = emailRes?.synced === true;
-            if (!anySynced) {
-                principalRes = await syncSubscriptionFromStripe(principal);
-                anySynced = principalRes?.synced === true;
-            }
-        }
-        return { emailRes, principalRes, anySynced };
-    };
+    const runPushSubscriptionToCanister = async (emailStr) =>
+        pushSubscriptionToCanisterForStudioRow(principal, emailStr);
 
     const refetchUserRowAndRefreshTable = async () => {
         let refreshErr = '';
@@ -5962,6 +6287,7 @@ async function initUsers(mainEl) {
     const tbody = mainEl.querySelector('#studio-users-tbody');
     const roleFilter = mainEl.querySelector('#studio-users-filter-role');
     const statusFilter = mainEl.querySelector('#studio-users-filter-status');
+    const membershipFilter = mainEl.querySelector('#studio-users-filter-membership');
     const countHeader = mainEl.querySelector('#studio-users-header-count');
     const syncAllBtn = mainEl.querySelector('#studio-users-sync-all');
     const loadContactsBtn = mainEl.querySelector('#studio-users-load-contacts');
@@ -6009,15 +6335,17 @@ async function initUsers(mainEl) {
         if (!tbody) return;
         const wantRole = roleFilter?.value || '';
         const wantSt = statusFilter?.value || '';
+        const wantMembership = membershipFilter?.value || '';
         const rows = allPairs.filter((r) => {
             if (wantRole && r.role !== wantRole) return false;
             if (wantSt && r.status !== wantSt) return false;
+            if (!studioMembershipFilterMatch(r, wantMembership)) return false;
             return true;
         });
         if (countHeader) countHeader.textContent = String(rows.length);
         if (!rows.length) {
             const emptyMsg =
-                allPairs.length === 0 && !wantRole && !wantSt
+                allPairs.length === 0 && !wantRole && !wantSt && !wantMembership
                     ? 'No accounts on this canister yet.'
                     : 'No accounts match filters.';
             tbody.innerHTML = `<tr><td colspan="13">${emptyMsg}</td></tr>`;
@@ -6097,11 +6425,13 @@ async function initUsers(mainEl) {
             }
             roleFilter?.addEventListener('change', renderTable);
             statusFilter?.addEventListener('change', renderTable);
+            membershipFilter?.addEventListener('change', renderTable);
             return;
         }
         renderTable();
         roleFilter?.addEventListener('change', renderTable);
         statusFilter?.addEventListener('change', renderTable);
+        membershipFilter?.addEventListener('change', renderTable);
 
         const trialBtn = generateTrialBtn instanceof HTMLButtonElement ? generateTrialBtn : null;
         if (trialBtn) {
@@ -6308,14 +6638,33 @@ async function initUsers(mainEl) {
                 syncBtn.disabled = true;
                 syncBtn.setAttribute('aria-busy', 'true');
                 if (syncMsg) syncMsg.textContent = 'Syncing…';
-                let ok = 0;
-                let fail = 0;
+                let synced = 0;
+                let skipped = 0;
+                let failed = 0;
                 for (const row of allPairs) {
+                    const principal = String(row.principal || '').trim();
+                    if (!principal) {
+                        skipped += 1;
+                        continue;
+                    }
+                    const email = contactByPrincipal.get(principal)?.email || '';
                     try {
-                        await syncSubscriptionFromStripe(row.principal);
-                        ok += 1;
+                        const { anySynced, emailRes, principalRes } =
+                            await pushSubscriptionToCanisterForStudioRow(principal, email);
+                        if (anySynced) {
+                            synced += 1;
+                        } else {
+                            const reason = String(
+                                emailRes?.reason || principalRes?.reason || 'no_stripe_match',
+                            );
+                            if (/no_stripe_customer|no_customer|no_subscription|invalid_email/i.test(reason)) {
+                                skipped += 1;
+                            } else {
+                                failed += 1;
+                            }
+                        }
                     } catch {
-                        fail += 1;
+                        failed += 1;
                     }
                 }
                 try {
@@ -6325,10 +6674,10 @@ async function initUsers(mainEl) {
                     /* ignore */
                 }
                 if (syncMsg) {
-                    syncMsg.textContent =
-                        fail > 0
-                            ? `Done: ${ok} synced, ${fail} failed (check integration logs).`
-                            : `Done: ${ok} synced.`;
+                    const parts = [`${synced} synced`];
+                    if (skipped > 0) parts.push(`${skipped} skipped (no Stripe match)`);
+                    if (failed > 0) parts.push(`${failed} failed`);
+                    syncMsg.textContent = `Done: ${parts.join(', ')}.`;
                 }
                 syncBtn.disabled = false;
                 syncBtn.setAttribute('aria-busy', 'false');
