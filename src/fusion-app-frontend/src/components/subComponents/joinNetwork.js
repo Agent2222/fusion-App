@@ -1425,12 +1425,13 @@ class JoinNetworkComponent extends HTMLElement {
       const { categoryToUserRole } = await import("../../utils/authHeader.js");
       const { registerWithJoinAccessCodeForCaller } =
         await import("../../utils/database.js");
+      const email = this._getEmailForSubscription() || this._formEmail.trim();
       const outcome = await registerWithJoinAccessCodeForCaller(
         categoryToUserRole(cat),
         code,
-        '',
-        '',
-        '',
+        this._formFirstName,
+        this._formLastName,
+        email,
       );
       if (outcome !== "ok") {
         const map = {

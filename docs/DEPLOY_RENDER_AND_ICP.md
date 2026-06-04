@@ -56,8 +56,8 @@ Set at least the following. Use **your real values**; do not commit them.
 | `S3_BUCKET` | S3 presign | Bucket name |
 | `AWS_ACCESS_KEY_ID` | S3 on Render | IAM user access key — **required** on hosts without an IAM instance role |
 | `AWS_SECRET_ACCESS_KEY` | S3 on Render | IAM secret for the same user |
-| `S3_PUBLIC_BASE_URL` | Optional | Public URL base for objects (CloudFront or `https://bucket.s3.region.amazonaws.com`) |
-| `S3_KEY_PREFIX` | Optional | Object key prefix (default **`fusionMedia/uploads/`**). IAM should allow `s3:PutObject` on `arn:aws:s3:::YOUR_BUCKET/fusionMedia/uploads/*`. |
+| `S3_PUBLIC_BASE_URL` | Optional | Public URL base for objects (CloudFront origin or `https://bucket.s3.region.amazonaws.com`). The frontend rewrites stored media to **`https://cdn.fusionart.world/uploads/…`**. |
+| `S3_KEY_PREFIX` | Optional | S3 object key prefix for `/storage/presign` (code default **`uploads/`**; production often **`fusionMedia/uploads/`**). IAM should allow `s3:PutObject` on `arn:aws:s3:::YOUR_BUCKET/<prefix>*`. CDN URLs always use `/uploads/…` on `cdn.fusionart.world`, even when bucket keys include `fusionMedia/uploads/`. |
 | `CORS_STRICT` | Optional | Set to `1` only if you want an allowlist (`CORS_ORIGINS` + built-in Fusion origins). **Leave unset** so browsers on `fusionart.world`, `*.icp0.io`, etc. always get valid CORS without redeploying the API. |
 | `CORS_ORIGINS` | With `CORS_STRICT` | Extra allowed origins, e.g. `https://<canister>.icp0.io` (no trailing slash) |
 | `INTEGRATION_API_KEY` | Optional hardening | Random secret; if set, frontend must send `Authorization: Bearer …` on POST routes |

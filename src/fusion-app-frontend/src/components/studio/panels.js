@@ -2,6 +2,15 @@
  * Studio section panels: dashboard + all sidebar tabs (data via database.js).
  */
 import { studioFeatureAccess } from '../../utils/studioShellState.js';
+import {
+    formatSubscriptionPeriodEnd,
+    studioMembershipDotClass,
+    studioMembershipFilterMatch,
+    studioMembershipStatusLabel,
+    studioStripeDashboardCustomerUrl,
+    studioTrialState,
+} from '../../utils/studioMembershipPresentation.js';
+import { renderFinance, initFinance } from './financeSection.js';
 import { renderPermissions, initPermissions } from './permissionsSection.js';
 import { DEV_MODE, getPublicSiteOrigin } from '../../config.js';
 import { getFusionBackendActor, normalizeEarlyAccessCategory } from '../../utils/earlyAccessSubscribe.js';
@@ -275,10 +284,7 @@ export function renderStudioMain(sectionId) {
                 'Program calendars, artist timelines, and event scheduling tools will live here.'
             );
         case 'finance':
-            return renderManagementPlaceholder(
-                'Finance',
-                'Finance workflows, payment tracking, invoices, and revenue reporting will live here.'
-            );
+            return renderFinance();
         case 'travel':
             return renderManagementPlaceholder(
                 'Travel',
@@ -443,42 +449,48 @@ function renderApplicants() {
                     { id: 'studio-app-tab-needs', label: 'Needs info', value: 'needsInfo' },
                     { id: 'studio-app-tab-accepted', label: 'Approved', value: 'accepted' },
                     { id: 'studio-app-tab-rejected', label: 'Denied', value: 'rejected' },
+                    { id: 'studio-app-tab-pulled-out', label: 'Pulled out', value: 'pulledOut' },
                 ],
             })}
             ${studioFilterBarHtml({
                 searchId: 'studio-applicants-search',
                 searchPlaceholder: 'Search email, name, program…',
             })}
-            <div id="studio-applicants-banner" class="studio-banner studio-banner--info"></div>
-            <div class="studio-modal-actions" style="margin:0.25rem 0 0.5rem">
-                <button type="button" class="studio-btn-secondary" id="studio-applicants-generate-access-code">Generate access code</button>
-            </div>
-            <div class="studio-applicant-add">
-                <h3 class="studio-subheading">Add applicant</h3>
-                <div class="studio-form-grid">
-                    <label class="studio-field studio-field--full"><span>Pick veteran artist</span>
-                        <select id="studio-app-new-artist" class="studio-select">
-                            <option value="">Manual applicant</option>
-                        </select>
-                    </label>
-                    <label class="studio-field"><span>Applicant reference</span><input type="text" id="studio-app-new-id" class="studio-input" placeholder="Unique reference for this record" /></label>
-                    <label class="studio-field"><span>Program ID</span><input type="text" id="studio-app-new-program" class="studio-input" /></label>
-                    <label class="studio-field"><span>Email</span><input type="email" id="studio-app-new-email" class="studio-input" /></label>
-                    <label class="studio-field"><span>Name</span><input type="text" id="studio-app-new-name" class="studio-input" /></label>
-                    <label class="studio-field"><span>Status</span>
-                        <select id="studio-app-new-status" class="studio-select">
-                            <option value="pending">Pending</option>
-                            <option value="reviewing">Initial review</option>
-                            <option value="postInterviewReview">Post interview review</option>
-                            <option value="needsInfo">Needs info</option>
-                            <option value="accepted">Approved</option>
-                            <option value="rejected">Denied</option>
-                        </select>
-                    </label>
-                    <label class="studio-field studio-field--full"><span>Notes</span><textarea id="studio-app-new-payload" class="studio-textarea" rows="4" placeholder="Internal notes (plain text)"></textarea></label>
+            <details class="studio-section-accordion studio-section-accordion--applicants-admin">
+                <summary class="studio-section-accordion__summary">Add applicant &amp; admin tools</summary>
+                <div class="studio-section-accordion__body">
+                    <div id="studio-applicants-banner" class="studio-banner studio-banner--info"></div>
+                    <div class="studio-modal-actions" style="margin:0.25rem 0 0.5rem">
+                        <button type="button" class="studio-btn-secondary" id="studio-applicants-generate-access-code">Generate access code</button>
+                    </div>
+                    <div class="studio-applicant-add">
+                        <h3 class="studio-subheading">Add applicant</h3>
+                        <div class="studio-form-grid">
+                            <label class="studio-field studio-field--full"><span>Pick veteran artist</span>
+                                <select id="studio-app-new-artist" class="studio-select">
+                                    <option value="">Manual applicant</option>
+                                </select>
+                            </label>
+                            <label class="studio-field"><span>Applicant reference</span><input type="text" id="studio-app-new-id" class="studio-input" placeholder="Unique reference for this record" /></label>
+                            <label class="studio-field"><span>Program ID</span><input type="text" id="studio-app-new-program" class="studio-input" /></label>
+                            <label class="studio-field"><span>Email</span><input type="email" id="studio-app-new-email" class="studio-input" /></label>
+                            <label class="studio-field"><span>Name</span><input type="text" id="studio-app-new-name" class="studio-input" /></label>
+                            <label class="studio-field"><span>Status</span>
+                                <select id="studio-app-new-status" class="studio-select">
+                                    <option value="pending">Pending</option>
+                                    <option value="reviewing">Initial review</option>
+                                    <option value="postInterviewReview">Post interview review</option>
+                                    <option value="needsInfo">Needs info</option>
+                                    <option value="accepted">Approved</option>
+                                    <option value="rejected">Denied</option>
+                                </select>
+                            </label>
+                            <label class="studio-field studio-field--full"><span>Notes</span><textarea id="studio-app-new-payload" class="studio-textarea" rows="4" placeholder="Internal notes (plain text)"></textarea></label>
+                        </div>
+                        <button type="button" class="studio-btn-primary" id="studio-app-new-save">SAVE APPLICANT</button>
+                    </div>
                 </div>
-                <button type="button" class="studio-btn-primary" id="studio-app-new-save">SAVE APPLICANT</button>
-            </div>
+            </details>
             <div class="studio-table-wrap studio-table-wrap--sticky-head">
                 <table class="studio-table studio-table--dense">
                     <thead>
@@ -1872,33 +1884,6 @@ async function studioAlertGeneratedJoinInviteCode(code, audienceNote) {
     }
 }
 
-/** @param {string | undefined} st */
-function studioMembershipStatusLabel(st) {
-    const s = String(st || '').toLowerCase();
-    if (!s) return 'No subscription';
-    const map = {
-        active: 'Active',
-        trialing: 'Trialing',
-        past_due: 'Past due',
-        canceled: 'Canceled',
-        unpaid: 'Unpaid',
-        incomplete: 'Incomplete',
-        incomplete_expired: 'Incomplete (expired)',
-        paused: 'Paused',
-    };
-    return map[s] || String(st);
-}
-
-/** @param {{ membershipExemptManual?: boolean, stripeSubscriptionStatus?: string }} row */
-function studioMembershipDotClass(row) {
-    if (row.membershipExemptManual) return 'studio-user-sub-dot--ok';
-    const trialState = studioTrialState(row);
-    if (trialState === 'active') return 'studio-user-sub-dot--ok';
-    const s = String(row.stripeSubscriptionStatus || '').toLowerCase();
-    if (s === 'active' || s === 'trialing') return 'studio-user-sub-dot--ok';
-    return 'studio-user-sub-dot--err';
-}
-
 /** Canister row shows paid access (active/trialing) or manual exempt. */
 function studioRowCanisterPaid(row) {
     if (!row || typeof row !== 'object') return false;
@@ -1906,18 +1891,6 @@ function studioRowCanisterPaid(row) {
     if (studioTrialState(row) === 'active') return true;
     const s = String(row.stripeSubscriptionStatus || '').toLowerCase();
     return s === 'active' || s === 'trialing';
-}
-
-/**
- * @param {{ trialEndsAtSec?: string | number }} row
- * @returns {'active' | 'expired' | 'none'}
- */
-function studioTrialState(row) {
-    const raw = row?.trialEndsAtSec;
-    const endsAtSec = Number(raw);
-    if (!Number.isFinite(endsAtSec) || endsAtSec <= 0) return 'none';
-    const nowSec = Date.now() / 1000;
-    return nowSec <= endsAtSec ? 'active' : 'expired';
 }
 
 /**
@@ -1931,19 +1904,6 @@ function studioTrialStatusLabel(row) {
     const startTxt = Number.isFinite(started) ? formatStudioDate(started) : '—';
     const endTxt = Number.isFinite(ends) ? formatStudioDate(ends) : '—';
     return state === 'active' ? `Trial active (${startTxt} -> ${endTxt})` : `Trial expired (${endTxt})`;
-}
-
-/**
- * @param {string | undefined} customerId
- * @param {string | undefined} publishableKey
- */
-function studioStripeDashboardCustomerUrl(customerId, publishableKey) {
-    const cid = String(customerId || '').trim();
-    if (!cid.startsWith('cus_')) return '';
-    const pk = String(publishableKey || '');
-    const isTest = pk.startsWith('pk_test_');
-    const base = isTest ? 'https://dashboard.stripe.com/test' : 'https://dashboard.stripe.com';
-    return `${base}/customers/${encodeURIComponent(cid)}`;
 }
 
 /** @param {string | undefined} reason */
@@ -1997,31 +1957,6 @@ function formatSyncAttempts(emailRes, principalRes) {
 }
 
 /**
- * @param {unknown} row
- * @param {string} wantMembership
- */
-function studioMembershipFilterMatch(row, wantMembership) {
-    const want = String(wantMembership || '').trim();
-    if (!want) return true;
-    const r = row && typeof row === 'object' ? /** @type {Record<string, unknown>} */ (row) : {};
-    if (want === 'exempt') return Boolean(r.membershipExemptManual);
-    const trial = studioTrialState(row);
-    if (want === 'trial_active') return trial === 'active';
-    if (want === 'trial_expired') return trial === 'expired';
-    const stripeStatus = String(r.stripeSubscriptionStatus || '').toLowerCase();
-    if (want === 'active') return !r.membershipExemptManual && stripeStatus === 'active';
-    if (want === 'trialing') return !r.membershipExemptManual && stripeStatus === 'trialing';
-    if (want === 'past_due') return !r.membershipExemptManual && stripeStatus === 'past_due';
-    if (want === 'canceled') return !r.membershipExemptManual && stripeStatus === 'canceled';
-    if (want === 'none') {
-        if (r.membershipExemptManual) return false;
-        if (trial !== 'none') return false;
-        return !stripeStatus;
-    }
-    return true;
-}
-
-/**
  * Push Stripe subscription to canister: email lookup first, then principal metadata.
  * @param {string} principal
  * @param {string} [email]
@@ -2045,11 +1980,6 @@ async function pushSubscriptionToCanisterForStudioRow(principal, email) {
         anySynced = principalRes?.synced === true;
     }
     return { emailRes, principalRes, anySynced };
-}
-
-/** @param {string | undefined} iso */
-function formatSubscriptionPeriodEnd(iso) {
-    return formatStudioDate(iso);
 }
 
 /** @param {string | undefined} iso */
@@ -2466,6 +2396,7 @@ const STUDIO_INIT = {
     home: initHome,
     subscribers: initSubscribers,
     applicants: initApplicants,
+    finance: initFinance,
     artists: initArtists,
     'pending-approval': initPendingApproval,
     programs: initPrograms,
@@ -2977,7 +2908,7 @@ async function initApplicants(mainEl) {
     /** @type {object[]} */
     let allRows = [];
     let page = 0;
-    /** @type {'all' | 'pending' | 'reviewing' | 'postInterviewReview' | 'needsInfo' | 'accepted' | 'rejected'} */
+    /** @type {'all' | 'pending' | 'reviewing' | 'postInterviewReview' | 'needsInfo' | 'accepted' | 'rejected' | 'pulledOut'} */
     let statusTab = 'all';
     /** @type {Map<string, string>} */
     let applicantEmailToSlug = new Map();

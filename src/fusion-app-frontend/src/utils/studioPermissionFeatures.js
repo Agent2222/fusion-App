@@ -10,7 +10,11 @@ export const STUDIO_PERMISSION_FEATURE_ROWS = [
     { id: 'subscribers', label: 'Subscribers' },
     { id: 'applicants', label: 'Applicants' },
     { id: 'schedule', label: 'Schedule' },
-    { id: 'finance', label: 'Finance' },
+    { id: 'finance', label: 'Finance', group: 'finance' },
+    { id: 'financePrograms', label: 'Finance — Programs', group: 'finance' },
+    { id: 'financeUsers', label: 'Finance — Users (membership)', group: 'finance' },
+    { id: 'financeProducts', label: 'Finance — Products', group: 'finance' },
+    { id: 'financePromotions', label: 'Finance — Promotions', group: 'finance' },
     { id: 'travel', label: 'Travel' },
     // Roster + Send blast: Studio gates blast on canEdit for this id (no extra Motoko key).
     { id: 'artists', label: 'Artists' },

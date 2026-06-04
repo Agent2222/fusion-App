@@ -30,10 +30,19 @@ function escapeHtml(s) {
  */
 function matrixTableHtml(map) {
     /** Only show rows for keys the canister returned — avoids sending newer keys (e.g. `sound`) to older deployments. */
+    let lastGroup = '';
     const rows = STUDIO_PERMISSION_FEATURE_ROWS.filter((row) => map.has(row.id))
         .map((row) => {
         const acc = map.get(row.id) ?? { visible: true, canEdit: true };
-        return `
+        const group = row.group || '';
+        let groupRow = '';
+        if (group && group !== lastGroup) {
+            lastGroup = group;
+            const groupLabel =
+                group === 'finance' ? 'Finance (parent + category scopes)' : group;
+            groupRow = `<tr class="studio-perm-matrix__group"><td colspan="3">${escapeHtml(groupLabel)}</td></tr>`;
+        }
+        return `${groupRow}
             <tr data-perm-row="${escapeHtml(row.id)}">
                 <td>${escapeHtml(row.label)}</td>
                 <td class="studio-perm-matrix__cell">

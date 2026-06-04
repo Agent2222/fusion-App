@@ -36,6 +36,33 @@ export function studioFeatureAccess(featureId) {
     return effectiveMatrix.get(featureId) ?? { visible: true, canEdit: true };
 }
 
+/** @type {Record<string, string>} */
+const FINANCE_CATEGORY_FEATURE_IDS = {
+    Programs: 'financePrograms',
+    Users: 'financeUsers',
+    Products: 'financeProducts',
+    Promotions: 'financePromotions',
+};
+
+/** Finance domain tabs / overview chips (requires parent `finance` visible). */
+export const STUDIO_FINANCE_CATEGORIES = ['Programs', 'Users', 'Products', 'Promotions'];
+
+/**
+ * @param {'Programs' | 'Users' | 'Products' | 'Promotions'} subKey
+ * @returns {{ visible: boolean, canEdit: boolean }}
+ */
+export function studioFinanceCategoryAccess(subKey) {
+    const parent = studioFeatureAccess('finance');
+    if (!parent.visible) return { visible: false, canEdit: false };
+    const featureId = FINANCE_CATEGORY_FEATURE_IDS[subKey] || `finance${subKey}`;
+    return studioFeatureAccess(featureId);
+}
+
+/** @returns {('Programs' | 'Users' | 'Products' | 'Promotions')[]} */
+export function studioFinanceVisibleCategories() {
+    return STUDIO_FINANCE_CATEGORIES.filter((k) => studioFinanceCategoryAccess(k).visible);
+}
+
 /**
  * @param {string} sectionId
  */

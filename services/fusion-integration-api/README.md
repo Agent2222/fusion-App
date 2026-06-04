@@ -44,8 +44,8 @@ stripe listen --forward-to localhost:8787/webhooks/stripe
 | `AWS_ACCESS_KEY_ID` | for S3 on **Render / most hosts** | IAM user access key (`AKIA…`). Required unless the process can use another [default credential chain](https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/setting-credentials-node.html) (e.g. local `~/.aws/credentials`). |
 | `AWS_SECRET_ACCESS_KEY` | with access key above | IAM secret key |
 | `AWS_SESSION_TOKEN` | optional | Only if using temporary credentials (STS) |
-| `S3_PUBLIC_BASE_URL` | no | Public base for object URLs (default: virtual-hosted–style S3 URL) |
-| `S3_KEY_PREFIX` | no | Prefix for keys (default `fusionMedia/uploads/`) |
+| `S3_PUBLIC_BASE_URL` | no | Public base for object URLs (default: virtual-hosted–style S3 URL). Frontend maps upload URLs to **`https://cdn.fusionart.world/uploads/…`** regardless of this value. |
+| `S3_KEY_PREFIX` | no | S3 object key prefix prepended by `/storage/presign` (code default **`uploads/`**; production often uses **`fusionMedia/uploads/`**). IAM should allow `s3:PutObject` on the matching prefix. Public CDN paths always use `/uploads/…` on `cdn.fusionart.world`, even when objects live under `fusionMedia/uploads/…` in the bucket. |
 | `FUSION_SIGNATURE_LOGO_URL` | no | If set, integration server rewrites `https://…/email/Fusion-X-logo-02.png` (and legacy `Fusion-Logo-Sig-1.png`) in HTML email bodies to this URL (e.g. CDN) for test/batch send |
 
 ## Scripts
