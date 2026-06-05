@@ -22,6 +22,10 @@ import { getFieldKind } from '../../../utils/studioFieldRegistry.js';
 import { partitionGroupedContentRowsByChapters } from '../studioContentManifest.js';
 import { uploadBlobToS3 } from '../../../utils/studioS3Upload.js';
 import { resetStudioWorkspaceTrail, setStudioWorkspaceTrail } from '../studioWorkspaceChrome.js';
+import {
+    fillJoinNetworkFlowEditor,
+    mergeJoinNetworkFlowFromContainer,
+} from './joinNetworkFlowStudio.js';
 
 function escapeHtml(s) {
     return String(s)
@@ -245,6 +249,12 @@ export async function loadStudioContentEditorPayload(fieldsEl, slug, hooks, opti
         loaded && typeof loaded === 'object' && 'isLivePlaceholder' in loaded
             ? /** @type {{ isLivePlaceholder: boolean }} */ (loaded).isLivePlaceholder
             : false;
+    if (slug === 'join-network-flow') {
+        fieldsEl.className = 'studio-content-fields studio-content-fields--join-network-flow';
+        await fillJoinNetworkFlowEditor(fieldsEl, bundle, hooks);
+        return { isLivePlaceholder };
+    }
+    fieldsEl.className = 'studio-content-fields studio-content-fields--scroll';
     fillStudioContentPlainFields(fieldsEl, bundle, slug || '', hooks, { chapterId: options.chapterId });
     return { isLivePlaceholder };
 }
@@ -256,6 +266,12 @@ export async function loadStudioContentEditorPayload(fieldsEl, slug, hooks, opti
  * @param {HTMLElement} fieldsEl
  */
 export async function persistStudioContentPage(slug, fieldsEl) {
+    if (slug === 'join-network-flow') {
+        const bundle = await getContentBundleForStudio(slug, { forStudio: true });
+        const next = mergeJoinNetworkFlowFromContainer(fieldsEl, bundle);
+        await upsertContentPageStudio(slug, next);
+        return;
+    }
     const map = collectContentStringValues(fieldsEl);
     /** @type {Record<string, string>} */
     const scalarMap = {};
@@ -332,6 +348,11 @@ async function initContentPanel(mainEl, cfg) {
     const savedAtEl = mainEl.querySelector(`#${p}-saved-at`);
     const placeholderEl = mainEl.querySelector(`#${p}-live-placeholder`);
     const adoptBtn = mainEl.querySelector(`#${p}-adopt`);
+    const hintEl = mainEl.querySelector(`#${p}-hint`);
+    const defaultHint =
+        'Fields are labeled by kind (Route, Media, Text, …). Uploads use Services → S3. Save to persist to storage.';
+    const joinNetworkFlowHint =
+        'Edit each flow in journey order — band teaser, modal steps, and confirmation. Live preview updates as you type. Save to persist the same JSON the public site uses.';
     /** @type {string | null} */
     let activeSlug = null;
     /** @type {boolean} */
@@ -400,6 +421,12 @@ async function initContentPanel(mainEl, cfg) {
         showMsg('info', '');
         setDirty(false);
         if (savedAtEl) savedAtEl.style.display = 'none';
+        if (hintEl) {
+            hintEl.innerHTML =
+                slug === 'join-network-flow'
+                    ? joinNetworkFlowHint
+                    : defaultHint;
+        }
         const { isLivePlaceholder } = fieldsEl
             ? await loadStudioContentEditorPayload(fieldsEl, slug, { markDirty: () => setDirty(true) }, {})
             : { isLivePlaceholder: false };

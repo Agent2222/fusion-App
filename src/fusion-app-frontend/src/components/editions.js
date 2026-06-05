@@ -49,6 +49,13 @@ export default function initEditions() {
             categoryKeys: [],
         });
         feed.setEditions({ items: initial });
+
+        queueMicrotask(() => {
+            const ff = document.querySelector('app-feed-filter[state="editions"]');
+            if (ff && typeof ff.hydrateFilterData === 'function') {
+                ff.hydrateFilterData({ state: 'editions', editions: items || [] });
+            }
+        });
     };
 
     void wire();

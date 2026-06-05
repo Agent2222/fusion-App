@@ -410,6 +410,45 @@ module {
         status : Text;
         createdAt : Text;
         dueAt : ?Text;
+        feeCents : Nat;
+        staffNote : Text;
+    };
+
+    /// Legacy ledger row (pre feeCents/staffNote) — stable upgrade migration only.
+    public type ProgramPaymentLedgerRowV0 = {
+        id : Text;
+        principal : Principal;
+        programId : Text;
+        applicationId : Text;
+        paymentType : Text;
+        amountCents : Nat;
+        currency : Text;
+        stripePaymentIntentId : Text;
+        stripeChargeId : Text;
+        stripeReceiptUrl : Text;
+        status : Text;
+        createdAt : Text;
+        dueAt : ?Text;
+    };
+
+    public func programPaymentLedgerFromV0(row : ProgramPaymentLedgerRowV0) : ProgramPaymentLedgerRow {
+        {
+            id = row.id;
+            principal = row.principal;
+            programId = row.programId;
+            applicationId = row.applicationId;
+            paymentType = row.paymentType;
+            amountCents = row.amountCents;
+            currency = row.currency;
+            stripePaymentIntentId = row.stripePaymentIntentId;
+            stripeChargeId = row.stripeChargeId;
+            stripeReceiptUrl = row.stripeReceiptUrl;
+            status = row.status;
+            createdAt = row.createdAt;
+            dueAt = row.dueAt;
+            feeCents = 0;
+            staffNote = "";
+        };
     };
 
     /// Active or historical Stripe-backed program payment plan.

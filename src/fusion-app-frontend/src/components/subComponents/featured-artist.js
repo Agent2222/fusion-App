@@ -30,6 +30,8 @@ class FeaturedArtistComponent extends HTMLElement {
         super();
         this.shadow = this.attachShadow({ mode: 'open' });
         this.data = null;
+        /** @type {number} */
+        this._cardRunId = 0;
         /** @type {(() => void) | null} */
         this._onCardImageMode = null;
     }
@@ -71,6 +73,7 @@ class FeaturedArtistComponent extends HTMLElement {
     }
 
     async createArtistCard(length) {
+        const runId = ++this._cardRunId;
         const content = this.shadowRoot?.querySelector('.content');
         if (content) content.innerHTML = '';
 
@@ -80,10 +83,16 @@ class FeaturedArtistComponent extends HTMLElement {
         } catch {
             currentSeason = '';
         }
-        const useSeasonCompare = currentSeason !== '';
+        if (runId !== this._cardRunId) return;
 
-        for (let i = 0; i < length; i++) {
-            const artist = this.data.artists[i];
+        const useSeasonCompare = currentSeason !== '';
+        const artists = this.data?.artists;
+        if (!Array.isArray(artists) || !content) return;
+
+        const count = Math.min(length, artists.length);
+        for (let i = 0; i < count; i++) {
+            if (runId !== this._cardRunId) return;
+            const artist = artists[i];
             const locale = typeof window.getLocale === 'function' ? window.getLocale() : 'en';
             const artistName = artistDisplayName(artist, locale);
             const artistDiscipline = artistDisplayDiscipline(artist, locale);

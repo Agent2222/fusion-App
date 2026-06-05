@@ -12,6 +12,10 @@ import {
     cycleAdminPerspective,
     buildEffectiveAccountForPerspective,
 } from '../../utils/adminPerspective.js';
+import {
+    ensureSoundEnvironmentPositionListeners,
+    syncSoundEnvironmentPosition,
+} from '../../utils/soundEnvironmentMount.js';
 
 const MENU_IDLE_MS = 2000;
 const SCROLL_DELTA_PX = 4;
@@ -69,6 +73,12 @@ class HeaderComponent extends HTMLElement {
         this._onProfileSetupPromptBound = null;
         /** @type {(() => void) | null} */
         this._onRosterVisBound = null;
+        /** @type {(() => void) | null} */
+        this._onPlatformUpdateBannerBound = null;
+        /** @type {(() => void) | null} */
+        this._onLocaleChangeForBannerBound = null;
+        /** @type {(() => void) | null} */
+        this._unsubDataSource = null;
         this._profileSetupPrompt = {
             open: false,
             mode: 'setup',
@@ -215,6 +225,7 @@ class HeaderComponent extends HTMLElement {
         } else if (this._logoHeaderEl) {
             gsap.set(this._logoHeaderEl, { opacity: 0, pointerEvents: 'none' });
         }
+        this._syncHeaderScrollDataset();
     }
 
     /** Show menu bar (scroll down); only used when header is active. */
@@ -240,6 +251,24 @@ class HeaderComponent extends HTMLElement {
                 overwrite: 'auto',
             });
         }
+        this._syncHeaderScrollDataset();
+    }
+
+    /** Sticky feed-filter `top` + stacking follow header hide/show (see index.css). */
+    _syncHeaderScrollDataset() {
+        const root = document.documentElement;
+        if (this.getAttribute('active') !== 'true') {
+            delete root.dataset.fusionHeaderScroll;
+            syncSoundEnvironmentPosition();
+            return;
+        }
+        if (this._allScrollTargetsAtTop()) {
+            root.dataset.fusionHeaderScroll = 'top';
+            syncSoundEnvironmentPosition();
+            return;
+        }
+        root.dataset.fusionHeaderScroll = this._scrollHidden ? 'hidden' : 'visible';
+        syncSoundEnvironmentPosition();
     }
 
     clearIdleHideTimer() {
@@ -285,6 +314,7 @@ class HeaderComponent extends HTMLElement {
                 this._lastScrollTopById[id] = 0;
                 this.showMenuBarScroll();
                 this.clearIdleHideTimer();
+                this._syncHeaderScrollDataset();
                 return;
             }
             const prev = this._lastScrollTopById[id];
@@ -328,6 +358,7 @@ class HeaderComponent extends HTMLElement {
         requestAnimationFrame(() => {
             this._syncLogoHeaderIfBottomZone();
             this.resetIdleHideTimer();
+            this._syncHeaderScrollDataset();
         });
     }
 
@@ -342,6 +373,7 @@ class HeaderComponent extends HTMLElement {
         };
         window.addEventListener('routeChange', this._onRouteChangeBound);
         this.bindScrollTargets();
+        this._syncHeaderScrollDataset();
     }
 
     bindScrollTargets() {
@@ -450,15 +482,32 @@ class HeaderComponent extends HTMLElement {
             void this._syncRosterVisibilityBanner();
         };
         window.addEventListener('fusion-roster-visibility-updated', this._onRosterVisBound);
+        this._onPlatformUpdateBannerBound = () => {
+            void this._syncPlatformUpdateBanner();
+        };
+        window.addEventListener('fusion-platform-update-banner-change', this._onPlatformUpdateBannerBound);
+        this._onLocaleChangeForBannerBound = () => {
+            void this._syncPlatformUpdateBanner();
+        };
+        window.addEventListener('fusion-localechange', this._onLocaleChangeForBannerBound);
+        import('../../utils/database.js').then(({ subscribeDataSource }) => {
+            if (this._unsubDataSource) this._unsubDataSource();
+            this._unsubDataSource = subscribeDataSource(() => {
+                void this._syncPlatformUpdateBanner();
+            });
+        });
+        void this._syncPlatformUpdateBanner();
         void this._refreshHeaderAuthState();
         this._onRouteChangeForNavBound = () => {
             this._syncActiveNavLink();
-            this._syncSoundEnvironmentForRoute();
+            this._syncSoundEnvironmentPosition();
+            void this._syncPlatformUpdateBanner();
             this.closeMobileMenu();
         };
         window.addEventListener('routeChange', this._onRouteChangeForNavBound);
+        ensureSoundEnvironmentPositionListeners();
         this._syncActiveNavLink();
-        this._syncSoundEnvironmentForRoute();
+        this._syncSoundEnvironmentPosition();
         if (this.getAttribute('active') === 'true') {
             this.attachScrollHideBehavior();
             this.resetIdleHideTimer();
@@ -489,6 +538,18 @@ class HeaderComponent extends HTMLElement {
             window.removeEventListener('fusion-roster-visibility-updated', this._onRosterVisBound);
             this._onRosterVisBound = null;
         }
+        if (this._onPlatformUpdateBannerBound) {
+            window.removeEventListener('fusion-platform-update-banner-change', this._onPlatformUpdateBannerBound);
+            this._onPlatformUpdateBannerBound = null;
+        }
+        if (this._onLocaleChangeForBannerBound) {
+            window.removeEventListener('fusion-localechange', this._onLocaleChangeForBannerBound);
+            this._onLocaleChangeForBannerBound = null;
+        }
+        if (this._unsubDataSource) {
+            this._unsubDataSource();
+            this._unsubDataSource = null;
+        }
     }
 
     /**
@@ -516,29 +577,8 @@ class HeaderComponent extends HTMLElement {
         });
     }
 
-    /**
-     * @param {string} path
-     * @returns {boolean}
-     */
-    _soundSuppressedForPath(path) {
-        const p = String(path || '/');
-        return p === '/studio' || p.startsWith('/settings') || p === '/profile' || p.startsWith('/profile/');
-    }
-
-    _syncSoundEnvironmentForRoute() {
-        const root = this.shadowRoot;
-        if (!root) return;
-        const env = root.querySelector('#headerSoundEnv');
-        if (!(env instanceof HTMLElement)) return;
-        const suppress = this._soundSuppressedForPath(window.location.pathname || '/');
-        if (suppress) {
-            env.setAttribute('hidden', '');
-            if (typeof env.setMasterEnabled === 'function') {
-                env.setMasterEnabled(false);
-            }
-            return;
-        }
-        env.removeAttribute('hidden');
+    _syncSoundEnvironmentPosition() {
+        syncSoundEnvironmentPosition(window.location.pathname || '/');
     }
 
     _fillAuthPair() {
@@ -888,6 +928,51 @@ class HeaderComponent extends HTMLElement {
                     <button type="button" class="header-roster-vis-cta" data-action="roster-public">${en ? 'Make public' : '公開にする'}</button>
                 </div>`;
             }
+            host.hidden = false;
+        } catch {
+            host.hidden = true;
+            host.innerHTML = '';
+        }
+    }
+
+    /**
+     * Site-wide platform update notice (admin site setting). Hidden on /studio routes.
+     */
+    async _syncPlatformUpdateBanner() {
+        const host = this.shadowRoot && this.shadowRoot.querySelector('#headerPlatformUpdateBanner');
+        if (!(host instanceof HTMLElement)) {
+            return;
+        }
+        const path = typeof window !== 'undefined' ? window.location.pathname || '' : '';
+        if (path.startsWith('/studio')) {
+            host.hidden = true;
+            host.innerHTML = '';
+            return;
+        }
+        try {
+            const { getPlatformUpdateBanner } = await import('../../utils/database.js');
+            const cfg = await getPlatformUpdateBanner();
+            if (!cfg.enabled) {
+                host.hidden = true;
+                host.innerHTML = '';
+                return;
+            }
+            const en = this.getLocale() === 'en';
+            const text = en ? cfg.messageEn : cfg.messageJa;
+            const fallback = en ? cfg.messageJa : cfg.messageEn;
+            const message = String(text || fallback || '').trim();
+            if (!message) {
+                host.hidden = true;
+                host.innerHTML = '';
+                return;
+            }
+            const esc = (s) =>
+                String(s)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;');
+            host.innerHTML = `<div class="header-platform-update-inner" role="status"><span class="header-platform-update-text">${esc(message)}</span></div>`;
             host.hidden = false;
         } catch {
             host.hidden = true;
@@ -1285,28 +1370,6 @@ class HeaderComponent extends HTMLElement {
                     pointer-events: none;
                 }
 
-                .header-sound-row app-sound-environment {
-                    display: block;
-                    position: relative;
-                    z-index: 35;
-                    pointer-events: auto;
-                    width: max-content;
-                    max-width: calc(100% - 4%);
-                    align-self: flex-start;
-                    padding-left: 1rem;
-                    box-sizing: border-box;
-                }
-
-                .header-sound-row app-sound-environment[hidden] {
-                    display: none !important;
-                }
-
-                :host-context(html[data-fusion-page="community"]) .header-sound-row app-sound-environment {
-                    opacity: 0 !important;
-                    visibility: hidden !important;
-                    pointer-events: none !important;
-                }
-
                 .header-utility-stack {
                     display: flex;
                     flex-direction: column;
@@ -1322,13 +1385,6 @@ class HeaderComponent extends HTMLElement {
 
                 .header-utility-stack > * {
                     pointer-events: auto;
-                }
-
-                :host-context(html[data-fusion-page="profile"]) .header-sound-row app-sound-environment {
-                    margin-left: auto;
-                    align-self: flex-end;
-                    padding-left: 0;
-                    padding-right: clamp(0.5rem, 2vw, 1.25rem);
                 }
 
                 a {
@@ -1663,8 +1719,58 @@ class HeaderComponent extends HTMLElement {
                     pointer-events: auto;
                 }
 
+                #headerPlatformUpdateBanner {
+                    box-sizing: border-box;
+                    width: 100%;
+                    position: relative;
+                    z-index: 34;
+                    margin: 0;
+                    padding: 0.48rem 0.75rem 0.5rem;
+                    background: var(--c1, #c12525);
+                    border: 1px solid var(--c1, #c12525);
+                    color: var(--bg, #faf3f4);
+                    font-family: 'momochidori-variable', sans-serif;
+                    font-size: clamp(0.64rem, 0.74vw, 0.76rem);
+                    line-height: 1.3;
+                    font-variation-settings: 'wght' 560;
+                    pointer-events: auto;
+                    animation: headerPlatformUpdatePulse 3s ease-in-out infinite;
+                }
+
+                @keyframes headerPlatformUpdatePulse {
+                    0%, 100% {
+                        background: var(--c1, #c12525);
+                        filter: brightness(1);
+                    }
+                    50% {
+                        background: color-mix(in srgb, var(--c1, #c12525) 88%, var(--bg, #faf3f4) 12%);
+                        filter: brightness(1.06);
+                    }
+                }
+
+                @media (prefers-reduced-motion: reduce) {
+                    #headerPlatformUpdateBanner {
+                        animation: none;
+                    }
+                }
+
+                #headerPlatformUpdateBanner[hidden],
                 #headerRosterVisBanner[hidden] {
                     display: none !important;
+                }
+
+                .header-platform-update-inner {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    text-align: center;
+                    margin: 0;
+                }
+
+                .header-platform-update-text {
+                    flex: 1 1 auto;
+                    min-width: 0;
+                    max-width: 52rem;
                 }
 
                 .header-roster-vis-inner {
@@ -1866,6 +1972,10 @@ class HeaderComponent extends HTMLElement {
                         width: 100%;
                     }
 
+                    #headerPlatformUpdateBanner {
+                        width: 100%;
+                    }
+
                     .header-utility-stack {
                         width: calc(100% - 2rem);
                         margin-left: 1rem;
@@ -1923,8 +2033,8 @@ class HeaderComponent extends HTMLElement {
                 </div>
             </header>
             <div class="header-sound-row">
-                <app-sound-environment id="headerSoundEnv" aria-label="Site sound environment"></app-sound-environment>
                 <div class="header-utility-stack" aria-live="polite">
+                    <div id="headerPlatformUpdateBanner" class="header-platform-update-banner" hidden></div>
                     <div id="headerRosterVisBanner" class="header-roster-vis-banner" hidden></div>
                 </div>
             </div>

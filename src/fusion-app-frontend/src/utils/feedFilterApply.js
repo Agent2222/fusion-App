@@ -3,7 +3,7 @@
  * and optional `filter` / `galleryFilter` objects on testData; otherwise derives
  * stable values from artist id + English locale fields.
  */
-import { artistEnglishBlock } from './artistSlug.js';
+import { artistEnglishBlock, artistSlugFromName, publicSlugFromEnglishFirstLast } from './artistSlug.js';
 
 /** @param {string} id */
 function stableHash(id) {
@@ -14,6 +14,181 @@ function stableHash(id) {
 }
 
 const COHORT_YEARS = [2017, 2018, 2019, 2024, 2025, 2026];
+
+export const DISCIPLINE_OPTIONS = [
+    { key: 'sculpture', label: 'Sculpture' },
+    { key: 'painting', label: 'Painting' },
+    { key: 'installation', label: 'Installation' },
+    { key: 'performance', label: 'Performance' },
+    { key: 'video', label: 'Film/Video' },
+    { key: 'performanceArt', label: 'Performance Art' },
+    { key: 'sound', label: 'Sound' },
+    { key: 'illustration', label: 'Illustration' },
+    { key: 'photography', label: 'Photography' },
+    { key: 'mixedMedia', label: 'Mixed Media' },
+    { key: 'interdisciplinary', label: 'Interdisciplinary' },
+];
+
+/** @param {string} key */
+export function normalizeDisciplineKey(key) {
+    const k = String(key || '').trim();
+    if (k === 'other') return 'interdisciplinary';
+    return k;
+}
+
+/** @param {string} key */
+export function disciplineKeyToLabel(key) {
+    const k = normalizeDisciplineKey(key);
+    return DISCIPLINE_OPTIONS.find((o) => o.key === k)?.label || 'Interdisciplinary';
+}
+
+/** @param {string} labelOrKey */
+export function disciplineLabelToKey(labelOrKey) {
+    const s = String(labelOrKey || '').trim();
+    if (!s) return '';
+    const normalized = normalizeDisciplineKey(s);
+    const byKey = DISCIPLINE_OPTIONS.find((o) => o.key === normalized);
+    if (byKey) return byKey.key;
+    const byLabel = DISCIPLINE_OPTIONS.find((o) => o.label.toLowerCase() === s.toLowerCase());
+    if (byLabel) return byLabel.key;
+    return disciplineStringToKey(s);
+}
+
+/**
+ * @param {object} artist
+ * @returns {string}
+ */
+export function artistProfileSlug(artist) {
+    if (!artist || typeof artist !== 'object') return '';
+    const slug = artist.slug != null ? String(artist.slug).trim() : '';
+    if (slug) return slug;
+    const en = artistEnglishBlock(artist);
+    const fromParts = publicSlugFromEnglishFirstLast(en?.firstName, en?.lastName);
+    if (fromParts) return fromParts;
+    return artistSlugFromName(en?.name || '');
+}
+
+/**
+ * @param {object} artist
+ * @param {string} query
+ * @returns {boolean}
+ */
+function artistMatchesNameQuery(artist, query) {
+    const q = String(query || '').trim().toLowerCase();
+    if (!q) return true;
+    const en = artistEnglishBlock(artist);
+    const name = String(en?.name || '').toLowerCase();
+    const slug = artistProfileSlug(artist).toLowerCase();
+    return name.includes(q) || slug.includes(q);
+}
+
+/**
+ * @param {object[]} artists
+ * @returns {{ locationKeys: string[], disciplineKeys: string[], connectionIds: string[], cohortYears: number[] }}
+ */
+export function buildArtistFilterAvailability(artists) {
+    /** @type {Set<string>} */
+    const locationKeys = new Set();
+    /** @type {Set<string>} */
+    const disciplineKeys = new Set();
+    /** @type {Set<string>} */
+    const connectionIds = new Set();
+    /** @type {Set<number>} */
+    const cohortYears = new Set();
+
+    for (const a of artists || []) {
+        const m = deriveArtistFilterRow(a);
+        if (m.locationKey) locationKeys.add(m.locationKey);
+        if (m.disciplineKey) disciplineKeys.add(m.disciplineKey);
+        connectionIds.add(m.connection === 'alumni' ? 'alumniConnection' : 'userConnection');
+        for (const y of m.cohortYears) cohortYears.add(y);
+    }
+
+    return {
+        locationKeys: [...locationKeys].sort(),
+        disciplineKeys: [...disciplineKeys].sort(),
+        connectionIds: [...connectionIds],
+        cohortYears: [...cohortYears].sort((a, b) => a - b),
+    };
+}
+
+/**
+ * @param {object[]} items
+ * @returns {{ categoryKeys: string[], yearIds: string[], formatIds: string[] }}
+ */
+export function buildEditionFilterAvailability(items) {
+    /** @type {Set<string>} */
+    const categoryKeys = new Set();
+    /** @type {Set<string>} */
+    const yearIds = new Set();
+    /** @type {Set<string>} */
+    const formatIds = new Set();
+
+    const formatToId = {
+        print: 'formatPrint',
+        multiple: 'formatMultiple',
+        book: 'formatBook',
+        object: 'formatObject',
+        digital: 'formatDigital',
+        other: 'formatOther',
+    };
+
+    for (const item of items || []) {
+        const m = deriveEditionFilterRow(item);
+        if (m.category) categoryKeys.add(m.category);
+        if (m.year === 'archive') yearIds.add('editionArchive');
+        else if (typeof m.year === 'number') yearIds.add(`edition${m.year}`);
+        const fid = formatToId[m.format];
+        if (fid) formatIds.add(fid);
+    }
+
+    return {
+        categoryKeys: [...categoryKeys].sort(),
+        yearIds: [...yearIds].sort(),
+        formatIds: [...formatIds].sort(),
+    };
+}
+
+/**
+ * @param {object[]} artists
+ * @returns {{ locationKeys: string[], seasonIds: string[], viewIds: string[] }}
+ */
+export function buildGalleryFilterAvailability(artists) {
+    /** @type {Set<string>} */
+    const locationKeys = new Set();
+    /** @type {Set<string>} */
+    const seasonIds = new Set();
+    /** @type {Set<string>} */
+    const viewIds = new Set();
+
+    const viewToId = {
+        preview: 'galleryPreview',
+        opening: 'galleryOpening',
+        archive: 'galleryArchive',
+    };
+
+    for (const a of artists || []) {
+        const m = deriveGalleryAccessRow(a);
+        if (m.locationKey) locationKeys.add(m.locationKey);
+        seasonIds.add(`gallery${m.season}`);
+        const vid = viewToId[m.view];
+        if (vid) viewIds.add(vid);
+    }
+
+    return {
+        locationKeys: [...locationKeys].sort(),
+        seasonIds: [...seasonIds].sort(),
+        viewIds: [...viewIds].sort(),
+    };
+}
+
+/**
+ * @param {string} key
+ * @returns {string}
+ */
+export function locationKeyToLabel(key) {
+    return ARTIST_LOCATION_OPTIONS.find((o) => o.key === key)?.label || key;
+}
 
 /**
  * Map English discipline line to filter slug (matches *Discipline button ids without suffix).
@@ -26,7 +201,7 @@ export function disciplineStringToKey(d) {
         .normalize('NFKD')
         .replace(/\s+/g, ' ')
         .trim();
-    if (!s) return 'other';
+    if (!s) return 'interdisciplinary';
     if (s.includes('sculpt')) return 'sculpture';
     if (s.includes('paint')) return 'painting';
     if (s.includes('install')) return 'installation';
@@ -37,7 +212,8 @@ export function disciplineStringToKey(d) {
     if (s.includes('illustrat')) return 'illustration';
     if (s.includes('photo') || s.includes('写真')) return 'photography';
     if (s.includes('mixed') || s.includes('複合')) return 'mixedMedia';
-    return 'other';
+    if (s.includes('interdisciplin')) return 'interdisciplinary';
+    return 'interdisciplinary';
 }
 
 /**
@@ -47,7 +223,7 @@ export function disciplineStringToKey(d) {
 export function disciplineButtonIdToKey(buttonId) {
     const id = String(buttonId || '');
     if (id === 'allDiscipline') return 'all';
-    return id.replace(/Discipline$/, '');
+    return normalizeDisciplineKey(id.replace(/Discipline$/, ''));
 }
 
 /**
@@ -86,7 +262,9 @@ export function deriveArtistFilterRow(artist) {
         return {
             connection: f.connection === 'alumni' ? 'alumni' : 'artist',
             cohortYears,
-            disciplineKey: f.disciplineKey || disciplineStringToKey(artistEnglishBlock(artist)?.discipline),
+            disciplineKey: normalizeDisciplineKey(
+                f.disciplineKey || disciplineStringToKey(artistEnglishBlock(artist)?.discipline)
+            ),
             locationKey: f.locationKey || 'other',
         };
     }
@@ -94,7 +272,7 @@ export function deriveArtistFilterRow(artist) {
     const cohortYears = [COHORT_YEARS[h % COHORT_YEARS.length]];
     const connection = h % 5 === 0 ? 'alumni' : 'artist';
     const en = artistEnglishBlock(artist);
-    const disciplineKey = disciplineStringToKey(en?.discipline);
+    const disciplineKey = normalizeDisciplineKey(disciplineStringToKey(en?.discipline));
     const country = String(en?.location?.country || '').toLowerCase();
     let locationKey = 'other';
     if (country.includes('united states') || country === 'us') locationKey = 'us';
@@ -114,12 +292,13 @@ export function deriveArtistFilterRow(artist) {
 
 /**
  * @param {object[]} artists
- * @param {{ connectionId: string, disciplineKeys?: string[], disciplineId?: string, locationKey: string }} c
+ * @param {{ connectionId: string, disciplineKeys?: string[], disciplineId?: string, locationKey: string, nameQuery?: string }} c
  */
 export function applyArtistFilters(artists, c) {
     if (!Array.isArray(artists)) return [];
     const connectionId = c.connectionId || 'allConnection';
     const locationKey = c.locationKey || 'all';
+    const nameQuery = c.nameQuery || '';
 
     /** @type {string[]} */
     let disciplineKeys = Array.isArray(c.disciplineKeys) ? c.disciplineKeys.filter(Boolean) : [];
@@ -129,11 +308,14 @@ export function applyArtistFilters(artists, c) {
     }
 
     return artists.filter((a) => {
+        if (!artistMatchesNameQuery(a, nameQuery)) return false;
+
         const m = deriveArtistFilterRow(a);
         if (locationKey !== 'all' && m.locationKey !== locationKey) return false;
 
         if (disciplineKeys.length > 0) {
-            if (!disciplineKeys.includes(m.disciplineKey)) return false;
+            const normalized = disciplineKeys.map(normalizeDisciplineKey);
+            if (!normalized.includes(m.disciplineKey)) return false;
         }
 
         if (connectionId !== 'allConnection') {
@@ -178,15 +360,18 @@ export function deriveGalleryAccessRow(artist) {
 
 /**
  * @param {object[]} artists
- * @param {{ locationKey: string, seasonId: string, viewId: string }} c
+ * @param {{ locationKey: string, seasonId: string, viewId: string, nameQuery?: string }} c
  */
 export function applyGalleryAccessFilters(artists, c) {
     if (!Array.isArray(artists)) return [];
     const locationKey = c.locationKey || 'all';
     const seasonId = c.seasonId || 'allGallerySeason';
     const viewId = c.viewId || 'allGalleryView';
+    const nameQuery = c.nameQuery || '';
 
     return artists.filter((a) => {
+        if (!artistMatchesNameQuery(a, nameQuery)) return false;
+
         const m = deriveGalleryAccessRow(a);
         if (locationKey !== 'all' && m.locationKey !== locationKey) return false;
         if (seasonId !== 'allGallerySeason') {
@@ -225,12 +410,13 @@ export function deriveEditionFilterRow(item) {
 
 /**
  * @param {object[]} items
- * @param {{ yearId: string, formatId: string, categoryKeys?: string[], categoryKey?: string }} c
+ * @param {{ yearId: string, formatId: string, categoryKeys?: string[], categoryKey?: string, titleQuery?: string }} c
  */
 export function applyEditionFilters(items, c) {
     if (!Array.isArray(items)) return [];
     const yearId = c.yearId || 'allEditionYears';
     const formatId = c.formatId || 'allEditionFormats';
+    const titleQuery = String(c.titleQuery || '').trim().toLowerCase();
 
     /** @type {string[]} */
     let categoryKeys = Array.isArray(c.categoryKeys) ? c.categoryKeys.filter(Boolean) : [];
@@ -239,6 +425,11 @@ export function applyEditionFilters(items, c) {
     }
 
     return items.filter((item) => {
+        if (titleQuery) {
+            const title = String(item?.en?.title || item?.title || '').toLowerCase();
+            if (!title.includes(titleQuery)) return false;
+        }
+
         const m = deriveEditionFilterRow(item);
         if (categoryKeys.length > 0) {
             if (!categoryKeys.includes(m.category)) return false;

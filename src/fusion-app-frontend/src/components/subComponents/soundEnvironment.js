@@ -695,6 +695,15 @@ class SoundEnvironment extends HTMLElement {
             color: var(--se-ink);
             pointer-events: none;
         }
+        :host([data-placement="filter"]) .se-wrap {
+            margin-top: 0;
+            min-width: 0;
+            width: min(20rem, calc(100vw - 2rem));
+        }
+        :host([data-placement="filter"]) .se-wrap.se-pan-open {
+            min-width: 0;
+            width: min(20rem, calc(100vw - 2rem));
+        }
         :host([hidden]) { display: none !important; }
         .se-wrap {
             display: inline-block;

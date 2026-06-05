@@ -197,33 +197,76 @@ export async function updateProgramReservedArtist(args) {
 }
 
 /**
- * @param {object} programRow — row from {@link import('./database.js').getPrograms}
- * @param {string} englishName
+ * @param {object | null | undefined} programRow — row from {@link import('./database.js').getPrograms}
+ * @returns {{ en: Record<string, unknown>, pp: Record<string, unknown>, list: string[] }}
  */
-export function programRowReservedState(programRow, englishName) {
-    const name = String(englishName || '').trim();
-    if (!name || !programRow || typeof programRow !== 'object') {
-        return { reserved: false, confirmedCount: 0, totalSlots: null, remaining: null };
+function programRowEnConfirmedContext(programRow) {
+    if (!programRow || typeof programRow !== 'object') {
+        return { en: {}, pp: {}, list: [] };
     }
-    let parsed = {};
-    try {
-        parsed = JSON.parse(String(programRow.localesJson || '{}'));
-    } catch {
-        parsed = {};
+    const row = /** @type {Record<string, unknown>} */ (programRow);
+    /** @type {Record<string, unknown>} */
+    let en =
+        row.enCard && typeof row.enCard === 'object'
+            ? /** @type {Record<string, unknown>} */ (row.enCard)
+            : null;
+    if (!en) {
+        try {
+            const parsed = JSON.parse(String(row.localesJson || '{}'));
+            en =
+                parsed.en && typeof parsed.en === 'object'
+                    ? /** @type {Record<string, unknown>} */ (parsed.en)
+                    : {};
+        } catch {
+            en = {};
+        }
     }
-    const en = parsed.en && typeof parsed.en === 'object' ? /** @type {Record<string, unknown>} */ (parsed.en) : {};
     const pp =
         en.programPage && typeof en.programPage === 'object'
             ? /** @type {Record<string, unknown>} */ (en.programPage)
             : {};
     const list = normalizeConfirmedArtistsList(pp.confirmedArtists);
-    const reserved = isNameInConfirmedListCaseInsensitive(name, list);
+    return { en, pp, list };
+}
+
+/**
+ * Confirmed slot counts for a program row (no artist name required).
+ * @param {object | null | undefined} programRow — row from {@link import('./database.js').getPrograms}
+ * @returns {{ confirmedCount: number, totalSlots: number | null, remaining: number | null }}
+ */
+export function programRowConfirmedSlotState(programRow) {
+    const { en, pp, list } = programRowEnConfirmedContext(programRow);
     const totalRaw = en.totalSlots ?? pp.totalSlots;
     const total = Number(totalRaw);
     const totalSlots = Number.isFinite(total) && total >= 0 ? Math.floor(total) : null;
     const confirmedCount = list.length;
-    const remaining =
-        totalSlots != null ? Math.max(0, totalSlots - confirmedCount) : null;
+    const remaining = totalSlots != null ? Math.max(0, totalSlots - confirmedCount) : null;
+    return { confirmedCount, totalSlots, remaining };
+}
+
+/**
+ * @param {object | null | undefined} programRow
+ * @returns {string[]}
+ */
+export function programRowConfirmedArtistNames(programRow) {
+    return programRowEnConfirmedContext(programRow).list;
+}
+
+/**
+ * @param {object} programRow — row from {@link import('./database.js').getPrograms}
+ * @param {string} englishName
+ */
+export function programRowReservedState(programRow, englishName) {
+    const name = String(englishName || '').trim();
+    if (!programRow || typeof programRow !== 'object') {
+        return { reserved: false, confirmedCount: 0, totalSlots: null, remaining: null };
+    }
+    const { confirmedCount, totalSlots, remaining } = programRowConfirmedSlotState(programRow);
+    if (!name) {
+        return { reserved: false, confirmedCount, totalSlots, remaining };
+    }
+    const { list } = programRowEnConfirmedContext(programRow);
+    const reserved = isNameInConfirmedListCaseInsensitive(name, list);
     return { reserved, confirmedCount, totalSlots, remaining };
 }
 

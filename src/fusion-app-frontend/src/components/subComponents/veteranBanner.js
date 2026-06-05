@@ -1,7 +1,10 @@
 // Two-column banner (half event-row height): Fusion badge + residency copy.
 import { getAllProgramsBlock, getCurrentProgramSeason, subscribeDataSource } from '../../utils/database.js';
-import { mergeLocaleDeep } from '../../utils/localeFallback.js';
 import { yearFromProgramSlug } from '../../utils/artistSlug.js';
+import {
+    programQualifiesForAlumniBanner,
+    resolveProgramCardFromBlock,
+} from '../../utils/programAlumniEligibility.js';
 
 function escapeHtml(s) {
     return String(s)
@@ -9,41 +12,6 @@ function escapeHtml(s) {
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
-}
-
-/** Artist `programs[]` may use slugs that differ from `allPrograms.programs.en[].id`. */
-const PROGRAM_ID_ALIASES = {
-    'fusion-residency-2025': 'fusionKaga',
-};
-
-/**
- * @param {string} programId
- * @param {Record<string, unknown> | null} block
- * @returns {{ program: object, loc: object } | null}
- */
-function resolveProgram(programId, block) {
-    if (programId == null || programId === '') return null;
-    const id = PROGRAM_ID_ALIASES[programId] || programId;
-    const locale = typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
-    const programs = block?.programs;
-    const enList =
-        programs && typeof programs === 'object'
-            ? /** @type {Record<string, unknown>} */ (programs).en
-            : null;
-    const jaList =
-        programs && typeof programs === 'object'
-            ? /** @type {Record<string, unknown>} */ (programs).ja
-            : null;
-    if (!Array.isArray(enList)) return null;
-    const idx = enList.findIndex((p) => p && String(p.id) === String(id));
-    if (idx < 0) return null;
-    const enCard = enList[idx];
-    const jaCard = Array.isArray(jaList) && jaList[idx] && typeof jaList[idx] === 'object' ? jaList[idx] : {};
-    const program =
-        locale === 'ja'
-            ? /** @type {Record<string, unknown>} */ (mergeLocaleDeep(enCard, jaCard))
-            : /** @type {Record<string, unknown>} */ (enCard);
-    return { program, loc: program };
 }
 
 /**
@@ -158,7 +126,8 @@ class VeteranBannerComponent extends HTMLElement {
 
         for (const programId of displayIds) {
             if (programId) {
-                const resolved = resolveProgram(programId, this._programsBlock);
+                const resolved = resolveProgramCardFromBlock(programId, this._programsBlock);
+                if (!programQualifiesForAlumniBanner(resolved?.program)) continue;
                 const focusText = displayFocusForProgram(resolved, programId);
                 let yearStr = displayYearForProgram(resolved, programId) || residencyYearAttr;
                 if (!yearStr && residencyYearAttr) yearStr = residencyYearAttr;
@@ -201,8 +170,10 @@ class VeteranBannerComponent extends HTMLElement {
 
         if (entries.length === 0) {
             this.shadow.innerHTML = '';
+            this.setAttribute('hidden', '');
             return;
         }
+        this.removeAttribute('hidden');
 
         const lead =
             locale === 'ja'

@@ -260,37 +260,45 @@ export function renderProgramLocaleFormHtml(escapeHtml, enRaw, jaRaw) {
   <details class="studio-prog-details" open>
     <summary class="studio-prog-subhead">Program page — fade gallery</summary>
     <p class="studio-modal-hint">Up to ten images on the program detail page (5:4 frame). Set how long each image stays, then add URLs (shared for EN/JA). Slides fade through the site background; click the gallery to advance and restart the timer.</p>
-    <div class="studio-prog-fade-duration-row" style="margin-bottom:0.75rem">
-      <label class="studio-field" style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
+    <div class="studio-prog-fade-duration-row">
+      <label class="studio-field">
         <span class="studio-muted">Seconds each image stays visible</span>
         <input type="number" class="studio-input studio-prog-fade-duration" min="0.5" max="120" step="0.5" value="${esc(escapeHtml, getFadeGalleryDurationSeed(en, ja))}" />
       </label>
-    </div>`;
+    </div>
+    <div class="studio-prog-image-grid studio-prog-fade-grid">`;
     const fadeSeed = getFadeGallerySeed(en, ja);
     for (let i = 0; i < FADE_GALLERY_MAX_IMAGES; i++) {
-        html += `<div class="studio-prog-fade-row" style="display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;margin-bottom:0.45rem">
-      <span class="studio-prog-grid-label" style="min-width:6rem">Image ${i + 1}</span>
-      <span class="studio-prog-url-preview-wrap" hidden><img class="studio-prog-url-preview" alt="${esc(escapeHtml, withSeoImageAlt('Fade gallery URL preview'))}" loading="lazy" decoding="async" /></span>
-      <input type="text" class="studio-input studio-prog-fade-url" data-fade-slot="${i}" value="${esc(escapeHtml, fadeSeed[i] || '')}" placeholder="Image URL" style="flex:1;min-width:14rem" autocomplete="off" />
-      <label class="studio-file-label studio-btn-ghost studio-field--shrink"><input type="file" class="studio-file-input studio-prog-fade-file" data-fade-slot="${i}" accept="image/*" />Upload</label>
+        html += `<div class="studio-prog-image-slot studio-prog-fade-row">
+      <span class="studio-prog-image-slot__label">Image ${i + 1}</span>
+      <div class="studio-prog-image-slot__row">
+        <span class="studio-prog-url-preview-wrap" hidden><img class="studio-prog-url-preview" alt="${esc(escapeHtml, withSeoImageAlt('Fade gallery URL preview'))}" loading="lazy" decoding="async" /></span>
+        <input type="text" class="studio-input studio-prog-fade-url" data-fade-slot="${i}" value="${esc(escapeHtml, fadeSeed[i] || '')}" placeholder="Image URL" autocomplete="off" />
+        <label class="studio-file-label studio-btn-ghost studio-field--shrink"><input type="file" class="studio-file-input studio-prog-fade-file" data-fade-slot="${i}" accept="image/*" />Upload</label>
+      </div>
     </div>`;
     }
     html += `
+    </div>
   </details>
 
   <details class="studio-prog-details" open>
     <summary class="studio-prog-subhead">Program page — strip gallery</summary>
-    <p class="studio-modal-hint">Up to twenty images: large main image with a vertical thumbnail strip (~200px) on desktop. URLs are shared for EN/JA. Click a thumbnail on the program page to change the main image.</p>`;
+    <p class="studio-modal-hint">Up to twenty images: large main image with a vertical thumbnail strip (~200px) on desktop. URLs are shared for EN/JA. Click a thumbnail on the program page to change the main image.</p>
+    <div class="studio-prog-image-grid studio-prog-strip-grid">`;
     const stripSeed = getStripGallerySeed(en, ja);
     for (let i = 0; i < STRIP_GALLERY_MAX_IMAGES; i++) {
-        html += `<div class="studio-prog-strip-row" style="display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;margin-bottom:0.45rem">
-      <span class="studio-prog-grid-label" style="min-width:6rem">Image ${i + 1}</span>
-      <span class="studio-prog-url-preview-wrap" hidden><img class="studio-prog-url-preview" alt="${esc(escapeHtml, withSeoImageAlt('Strip gallery URL preview'))}" loading="lazy" decoding="async" /></span>
-      <input type="text" class="studio-input studio-prog-strip-url" data-strip-slot="${i}" value="${esc(escapeHtml, stripSeed[i] || '')}" placeholder="Image URL" style="flex:1;min-width:14rem" autocomplete="off" />
-      <label class="studio-file-label studio-btn-ghost studio-field--shrink"><input type="file" class="studio-file-input studio-prog-strip-file" data-strip-slot="${i}" accept="image/*" />Upload</label>
+        html += `<div class="studio-prog-image-slot studio-prog-strip-row">
+      <span class="studio-prog-image-slot__label">Image ${i + 1}</span>
+      <div class="studio-prog-image-slot__row">
+        <span class="studio-prog-url-preview-wrap" hidden><img class="studio-prog-url-preview" alt="${esc(escapeHtml, withSeoImageAlt('Strip gallery URL preview'))}" loading="lazy" decoding="async" /></span>
+        <input type="text" class="studio-input studio-prog-strip-url" data-strip-slot="${i}" value="${esc(escapeHtml, stripSeed[i] || '')}" placeholder="Image URL" autocomplete="off" />
+        <label class="studio-file-label studio-btn-ghost studio-field--shrink"><input type="file" class="studio-file-input studio-prog-strip-file" data-strip-slot="${i}" accept="image/*" />Upload</label>
+      </div>
     </div>`;
     }
     html += `
+    </div>
   </details>
 
   <details class="studio-prog-details">

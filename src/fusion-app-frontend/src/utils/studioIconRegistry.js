@@ -51,6 +51,18 @@ export const ICON_KEYS = {
     ],
 };
 
+/** Sidebar section id → existing icon when `ic-nav-{id}.svg` is absent. */
+export const STUDIO_NAV_ICON_ALIASES = {
+    schedule: 'nav-status',
+    finance: 'nav-services',
+    travel: 'nav-programs',
+};
+
+/** Sidebar group label (lowercase) → existing group icon. */
+export const STUDIO_GROUP_ICON_ALIASES = {
+    management: 'group-operations',
+};
+
 const iconModules = import.meta.glob('../assets/icons/ic-*.svg', {
     eager: true,
     import: 'default',
@@ -76,5 +88,25 @@ export function studioIconHref(key) {
         console.warn(`[studio icons] missing asset for key "${safe}" (expected ${path})`);
     }
     return '';
+}
+
+/**
+ * @param {string} sectionId Studio nav item id (e.g. `finance`, `schedule`)
+ * @returns {string}
+ */
+export function studioNavIconHref(sectionId) {
+    const id = String(sectionId || '').trim().toLowerCase();
+    const alias = STUDIO_NAV_ICON_ALIASES[id];
+    return studioIconHref(alias || `nav-${id}`);
+}
+
+/**
+ * @param {string} groupLabel e.g. `Management`
+ * @returns {string}
+ */
+export function studioGroupIconHref(groupLabel) {
+    const groupKey = String(groupLabel || '').trim().toLowerCase();
+    const alias = STUDIO_GROUP_ICON_ALIASES[groupKey];
+    return studioIconHref(alias || `group-${groupKey}`);
 }
 

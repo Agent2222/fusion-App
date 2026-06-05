@@ -55,7 +55,7 @@ class ArtistCardImageToggle extends HTMLElement {
                 :host {
                     display: block;
                     position: relative;
-                    z-index: 35;
+                    z-index: 1;
                     width: max-content;
                     max-width: calc(100% - 4%);
                     min-width: 11.5rem;

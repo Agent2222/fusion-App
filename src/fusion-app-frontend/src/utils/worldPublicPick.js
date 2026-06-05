@@ -1,11 +1,27 @@
 /**
  * Public profile: choose between artist `world` and LLM `worldNew` per field using `publicWorldSource`.
- * World is the default; New World must be explicitly selected after generated copy exists.
+ * When `publicWorldSource` is unset and usable `worldNew` exists, New World is the effective default.
  */
+import { isLlmFailureText } from './llmTextSanitize.js';
+import { worldTextToParagraphs } from './worldNormalize.js';
 
 /** @typedef {'newWorld' | 'world'} PublicWorldSource */
 
+/** Fallback when no worldNew content and no explicit preference. */
 export const PUBLIC_WORLD_SOURCE_DEFAULT = /** @type {const} */ ('world');
+
+const WORLD_NEW_TEXT_KEYS = ['practice', 'perspective', 'vision', 'constructing', 'context', 'quote'];
+
+/**
+ * @param {unknown} v
+ * @returns {boolean}
+ */
+function scalarFieldHasUsableContent(v) {
+    const s = String(v ?? '').trim();
+    if (!s || isLlmFailureText(s)) return false;
+    if (/Registered in\s*\)\.?$/i.test(s)) return false;
+    return true;
+}
 
 /**
  * @param {unknown} v
@@ -18,11 +34,11 @@ export function worldFieldHasContent(v) {
         for (const item of v) {
             if (item && typeof item === 'object' && !Array.isArray(item)) {
                 if (String(/** @type {Record<string, unknown>} */ (item).src ?? '').trim()) return true;
-            } else if (String(item ?? '').trim()) return true;
+            }
         }
-        return false;
+        return worldTextToParagraphs(v).length > 0;
     }
-    return String(v).trim() !== '';
+    return scalarFieldHasUsableContent(v);
 }
 
 /**
@@ -40,12 +56,31 @@ function worldLikeBlock(loc, which) {
 
 /**
  * @param {Record<string, unknown> | null | undefined} locales
+ * @returns {boolean}
+ */
+export function localesHaveUsableWorldNew(locales) {
+    if (!locales || typeof locales !== 'object') return false;
+    for (const code of ['en', 'ja']) {
+        const loc = /** @type {Record<string, unknown>} */ (locales)[code];
+        if (!loc || typeof loc !== 'object' || Array.isArray(loc)) continue;
+        const wn = worldLikeBlock(loc, 'worldNew');
+        for (const k of WORLD_NEW_TEXT_KEYS) {
+            if (worldFieldHasContent(wn[k])) return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * @param {Record<string, unknown> | null | undefined} locales
  * @returns {PublicWorldSource}
  */
 export function getPublicWorldSourceFromLocales(locales) {
     if (!locales || typeof locales !== 'object') return PUBLIC_WORLD_SOURCE_DEFAULT;
     const raw = /** @type {Record<string, unknown>} */ (locales).publicWorldSource;
+    if (raw === 'world') return 'world';
     if (raw === 'newWorld') return 'newWorld';
+    if (localesHaveUsableWorldNew(locales)) return 'newWorld';
     return PUBLIC_WORLD_SOURCE_DEFAULT;
 }
 
@@ -66,21 +101,10 @@ export function pickPublicWorldField(loc, key, publicWorldSource = PUBLIC_WORLD_
     return undefined;
 }
 
-const WORLD_NEW_TEXT_KEYS = ['practice', 'perspective', 'vision', 'constructing', 'context', 'quote'];
-
 /**
  * True when there is no usable AI world copy yet (post-save auto-gen should run).
  * @param {Record<string, unknown> | null | undefined} locales
  */
 export function needsInitialWorldNew(locales) {
-    if (!locales || typeof locales !== 'object') return true;
-    for (const code of ['en', 'ja']) {
-        const loc = /** @type {Record<string, unknown>} */ (locales)[code];
-        if (!loc || typeof loc !== 'object' || Array.isArray(loc)) continue;
-        const wn = worldLikeBlock(loc, 'worldNew');
-        for (const k of WORLD_NEW_TEXT_KEYS) {
-            if (worldFieldHasContent(wn[k])) return false;
-        }
-    }
-    return true;
+    return !localesHaveUsableWorldNew(locales);
 }

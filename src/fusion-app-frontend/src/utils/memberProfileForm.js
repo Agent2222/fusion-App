@@ -2,6 +2,14 @@
  * Serialize / deserialize member profile settings form ↔ locales JSON + world normalization.
  */
 import { normalizeLocalesWorldForStorage } from './worldNormalize.js';
+import { disciplineKeyToLabel } from './feedFilterApply.js';
+
+/** @param {(id: string) => string | undefined} val */
+function readDisciplineLabelFromDom(val) {
+    const raw = String(val('mpd_discipline') ?? '').trim();
+    if (!raw) return '';
+    return disciplineKeyToLabel(raw);
+}
 
 /** @param {unknown} raw */
 export function worldFieldToTextarea(raw) {
@@ -135,7 +143,7 @@ export function readProfileDraftFromDom(val) {
         firstName: fn,
         lastName: ln,
         name: [fn, ln].filter(Boolean).join(' '),
-        discipline: val('mpd_discipline') ?? '',
+        discipline: readDisciplineLabelFromDom(val),
         bio: val('mpd_bio') ?? '',
         bioLong: '',
         status: val('mpd_status') ?? '',
@@ -166,7 +174,7 @@ export function readLocalesFromDom(prev, active, val) {
     nb.firstName = fn;
     nb.lastName = ln;
     nb.name = [fn, ln].filter(Boolean).join(' ');
-    nb.discipline = val('mpd_discipline') ?? '';
+    nb.discipline = readDisciplineLabelFromDom(val);
     nb.bio = val('mpd_bio') ?? '';
     nb.bioLong = '';
     nb.status = val('mpd_status') ?? '';

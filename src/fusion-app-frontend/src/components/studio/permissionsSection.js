@@ -2,17 +2,26 @@
  * Studio Permissions: Staff matrix (role defaults + per-principal overrides); other role tabs stubbed.
  */
 import { Principal } from '@dfinity/principal';
-import { STUDIO_PERMISSION_FEATURE_ROWS, STUDIO_PERMISSION_ROLE_TABS } from '../../utils/studioPermissionFeatures.js';
+import {
+    STUDIO_PERMISSION_FEATURE_ROWS,
+    STUDIO_PERMISSION_ROLE_TABS,
+    isStaleCanisterPermissionKeyList,
+    mergeStudioPermissionMap,
+    parseStudioPermissionMatrixTuples,
+    studioPermissionMapsEqual,
+} from '../../utils/studioPermissionFeatures.js';
 import {
     adminAddSuperStaffStudio,
     adminClearStudioPermissionOverrideStudio,
     adminGetStudioPermissionDefaultsStudio,
     adminGetStudioPermissionOverrideStudio,
     adminListSuperStaffStudio,
+    adminMergeDefaultStudioPermissionFeatureKeysStudio,
     adminRemoveSuperStaffStudio,
     adminSetStudioPermissionDefaultsStudio,
     adminSetStudioPermissionOverrideStudio,
     getAccountsForStudio,
+    listStudioPermissionFeatureKeysStudio,
     refreshStudioShellAccessState,
 } from '../../utils/database.js';
 import { setStudioShellGate } from '../../utils/studioShellState.js';
@@ -27,13 +36,15 @@ function escapeHtml(s) {
 
 /**
  * @param {Map<string, { visible: boolean, canEdit: boolean }>} map
+ * @param {Set<string> | null} [supportedKeys]
  */
-function matrixTableHtml(map) {
-    /** Only show rows for keys the canister returned — avoids sending newer keys (e.g. `sound`) to older deployments. */
+function matrixTableHtml(map, supportedKeys = null) {
     let lastGroup = '';
-    const rows = STUDIO_PERMISSION_FEATURE_ROWS.filter((row) => map.has(row.id))
-        .map((row) => {
+    const rows = STUDIO_PERMISSION_FEATURE_ROWS.map((row) => {
         const acc = map.get(row.id) ?? { visible: true, canEdit: true };
+        const unsupported = Boolean(supportedKeys?.size && !supportedKeys.has(row.id));
+        const disabledAttr = unsupported ? ' disabled' : '';
+        const rowClass = unsupported ? ' studio-perm-matrix__row--unsupported' : '';
         const group = row.group || '';
         let groupRow = '';
         if (group && group !== lastGroup) {
@@ -43,13 +54,13 @@ function matrixTableHtml(map) {
             groupRow = `<tr class="studio-perm-matrix__group"><td colspan="3">${escapeHtml(groupLabel)}</td></tr>`;
         }
         return `${groupRow}
-            <tr data-perm-row="${escapeHtml(row.id)}">
-                <td>${escapeHtml(row.label)}</td>
+            <tr data-perm-row="${escapeHtml(row.id)}" class="${rowClass.trim()}">
+                <td>${escapeHtml(row.label)}${unsupported ? ' <span class="studio-muted">(needs backend upgrade)</span>' : ''}</td>
                 <td class="studio-perm-matrix__cell">
                     <label class="studio-checkbox-label">
                         <input type="checkbox" class="studio-perm-visible" data-feature="${escapeHtml(row.id)}" ${
                             acc.visible ? 'checked' : ''
-                        } />
+                        }${disabledAttr} />
                         <span>Visible</span>
                     </label>
                 </td>
@@ -57,7 +68,7 @@ function matrixTableHtml(map) {
                     <label class="studio-checkbox-label">
                         <input type="checkbox" class="studio-perm-edit" data-feature="${escapeHtml(row.id)}" ${
                             acc.canEdit ? 'checked' : ''
-                        } />
+                        }${disabledAttr} />
                         <span>Can change</span>
                     </label>
                 </td>
@@ -101,13 +112,50 @@ function readMatrixFromDom(root) {
 
 /**
  * @param {Map<string, { visible: boolean, canEdit: boolean }>} map
+ * @param {Set<string> | null} [allowedKeys]
  * @returns {Array<[string, { visible: boolean, canEdit: boolean }]>}
  */
-function matrixToCandidTuples(map) {
-    return STUDIO_PERMISSION_FEATURE_ROWS.filter((row) => map.has(row.id)).map((row) => {
+function matrixToCandidTuples(map, allowedKeys = null) {
+    return STUDIO_PERMISSION_FEATURE_ROWS.filter((row) => !allowedKeys || allowedKeys.has(row.id)).map((row) => {
         const v = map.get(row.id) ?? { visible: true, canEdit: true };
         return [row.id, { visible: v.visible, canEdit: v.canEdit }];
     });
+}
+
+/**
+ * @param {Array<[string, { visible: boolean, canEdit: boolean }]>} tuples
+ * @returns {string | null}
+ */
+function parseUnknownStudioFeatureKeyError(err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const m = msg.match(/Unknown studio feature key:\s*([^'.\s]+)/i);
+    return m ? String(m[1]).trim() : null;
+}
+
+/**
+ * Save permission matrix; on older canisters that trap on newer keys, drop unknown keys and retry.
+ *
+ * @param {(tuples: Array<[string, { visible: boolean, canEdit: boolean }]>) => Promise<void>} saveFn
+ * @param {Array<[string, { visible: boolean, canEdit: boolean }]>} tuples
+ * @returns {Promise<{ saved: Array<[string, { visible: boolean, canEdit: boolean }]>, skipped: string[] }>}
+ */
+async function savePermissionMatrixWithFallback(saveFn, tuples) {
+    let pending = tuples;
+    const skipped = [];
+    for (let attempt = 0; attempt < 32; attempt++) {
+        try {
+            await saveFn(pending);
+            return { saved: pending, skipped };
+        } catch (err) {
+            const bad = parseUnknownStudioFeatureKeyError(err);
+            if (!bad) throw err;
+            if (!pending.some(([k]) => k === bad)) throw err;
+            pending = pending.filter(([k]) => k !== bad);
+            skipped.push(bad);
+            if (!pending.length) throw err;
+        }
+    }
+    throw new Error('Could not save permissions — too many unknown feature keys for this canister.');
 }
 
 export function renderPermissions() {
@@ -145,6 +193,7 @@ export function renderPermissions() {
                 <div id="studio-perm-matrix-host"></div>
                 <div class="studio-toolbar">
                     <button type="button" class="studio-btn-primary" id="studio-perm-save">Save</button>
+                    <button type="button" class="studio-btn-ghost" id="studio-perm-register-keys" hidden>Register missing keys</button>
                     <button type="button" class="studio-btn-ghost" id="studio-perm-clear-override" hidden>Clear override</button>
                 </div>
             </div>
@@ -176,6 +225,7 @@ export async function initPermissions(mainEl) {
     const principalText = /** @type {HTMLInputElement | null} */ (mainEl.querySelector('#studio-perm-principal-text'));
     const principalLoadBtn = mainEl.querySelector('#studio-perm-principal-load');
     const saveBtn = /** @type {HTMLButtonElement | null} */ (mainEl.querySelector('#studio-perm-save'));
+    const registerKeysBtn = /** @type {HTMLButtonElement | null} */ (mainEl.querySelector('#studio-perm-register-keys'));
     const clearOverrideBtn = /** @type {HTMLButtonElement | null} */ (mainEl.querySelector('#studio-perm-clear-override'));
     const superBlock = mainEl.querySelector('#studio-perm-super-staff');
     const superList = mainEl.querySelector('#studio-perm-super-list');
@@ -207,6 +257,67 @@ export async function initPermissions(mainEl) {
     let mode = /** @type {'role' | 'principal'} */ ('role');
     /** @type {Map<string, { visible: boolean, canEdit: boolean }>} */
     let working = new Map();
+    /** @type {Set<string> | null} */
+    let canisterFeatureKeys = null;
+    /** @type {boolean} */
+    let canisterPermissionKeysStale = false;
+
+    const refreshCanisterFeatureKeys = async () => {
+        try {
+            const keys = await listStudioPermissionFeatureKeysStudio();
+            if (!keys.length || isStaleCanisterPermissionKeyList(keys)) {
+                canisterPermissionKeysStale = true;
+                canisterFeatureKeys = null;
+                return;
+            }
+            canisterPermissionKeysStale = false;
+            canisterFeatureKeys = new Set(keys);
+        } catch {
+            canisterPermissionKeysStale = false;
+            canisterFeatureKeys = null;
+        }
+    };
+
+    const showUnsupportedKeysHint = () => {
+        if (canisterPermissionKeysStale) {
+            if (registerKeysBtn) registerKeysBtn.hidden = false;
+            showBanner(
+                'This backend is missing Finance / Schedule permission keys. Click “Register missing keys” to add them on the canister, or redeploy fusion-app-backend if that button is unavailable.',
+                'warn',
+            );
+            return;
+        }
+        if (registerKeysBtn) registerKeysBtn.hidden = true;
+        if (!canisterFeatureKeys?.size) return;
+        const labels = STUDIO_PERMISSION_FEATURE_ROWS.filter((row) => !canisterFeatureKeys.has(row.id)).map(
+            (row) => row.label,
+        );
+        if (!labels.length) return;
+        if (registerKeysBtn) registerKeysBtn.hidden = false;
+        showBanner(
+            `This backend cannot store permissions for: ${labels.join(', ')}. Click “Register missing keys” or redeploy fusion-app-backend.`,
+            'warn',
+        );
+    };
+
+    const registerMissingPermissionKeys = async () => {
+        if (registerKeysBtn) registerKeysBtn.disabled = true;
+        try {
+            const keys = await adminMergeDefaultStudioPermissionFeatureKeysStudio();
+            await refreshCanisterFeatureKeys();
+            showUnsupportedKeysHint();
+            if (matrixHost) matrixHost.innerHTML = matrixTableHtml(working, canisterFeatureKeys);
+            showBanner(
+                keys.length
+                    ? `Registered ${keys.length} permission keys on the canister. You can save Finance / Schedule rows now.`
+                    : 'Permission keys updated on the canister.',
+            );
+        } catch (e) {
+            showBanner(e instanceof Error ? e.message : String(e), 'warn');
+        } finally {
+            if (registerKeysBtn) registerKeysBtn.disabled = false;
+        }
+    };
 
     const setMode = (next) => {
         mode = next;
@@ -220,27 +331,42 @@ export async function initPermissions(mainEl) {
 
     const loadMatrixIntoDom = (map) => {
         working = new Map(map);
-        if (matrixHost) matrixHost.innerHTML = matrixTableHtml(working);
+        if (matrixHost) matrixHost.innerHTML = matrixTableHtml(working, canisterFeatureKeys);
         if (saveBtn) saveBtn.disabled = false;
     };
 
     const fetchDefaultsForRole = async (cat) => {
         const tuples = await adminGetStudioPermissionDefaultsStudio(cat);
-        const m = new Map();
-        for (const row of tuples) {
-            if (Array.isArray(row) && row.length >= 2) {
-                const k = String(row[0]);
-                const v = row[1];
-                if (v && typeof v === 'object') {
-                    const o = /** @type {Record<string, unknown>} */ (v);
-                    m.set(k, {
-                        visible: Boolean(o.visible ?? o.Visible),
-                        canEdit: Boolean(o.canEdit ?? o.can_edit ?? o.CanEdit),
-                    });
-                }
-            }
+        return mergeStudioPermissionMap(parseStudioPermissionMatrixTuples(tuples));
+    };
+
+    /**
+     * Build save payload: patch stored canister values with DOM edits for keys this canister accepts.
+     *
+     * @param {Map<string, { visible: boolean, canEdit: boolean }>} stored
+     * @param {Map<string, { visible: boolean, canEdit: boolean }>} domMap
+     */
+    const buildSaveTuplesFromStored = (stored, domMap) => {
+        const outgoing = new Map(stored);
+        for (const row of STUDIO_PERMISSION_FEATURE_ROWS) {
+            if (canisterFeatureKeys && !canisterFeatureKeys.has(row.id)) continue;
+            if (domMap.has(row.id)) outgoing.set(row.id, domMap.get(row.id));
         }
-        return m;
+        return matrixToCandidTuples(outgoing, canisterFeatureKeys);
+    };
+
+    const buildSaveTuplesForRole = async (cat, domMap) => {
+        const tuples = await adminGetStudioPermissionDefaultsStudio(cat);
+        return buildSaveTuplesFromStored(parseStudioPermissionMatrixTuples(tuples), domMap);
+    };
+
+    const buildSaveTuplesForOverride = async (principalText, roleCat, domMap) => {
+        const overrideTuples = await adminGetStudioPermissionOverrideStudio(principalText);
+        const stored =
+            overrideTuples && overrideTuples.length
+                ? parseStudioPermissionMatrixTuples(overrideTuples)
+                : parseStudioPermissionMatrixTuples(await adminGetStudioPermissionDefaultsStudio(roleCat));
+        return buildSaveTuplesFromStored(stored, domMap);
     };
 
     const renderRoleTabPanel = () => {
@@ -351,21 +477,11 @@ export async function initPermissions(mainEl) {
                 loadMatrixIntoDom(base);
                 showBanner('No override — showing role default for the selected tab. Save to create an override.');
             } else {
-                const m = new Map();
-                for (const row of tuples) {
-                    if (Array.isArray(row) && row.length >= 2) {
-                        const k = String(row[0]);
-                        const v = row[1];
-                        if (v && typeof v === 'object') {
-                            const o = /** @type {Record<string, unknown>} */ (v);
-                            m.set(k, {
-                                visible: Boolean(o.visible ?? o.Visible),
-                                canEdit: Boolean(o.canEdit ?? o.can_edit ?? o.CanEdit),
-                            });
-                        }
-                    }
-                }
-                loadMatrixIntoDom(m);
+                const m = parseStudioPermissionMatrixTuples(tuples);
+                const roleBase = await fetchDefaultsForRole(
+                    activeRoleTab === 'staff' || activeRoleTab === 'collaborator' ? activeRoleTab : 'staff',
+                );
+                loadMatrixIntoDom(mergeStudioPermissionMap(m, roleBase));
                 showBanner('');
             }
         } catch (e) {
@@ -408,6 +524,10 @@ export async function initPermissions(mainEl) {
         if (t) void loadOverrideForPrincipal(t);
     });
 
+    registerKeysBtn?.addEventListener('click', () => {
+        void registerMissingPermissionKeys();
+    });
+
     clearOverrideBtn?.addEventListener('click', async () => {
         const p =
             mode === 'principal'
@@ -429,16 +549,20 @@ export async function initPermissions(mainEl) {
 
     saveBtn?.addEventListener('click', async () => {
         if (!matrixHost) return;
-        const map = readMatrixFromDom(matrixHost);
-        const tuples = matrixToCandidTuples(map);
+        const domMap = readMatrixFromDom(matrixHost);
         try {
             if (activeRoleTab !== 'staff' && activeRoleTab !== 'collaborator') {
                 showBanner('Only Staff and Collaborator role defaults are editable in this build.', 'warn');
                 return;
             }
+            let result;
+            const intended = new Map(domMap);
             if (mode === 'role') {
-                await adminSetStudioPermissionDefaultsStudio(activeRoleTab, tuples);
-                showBanner('Role defaults saved.');
+                const tuples = await buildSaveTuplesForRole(activeRoleTab, domMap);
+                result = await savePermissionMatrixWithFallback(
+                    (rows) => adminSetStudioPermissionDefaultsStudio(activeRoleTab, rows),
+                    tuples,
+                );
             } else {
                 const p = principalSelect?.value || principalText?.value.trim() || '';
                 if (!p) {
@@ -446,8 +570,43 @@ export async function initPermissions(mainEl) {
                     return;
                 }
                 Principal.fromText(p);
-                await adminSetStudioPermissionOverrideStudio(p, tuples);
-                showBanner('Override saved for principal.');
+                const roleCat =
+                    activeRoleTab === 'staff' || activeRoleTab === 'collaborator' ? activeRoleTab : 'staff';
+                const tuples = await buildSaveTuplesForOverride(p, roleCat, domMap);
+                result = await savePermissionMatrixWithFallback(
+                    (rows) => adminSetStudioPermissionOverrideStudio(p, rows),
+                    tuples,
+                );
+            }
+            const reloaded =
+                mode === 'role'
+                    ? await fetchDefaultsForRole(activeRoleTab)
+                    : mergeStudioPermissionMap(
+                          parseStudioPermissionMatrixTuples(
+                              await adminGetStudioPermissionOverrideStudio(
+                                  principalSelect?.value || principalText?.value.trim() || '',
+                              ),
+                          ),
+                          await fetchDefaultsForRole(
+                              activeRoleTab === 'staff' || activeRoleTab === 'collaborator'
+                                  ? activeRoleTab
+                                  : 'staff',
+                          ),
+                      );
+            loadMatrixIntoDom(reloaded);
+            const persisted = studioPermissionMapsEqual(intended, reloaded);
+            if (result.skipped.length) {
+                showBanner(
+                    `Saved supported permissions. Skipped until backend upgrade: ${result.skipped.join(', ')}. Run dfx deploy fusion-app-backend --network ic`,
+                    'info',
+                );
+            } else if (!persisted) {
+                showBanner(
+                    'Saved, but reloaded values differ — redeploy fusion-app-backend if Finance / Schedule rows were edited.',
+                    'warn',
+                );
+            } else {
+                showBanner(mode === 'role' ? 'Role defaults saved.' : 'Override saved for principal.');
             }
             const next = await refreshStudioShellAccessState();
             setStudioShellGate(next);
@@ -459,6 +618,8 @@ export async function initPermissions(mainEl) {
 
     renderRoleTabPanel();
     mainEl.querySelector('.studio-perm-role-tab[data-role-tab="staff"]')?.classList.add('is-active');
+    await refreshCanisterFeatureKeys();
+    showUnsupportedKeysHint();
     await loadRoleTabDefaults();
 
     if (!shell.isAdmin && saveBtn) {

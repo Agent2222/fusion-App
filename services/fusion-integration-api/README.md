@@ -1,6 +1,8 @@
 # fusion-integration-api
 
-Express server for Stripe (subscriptions + legacy Payment Intents), Resend email, and S3 presigned PUT uploads. Used by the Fusion frontend / Studio; Stripe secret keys never ship to the browser.
+Express server for Stripe (subscriptions + legacy Payment Intents), Resend email, and S3/R2 presigned PUT uploads. Used by the Fusion frontend / Studio; Stripe secret keys never ship to the browser.
+
+Upload presigns use **AWS S3** or **Cloudflare R2** depending on `STORAGE_BACKEND` (default `aws`). Both backends can be configured at once; switching is an env change + redeploy. See [MIGRATE_AWS_S3_TO_CLOUDFLARE_R2.md](../docs/MIGRATE_AWS_S3_TO_CLOUDFLARE_R2.md).
 
 ## Membership subscriptions (join flow)
 
@@ -39,13 +41,22 @@ stripe listen --forward-to localhost:8787/webhooks/stripe
 | `RESEND_API_KEY` | for email | Resend API key |
 | `RESEND_FROM` | for email | Verified sender, e.g. `Fusion <onboarding@resend.dev>` |
 | `RESEND_BROADCAST_SEGMENT_ID` | no | If set, returned by `GET /resend/sender` as `segmentId` for Studio “All subscribers (broadcast)” defaults. |
-| `AWS_REGION` or `S3_REGION` | for S3 | Region |
-| `S3_BUCKET` | for S3 | Bucket name |
-| `AWS_ACCESS_KEY_ID` | for S3 on **Render / most hosts** | IAM user access key (`AKIA…`). Required unless the process can use another [default credential chain](https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/setting-credentials-node.html) (e.g. local `~/.aws/credentials`). |
+| `STORAGE_BACKEND` | no | `aws` (default) or `r2` — which backend `/storage/*` presign routes use |
+| `AWS_REGION` or `S3_REGION` | for AWS backend | Region |
+| `S3_BUCKET` | for AWS backend | Bucket name |
+| `AWS_ACCESS_KEY_ID` | for AWS on **Render / most hosts** | IAM user access key (`AKIA…`). Required unless the process can use another [default credential chain](https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/setting-credentials-node.html) (e.g. local `~/.aws/credentials`). |
 | `AWS_SECRET_ACCESS_KEY` | with access key above | IAM secret key |
 | `AWS_SESSION_TOKEN` | optional | Only if using temporary credentials (STS) |
 | `S3_PUBLIC_BASE_URL` | no | Public base for object URLs (default: virtual-hosted–style S3 URL). Frontend maps upload URLs to **`https://cdn.fusionart.world/uploads/…`** regardless of this value. |
-| `S3_KEY_PREFIX` | no | S3 object key prefix prepended by `/storage/presign` (code default **`uploads/`**; production often uses **`fusionMedia/uploads/`**). IAM should allow `s3:PutObject` on the matching prefix. Public CDN paths always use `/uploads/…` on `cdn.fusionart.world`, even when objects live under `fusionMedia/uploads/…` in the bucket. |
+| `R2_BUCKET` | for R2 backend | Bucket name (default **`fusion-app`**) |
+| `R2_ACCESS_KEY_ID` | for R2 on Render | R2 API token access key id |
+| `R2_SECRET_ACCESS_KEY` | for R2 on Render | R2 API token secret |
+| `R2_ENDPOINT` | for R2 backend | e.g. `https://<ACCOUNT_ID>.r2.cloudflarestorage.com` |
+| `R2_ACCOUNT_ID` | optional | If `R2_ENDPOINT` unset, endpoint is built from this |
+| `R2_PUBLIC_BASE_URL` | no | Public CDN base for presign `publicUrl` (default: `S3_PUBLIC_BASE_URL` or `https://cdn.fusionart.world`) |
+| `S3_KEY_PREFIX` | no | Object key prefix prepended by `/storage/presign` (code default **`uploads/`**; production often uses **`fusionMedia/uploads/`**). IAM/R2 token should allow writes on the matching prefix. Public CDN paths always use `/uploads/…` on `cdn.fusionart.world`, even when objects live under `fusionMedia/uploads/…` in the bucket. |
+| `S3_FUSION_MEDIA_PUBLIC_PREFIX` | no | Prefix for community public media (default `fusionMedia/uploads/`) |
+| `S3_PRIVATE_VIDEO_PREFIX` | no | Prefix for gated private video (default `fusionMedia/private-video/`) |
 | `FUSION_SIGNATURE_LOGO_URL` | no | If set, integration server rewrites `https://…/email/Fusion-X-logo-02.png` (and legacy `Fusion-Logo-Sig-1.png`) in HTML email bodies to this URL (e.g. CDN) for test/batch send |
 
 ## Scripts
@@ -55,7 +66,7 @@ stripe listen --forward-to localhost:8787/webhooks/stripe
 
 ## Routes
 
-- `GET /health` — status flags (no secrets); includes `stripePrice`, `fusionCanister`, `stripeWebhook`
+- `GET /health` — status flags (no secrets); includes `stripePrice`, `fusionCanister`, `stripeWebhook`, `storageBackend`, nested `storage: { active, aws, r2 }`, and legacy `s3` (active backend configured)
 - `POST /stripe/create-subscription` — body `{ principal?, email, metadata?, payFirst?, subscriptionTier? }` — `subscriptionTier` optional: `bimonthly` (default) or `annual` (uses `STRIPE_ANNUAL_PRICE_ID`). Creates/finds Customer, Subscription, returns `clientSecret` from the first invoice PaymentIntent
 - `POST /stripe/subscription-status-by-email` — body `{ email }` — looks up Stripe customer by email, returns best subscription + `membershipActive` (`true` when status is `active` or `trialing`). Studio “Manage user” live check (API key required)
 - `POST /stripe/sync-subscription-by-email` — body `{ email, principal }` — finds customer by email, pushes best subscription to the canister with `metadata.principal` (Studio after email check; API key required)

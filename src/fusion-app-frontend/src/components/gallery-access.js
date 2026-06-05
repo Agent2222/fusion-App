@@ -54,6 +54,13 @@ export default function initGalleryAccess() {
             viewId: 'allGalleryView',
         });
         feed.setArtists(buildFeedPool(initial));
+
+        queueMicrotask(() => {
+            const ff = document.querySelector('app-feed-filter[state="gallery-access"]');
+            if (ff && typeof ff.hydrateFilterData === 'function') {
+                ff.hydrateFilterData({ state: 'gallery-access', artists });
+            }
+        });
     };
 
     void wire();

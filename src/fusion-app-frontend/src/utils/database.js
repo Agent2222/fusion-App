@@ -23,6 +23,8 @@ import {
 } from './artistFeaturedExtension.js';
 import { getFusionBackendActor } from './earlyAccessSubscribe.js';
 import { getStudioAuthenticatedActor } from './studioAuth.js';
+import { mergeStudioPermissionMap, parseStudioPermissionMatrixTuples } from './studioPermissionFeatures.js';
+import { getApplicantManualDepositSubmitted } from './studioPlainForms.js';
 import {
     artistRecordToTestOverlayShape,
     cohortNatPairsForCanisterBulk,
@@ -40,6 +42,8 @@ import {
     needsIntroGallerySync,
 } from './studioLegacyProfileUrls.js';
 import { normalizeLocalesWorldForStorage } from './worldNormalize.js';
+import { sanitizeLlmTextOutput } from './llmTextSanitize.js';
+import { worldFieldHasContent } from './worldPublicPick.js';
 import {
     buildTrimmedSourceJsonForLlm,
     generateEnglishWorldWithLlm,
@@ -89,6 +93,9 @@ const STORAGE_KEY = FUSION_DATA_SOURCE_STORAGE_KEY;
 /** Site setting key: JSON for program application “what’s included” global bullets (EN/JA). */
 export const SITE_SETTING_APPLICATION_PAYMENT_GLOBAL = 'applicationPaymentGlobal';
 
+/** Site setting key: JSON for public platform update banner (enabled + EN/JA messages). */
+export const SITE_SETTING_PLATFORM_UPDATE_BANNER = 'platformUpdateBanner';
+
 /** localStorage keys (Studio test mode overlays). */
 const LS_SUBSCRIBERS = 'subscribers';
 const LS_APPLICANTS = 'applicants';
@@ -104,6 +111,119 @@ const LS_STUDIO_PREFIX = 'fusion-studio-';
 
 /** Test-mode overlay for `applicationPaymentGlobal` site JSON (`database.js` getApplicationPaymentGlobal). */
 const LS_APPLICATION_PAYMENT_GLOBAL = 'fusion-test-application-payment-global';
+
+/** Test-mode overlay for `platformUpdateBanner` site JSON. */
+const LS_PLATFORM_UPDATE_BANNER = 'fusion-test-platform-update-banner';
+
+/**
+ * @returns {{ enabled: boolean, messageEn: string, messageJa: string }}
+ */
+export function defaultPlatformUpdateBanner() {
+    return {
+        enabled: false,
+        messageEn: "We're updating the platform — please check back soon.",
+        messageJa: 'プラットフォームを更新中です。しばらくしてから再度ご確認ください。',
+    };
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {{ enabled: boolean, messageEn: string, messageJa: string }}
+ */
+export function parsePlatformUpdateBannerJson(raw) {
+    const base = defaultPlatformUpdateBanner();
+    if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return base;
+    const o = /** @type {Record<string, unknown>} */ (raw);
+    if (typeof o.enabled === 'boolean') base.enabled = o.enabled;
+    else if (o.enabled != null) base.enabled = String(o.enabled).trim().toLowerCase() === 'true';
+    const en = String(o.messageEn ?? o.message_en ?? '').trim();
+    const ja = String(o.messageJa ?? o.message_ja ?? '').trim();
+    if (en) base.messageEn = en;
+    if (ja) base.messageJa = ja;
+    return base;
+}
+
+/**
+ * Public platform update banner (site setting `platformUpdateBanner`).
+ * Live: `getSiteSetting`; test: localStorage overlay or `testData.platformUpdateBanner`.
+ * @returns {Promise<{ enabled: boolean, messageEn: string, messageJa: string }>}
+ */
+export async function getPlatformUpdateBanner() {
+    if (getDataSource() === 'test') {
+        try {
+            if (typeof window !== 'undefined' && window.localStorage) {
+                const v = window.localStorage.getItem(LS_PLATFORM_UPDATE_BANNER);
+                if (v != null && String(v).trim() !== '') {
+                    try {
+                        return parsePlatformUpdateBannerJson(JSON.parse(String(v)));
+                    } catch {
+                        /* fall through */
+                    }
+                }
+            }
+        } catch {
+            /* ignore */
+        }
+        const td = /** @type {unknown} */ (testData.platformUpdateBanner);
+        if (td != null && typeof td === 'object') {
+            try {
+                return parsePlatformUpdateBannerJson(td);
+            } catch {
+                /* ignore */
+            }
+        }
+        return defaultPlatformUpdateBanner();
+    }
+    try {
+        const actor = await getFusionBackendActor();
+        if (typeof actor.getSiteSetting !== 'function') return defaultPlatformUpdateBanner();
+        const opt = await actor.getSiteSetting(SITE_SETTING_PLATFORM_UPDATE_BANNER);
+        const raw = unwrapOpt(opt);
+        if (raw == null || String(raw).trim() === '') return defaultPlatformUpdateBanner();
+        try {
+            return parsePlatformUpdateBannerJson(JSON.parse(String(raw)));
+        } catch {
+            return defaultPlatformUpdateBanner();
+        }
+    } catch {
+        return defaultPlatformUpdateBanner();
+    }
+}
+
+/**
+ * Persist platform update banner (admin). Uses `setSiteSetting('platformUpdateBanner', json)`.
+ * @param {{ enabled?: boolean, messageEn?: string, messageJa?: string }} value
+ * @returns {Promise<void>}
+ */
+export async function setPlatformUpdateBanner(value) {
+    const normalized = parsePlatformUpdateBannerJson(value);
+    const json = JSON.stringify(normalized);
+    if (getDataSource() === 'test') {
+        try {
+            if (typeof window !== 'undefined' && window.localStorage) {
+                window.localStorage.setItem(LS_PLATFORM_UPDATE_BANNER, json);
+            }
+        } catch {
+            /* ignore */
+        }
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(
+                new CustomEvent('fusion-platform-update-banner-change', { detail: normalized }),
+            );
+        }
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.setSiteSetting !== 'function') {
+        throw new Error('setSiteSetting unavailable — deploy backend and run dfx generate.');
+    }
+    await actor.setSiteSetting(SITE_SETTING_PLATFORM_UPDATE_BANNER, json);
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+            new CustomEvent('fusion-platform-update-banner-change', { detail: normalized }),
+        );
+    }
+}
 
 /**
  * @returns {{ en: { whatsIncludedBullets: string[] }, ja: { whatsIncludedBullets: string[] } }}
@@ -2218,6 +2338,49 @@ export async function setMyAccountContactForCaller(contact) {
     return true;
 }
 
+/**
+ * Push join-flow email/name from session draft or billing storage onto the canister account
+ * contact before linking an artist profile (so roster `contactEmail` can inherit it).
+ * @returns {Promise<boolean>}
+ */
+export async function syncMyAccountContactFromJoinContextIfNeeded() {
+    const { getProfileSetupDraft } = await import('./profileSetupDraft.js');
+    const draft = getProfileSetupDraft();
+    let email = String(draft.email || '').trim();
+    let firstName = String(draft.firstName || '').trim();
+    let lastName = String(draft.lastName || '').trim();
+
+    if (!email.includes('@')) {
+        try {
+            const { getAuthSnapshot } = await import('./icAuth.js');
+            const snap = await getAuthSnapshot();
+            if (snap.authenticated) {
+                const { getStoredBillingEmailForPrincipal } = await import('./integrationApi.js');
+                email = String(getStoredBillingEmailForPrincipal(snap.principal.toText()) || '').trim();
+            }
+        } catch {
+            /* ignore */
+        }
+    }
+
+    if (!email.includes('@')) return false;
+
+    if (!firstName) {
+        const fullName = String(draft.fullName || '').trim();
+        if (fullName) {
+            const parts = fullName.split(/\s+/).filter(Boolean);
+            firstName = parts[0] || '';
+            if (!lastName) lastName = parts.slice(1).join(' ');
+        }
+    }
+
+    try {
+        return await setMyAccountContactForCaller({ firstName, lastName, email });
+    } catch {
+        return false;
+    }
+}
+
 export async function ensureMyLinkedArtistProfile() {
     if (getDataSource() === 'test') {
         let id = getProfileSettingsDevArtistId();
@@ -2229,6 +2392,8 @@ export async function ensureMyLinkedArtistProfile() {
         const nid = `mpd-local-${
             typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID().slice(0, 8) : String(Date.now())
         }`;
+        const { getProfileSetupDraft } = await import('./profileSetupDraft.js');
+        const contactEmail = String(getProfileSetupDraft().email || '').trim();
         const minimal = normalizeArtistDefaults({
             id: nid,
             slug: nid,
@@ -2239,6 +2404,7 @@ export async function ensureMyLinkedArtistProfile() {
             locales: { en: {}, ja: {} },
             imported: false,
             accessCode: '',
+            contactEmail,
         });
         const overlay = readStudioLs(LS_ARTISTS_OVERLAY) || {};
         overlay[nid] = minimal;
@@ -2255,6 +2421,7 @@ export async function ensureMyLinkedArtistProfile() {
     if (typeof actor.ensureMyLinkedArtistProfile !== 'function') {
         return 'alreadyLinked';
     }
+    await syncMyAccountContactFromJoinContextIfNeeded();
     const raw = await actor.ensureMyLinkedArtistProfile();
     if (raw && typeof raw === 'object') {
         if ('ok' in raw) return 'ok';
@@ -4352,7 +4519,8 @@ export async function studioTranslateEnToJa(englishText) {
     if (typeof actor.studioTranslateEnToJa !== 'function') {
         throw new Error('studioTranslateEnToJa missing — run dfx generate fusion-app-backend.');
     }
-    return actor.studioTranslateEnToJa(englishText);
+    const raw = await actor.studioTranslateEnToJa(englishText);
+    return sanitizeLlmTextOutput(raw);
 }
 
 /**
@@ -4410,19 +4578,21 @@ export async function memberTranslateText(sourceText, targetLocale, sourceLocale
     }
     const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
     const actor = await getAuthenticatedFusionBackendActor();
+    /** @type {string} */
+    let raw = '';
     if (actor && typeof actor.memberTranslateText === 'function') {
-        return actor.memberTranslateText(text, target, source);
-    }
-    if (target === 'ja' && source === 'en' && actor && typeof actor.memberTranslateEnToJa === 'function') {
-        return actor.memberTranslateEnToJa(text);
-    }
-    if (actor && typeof actor.memberReinterpretWithPrompt === 'function') {
+        raw = await actor.memberTranslateText(text, target, source);
+    } else if (target === 'ja' && source === 'en' && actor && typeof actor.memberTranslateEnToJa === 'function') {
+        raw = await actor.memberTranslateEnToJa(text);
+    } else if (actor && typeof actor.memberReinterpretWithPrompt === 'function') {
         const targetLabel = target === 'ja' ? 'Japanese' : 'English';
         const sourceLabel = source === 'auto' ? 'the detected source language' : source;
         const prompt = `Translate from ${sourceLabel} to ${targetLabel}. Preserve names, URLs, line breaks, and meaning. Output only the translated text with no commentary.`;
-        return actor.memberReinterpretWithPrompt(prompt, text, target);
+        raw = await actor.memberReinterpretWithPrompt(prompt, text, target);
+    } else {
+        throw new Error('memberTranslateText missing — deploy backend and run dfx generate fusion-app-backend.');
     }
-    throw new Error('memberTranslateText missing — deploy backend and run dfx generate fusion-app-backend.');
+    return sanitizeLlmTextOutput(raw);
 }
 
 /**
@@ -4488,6 +4658,9 @@ export async function buildMergedLocalesWithGeneratedWorld(
     if (!locales.ja || typeof locales.ja !== 'object') locales.ja = {};
     locales.en = { ...locales.en, worldNew: enWorldNew };
     locales.ja = { ...locales.ja, worldNew: jaWorldNew };
+    if (worldFieldHasContent(enWorldNew.practice) || worldFieldHasContent(enWorldNew.context)) {
+        locales.publicWorldSource = 'newWorld';
+    }
     return normalizeLocalesWorldForStorage(locales);
 }
 
@@ -5150,15 +5323,160 @@ export async function deleteApplicantStudio(applicantId) {
  * Staff/admin helper for read-only applicant timeline slot-secured display.
  * @param {string} applicantId
  * @param {string} programId
+ * @param {string} [payloadJson]
  */
-export async function getApplicantSlotSecuredStudio(applicantId, programId) {
+export async function getApplicantSlotSecuredStudio(applicantId, programId, payloadJson = '') {
     const id = String(applicantId || '').trim();
     const pid = String(programId || '').trim();
     if (!id || !pid) return false;
-    if (getDataSource() === 'test') return false;
+    if (getDataSource() === 'test') {
+        return getApplicantManualDepositSubmitted(payloadJson);
+    }
     const actor = await getStudioAuthenticatedActor();
     if (typeof actor.staffIsApplicantSlotSecured !== 'function') return false;
     return Boolean(await actor.staffIsApplicantSlotSecured(id, pid));
+}
+
+/**
+ * After staff marks manual deposit on an applicant, sync linked member payment summary when possible.
+ * @param {string} applicantId
+ */
+export async function syncApplicantManualDepositStudio(applicantId) {
+    const id = String(applicantId || '').trim();
+    if (!id || getDataSource() === 'test') return;
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.staffSyncManualDepositPaymentSummary !== 'function') return;
+    await actor.staffSyncManualDepositPaymentSummary(id, new Date().toISOString());
+}
+
+/**
+ * After staff changes applicant category, sync linked member payment summary when possible.
+ * @param {string} applicantId
+ */
+export async function syncApplicantCategoryPaymentStudio(applicantId) {
+    const id = String(applicantId || '').trim();
+    if (!id || getDataSource() === 'test') return;
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.staffSyncApplicantCategoryPaymentSummary !== 'function') return;
+    await actor.staffSyncApplicantCategoryPaymentSummary(id, new Date().toISOString());
+}
+
+const LS_STAFF_FINANCE_PAYMENTS = 'staffFinancePayments';
+
+/**
+ * Staff Finance Programs: all payment summaries, ledger rows, and plans.
+ * @returns {Promise<{ summaries: object[], ledger: object[], plans: object[] }>}
+ */
+export async function getStaffProgramPaymentsFinanceStudio() {
+    if (getDataSource() === 'test') {
+        const stored = readStudioLs(LS_STAFF_FINANCE_PAYMENTS);
+        if (stored && typeof stored === 'object') {
+            return {
+                summaries: Array.isArray(stored.summaries) ? stored.summaries : [],
+                ledger: Array.isArray(stored.ledger) ? stored.ledger : [],
+                plans: Array.isArray(stored.plans) ? stored.plans : [],
+            };
+        }
+        return { summaries: [], ledger: [], plans: [] };
+    }
+    try {
+        const actor = await getStudioAuthenticatedActor();
+        if (typeof actor.staffGetProgramPaymentsFinanceJson !== 'function') {
+            return { summaries: [], ledger: [], plans: [] };
+        }
+        const raw = await actor.staffGetProgramPaymentsFinanceJson();
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        return {
+            summaries: Array.isArray(parsed?.summaries) ? parsed.summaries : [],
+            ledger: Array.isArray(parsed?.ledger) ? parsed.ledger : [],
+            plans: Array.isArray(parsed?.plans) ? parsed.plans : [],
+        };
+    } catch {
+        return { summaries: [], ledger: [], plans: [] };
+    }
+}
+
+/**
+ * @param {{ applicantId: string, programId: string, amountCents: number, feeCents: number, staffNote?: string, entryKind?: 'fee' | 'travel' }} opts
+ */
+export async function recordStaffManualProgramLedgerStudio(opts) {
+    const applicantId = String(opts.applicantId || '').trim();
+    const programId = String(opts.programId || '').trim();
+    const amountCents = Math.max(0, Math.round(Number(opts.amountCents) || 0));
+    const feeCents = Math.max(0, Math.round(Number(opts.feeCents) || 0));
+    const staffNote = String(opts.staffNote || '').trim();
+    const entryKind = opts.entryKind === 'travel' ? 'travel' : 'fee';
+    const recordedAt = new Date().toISOString();
+    if (!applicantId || !programId || (amountCents === 0 && feeCents === 0)) {
+        throw new Error('Applicant, program, and amount or fee required');
+    }
+    if (getDataSource() === 'test') {
+        const stored = readStudioLs(LS_STAFF_FINANCE_PAYMENTS) || {
+            summaries: [],
+            ledger: [],
+            plans: [],
+        };
+        const rowIdPrefix =
+            amountCents > 0 ? 'staff-manual-' : entryKind === 'travel' ? 'staff-travel-' : 'staff-manual-';
+        const rowId = `${rowIdPrefix}${applicantId}-${recordedAt}`;
+        const paymentType =
+            amountCents > 0 ? 'staff_manual' : entryKind === 'travel' ? 'staff_travel' : 'staff_fee';
+        stored.ledger = Array.isArray(stored.ledger) ? stored.ledger : [];
+        stored.summaries = Array.isArray(stored.summaries) ? stored.summaries : [];
+        stored.ledger.push({
+            id: rowId,
+            principal: 'test-principal',
+            programId,
+            applicationId: applicantId,
+            paymentType,
+            amountCents,
+            feeCents,
+            currency: 'usd',
+            stripePaymentIntentId: '',
+            stripeChargeId: '',
+            stripeReceiptUrl: '',
+            status: 'succeeded',
+            createdAt: recordedAt,
+            staffNote,
+        });
+        let summary = stored.summaries.find((s) => s.applicationId === applicantId);
+        if (!summary) {
+            summary = {
+                key: `${programId}|test`,
+                applicationId: applicantId,
+                programId,
+                depositStatus: amountCents > 0 ? 'paid' : 'due',
+                totalDueCents: 500000,
+                depositAmountCents: 100000,
+                totalPaidCents: 0,
+                outstandingCents: 500000,
+                refundedCents: 0,
+                ownFlight: false,
+            };
+            stored.summaries.push(summary);
+        }
+        summary.totalPaidCents = Math.max(0, Number(summary.totalPaidCents || 0) + amountCents);
+        summary.outstandingCents = Math.max(
+            0,
+            Number(summary.totalDueCents || 500000) - summary.totalPaidCents,
+        );
+        if (amountCents > 0) summary.depositStatus = 'paid';
+        writeStudioLs(LS_STAFF_FINANCE_PAYMENTS, stored);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.staffRecordManualProgramLedgerEntry !== 'function') {
+        throw new Error('staffRecordManualProgramLedgerEntry missing — run dfx generate');
+    }
+    await actor.staffRecordManualProgramLedgerEntry(
+        applicantId,
+        programId,
+        BigInt(amountCents),
+        BigInt(feeCents),
+        staffNote,
+        recordedAt,
+        entryKind,
+    );
 }
 
 /**
@@ -5371,20 +5689,7 @@ function candidOptUnwrap(opt) {
  * @returns {Map<string, { visible: boolean, canEdit: boolean }>}
  */
 function studioPermissionTuplesToMap(tuples) {
-    const map = new Map();
-    if (!Array.isArray(tuples)) return map;
-    for (const row of tuples) {
-        if (!Array.isArray(row) || row.length < 2) continue;
-        const k = String(row[0]);
-        const v = row[1];
-        if (!v || typeof v !== 'object') continue;
-        const o = /** @type {Record<string, unknown>} */ (v);
-        map.set(k, {
-            visible: Boolean(o.visible ?? o.Visible),
-            canEdit: Boolean(o.canEdit ?? o.can_edit ?? o.CanEdit),
-        });
-    }
-    return map;
+    return parseStudioPermissionMatrixTuples(tuples);
 }
 
 /**
@@ -5396,7 +5701,7 @@ export async function getStudioPermissionsMatrixForCaller() {
     const raw = await actor.getStudioPermissionsForCaller();
     const inner = candidOptUnwrap(raw);
     if (inner == null) return null;
-    return studioPermissionTuplesToMap(inner);
+    return mergeStudioPermissionMap(studioPermissionTuplesToMap(inner));
 }
 
 export async function isCallerAdminStudio() {
@@ -5449,6 +5754,52 @@ export async function adminGetStudioPermissionDefaultsStudio(category) {
     const raw = await actor.adminGetStudioPermissionDefaults(String(category || '').trim());
     if (!Array.isArray(raw)) return [];
     return /** @type {Array<[string, { visible: boolean, canEdit: boolean }]>} */ (raw);
+}
+
+/**
+ * @returns {Promise<string[]>}
+ */
+export async function listStudioPermissionFeatureKeysStudio() {
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.listStudioPermissionFeatureKeys !== 'function') {
+        return [];
+    }
+    const raw = await actor.listStudioPermissionFeatureKeys();
+    if (!Array.isArray(raw)) return [];
+    return raw.map((k) => String(k));
+}
+
+/**
+ * @param {string[]} keys
+ * @returns {Promise<string[]>}
+ */
+export async function adminAddStudioPermissionFeatureKeysStudio(keys) {
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminAddStudioPermissionFeatureKeys !== 'function') {
+        throw new Error(
+            'adminAddStudioPermissionFeatureKeys missing — deploy fusion-app-backend and run dfx generate fusion-app-backend.',
+        );
+    }
+    const raw = await actor.adminAddStudioPermissionFeatureKeys(
+        (Array.isArray(keys) ? keys : []).map((k) => String(k).trim()).filter(Boolean),
+    );
+    if (!Array.isArray(raw)) return [];
+    return raw.map((k) => String(k));
+}
+
+/**
+ * @returns {Promise<string[]>}
+ */
+export async function adminMergeDefaultStudioPermissionFeatureKeysStudio() {
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminMergeDefaultStudioPermissionFeatureKeys !== 'function') {
+        throw new Error(
+            'adminMergeDefaultStudioPermissionFeatureKeys missing — deploy fusion-app-backend and run dfx generate fusion-app-backend.',
+        );
+    }
+    const raw = await actor.adminMergeDefaultStudioPermissionFeatureKeys();
+    if (!Array.isArray(raw)) return [];
+    return raw.map((k) => String(k));
 }
 
 /**

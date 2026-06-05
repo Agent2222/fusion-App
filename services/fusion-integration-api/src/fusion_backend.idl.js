@@ -20,6 +20,8 @@ export const idlFactory = ({ IDL }) => {
         status: IDL.Text,
         createdAt: IDL.Text,
         dueAt: IDL.Opt(IDL.Text),
+        feeCents: IDL.Nat,
+        staffNote: IDL.Text,
     });
     const ProgramPaymentPlan = IDL.Record({
         id: IDL.Text,

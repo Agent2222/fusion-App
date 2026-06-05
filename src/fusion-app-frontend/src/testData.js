@@ -39,6 +39,12 @@ export const testData = {
             ],
         },
     },
+    /** Site setting `platformUpdateBanner` — public header notice (test mode; disabled by default). */
+    platformUpdateBanner: {
+        enabled: false,
+        messageEn: "We're updating the platform — please check back soon.",
+        messageJa: 'プラットフォームを更新中です。しばらくしてから再度ご確認ください。',
+    },
     /** Site “current season” program id — compared to each artist’s `mostRecentProgram` (Studio → Programs). */
     currentProgramSeason: 'fusionKaga',
     programHero: {

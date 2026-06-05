@@ -67,7 +67,8 @@ persistent actor {
   /// Applicant id → JSON array of `ApplicantEmailOutreachEntry` (separate from `ApplicantRecord`).
   stable var applicantEmailOutreachStable : [(Text, Text)] = [];
   stable var programPaymentSummariesStable : [(Text, Types.ProgramPaymentSummary)] = [];
-  stable var programPaymentLedgerStable : [(Text, Types.ProgramPaymentLedgerRow)] = [];
+  stable var programPaymentLedgerStable : [(Text, Types.ProgramPaymentLedgerRowV0)] = [];
+  stable var programPaymentLedgerStableV1 : [(Text, Types.ProgramPaymentLedgerRow)] = [];
   stable var programPaymentPlansStable : [(Text, Types.ProgramPaymentPlan)] = [];
   var programPaymentFlightPreferencesStable : [(Text, Types.ProgramPaymentFlightPreference)] = [];
   stable var siteSettingsStable : [(Text, Text)] = [];
@@ -93,6 +94,8 @@ persistent actor {
   /// Studio → Permissions: role-tab defaults (`staff`, …), per-principal overrides, super-staff principals.
   stable var studioPermissionDefaultsStable : [(Text, Types.StudioPermissionMatrix)] = [];
   stable var studioPermissionOverridesStable : [(Principal, Types.StudioPermissionMatrix)] = [];
+  /// Runtime permission matrix feature ids (merged from defaults on upgrade; admins may append).
+  stable var studioFeatureKeys : [Text] = [];
   stable var superStaffPrincipalsStable : [Principal] = [];
   /// Join Fusion / Team tab: name + email per principal (exempt from `UserAccount` core layout).
   stable var accountContactStable : [(Principal, Types.AccountContact)] = [];
@@ -242,6 +245,8 @@ persistent actor {
   transient var studioPermissionOverridesByPrincipal : _HashMap.HashMap<Principal, Types.StudioPermissionMatrix> =
     _HashMap.HashMap<Principal, Types.StudioPermissionMatrix>(0, Principal.equal, Principal.hash);
 
+  transient var studioFeatureKeysActive : [Text] = [];
+
   transient var superStaffPrincipals : _HashMap.HashMap<Principal, Bool> =
     _HashMap.HashMap<Principal, Bool>(0, Principal.equal, Principal.hash);
 
@@ -293,6 +298,19 @@ persistent actor {
     ];
   };
 
+  /// Load program payment ledger into transient map from stable (V1 preferred, else migrate V0).
+  private func reloadProgramPaymentLedgerFromStables() {
+    if (programPaymentLedgerStableV1.size() > 0) {
+      for (entry in programPaymentLedgerStableV1.vals()) {
+        programPaymentLedgerById.put(entry.0, entry.1);
+      };
+    } else {
+      for (entry in programPaymentLedgerStable.vals()) {
+        programPaymentLedgerById.put(entry.0, Types.programPaymentLedgerFromV0(entry.1));
+      };
+    };
+  };
+
   /// Prefer `subscribersV1` (rows with `audiences`); otherwise migrate 5-field `subscribersStable` (legacy).
   private func reloadSubscribersFromStables() {
     subscribersByEmail := _HashMap.HashMap<Text, Types.Subscriber>(
@@ -338,9 +356,7 @@ persistent actor {
   for (entry in programPaymentSummariesStable.vals()) {
     programPaymentSummariesByKey.put(entry.0, entry.1);
   };
-  for (entry in programPaymentLedgerStable.vals()) {
-    programPaymentLedgerById.put(entry.0, entry.1);
-  };
+  reloadProgramPaymentLedgerFromStables();
   for (entry in programPaymentPlansStable.vals()) {
     programPaymentPlansById.put(entry.0, entry.1);
   };
@@ -467,43 +483,99 @@ persistent actor {
   };
 
   /// Sidebar / section ids aligned with Studio frontend (`STUDIO_NAV` + `dashboard`).
-  private let studioFeatureKeys : [Text] = [
-    "dashboard",
-    "home",
-    "subscribers",
-    "applicants",
-    "schedule",
-    "finance",
-    "financePrograms",
-    "financeUsers",
-    "financeProducts",
-    "financePromotions",
-    "travel",
-    "artists",
-    "programs",
-    "products",
-    "gallery-access",
-    "journal",
-    "sound",
-    "content",
-    "community",
-    "email",
-    "ai",
-    "galleries",
-    "collectors",
-    "curators",
-    "users",
-    "services",
-    "settings",
-    "team",
-  ];
+  private func defaultStudioFeatureKeys() : [Text] {
+    [
+      "dashboard",
+      "home",
+      "subscribers",
+      "applicants",
+      "schedule",
+      "finance",
+      "financePrograms",
+      "financeUsers",
+      "financeProducts",
+      "financePromotions",
+      "travel",
+      "pending-approval",
+      "artists",
+      "programs",
+      "products",
+      "gallery-access",
+      "journal",
+      "sound",
+      "content",
+      "community",
+      "email",
+      "ai",
+      "galleries",
+      "collectors",
+      "curators",
+      "users",
+      "services",
+      "settings",
+      "team",
+    ];
+  };
+
+  private func isValidStudioFeatureKeyChar(c : Char) : Bool {
+    let n = Char.toNat32(c);
+    (n >= 97 and n <= 122)
+    or (n >= 65 and n <= 90)
+    or (n >= 48 and n <= 57)
+    or c == '-';
+  };
+
+  private func isValidStudioFeatureKeyFormat(k : Text) : Bool {
+    if (k.size() == 0) {
+      return false;
+    };
+    for (c in k.chars()) {
+      if (not isValidStudioFeatureKeyChar(c)) {
+        return false;
+      };
+    };
+    true;
+  };
+
+  private func mergeUniqueTextKeysSorted(existing : [Text], additions : [Text]) : [Text] {
+    let m = _HashMap.HashMap<Text, Bool>(
+      existing.size() + additions.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (k in existing.vals()) {
+      m.put(k, true);
+    };
+    for (k in additions.vals()) {
+      m.put(k, true);
+    };
+    let keys = _Iter.toArray(m.keys());
+    Array.sort(keys, Text.compare);
+  };
+
+  private func reloadStudioFeatureKeysFromStable() {
+    studioFeatureKeysActive := studioFeatureKeys;
+  };
+
+  /// Ensure every built-in key exists; preserves admin-added keys beyond defaults.
+  private func ensureStudioFeatureKeysMergedWithDefaults() {
+    studioFeatureKeysActive := mergeUniqueTextKeysSorted(
+      studioFeatureKeysActive,
+      defaultStudioFeatureKeys(),
+    );
+    studioFeatureKeys := studioFeatureKeysActive;
+  };
+
+  private func persistStudioFeatureKeysFromActive() {
+    studioFeatureKeys := studioFeatureKeysActive;
+  };
 
   private func defaultOpenStudioAccess() : Types.StudioFeatureAccess {
     { visible = true; canEdit = true };
   };
 
   private func isKnownStudioFeatureKey(k : Text) : Bool {
-    for (x in studioFeatureKeys.vals()) {
+    for (x in studioFeatureKeysActive.vals()) {
       if (x == k) {
         return true;
       };
@@ -523,9 +595,50 @@ persistent actor {
     };
   };
 
+  /// Drop keys the canister build does not recognize (forward-compatible saves from newer Studio UI).
+  private func filterKnownStudioPermissionMatrix(m : Types.StudioPermissionMatrix) : Types.StudioPermissionMatrix {
+    Array.filter<(Text, Types.StudioFeatureAccess)>(
+      m,
+      func(e : (Text, Types.StudioFeatureAccess)) : Bool {
+        isKnownStudioFeatureKey(e.0);
+      },
+    );
+  };
+
+  /// Return access for `key` when present in `m`, else null (no implicit open default).
+  private func accessInMatrixOpt(m : Types.StudioPermissionMatrix, key : Text) : ?Types.StudioFeatureAccess {
+    for (e in m.vals()) {
+      if (e.0 == key) {
+        return ?e.1;
+      };
+    };
+    null;
+  };
+
+  /// Apply `patch` entries onto `existing`; keys omitted from `patch` keep prior values.
+  private func applyPermissionMatrixPatch(
+    existing : Types.StudioPermissionMatrix,
+    patch : Types.StudioPermissionMatrix,
+  ) : Types.StudioPermissionMatrix {
+    Array.map<Text, (Text, Types.StudioFeatureAccess)>(
+      studioFeatureKeysActive,
+      func(k : Text) : (Text, Types.StudioFeatureAccess) {
+        switch (accessInMatrixOpt(patch, k)) {
+          case (?acc) { (k, acc) };
+          case null {
+            switch (accessInMatrixOpt(existing, k)) {
+              case (?acc) { (k, acc) };
+              case null { (k, defaultOpenStudioAccess()) };
+            };
+          };
+        };
+      },
+    );
+  };
+
   private func fullOpenPermissionMatrix() : Types.StudioPermissionMatrix {
     Array.map<Text, (Text, Types.StudioFeatureAccess)>(
-      studioFeatureKeys,
+      studioFeatureKeysActive,
       func(k : Text) : (Text, Types.StudioFeatureAccess) {
         (k, defaultOpenStudioAccess());
       },
@@ -534,7 +647,7 @@ persistent actor {
 
   private func allClosedPermissionMatrix() : Types.StudioPermissionMatrix {
     Array.map<Text, (Text, Types.StudioFeatureAccess)>(
-      studioFeatureKeys,
+      studioFeatureKeysActive,
       func(k : Text) : (Text, Types.StudioFeatureAccess) {
         (k, { visible = false; canEdit = false });
       },
@@ -548,6 +661,44 @@ persistent actor {
       };
     };
     defaultOpenStudioAccess();
+  };
+
+  /// Fill every known feature key; missing stored entries use `defaultOpenStudioAccess()`.
+  private func mergePermissionMatrixWithKnownKeys(stored : Types.StudioPermissionMatrix) : Types.StudioPermissionMatrix {
+    Array.map<Text, (Text, Types.StudioFeatureAccess)>(
+      studioFeatureKeysActive,
+      func(k : Text) : (Text, Types.StudioFeatureAccess) {
+        (k, matrixAccess(stored, k));
+      },
+    );
+  };
+
+  /// Per-principal override: explicit override wins; otherwise inherit merged role default.
+  private func mergeOverrideOnRoleBase(
+    roleBase : Types.StudioPermissionMatrix,
+    overridePartial : Types.StudioPermissionMatrix,
+  ) : Types.StudioPermissionMatrix {
+    Array.map<Text, (Text, Types.StudioFeatureAccess)>(
+      studioFeatureKeysActive,
+      func(k : Text) : (Text, Types.StudioFeatureAccess) {
+        for (e in overridePartial.vals()) {
+          if (e.0 == k) {
+            return (k, e.1);
+          };
+        };
+        (k, matrixAccess(roleBase, k));
+      },
+    );
+  };
+
+  /// Upgrade path: ensure stored category defaults and overrides include all current keys.
+  private func migrateStudioPermissionMatrices() {
+    for ((cat, m) in studioPermissionDefaultsByCategory.entries()) {
+      studioPermissionDefaultsByCategory.put(cat, mergePermissionMatrixWithKnownKeys(m));
+    };
+    for ((p, m) in studioPermissionOverridesByPrincipal.entries()) {
+      studioPermissionOverridesByPrincipal.put(p, mergePermissionMatrixWithKnownKeys(m));
+    };
   };
 
   private func roleToPermissionCategory(role : Types.UserRole) : Text {
@@ -600,6 +751,7 @@ persistent actor {
 
   /// Rebuild permission-related transient maps from their stable snapshots (install / upgrade / import).
   private func reloadStudioPermissionTransientFromStable() {
+    reloadStudioFeatureKeysFromStable();
     studioPermissionDefaultsByCategory := _HashMap.HashMap<Text, Types.StudioPermissionMatrix>(
       studioPermissionDefaultsStable.size(),
       Text.equal,
@@ -641,6 +793,7 @@ persistent actor {
   private func runInstallTransientReloadAndIndex() {
     reloadAccountContactTransientFromStable();
     reloadStudioPermissionTransientFromStable();
+    ensureStudioFeatureKeysMergedWithDefaults();
     seedStudioPermissionDefaultsIfEmpty();
     rebuildAccessCodeToArtistIdIndex();
   };
@@ -934,12 +1087,13 @@ persistent actor {
           return ?allClosedPermissionMatrix();
         };
         let cat = roleToPermissionCategory(acc.role);
-        let base = switch (studioPermissionDefaultsByCategory.get(cat)) {
+        let baseRaw = switch (studioPermissionDefaultsByCategory.get(cat)) {
           case (?m) { m };
           case null { fullOpenPermissionMatrix() };
         };
+        let base = mergePermissionMatrixWithKnownKeys(baseRaw);
         switch (studioPermissionOverridesByPrincipal.get(caller)) {
-          case (?o) { ?o };
+          case (?o) { ?mergeOverrideOnRoleBase(base, o) };
           case null { ?base };
         };
       };
@@ -961,6 +1115,22 @@ persistent actor {
     };
   };
 
+  private func assertStudioFeatureVisibleEither(caller : Principal, k1 : Text, k2 : Text) {
+    if (isAdminPrincipal(caller) or isSuperStaffPrincipal(caller)) {
+      return;
+    };
+    switch (effectiveStudioMatrixForCaller(caller)) {
+      case null { return };
+      case (?m) {
+        let a1 = matrixAccess(m, k1);
+        let a2 = matrixAccess(m, k2);
+        if (not a1.visible and not a2.visible) {
+          Debug.trap("Studio feature not visible: " # k1 # " or " # k2);
+        };
+      };
+    };
+  };
+
   private func assertStudioFeatureEdit(caller : Principal, featureKey : Text) {
     if (isAdminPrincipal(caller) or isSuperStaffPrincipal(caller)) {
       return;
@@ -971,6 +1141,22 @@ persistent actor {
         let a = matrixAccess(m, featureKey);
         if (not a.canEdit) {
           Debug.trap("Studio feature not editable: " # featureKey);
+        };
+      };
+    };
+  };
+
+  private func assertStudioFeatureEditEither(caller : Principal, k1 : Text, k2 : Text) {
+    if (isAdminPrincipal(caller) or isSuperStaffPrincipal(caller)) {
+      return;
+    };
+    switch (effectiveStudioMatrixForCaller(caller)) {
+      case null { return };
+      case (?m) {
+        let a1 = matrixAccess(m, k1);
+        let a2 = matrixAccess(m, k2);
+        if (not a1.canEdit and not a2.canEdit) {
+          Debug.trap("Studio feature not editable: " # k1 # " or " # k2);
         };
       };
     };
@@ -1064,13 +1250,40 @@ persistent actor {
     effectiveStudioMatrixForCaller(msg.caller);
   };
 
+  /// Studio UI: feature ids this canister accepts in permission matrices.
+  public query func listStudioPermissionFeatureKeys() : async [Text] {
+    studioFeatureKeysActive;
+  };
+
+  /// Admin: append permission feature keys at runtime (lowercase, camelCase, digits, hyphen).
+  public shared (msg) func adminAddStudioPermissionFeatureKeys(keys : [Text]) : async [Text] {
+    assertAdminOrSuperStaffConfigure(msg.caller);
+    for (k in keys.vals()) {
+      if (not isValidStudioFeatureKeyFormat(k)) {
+        Debug.trap("Invalid studio feature key format: " # k);
+      };
+    };
+    studioFeatureKeysActive := mergeUniqueTextKeysSorted(studioFeatureKeysActive, keys);
+    persistStudioFeatureKeysFromActive();
+    migrateStudioPermissionMatrices();
+    studioFeatureKeysActive;
+  };
+
+  /// Admin: merge built-in default keys into the runtime list (safe after wasm upgrades).
+  public shared (msg) func adminMergeDefaultStudioPermissionFeatureKeys() : async [Text] {
+    assertAdminOrSuperStaffConfigure(msg.caller);
+    ensureStudioFeatureKeysMergedWithDefaults();
+    migrateStudioPermissionMatrices();
+    studioFeatureKeysActive;
+  };
+
   public shared query (msg) func adminGetStudioPermissionDefaults(category : Text) : async Types.StudioPermissionMatrix {
     assertAdminOrSuperStaffConfigure(msg.caller);
     if (not isKnownPermissionCategory(category)) {
       Debug.trap("Unknown permission category");
     };
     switch (studioPermissionDefaultsByCategory.get(category)) {
-      case (?m) { m };
+      case (?m) { mergePermissionMatrixWithKnownKeys(m) };
       case null { fullOpenPermissionMatrix() };
     };
   };
@@ -1080,8 +1293,16 @@ persistent actor {
     if (not isKnownPermissionCategory(category)) {
       Debug.trap("Unknown permission category");
     };
-    validateStudioPermissionMatrix(matrix);
-    studioPermissionDefaultsByCategory.put(category, matrix);
+    validateStudioPermissionMatrix(filterKnownStudioPermissionMatrix(matrix));
+    let filtered = filterKnownStudioPermissionMatrix(matrix);
+    let existing = switch (studioPermissionDefaultsByCategory.get(category)) {
+      case (?m) { m };
+      case null { [] };
+    };
+    studioPermissionDefaultsByCategory.put(
+      category,
+      mergePermissionMatrixWithKnownKeys(applyPermissionMatrixPatch(existing, filtered)),
+    );
   };
 
   public shared query (msg) func adminGetStudioPermissionOverride(p : Principal) : async ?Types.StudioPermissionMatrix {
@@ -1091,8 +1312,16 @@ persistent actor {
 
   public shared (msg) func adminSetStudioPermissionOverride(p : Principal, matrix : Types.StudioPermissionMatrix) : async () {
     assertAdminOrSuperStaffConfigure(msg.caller);
-    validateStudioPermissionMatrix(matrix);
-    studioPermissionOverridesByPrincipal.put(p, matrix);
+    validateStudioPermissionMatrix(filterKnownStudioPermissionMatrix(matrix));
+    let filtered = filterKnownStudioPermissionMatrix(matrix);
+    let existing = switch (studioPermissionOverridesByPrincipal.get(p)) {
+      case (?m) { m };
+      case null { [] };
+    };
+    studioPermissionOverridesByPrincipal.put(
+      p,
+      mergePermissionMatrixWithKnownKeys(applyPermissionMatrixPatch(existing, filtered)),
+    );
   };
 
   public shared (msg) func adminClearStudioPermissionOverride(p : Principal) : async () {
@@ -1148,7 +1377,8 @@ persistent actor {
     applicantsStable := _Iter.toArray(applicantsById.entries());
     archivedApplicantsStable := _Iter.toArray(archivedApplicantsById.entries());
     programPaymentSummariesStable := _Iter.toArray(programPaymentSummariesByKey.entries());
-    programPaymentLedgerStable := _Iter.toArray(programPaymentLedgerById.entries());
+    programPaymentLedgerStableV1 := _Iter.toArray(programPaymentLedgerById.entries());
+    programPaymentLedgerStable := [];
     programPaymentPlansStable := _Iter.toArray(programPaymentPlansById.entries());
     programPaymentFlightPreferencesStable := _Iter.toArray(programPaymentFlightPreferencesByKey.entries());
     siteSettingsStable := _Iter.toArray(siteSettingsByKey.entries());
@@ -1162,6 +1392,7 @@ persistent actor {
     artistMediaStable := _Iter.toArray(artistMediaByArtistId.entries());
     studioPermissionDefaultsStable := _Iter.toArray(studioPermissionDefaultsByCategory.entries());
     studioPermissionOverridesStable := _Iter.toArray(studioPermissionOverridesByPrincipal.entries());
+    studioFeatureKeys := studioFeatureKeysActive;
     superStaffPrincipalsStable := superStaffPrincipalsAsArray();
     accountContactStable := _Iter.toArray(accountContactByPrincipal.entries());
     artistHeroProfileImageStable := _Iter.toArray(artistHeroProfileImageById.entries());
@@ -1352,10 +1583,9 @@ persistent actor {
     programPaymentSummariesStable := [];
 
     programPaymentLedgerById := _HashMap.HashMap<Text, Types.ProgramPaymentLedgerRow>(0, Text.equal, Text.hash);
-    for (entry in programPaymentLedgerStable.vals()) {
-      programPaymentLedgerById.put(entry.0, entry.1);
-    };
+    reloadProgramPaymentLedgerFromStables();
     programPaymentLedgerStable := [];
+    programPaymentLedgerStableV1 := [];
 
     programPaymentPlansById := _HashMap.HashMap<Text, Types.ProgramPaymentPlan>(0, Text.equal, Text.hash);
     for (entry in programPaymentPlansStable.vals()) {
@@ -1404,6 +1634,8 @@ persistent actor {
     artistFeaturedManualIdsStable := [];
 
     reloadStudioPermissionTransientFromStable();
+    ensureStudioFeatureKeysMergedWithDefaults();
+    migrateStudioPermissionMatrices();
     studioPermissionDefaultsStable := [];
     studioPermissionOverridesStable := [];
     superStaffPrincipalsStable := [];
@@ -1544,9 +1776,7 @@ persistent actor {
     };
 
     programPaymentLedgerById := _HashMap.HashMap<Text, Types.ProgramPaymentLedgerRow>(0, Text.equal, Text.hash);
-    for (entry in programPaymentLedgerStable.vals()) {
-      programPaymentLedgerById.put(entry.0, entry.1);
-    };
+    reloadProgramPaymentLedgerFromStables();
 
     programPaymentPlansById := _HashMap.HashMap<Text, Types.ProgramPaymentPlan>(0, Text.equal, Text.hash);
     for (entry in programPaymentPlansStable.vals()) {
@@ -1597,7 +1827,9 @@ persistent actor {
     };
 
     reloadStudioPermissionTransientFromStable();
+    ensureStudioFeatureKeysMergedWithDefaults();
     seedStudioPermissionDefaultsIfEmpty();
+    migrateStudioPermissionMatrices();
 
     reloadAccountContactTransientFromStable();
 
@@ -1683,6 +1915,10 @@ persistent actor {
       case (?rows) { rows };
     };
     programPaymentLedgerStable := switch (snapshot.programPaymentLedgerStable) {
+      case null { [] };
+      case (?rows) { [] };
+    };
+    programPaymentLedgerStableV1 := switch (snapshot.programPaymentLedgerStable) {
       case null { [] };
       case (?rows) { rows };
     };
@@ -2034,8 +2270,15 @@ persistent actor {
             };
             putUserAccountParts(core, m, msg.caller);
             accountContactByPrincipal.put(msg.caller, contact);
+            let contactEmail = if (Text.size(rec.profile.contactEmail) == 0) {
+              email;
+            } else {
+              rec.profile.contactEmail;
+            };
             let cleared : Types.ArtistRecord = {
-              rec with accessCode = "";
+              rec with
+              accessCode = "";
+              profile = { rec.profile with contactEmail = contactEmail };
             };
             putArtistRecord(cleared);
             return #ok;
@@ -2047,6 +2290,30 @@ persistent actor {
 
   /// Self-service: when membership is active (`#ok` or `#exempt`), create a minimal public roster row
   /// and set `linkedArtistId`. Idempotent if already linked. Used by profile settings + post-payment flows.
+  private func accountContactEmailForPrincipal(p : Principal) : Text {
+    switch (accountContactByPrincipal.get(p)) {
+      case null { "" };
+      case (?c) { c.email };
+    };
+  };
+
+  private func backfillArtistContactEmailIfEmpty(artistId : Text, email : Text) {
+    if (Text.size(email) == 0) {
+      return;
+    };
+    switch (artistsById.get(artistId)) {
+      case null {};
+      case (?rec) {
+        if (Text.size(rec.profile.contactEmail) == 0) {
+          let updated : Types.ArtistRecord = {
+            rec with profile = { rec.profile with contactEmail = email };
+          };
+          putArtistRecord(updated);
+        };
+      };
+    };
+  };
+
   public shared (msg) func ensureMyLinkedArtistProfile() : async Types.EnsureLinkedProfileResult {
     if (Principal.equal(msg.caller, anonPrincipal)) {
       return #noAccount;
@@ -2055,7 +2322,10 @@ persistent actor {
       case null { return #noAccount };
       case (?acc) {
         switch (acc.linkedArtistId) {
-          case (?_) { return #alreadyLinked };
+          case (?aid) {
+            backfillArtistContactEmailIfEmpty(aid, accountContactEmailForPrincipal(msg.caller));
+            return #alreadyLinked;
+          };
           case null {};
         };
         switch (membershipAccessForPrincipal(msg.caller)) {
@@ -2067,8 +2337,10 @@ persistent actor {
         let pidText = Principal.toText(msg.caller);
         let artistId = "m-" # pidText;
         let now = nowText();
+        let contactEmail = accountContactEmailForPrincipal(msg.caller);
         switch (artistsById.get(artistId)) {
           case (?_) {
+            backfillArtistContactEmailIfEmpty(artistId, contactEmail);
             let newCore : Types.UserAccountCore = {
               acc with
               linkedArtistId = ?artistId;
@@ -2087,7 +2359,7 @@ persistent actor {
           featuredOrder = fo;
           visibility = "inactive";
           updatedAt = now;
-          contactEmail = "";
+          contactEmail = contactEmail;
           filter = null;
           galleryFilter = null;
         };
@@ -2491,6 +2763,7 @@ persistent actor {
               # ",\"email\":" # jsonText(rec.email)
               # ",\"fullName\":" # jsonText(rec.fullName)
               # ",\"createdAt\":" # jsonText(rec.createdAt)
+              # ",\"applicantCategory\":" # jsonText(applicantCategoryFromPayloadJson(rec.payloadJson))
               # "}";
           };
           case _ {};
@@ -2523,14 +2796,10 @@ persistent actor {
       case null { false };
       case (?pref) { pref.ownFlight };
     };
-    let flightCreditCents = switch (flightPreference) {
-      case null { 0 };
-      case (?pref) { pref.flightCreditCents };
-    };
-    let effectiveTotalDueCents = switch (flightPreference) {
-      case null { s.totalDueCents };
-      case (?pref) { pref.totalDueCents };
-    };
+    let category = applicantCategoryForApplicationId(s.applicationId);
+    let categoryDiscountCents = if (category == "veteran") { PROGRAM_VETERAN_DISCOUNT_CENTS } else { 0 };
+    let flightCreditCents = if (ownFlight) { PROGRAM_OWN_FLIGHT_CREDIT_CENTS } else { 0 };
+    let effectiveTotalDueCents = memberProgramTotalDueCents(category, ownFlight);
     let effectiveOutstandingCents = natSubFloor(effectiveTotalDueCents, s.totalPaidCents);
     "{"
       # "\"key\":" # jsonText(s.key)
@@ -2545,6 +2814,8 @@ persistent actor {
       # ",\"refundedCents\":" # Nat.toText(s.refundedCents)
       # ",\"ownFlight\":" # jsonBool(ownFlight)
       # ",\"flightCreditCents\":" # Nat.toText(flightCreditCents)
+      # ",\"applicantCategory\":" # jsonText(category)
+      # ",\"categoryDiscountCents\":" # Nat.toText(categoryDiscountCents)
       # ",\"activePlanId\":" # optJsonText(s.activePlanId)
       # ",\"updatedAt\":" # jsonText(s.updatedAt)
       # "}";
@@ -2565,6 +2836,8 @@ persistent actor {
       # ",\"status\":" # jsonText(row.status)
       # ",\"createdAt\":" # jsonText(row.createdAt)
       # ",\"dueAt\":" # optJsonText(row.dueAt)
+      # ",\"feeCents\":" # Nat.toText(row.feeCents)
+      # ",\"staffNote\":" # jsonText(row.staffNote)
       # "}";
   };
 
@@ -2631,6 +2904,130 @@ persistent actor {
       # ",\"ledger\":" # ledger
       # ",\"plans\":" # plans
       # "}";
+  };
+
+  /// Staff Finance Programs: all program payment summaries, ledger rows, and plans.
+  public shared query (msg) func staffGetProgramPaymentsFinanceJson() : async Text {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "financePrograms");
+    var summaries : Text = "[";
+    var firstSummary = true;
+    for ((_, s) in programPaymentSummariesByKey.entries()) {
+      if (not firstSummary) { summaries := summaries # "," };
+      firstSummary := false;
+      summaries := summaries # programPaymentSummaryJson(s);
+    };
+    summaries := summaries # "]";
+
+    var ledger : Text = "[";
+    var firstLedger = true;
+    for ((_, row) in programPaymentLedgerById.entries()) {
+      if (not firstLedger) { ledger := ledger # "," };
+      firstLedger := false;
+      ledger := ledger # programPaymentLedgerJson(row);
+    };
+    ledger := ledger # "]";
+
+    var plans : Text = "[";
+    var firstPlan = true;
+    for ((_, plan) in programPaymentPlansById.entries()) {
+      if (not firstPlan) { plans := plans # "," };
+      firstPlan := false;
+      plans := plans # programPaymentPlanJson(plan);
+    };
+    plans := plans # "]";
+
+    "{\"summaries\":" # summaries # ",\"ledger\":" # ledger # ",\"plans\":" # plans # "}";
+  };
+
+  private func effectiveTotalDueForStaffLedger(
+    principal : Principal,
+    programId : Text,
+    applicationId : Text,
+  ) : Nat {
+    let key = programPaymentKey(principal, programId);
+    let category = applicantCategoryForApplicationId(applicationId);
+    let flightPref = programPaymentFlightPreferencesByKey.get(key);
+    let ownFlight = switch (flightPref) {
+      case null { false };
+      case (?pref) { pref.ownFlight };
+    };
+    switch (flightPref) {
+      case (?pref) {
+        if (pref.totalDueCents > 0) { pref.totalDueCents } else { memberProgramTotalDueCents(category, ownFlight) };
+      };
+      case null {
+        switch (programPaymentSummariesByKey.get(key)) {
+          case (?s) {
+            if (s.totalDueCents > 0) { s.totalDueCents } else { memberProgramTotalDueCents(category, ownFlight) };
+          };
+          case null { memberProgramTotalDueCents(category, ownFlight) };
+        };
+      };
+    };
+  };
+
+  public shared (msg) func staffRecordManualProgramLedgerEntry(
+    applicantId : Text,
+    programId : Text,
+    amountCents : Nat,
+    feeCents : Nat,
+    staffNote : Text,
+    recordedAt : Text,
+    entryKind : Text,
+  ) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "financePrograms");
+    if (applicantId.size() == 0 or programId.size() == 0) {
+      Debug.trap("applicantId and programId required");
+    };
+    if (amountCents == 0 and feeCents == 0) {
+      Debug.trap("amountCents or feeCents required");
+    };
+    let artistId = applicantArtistId(applicantId);
+    let principal = switch (principalForArtistId(artistId)) {
+      case null { Debug.trap("Linked member account required for manual ledger entry") };
+      case (?p) { p };
+    };
+    let rowIdPrefix =
+      if (amountCents > 0) { "staff-manual-" }
+      else if (entryKind == "travel") { "staff-travel-" }
+      else { "staff-manual-" };
+    let rowId = rowIdPrefix # applicantId # "-" # recordedAt;
+    switch (programPaymentLedgerById.get(rowId)) {
+      case (?_) { return };
+      case null {};
+    };
+    let paymentType =
+      if (amountCents > 0) { "staff_manual" }
+      else if (entryKind == "travel") { "staff_travel" }
+      else { "staff_fee" };
+    let row : Types.ProgramPaymentLedgerRow = {
+      id = rowId;
+      principal = principal;
+      programId = programId;
+      applicationId = applicantId;
+      paymentType = paymentType;
+      amountCents = amountCents;
+      currency = "usd";
+      stripePaymentIntentId = "";
+      stripeChargeId = "";
+      stripeReceiptUrl = "";
+      status = "succeeded";
+      createdAt = recordedAt;
+      dueAt = null;
+      feeCents = feeCents;
+      staffNote = staffNote;
+    };
+    let totalDueCents = effectiveTotalDueForStaffLedger(principal, programId, applicantId);
+    let depositAmountCents = switch (programPaymentSummariesByKey.get(programPaymentKey(principal, programId))) {
+      case (?s) {
+        if (s.depositAmountCents > 0) { s.depositAmountCents } else { 100000 };
+      };
+      case null { 100000 };
+    };
+    programPaymentLedgerById.put(rowId, row);
+    putProgramPaymentSummaryFromLedger(row, totalDueCents, depositAmountCents, 0);
   };
 
   private func setProgramMemberExempt(memberPrincipal : Principal, exempt : Bool) {
@@ -2827,8 +3224,9 @@ persistent actor {
     if (not hasAcceptedApplicantForProgram(msg.caller, programId)) {
       Debug.trap("Accepted program application required");
     };
-    let flightCreditCents = if (ownFlight) { 80000 } else { 0 };
-    let totalDueCents = if (ownFlight) { 420000 } else { 500000 };
+    let category = applicantCategoryForApplicationId(applicationId);
+    let flightCreditCents = if (ownFlight) { PROGRAM_OWN_FLIGHT_CREDIT_CENTS } else { 0 };
+    let totalDueCents = memberProgramTotalDueCents(category, ownFlight);
     putProgramPaymentFlightPreference(msg.caller, programId, applicationId, ownFlight, flightCreditCents, totalDueCents, updatedAt, false);
   };
 
@@ -3384,7 +3782,7 @@ persistent actor {
   /// Staff/admin: full records including `imported` and `accessCode` (for Studio roster).
   public shared (msg) func listArtistRecordsForStudio() : async [Types.ArtistRecord] {
     assertStaffOrAdmin(msg.caller);
-    assertStudioFeatureVisible(msg.caller, "artists");
+    assertStudioFeatureVisibleEither(msg.caller, "artists", "pending-approval");
     _Iter.toArray(artistsById.vals());
   };
 
@@ -3515,7 +3913,7 @@ persistent actor {
 
   public shared (msg) func upsertArtist(record : Types.ArtistRecord, heroProfileImage : Text) : async () {
     assertStaffOrAdmin(msg.caller);
-    assertStudioFeatureEdit(msg.caller, "artists");
+    assertStudioFeatureEditEither(msg.caller, "artists", "pending-approval");
     putArtistRecord(record);
     setHeroProfileImageForArtist(record.profile.id, heroProfileImage);
   };
@@ -4009,9 +4407,157 @@ persistent actor {
     };
   };
 
+  private let PROGRAM_RESIDENCY_BASE_TOTAL_CENTS : Nat = 500000;
+  private let PROGRAM_OWN_FLIGHT_CREDIT_CENTS : Nat = 80000;
+  private let PROGRAM_VETERAN_DISCOUNT_CENTS : Nat = 100000;
+
+  private func applicantCategoryFromPayloadJson(payloadJson : Text) : Text {
+    let cat = extractJsonStringField(payloadJson, "staffApplicantCategory");
+    if (cat == "veteran" or cat == "veteranPlusPlus" or cat == "sponsored" or cat == "extSponsored") {
+      cat
+    } else {
+      "general"
+    };
+  };
+
+  private func applicantCategoryForApplicationId(applicationId : Text) : Text {
+    let recOpt = switch (applicantsById.get(applicationId)) {
+      case (?rec) { ?rec };
+      case null { archivedApplicantsById.get(applicationId) };
+    };
+    switch (recOpt) {
+      case null { "general" };
+      case (?rec) { applicantCategoryFromPayloadJson(rec.payloadJson) };
+    };
+  };
+
+  private func memberProgramTotalDueCents(category : Text, ownFlight : Bool) : Nat {
+    let categoryDiscount : Nat = if (category == "veteran") { PROGRAM_VETERAN_DISCOUNT_CENTS } else { 0 };
+    let flightCredit : Nat = if (ownFlight) { PROGRAM_OWN_FLIGHT_CREDIT_CENTS } else { 0 };
+    let sum = categoryDiscount + flightCredit;
+    if (PROGRAM_RESIDENCY_BASE_TOTAL_CENTS > sum) {
+      PROGRAM_RESIDENCY_BASE_TOTAL_CENTS - sum
+    } else {
+      0
+    };
+  };
+
+  private func staffRecomputeApplicantCategoryPaymentSummary(
+    applicantId : Text,
+    programId : Text,
+    updatedAt : Text,
+  ) {
+    let artistId = applicantArtistId(applicantId);
+    let principal = switch (principalForArtistId(artistId)) {
+      case null { return };
+      case (?p) { p };
+    };
+    let key = programPaymentKey(principal, programId);
+    let category = applicantCategoryForApplicationId(applicantId);
+    let flightPref = programPaymentFlightPreferencesByKey.get(key);
+    let ownFlight = switch (flightPref) {
+      case null { false };
+      case (?pref) { pref.ownFlight };
+    };
+    let totalDueCents = memberProgramTotalDueCents(category, ownFlight);
+    let flightCreditCents = if (ownFlight) { PROGRAM_OWN_FLIGHT_CREDIT_CENTS } else { 0 };
+    switch (flightPref) {
+      case (?pref) {
+        programPaymentFlightPreferencesByKey.put(key, {
+          pref with
+          applicationId = applicantId;
+          totalDueCents = totalDueCents;
+          flightCreditCents = flightCreditCents;
+          updatedAt = updatedAt;
+        });
+      };
+      case null {};
+    };
+    switch (programPaymentSummariesByKey.get(key)) {
+      case null { return };
+      case (?summary) {
+        let outstanding = natSubFloor(totalDueCents, summary.totalPaidCents);
+        programPaymentSummariesByKey.put(key, {
+          summary with
+          applicationId = applicantId;
+          totalDueCents = totalDueCents;
+          outstandingCents = outstanding;
+          updatedAt = updatedAt;
+        });
+      };
+    };
+  };
+
+  private func applicantRecordHasManualDepositSubmitted(applicantId : Text) : Bool {
+    let recOpt = switch (applicantsById.get(applicantId)) {
+      case (?rec) { ?rec };
+      case null { archivedApplicantsById.get(applicantId) };
+    };
+    switch (recOpt) {
+      case (?rec) {
+        let p = rec.payloadJson;
+        Text.contains(p, #text "\"manualDepositSubmitted\":true")
+        or Text.contains(p, #text "\"manualDepositSubmitted\": true");
+      };
+      case null { false };
+    };
+  };
+
+  private func staffMarkManualDepositPaymentSummary(
+    applicantId : Text,
+    programId : Text,
+    updatedAt : Text,
+  ) {
+    let artistId = applicantArtistId(applicantId);
+    let principal = switch (principalForArtistId(artistId)) {
+      case null { return };
+      case (?p) { p };
+    };
+    let key = programPaymentKey(principal, programId);
+    let category = applicantCategoryForApplicationId(applicantId);
+    let totalDefault = memberProgramTotalDueCents(category, false);
+    let depositDefault : Nat = 100000;
+    let outstandingDefault = if (totalDefault > depositDefault) { totalDefault - depositDefault } else { 0 };
+    let prior = switch (programPaymentSummariesByKey.get(key)) {
+      case null {
+        {
+          key = key;
+          principal = principal;
+          programId = programId;
+          applicationId = applicantId;
+          depositStatus = "paid";
+          totalDueCents = totalDefault;
+          depositAmountCents = depositDefault;
+          totalPaidCents = depositDefault;
+          outstandingCents = outstandingDefault;
+          refundedCents = 0;
+          activePlanId = null;
+          updatedAt = updatedAt;
+        };
+      };
+      case (?s) {
+        let paid = s.totalPaidCents;
+        let deposit = if (s.depositAmountCents > 0) { s.depositAmountCents } else { depositDefault };
+        let total = memberProgramTotalDueCents(category, false);
+        let outstanding = if (total > paid) { total - paid } else { 0 };
+        {
+          s with
+          depositStatus = "paid";
+          depositAmountCents = deposit;
+          totalDueCents = total;
+          totalPaidCents = if (paid > 0) { paid } else { deposit };
+          outstandingCents = outstanding;
+          updatedAt = updatedAt;
+        };
+      };
+    };
+    programPaymentSummariesByKey.put(key, prior);
+  };
+
   public shared query (msg) func staffIsApplicantSlotSecured(applicantId : Text, programId : Text) : async Bool {
     assertStaffOrAdmin(msg.caller);
     assertStudioFeatureVisible(msg.caller, "applicants");
+    if (applicantRecordHasManualDepositSubmitted(applicantId)) return true;
     let artistId = applicantArtistId(applicantId);
     let principal = switch (principalForArtistId(artistId)) {
       case null { return false };
@@ -4084,6 +4630,29 @@ persistent actor {
     };
     ignore applicantEmailOutreachById.remove(applicantId);
     removedApplicant or removedArchived or removedApplication;
+  };
+
+  public shared (msg) func staffSyncManualDepositPaymentSummary(applicantId : Text, updatedAt : Text) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "applicants");
+    if (not applicantRecordHasManualDepositSubmitted(applicantId)) return;
+    switch (applicantsById.get(applicantId)) {
+      case null { return };
+      case (?rec) {
+        staffMarkManualDepositPaymentSummary(applicantId, rec.programId, updatedAt);
+      };
+    };
+  };
+
+  public shared (msg) func staffSyncApplicantCategoryPaymentSummary(applicantId : Text, updatedAt : Text) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "applicants");
+    switch (applicantsById.get(applicantId)) {
+      case null { return };
+      case (?rec) {
+        staffRecomputeApplicantCategoryPaymentSummary(applicantId, rec.programId, updatedAt);
+      };
+    };
   };
 
   public shared query (msg) func listApplicantEmailOutreach() : async [(Text, Text)] {
@@ -4182,6 +4751,15 @@ persistent actor {
     assertContactFieldLen(contact.lastName);
     assertContactFieldLen(contact.email);
     accountContactByPrincipal.put(msg.caller, contact);
+    switch (accountsByPrincipal.get(msg.caller)) {
+      case null {};
+      case (?acc) {
+        switch (acc.linkedArtistId) {
+          case null {};
+          case (?aid) { backfillArtistContactEmailIfEmpty(aid, contact.email) };
+        };
+      };
+    };
   };
 
   // ===== Queries: subscribers =====

@@ -2,8 +2,20 @@
  * Normalizes `locales.*.world` text fields that may be string or string[] in seed data.
  * @see docs/profile-schema.md
  */
+import { isLlmFailureText } from './llmTextSanitize.js';
 
 const WORLD_ARRAY_KEYS = ['perspective', 'vision', 'constructing', 'context'];
+
+/**
+ * @param {string} s
+ * @returns {boolean}
+ */
+function isUsableParagraph(s) {
+    const t = String(s ?? '').trim();
+    if (!t || isLlmFailureText(t)) return false;
+    if (/Registered in\s*\)\.?$/i.test(t)) return false;
+    return true;
+}
 
 /**
  * Turn a polymorphic world text field into paragraph strings for UI.
@@ -12,8 +24,11 @@ const WORLD_ARRAY_KEYS = ['perspective', 'vision', 'constructing', 'context'];
  */
 export function worldTextToParagraphs(raw) {
     if (raw == null || raw === '') return [];
-    if (Array.isArray(raw)) return raw.map((x) => String(x)).filter(Boolean);
-    return [String(raw)];
+    if (Array.isArray(raw)) {
+        return raw.map((x) => String(x)).filter(isUsableParagraph);
+    }
+    const s = String(raw).trim();
+    return isUsableParagraph(s) ? [s] : [];
 }
 
 /**

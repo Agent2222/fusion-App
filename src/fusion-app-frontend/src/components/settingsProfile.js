@@ -37,6 +37,10 @@ import {
   worldFieldToTextarea,
 } from "../utils/memberProfileForm.js";
 import { publicSlugFromEnglishFirstLast } from "../utils/artistSlug.js";
+import {
+  DISCIPLINE_OPTIONS,
+  disciplineLabelToKey,
+} from "../utils/feedFilterApply.js";
 import { normalizeLocalesWorldForStorage } from "../utils/worldNormalize.js";
 import {
   getPublicWorldSourceFromLocales,
@@ -46,6 +50,9 @@ import {
 import { getAuthSnapshot } from "../utils/icAuth.js";
 import { DEV_MODE } from "../config.js";
 import { uploadBlobToS3 } from "../utils/studioS3Upload.js";
+import {
+  prepareImageFileForUpload,
+} from "../utils/imageUploadPrep.js";
 import { getProfileSetupDraft } from "../utils/profileSetupDraft.js";
 import { navigate } from "../router.js";
 import { applyDocumentSeo } from "../utils/documentSeo.js";
@@ -55,6 +62,16 @@ import {
   isRealAdminCaller,
 } from "../utils/adminPerspective.js";
 import { firstNonEmptyString } from "../utils/localeFallback.js";
+import {
+  formatUsdFromCents,
+  parseUsdDisplayToCents,
+  applicantCategoryDiscountCents,
+  computeMemberProgramTotalDueCents,
+  PROGRAM_OWN_FLIGHT_CREDIT_CENTS,
+  PROGRAM_RESIDENCY_BASE_TOTAL_CENTS,
+  resolveProgramDepositCents,
+} from "../utils/programPaymentMoney.js";
+import { normalizeApplicantCategory } from "../utils/studioPlainForms.js";
 import { studioIconHref } from "../utils/studioIconRegistry.js";
 import { formatStudioDate } from "../utils/studioDateFormat.js";
 import exploreProgramsIconUrl from "../assets/icons/fusion_dashboard_svg_icons/explore-programs.svg";
@@ -65,6 +82,17 @@ import paymentPlanIconUrl from "../assets/icons/fusion_dashboard_svg_icons/payme
 import receiptDownloadIconUrl from "../assets/icons/fusion_dashboard_svg_icons/receipt-download.svg";
 import warningIconUrl from "../assets/icons/fusion_dashboard_svg_icons/warning.svg";
 import flightIconUrl from "../assets/icons/flight-icon.png";
+
+function mpdDisciplineSelectHtml() {
+  const opts = [
+    `<option value="">Select discipline…</option>`,
+    ...DISCIPLINE_OPTIONS.map(
+      (o) =>
+        `<option value="${mpdEscapeAttr(o.key)}">${mpdEscapeAttr(o.label)}</option>`
+    ),
+  ];
+  return `<select id="mpd_discipline" class="studio-input" aria-label="Discipline">${opts.join("")}</select>`;
+}
 
 function mpdEscapeAttr(value) {
   return String(value ?? "")
@@ -249,14 +277,49 @@ function mpdRelativeDaysFromIso(iso) {
 
 /**
  * @param {File} f
+ * @returns {Promise<File>}
  */
-function assertMpdImageSizeOk(f) {
-  if (f.size > MPD_MAX_IMAGE_BYTES) {
-    const kb = Math.round(f.size / 1024);
-    throw new Error(
-      `Image is too large (${kb} KB). ${MPD_IMAGE_LIMIT_NOTICE}`,
+async function mpdPrepareImageFile(f) {
+  const { file, heicWarning } = await prepareImageFileForUpload(f, MPD_MAX_IMAGE_BYTES);
+  if (heicWarning) {
+    setStatus(
+      "HEIC photo accepted — if preview fails, export as JPEG or WebP and upload again.",
     );
   }
+  return file;
+}
+
+/** @param {boolean} enabled */
+function setMpdMediaUploadsEnabled(enabled) {
+  document.querySelectorAll(".mpd-file-input-hidden").forEach((inp) => {
+    if (inp instanceof HTMLInputElement && inp.accept?.includes("image")) {
+      inp.disabled = !enabled;
+    }
+  });
+  document.querySelectorAll(".mpd-media-upload-label").forEach((lab) => {
+    if (!(lab instanceof HTMLElement)) return;
+    lab.classList.toggle("is-disabled", !enabled);
+    lab.style.pointerEvents = enabled ? "" : "none";
+    lab.style.opacity = enabled ? "" : "0.45";
+    if (!enabled) {
+      lab.setAttribute("aria-disabled", "true");
+      lab.title = "Loading profile…";
+    } else {
+      lab.removeAttribute("aria-disabled");
+      lab.removeAttribute("title");
+    }
+  });
+}
+
+/**
+ * @param {HTMLInputElement} t
+ * @returns {boolean}
+ */
+function mpdImageUploadReady(t) {
+  if (currentArtistId || getDataSource() === "test") return true;
+  setStatus("Profile still loading — wait a moment, then try your upload again.");
+  t.value = "";
+  return false;
 }
 
 /**
@@ -379,7 +442,16 @@ function updateHeroProfileCardCopy() {
     .map((part) => part.trim())
     .filter(Boolean)
     .join(" ");
-  const discipline = getVal("mpd_discipline").trim();
+  const disciplineEl = document.getElementById("mpd_discipline");
+  let discipline = "";
+  if (disciplineEl instanceof HTMLSelectElement) {
+    discipline =
+      disciplineEl.selectedIndex > 0
+        ? disciplineEl.options[disciplineEl.selectedIndex].text
+        : "";
+  } else {
+    discipline = getVal("mpd_discipline").trim();
+  }
   if (nameNode) nameNode.textContent = name || "Artist Name";
   if (disciplineNode) disciplineNode.textContent = discipline || "Discipline";
 }
@@ -782,7 +854,7 @@ function fillFormFromLocales(locales, active) {
     setVal("mpd_first_name", parts[0] ?? "");
     setVal("mpd_last_name", parts.length > 1 ? parts.slice(1).join(" ") : "");
   }
-  setVal("mpd_discipline", String(b.discipline ?? ""));
+  setVal("mpd_discipline", disciplineLabelToKey(String(b.discipline ?? "")));
   updateHeroProfileCardCopy();
   setVal("mpd_bio", String(b.bio ?? b.bioLong ?? ""));
   setMpdStatusToggle(b.status);
@@ -1546,24 +1618,10 @@ function mpdCents(value) {
   return Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0;
 }
 
-function mpdUsd(cents) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2,
-  }).format(mpdCents(cents) / 100);
-}
-
-function mpdParseUsdCents(value) {
-  const raw = String(value ?? "").replace(/,/g, "");
-  const m = raw.match(/\$?\s*(\d+(?:\.\d{1,2})?)\s*(?:USD)?/i);
-  if (!m) return 0;
-  return Math.round(Number(m[1]) * 100);
-}
-
-const MPD_PROGRAM_BASE_TOTAL_CENTS = 500000;
-const MPD_PROGRAM_OWN_FLIGHT_CREDIT_CENTS = 80000;
-const MPD_PROGRAM_DEFAULT_DEPOSIT_CENTS = 100000;
+const mpdUsd = formatUsdFromCents;
+const mpdParseUsdCents = parseUsdDisplayToCents;
+const MPD_PROGRAM_BASE_TOTAL_CENTS = PROGRAM_RESIDENCY_BASE_TOTAL_CENTS;
+const MPD_PROGRAM_OWN_FLIGHT_CREDIT_CENTS = PROGRAM_OWN_FLIGHT_CREDIT_CENTS;
 
 function mpdDateMonthsUntil(startText) {
   const d = new Date(String(startText || ""));
@@ -1616,15 +1674,22 @@ function normalizeMpdProgramPaymentViewModels(programs, payments) {
       const imageSrc = firstNonEmptyString(ja.imageSrc, en.imageSrc, program.image);
       const imageAlt = firstNonEmptyString(en.imageAlt, focus, title);
       const startText = firstNonEmptyString(en.startDate, en.start, en.programStart, en.programPage?.startDate);
-      const depositDisplay = firstNonEmptyString(program.depositAmountDisplay, en.depositAmountDisplay, en.programPage?.applicationForm?.depositAmountDisplay);
-      const depositCents = mpdParseUsdCents(depositDisplay) || MPD_PROGRAM_DEFAULT_DEPOSIT_CENTS;
+      const depositCents = resolveProgramDepositCents(program);
       const summary = mpdPaymentSummaryFor(programId, payments);
+      const applicantCategory = normalizeApplicantCategory(
+        approval.applicantCategory ?? summary?.applicantCategory,
+      );
       const ownFlight = summary?.ownFlight === true || String(summary?.ownFlight || "").toLowerCase() === "true";
-      const baseTotalDueCents = MPD_PROGRAM_BASE_TOTAL_CENTS;
+      const categoryDiscountCents = applicantCategoryDiscountCents(applicantCategory);
+      const baseTotalDueCents = computeMemberProgramTotalDueCents({
+        category: applicantCategory,
+        ownFlight: false,
+      });
       const flightCreditCents = ownFlight ? MPD_PROGRAM_OWN_FLIGHT_CREDIT_CENTS : 0;
-      const totalDueCents = ownFlight
-        ? Math.max(0, baseTotalDueCents - flightCreditCents)
-        : baseTotalDueCents;
+      const totalDueCents = computeMemberProgramTotalDueCents({
+        category: applicantCategory,
+        ownFlight,
+      });
       const totalPaidCents = mpdCents(summary?.totalPaidCents);
       const outstandingCents = summary ? mpdCents(summary.outstandingCents) : Math.max(0, totalDueCents - totalPaidCents);
       const activePlan = mpdPaymentPlanFor(summary?.activePlanId, payments);
@@ -1650,6 +1715,8 @@ function normalizeMpdProgramPaymentViewModels(programs, payments) {
         email: String(approval.email || ""),
         fullName: String(approval.fullName || ""),
         depositCents,
+        applicantCategory,
+        categoryDiscountCents,
         baseTotalDueCents,
         ownFlight,
         flightCreditCents,
@@ -1741,7 +1808,7 @@ function renderMpdFlightChoiceSection(item) {
     </div>
     <div class="mpd-flight-choice-card__note">
       <strong>${item.ownFlight ? "Flight credit applied" : "No flight credit applied"}</strong>
-      <span>${item.ownFlight ? "The $800 credit will be applied to your balance once you confirm your program slot." : "Total residency price remains $5,000 when Fusion provides flight support."}</span>
+      <span>${item.ownFlight ? "The $800 credit will be applied to your balance once you confirm your program slot." : `Total residency price is ${mpdUsd(item.baseTotalDueCents)} when Fusion provides flight support.`}</span>
       ${locked ? `<em>Flight choice is locked after payment activity starts.</em>` : ""}
     </div>
   </section>`;
@@ -1827,6 +1894,16 @@ function renderMpdPaymentsWorkspace() {
           <strong>${mpdUsd(item.totalDueCents)}</strong>
           <small>${item.ownFlight ? "After flight credit" : "Flight support included"}</small>
         </div>
+        ${
+          item.categoryDiscountCents
+            ? `<div class="mpd-payments-overview-card mpd-payments-overview-card--outstanding">
+          ${mpdInlineIconHtml(paymentsIconUrl, "mpd-payments-overview-card__icon")}
+          <span>Veteran discount</span>
+          <strong>-${mpdUsd(item.categoryDiscountCents)}</strong>
+          <small>Returning artist pricing</small>
+        </div>`
+            : ""
+        }
         <div class="mpd-payments-overview-card mpd-payments-overview-card--outstanding">
           ${mpdInlineIconHtml(warningIconUrl, "mpd-payments-overview-card__icon")}
           <span>Flight credit</span>
@@ -1891,9 +1968,10 @@ function applyMpdFlightChoiceToItem(item, ownFlight) {
   if (!item) return;
   item.ownFlight = Boolean(ownFlight);
   item.flightCreditCents = item.ownFlight ? MPD_PROGRAM_OWN_FLIGHT_CREDIT_CENTS : 0;
-  item.totalDueCents = item.ownFlight
-    ? Math.max(0, item.baseTotalDueCents - item.flightCreditCents)
-    : item.baseTotalDueCents;
+  item.totalDueCents = computeMemberProgramTotalDueCents({
+    category: item.applicantCategory || "general",
+    ownFlight: item.ownFlight,
+  });
   item.outstandingCents = Math.max(0, item.totalDueCents - mpdCents(item.totalPaidCents));
   item.paidInFull = item.outstandingCents <= 0 && item.totalDueCents > 0;
 }
@@ -2835,7 +2913,7 @@ export function generateSettingsProfileContent() {
                                         <input type="text" id="mpd_last_name" class="studio-input" autocomplete="family-name" placeholder="Last name" />
                                     </label>
                                     <label class="studio-field studio-field--full"><span>Discipline</span>
-                                        <input type="text" id="mpd_discipline" class="studio-input" placeholder="Painting, sound, installation..." />
+                                        ${mpdDisciplineSelectHtml()}
                                     </label>
                                 </div>
 
@@ -4085,10 +4163,13 @@ export default function initSettingsProfile() {
       refreshBaseline();
       if (!slugSaveFailed) {
         posthog.capture("profile_settings_saved");
-        finishMpdOperation("profile-save", "idle", "Profile saved.");
         const worldGenerationOk = await runMemberWorldGenerationAfterSave(merged);
-        if (optionalSaveWarnings.length && (!statusEl || statusEl.textContent === "Saved.")) {
-          setStatus(`Saved. ${optionalSaveWarnings.join(" ")}`);
+        if (optionalSaveWarnings.length) {
+          const warnText = optionalSaveWarnings.join(" ");
+          setStatus(`Profile saved, but some media did not persist: ${warnText}`);
+          finishMpdOperation("profile-save", "error", warnText);
+        } else {
+          finishMpdOperation("profile-save", "idle", "Profile saved.");
         }
         if (worldGenerationOk) {
           dispatchProfileSaveStatus("saved", "Profile saved", {
@@ -4430,9 +4511,11 @@ export default function initSettingsProfile() {
       }
       if (!(t instanceof HTMLInputElement)) return;
       if (t.id === "mpd_hero_file" && t.files?.[0]) {
-        const f = t.files[0];
+        if (!mpdImageUploadReady(t)) return;
+        const raw = t.files[0];
+        let f = raw;
         try {
-          assertMpdImageSizeOk(f);
+          f = await mpdPrepareImageFile(raw);
         } catch (err) {
           setStatus(err instanceof Error ? err.message : String(err));
           t.value = "";
@@ -4485,9 +4568,11 @@ export default function initSettingsProfile() {
         return;
       }
       if (t.id === "mpd_hero_profile_file" && t.files?.[0]) {
-        const f = t.files[0];
+        if (!mpdImageUploadReady(t)) return;
+        const raw = t.files[0];
+        let f = raw;
         try {
-          assertMpdImageSizeOk(f);
+          f = await mpdPrepareImageFile(raw);
         } catch (err) {
           setStatus(err instanceof Error ? err.message : String(err));
           t.value = "";
@@ -4581,10 +4666,12 @@ export default function initSettingsProfile() {
       }
       const slot = t.getAttribute("data-intro-slot");
       if (slot != null && t.files?.[0]) {
+        if (!mpdImageUploadReady(t)) return;
         const i = Number(slot);
-        const f = t.files[0];
+        const raw = t.files[0];
+        let f = raw;
         try {
-          assertMpdImageSizeOk(f);
+          f = await mpdPrepareImageFile(raw);
         } catch (err) {
           setStatus(err instanceof Error ? err.message : String(err));
           t.value = "";
@@ -4674,12 +4761,16 @@ export default function initSettingsProfile() {
       ) {
         mpdStoryWorldDraft = readMpdStoryWorldTextDraftFromDom();
       }
-      if (!(t instanceof HTMLInputElement)) return;
       if (
         t.id === "mpd_first_name" ||
-        t.id === "mpd_last_name" ||
-        t.id === "mpd_discipline"
+        t.id === "mpd_last_name"
       ) {
+        updateHeroProfileCardCopy();
+      }
+    });
+    rootEl.addEventListener("change", (e) => {
+      const t = e.target;
+      if (t instanceof HTMLSelectElement && t.id === "mpd_discipline") {
         updateHeroProfileCardCopy();
       }
     });
@@ -4832,6 +4923,7 @@ export default function initSettingsProfile() {
     }
     setStatus("");
     setInitialProfileLoading(true);
+    setMpdMediaUploadsEnabled(false);
     const membershipActionsEl = document.getElementById(
       "settingsProfileMembershipActions",
     );
@@ -5050,6 +5142,7 @@ export default function initSettingsProfile() {
       })();
     }
     currentArtistId = String(p.id ?? "");
+    setMpdMediaUploadsEnabled(Boolean(currentArtistId) || getDataSource() === "test");
     profileAudioUrl = String(p.audioUrl ?? "");
     setVal("mpd_hero_url", heroImageUrl);
     setVal("mpd_hero_profile_url", heroProfileImageUrl);

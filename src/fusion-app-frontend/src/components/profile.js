@@ -1,10 +1,17 @@
 import {
+  artistGallerySeasonYear,
   artistLocaleBlock,
   artistProgramIds,
   artistResidencyCardYear,
+  yearFromProgramSlug,
 } from "../utils/artistSlug.js";
 import { getPublicSiteOrigin } from "../config.js";
-import { getArtistBySlug } from "../utils/database.js";
+import { getAllProgramsBlock, getArtistBySlug } from "../utils/database.js";
+import {
+  filterProgramIdsForAlumniBanner,
+  programQualifiesForAlumniBanner,
+  resolveProgramCardFromBlock,
+} from "../utils/programAlumniEligibility.js";
 import { applyDocumentSeo } from "../utils/documentSeo.js";
 import { SEO_MEDIA_DEFAULT, withSeoImageAlt } from "../utils/mediaAltSeo.js";
 import { worldTextParts } from "../utils/worldNormalize.js";
@@ -362,7 +369,7 @@ export default function initProfile() {
     return;
   }
 
-  const applyArtist = (artist) => {
+  const applyArtist = async (artist) => {
     setProfileLoading(false);
     if (!artist) {
       for (const el of loadedContentEls) show(el, false);
@@ -583,8 +590,34 @@ export default function initProfile() {
       /** @type {unknown} */ (pickWorld("introGallery")),
     );
 
-    const programIdsForBanner = artistProgramIds(artist);
-    const residencyCardYear = artistResidencyCardYear(artist);
+    const programsBlock = await getAllProgramsBlock();
+    const enrolledProgramIds = artistProgramIds(artist);
+    const programIdsForBanner = filterProgramIdsForAlumniBanner(
+      enrolledProgramIds,
+      programsBlock,
+    );
+    let residencyCardYear = "";
+    if (programIdsForBanner.length) {
+      residencyCardYear =
+        yearFromProgramSlug(programIdsForBanner[programIdsForBanner.length - 1]) ||
+        "";
+    }
+    if (!residencyCardYear) {
+      const onlyUpcomingEnrollment =
+        enrolledProgramIds.length > 0 &&
+        programIdsForBanner.length === 0 &&
+        enrolledProgramIds.every((id) => {
+          const card = resolveProgramCardFromBlock(id, programsBlock)?.program;
+          return card && !programQualifiesForAlumniBanner(card);
+        });
+      if (!onlyUpcomingEnrollment) {
+        const sy = artistGallerySeasonYear(artist);
+        if (sy) residencyCardYear = String(sy);
+        else if (!enrolledProgramIds.length) {
+          residencyCardYear = artistResidencyCardYear(artist);
+        }
+      }
+    }
     if (veteranBannerEl) {
       if (programIdsForBanner.length) {
         veteranBannerEl.setAttribute(
@@ -612,7 +645,7 @@ export default function initProfile() {
     setProfileLoading(true);
     try {
       const artist = await getArtistBySlug(slug);
-      applyArtist(artist);
+      await applyArtist(artist);
     } catch {
       applyArtist(null);
     }

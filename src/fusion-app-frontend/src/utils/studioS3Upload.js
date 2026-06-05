@@ -1,5 +1,7 @@
-import { presignUpload } from './integrationApi.js';
+import { DEV_MODE } from '../config.js';
+import { getIntegrationBaseUrl, mapIntegrationUserMessage, presignUpload } from './integrationApi.js';
 import { toCloudFrontAssetUrl } from './assetDistribution.js';
+import { normalizeImageMime } from './imageUploadPrep.js';
 
 /**
  * Logical prefixes for S3 object keys (after server `S3_KEY_PREFIX`, usually `uploads/`).
@@ -22,6 +24,18 @@ export const S3_UPLOAD_AREAS = [
 
 const DEFAULT_UPLOAD_AREA = 'studio/misc';
 const COMMUNITY_MEDIA_ROOT_PREFIX = 'fusionMedia/uploads/';
+
+/**
+ * Verify Integration API URL is configured before presign.
+ */
+export function assertIntegrationUploadReady() {
+    const base = getIntegrationBaseUrl();
+    if (!base) {
+        throw new Error(
+            'Uploads need the Integration API URL and API key — configure Studio → Services, then try again.',
+        );
+    }
+}
 
 /**
  * @param {unknown} area
@@ -101,6 +115,22 @@ function truncatedSafeBase(fileName, maxStem = 40) {
 }
 
 /**
+ * @param {unknown} err
+ * @param {number} [status]
+ * @returns {Error}
+ */
+function uploadError(err, status) {
+    const raw = err instanceof Error ? err.message : String(err);
+    const msg = mapIntegrationUserMessage(raw, status);
+    if (/S3 upload failed/i.test(raw)) {
+        return new Error(
+            `${raw} — check S3 configuration under Studio → Services and bucket CORS for this site.`,
+        );
+    }
+    return new Error(msg);
+}
+
+/**
  * Presign + PUT; sets input value to public URL on success.
  *
  * Object key: `{area}/{shortId}-{safeBase}` (integration API prepends `uploads/` or `S3_KEY_PREFIX` when needed).
@@ -113,19 +143,32 @@ function truncatedSafeBase(fileName, maxStem = 40) {
  * @returns {Promise<string>}
  */
 export async function uploadBlobToS3(file, inputEl, options = {}) {
+    assertIntegrationUploadReady();
     const area = normalizeUploadArea(options.area);
     const deterministic = deterministicKey(area, file, options);
     const key = deterministic || `${area}/${shortId8()}-${truncatedSafeBase(file.name)}`;
-    const ct = file.type || 'application/octet-stream';
+    const ct = normalizeImageMime(file);
     const rootPrefix = area === 'studio/community' ? COMMUNITY_MEDIA_ROOT_PREFIX : undefined;
-    const { putUrl, publicUrl } = await presignUpload(key, ct, { rootPrefix });
+    let putUrl;
+    let publicUrl;
+    try {
+        ({ putUrl, publicUrl } = await presignUpload(key, ct, { rootPrefix }));
+    } catch (err) {
+        throw uploadError(err);
+    }
+    if (DEV_MODE) {
+        console.debug('[uploadBlobToS3] presigned', { key, contentType: ct, area });
+    }
     const res = await fetch(putUrl, {
         method: 'PUT',
         body: file,
         headers: { 'Content-Type': ct },
     });
     if (!res.ok) {
-        throw new Error(`S3 upload failed: HTTP ${res.status}`);
+        if (DEV_MODE) {
+            console.debug('[uploadBlobToS3] PUT failed', { key, status: res.status });
+        }
+        throw uploadError(new Error(`S3 upload failed: HTTP ${res.status}`), res.status);
     }
     const distributedUrl = toCloudFrontAssetUrl(publicUrl);
     if (inputEl) inputEl.value = distributedUrl;

@@ -2,7 +2,20 @@
  * Studio: plain-text editing helpers (no JSON shown to editors).
  */
 
+import { artistProgramIds } from './artistSlug.js';
 import { getFieldKind } from './studioFieldRegistry.js';
+
+/** @typedef {'general' | 'veteran' | 'veteranPlusPlus' | 'sponsored' | 'extSponsored'} ApplicantCategory */
+
+export const APPLICANT_CATEGORY_OPTIONS = [
+    { value: 'general', label: 'General' },
+    { value: 'veteran', label: 'Veteran' },
+    { value: 'veteranPlusPlus', label: 'Veteran ++' },
+    { value: 'sponsored', label: 'Sponsored' },
+    { value: 'extSponsored', label: 'Ext sponsored' },
+];
+
+const APPLICANT_CATEGORY_VALUES = new Set(APPLICANT_CATEGORY_OPTIONS.map((o) => o.value));
 
 /**
  * @param {unknown} v
@@ -347,12 +360,143 @@ export function parseApplicantPayload(payloadJson) {
 }
 
 /**
- * @param {string} internalNotes
+ * @param {string} payloadJson
+ * @returns {boolean}
+ */
+export function getApplicantManualDepositSubmitted(payloadJson) {
+    const { other } = parseApplicantPayload(payloadJson);
+    if (!other) return false;
+    return other.manualDepositSubmitted === true;
+}
+
+/**
+ * @param {string} payloadJson
+ * @returns {boolean}
+ */
+export function getApplicantIsTester(payloadJson) {
+    const { other } = parseApplicantPayload(payloadJson);
+    if (!other) return false;
+    return other.staffApplicantIsTester === true;
+}
+
+/**
+ * @param {string} payloadJson
+ * @returns {number}
+ */
+export function getApplicantFlightCostCents(payloadJson) {
+    const { other } = parseApplicantPayload(payloadJson);
+    if (!other) return 0;
+    const n = Number(other.staffApplicantFlightCostCents ?? 0);
+    return Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0;
+}
+
+/**
+ * @param {string} payloadJson
+ * @returns {number}
+ */
+export function getApplicantLocalTravelCostCents(payloadJson) {
+    const { other } = parseApplicantPayload(payloadJson);
+    if (!other) return 0;
+    const n = Number(other.staffApplicantLocalTravelCostCents ?? 0);
+    return Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0;
+}
+
+/**
+ * @param {string} category
+ * @param {(s: string) => string} escapeHtml
+ * @returns {string}
+ */
+export function applicantCategoryPillHtml(category, escapeHtml) {
+    const value = String(category || 'general');
+    const option = APPLICANT_CATEGORY_OPTIONS.find((o) => o.value === value);
+    const label = option?.label || 'General';
+    const clsByValue = {
+        general: 'studio-status-pill--category-general',
+        veteran: 'studio-status-pill--category-veteran',
+        veteranPlusPlus: 'studio-status-pill--category-veteran-plus',
+        sponsored: 'studio-status-pill--category-sponsored',
+        extSponsored: 'studio-status-pill--category-ext-sponsored',
+    };
+    const cls = clsByValue[value] || clsByValue.general;
+    return `<span class="studio-status-pill ${cls}">${escapeHtml(label)}</span>`;
+}
+
+/**
+ * Applicant display names from payload.
+ * @param {string} payloadJson
+ * @param {string} [fullNameFallback]
+ */
+export function applicantDisplayNamesFromPayload(payloadJson, fullNameFallback = '') {
+    const { fields } = parseApplicantPayload(payloadJson);
+    let firstName = String(fields.firstName || '').trim();
+    let lastName = String(fields.lastName || '').trim();
+    if (!firstName && !lastName) {
+        const full = String(fullNameFallback || '').trim();
+        if (full) {
+            const parts = full.split(/\s+/).filter(Boolean);
+            firstName = parts[0] || '';
+            lastName = parts.slice(1).join(' ');
+        }
+    }
+    return { firstName, lastName, discipline: String(fields.discipline || '').trim() };
+}
+
+/**
+ * @param {unknown} value
+ * @returns {ApplicantCategory}
+ */
+export function normalizeApplicantCategory(value) {
+    const s = String(value ?? '').trim();
+    return APPLICANT_CATEGORY_VALUES.has(/** @type {ApplicantCategory} */ (s))
+        ? /** @type {ApplicantCategory} */ (s)
+        : 'general';
+}
+
+/**
+ * @param {string} payloadJson
+ * @returns {boolean}
+ */
+export function hasSavedApplicantCategory(payloadJson) {
+    const { other } = parseApplicantPayload(payloadJson);
+    if (!other) return false;
+    const raw = other.staffApplicantCategory;
+    return typeof raw === 'string' && String(raw).trim() !== '';
+}
+
+/**
+ * @param {string} payloadJson
+ * @returns {ApplicantCategory}
+ */
+export function getApplicantCategory(payloadJson) {
+    const { other } = parseApplicantPayload(payloadJson);
+    if (!other) return 'general';
+    return normalizeApplicantCategory(other.staffApplicantCategory);
+}
+
+/**
+ * Derive category from artist roster program history (excluding current program).
+ * @param {object | null | undefined} artist
+ * @param {string} currentProgramId
+ * @returns {ApplicantCategory}
+ */
+export function suggestApplicantCategoryFromArtist(artist, currentProgramId) {
+    const currentId = String(currentProgramId || '').trim();
+    const ids = artistProgramIds(artist).filter((id) => id && id !== currentId);
+    if (ids.length >= 2) return 'veteranPlusPlus';
+    if (ids.length >= 1) return 'veteran';
+    return 'general';
+}
+
+/**
+ * @param {{ internalNotes: string, manualDepositSubmitted: boolean, applicantCategory?: ApplicantCategory, isTester?: boolean, flightCostCents?: number, localTravelCostCents?: number }} fields
  * @param {string} previousPayloadJson
  * @returns {string} JSON string for `payloadJson` on applicant record
  */
-export function mergeApplicantInternalNotes(internalNotes, previousPayloadJson) {
-    const t = String(internalNotes ?? '').trim();
+export function mergeApplicantStaffFields(fields, previousPayloadJson) {
+    const t = String(fields.internalNotes ?? '').trim();
+    const manual = Boolean(fields.manualDepositSubmitted);
+    const isTester = Boolean(fields.isTester);
+    /** @type {Record<string, unknown>} */
     let prev = {};
     try {
         const p = JSON.parse(String(previousPayloadJson || '{}'));
@@ -360,8 +504,68 @@ export function mergeApplicantInternalNotes(internalNotes, previousPayloadJson) 
     } catch {
         /* ignore */
     }
+    /** @type {Record<string, unknown>} */
     const next = { ...prev, notes: t };
+    if (manual) {
+        next.manualDepositSubmitted = true;
+        if (!next.manualDepositSubmittedAt) {
+            next.manualDepositSubmittedAt = new Date().toISOString();
+        }
+    } else {
+        delete next.manualDepositSubmitted;
+        delete next.manualDepositSubmittedAt;
+    }
+    if (fields.applicantCategory !== undefined) {
+        const category = normalizeApplicantCategory(fields.applicantCategory);
+        if (category === 'general') {
+            delete next.staffApplicantCategory;
+        } else {
+            next.staffApplicantCategory = category;
+        }
+    }
+    if (fields.isTester !== undefined) {
+        if (isTester) {
+            next.staffApplicantIsTester = true;
+        } else {
+            delete next.staffApplicantIsTester;
+        }
+    }
+    if (fields.flightCostCents !== undefined) {
+        const flight = Math.max(0, Math.round(Number(fields.flightCostCents) || 0));
+        if (flight > 0) {
+            next.staffApplicantFlightCostCents = flight;
+        } else {
+            delete next.staffApplicantFlightCostCents;
+        }
+    }
+    if (fields.localTravelCostCents !== undefined) {
+        const travel = Math.max(0, Math.round(Number(fields.localTravelCostCents) || 0));
+        if (travel > 0) {
+            next.staffApplicantLocalTravelCostCents = travel;
+        } else {
+            delete next.staffApplicantLocalTravelCostCents;
+        }
+    }
     return JSON.stringify(next);
+}
+
+/**
+ * @param {string} internalNotes
+ * @param {string} previousPayloadJson
+ * @returns {string} JSON string for `payloadJson` on applicant record
+ */
+export function mergeApplicantInternalNotes(internalNotes, previousPayloadJson) {
+    return mergeApplicantStaffFields(
+        {
+            internalNotes,
+            manualDepositSubmitted: getApplicantManualDepositSubmitted(previousPayloadJson),
+            applicantCategory: getApplicantCategory(previousPayloadJson),
+            isTester: getApplicantIsTester(previousPayloadJson),
+            flightCostCents: getApplicantFlightCostCents(previousPayloadJson),
+            localTravelCostCents: getApplicantLocalTravelCostCents(previousPayloadJson),
+        },
+        previousPayloadJson,
+    );
 }
 
 /**

@@ -1,8 +1,6 @@
 /**
  * Studio permission matrix rows — ids must match Motoko `studioFeatureKeys` in `main.mo`
  * and sidebar section ids (`STUDIO_NAV` + `dashboard`).
- * The Permissions UI only sends rows returned by `adminGetStudioPermissionDefaults`, so older
- * canisters without newer keys (e.g. `sound`) do not receive unknown keys on save.
  */
 export const STUDIO_PERMISSION_FEATURE_ROWS = [
     { id: 'dashboard', label: 'Dashboard' },
@@ -17,6 +15,7 @@ export const STUDIO_PERMISSION_FEATURE_ROWS = [
     { id: 'financePromotions', label: 'Finance — Promotions', group: 'finance' },
     { id: 'travel', label: 'Travel' },
     // Roster + Send blast: Studio gates blast on canEdit for this id (no extra Motoko key).
+    { id: 'pending-approval', label: 'Status' },
     { id: 'artists', label: 'Artists' },
     { id: 'programs', label: 'Programs' },
     { id: 'products', label: 'Products' },
@@ -35,6 +34,89 @@ export const STUDIO_PERMISSION_FEATURE_ROWS = [
     { id: 'settings', label: 'Settings' },
     { id: 'team', label: 'Team' },
 ];
+
+const DEFAULT_STUDIO_FEATURE_ACCESS = { visible: true, canEdit: true };
+
+/** Present in current Motoko `studioFeatureKeys`; missing from older deployed wasm. */
+const CANISTER_PERMISSION_SENTINEL_KEYS = ['schedule', 'finance'];
+
+/**
+ * Older IC builds may still answer `listStudioPermissionFeatureKeys` with a short legacy list
+ * (e.g. has `applicants` but not `schedule` / `finance`). Treat as stale — do not grey out UI rows.
+ *
+ * @param {string[]} keys
+ */
+export function isStaleCanisterPermissionKeyList(keys) {
+    if (!Array.isArray(keys) || keys.length < STUDIO_PERMISSION_FEATURE_ROWS.length - 6) {
+        return true;
+    }
+    const set = new Set(keys);
+    return CANISTER_PERMISSION_SENTINEL_KEYS.some((k) => !set.has(k));
+}
+
+/**
+ * Parse canister permission matrix tuples (array or `{ 0, 1 }` object pairs).
+ *
+ * @param {unknown} tuples
+ * @returns {Map<string, { visible: boolean, canEdit: boolean }>}
+ */
+export function parseStudioPermissionMatrixTuples(tuples) {
+    const map = new Map();
+    if (!Array.isArray(tuples)) return map;
+    for (const row of tuples) {
+        let k = '';
+        let v = null;
+        if (Array.isArray(row) && row.length >= 2) {
+            k = String(row[0] ?? '');
+            v = row[1];
+        } else if (row && typeof row === 'object') {
+            const o = /** @type {Record<string, unknown>} */ (row);
+            k = String(o[0] ?? o['0'] ?? o._0_ ?? '');
+            v = o[1] ?? o['1'] ?? o._1_;
+        }
+        if (!k || !v || typeof v !== 'object') continue;
+        const access = /** @type {Record<string, unknown>} */ (v);
+        map.set(k, {
+            visible: Boolean(access.visible ?? access.Visible),
+            canEdit: Boolean(access.canEdit ?? access.can_edit ?? access.CanEdit),
+        });
+    }
+    return map;
+}
+
+/**
+ * @param {Map<string, { visible: boolean, canEdit: boolean }>} a
+ * @param {Map<string, { visible: boolean, canEdit: boolean }>} b
+ */
+export function studioPermissionMapsEqual(a, b) {
+    for (const row of STUDIO_PERMISSION_FEATURE_ROWS) {
+        const av = a.get(row.id) ?? DEFAULT_STUDIO_FEATURE_ACCESS;
+        const bv = b.get(row.id) ?? DEFAULT_STUDIO_FEATURE_ACCESS;
+        if (av.visible !== bv.visible || av.canEdit !== bv.canEdit) return false;
+    }
+    return true;
+}
+
+/**
+ * Ensure every known feature row exists in the map (canister + optional role defaults for overrides).
+ *
+ * @param {Map<string, { visible: boolean, canEdit: boolean }>} canisterMap
+ * @param {Map<string, { visible: boolean, canEdit: boolean }> | null | undefined} [roleDefaultMap]
+ * @returns {Map<string, { visible: boolean, canEdit: boolean }>}
+ */
+export function mergeStudioPermissionMap(canisterMap, roleDefaultMap = null) {
+    const out = new Map();
+    for (const row of STUDIO_PERMISSION_FEATURE_ROWS) {
+        if (canisterMap.has(row.id)) {
+            out.set(row.id, canisterMap.get(row.id));
+        } else if (roleDefaultMap?.has(row.id)) {
+            out.set(row.id, roleDefaultMap.get(row.id));
+        } else {
+            out.set(row.id, { ...DEFAULT_STUDIO_FEATURE_ACCESS });
+        }
+    }
+    return out;
+}
 
 /** Role tabs stored on the canister (Staff implemented in v1). */
 export const STUDIO_PERMISSION_ROLE_TABS = [

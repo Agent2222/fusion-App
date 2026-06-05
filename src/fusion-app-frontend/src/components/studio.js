@@ -24,7 +24,7 @@ import {
     setStudioShellGate,
     studioFeatureAccess,
 } from '../utils/studioShellState.js';
-import { studioIconHref } from '../utils/studioIconRegistry.js';
+import { studioGroupIconHref, studioNavIconHref } from '../utils/studioIconRegistry.js';
 import studioWordmarkLogo from '../assets/Fusion-X-logo-03.png';
 
 function normalizeHash() {
@@ -64,13 +64,12 @@ function buildStudioNavButtonsHtml(activeId) {
             continue;
         }
         const groupLabel = escapeHtml(g.label);
-        const groupKey = groupLabel.toLowerCase();
-        const groupIcon = studioIconHref(`group-${groupKey}`);
+        const groupIcon = studioGroupIconHref(g.label);
         const groupInner = items
             .map((item) => {
                 const active = item.id === activeId ? ' is-active' : '';
                 const idHtml = escapeHtml(item.id);
-                const itemIcon = studioIconHref(`nav-${item.id}`);
+                const itemIcon = studioNavIconHref(item.id);
                 return `<button type="button" class="studio-nav-item${active}" data-studio-section="${idHtml}">
                   <span class="studio-nav-item__icon" aria-hidden="true">${
                       itemIcon

@@ -6,6 +6,10 @@ import {
     isFusionProgramApplicationUnsaved,
 } from './utils/programApplicationGuard.js';
 import { getGateStateForPath, renderGatedHomeInnerHtml, renderGatedPageHtml } from './utils/pageGate.js';
+import {
+    ensureSoundEnvironmentPositionListeners,
+    syncSoundEnvironmentPosition,
+} from './utils/soundEnvironmentMount.js';
 
 import { renderHeader } from './components/shared/header.js';
 import { renderFooter } from './components/shared/footer.js';
@@ -274,6 +278,7 @@ class Router {
     }
 
     init() {
+        ensureSoundEnvironmentPositionListeners();
         // Avoid the browser fighting our own scroll resets on SPA navigations.
         if (typeof history !== 'undefined' && 'scrollRestoration' in history) {
             history.scrollRestoration = 'manual';
@@ -544,6 +549,7 @@ class Router {
                 }
 
                 this.onRouteChange(path, route);
+                syncSoundEnvironmentPosition(path);
                 this.syncHeaderLogosForPath(path);
             } else {
             // Load component module (static loader so bundlers can include it)
@@ -698,6 +704,8 @@ class Router {
 
             // Trigger route change event
             this.onRouteChange(path, route);
+
+            syncSoundEnvironmentPosition(path);
 
             this.syncHeaderLogosForPath(path);
             }

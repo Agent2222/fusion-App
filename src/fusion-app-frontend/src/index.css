@@ -71,6 +71,8 @@ html[data-theme="dark"] {
   --fv-cta: 'wght' 900, 'wdth' 110;
   /* Rare: loadscreen / display tweaks — use only when the axis is needed */
   --fv-display-tall: 'wght' 900, 'wdth' 100, 'hgth' 200;
+  /** Matches `.artists-page` / `.editions-page` / `.gallery-access-page` top padding — sticky filter sits below header chrome. */
+  --fusion-header-chrome-height: 145px;
 }
 
 .fv-display {
@@ -306,6 +308,10 @@ body {
   padding-bottom: 400px;
   padding-top: 145px;
   overflow: visible;
+}
+
+.artists-page #featuredArtist2 {
+  scroll-margin-top: 200px;
 }
 
 .profile-page {
@@ -1335,6 +1341,11 @@ app-feed-filter,
   pointer-events: auto;
 }
 
+app-feed-filter #filterSystem {
+  /* Above header surface (z-index 30) when sticky overlaps chrome. */
+  z-index: 31;
+}
+
 #filterSystem {
   width: 100%;
   height: 70px;
@@ -1347,15 +1358,164 @@ app-feed-filter,
   border-top: 1px solid var(--c2);
   border-bottom: 1px solid var(--c2);
   position: sticky;
-  top: 0;
+  top: var(--fusion-header-chrome-height);
   z-index: 10;
   overflow: hidden;
-  transition: all 0.3s ease-in-out;
+  transition: top 0.35s ease-in-out, height 0.3s ease-in-out;
+}
+
+html[data-fusion-header-scroll="hidden"] app-feed-filter #filterSystem {
+  top: 0;
 }
 
 #filterSystem.active {
-  height: 300px;
+  height: auto;
+  min-height: calc(70px + 11rem);
+  max-height: min(85vh, 520px);
   padding-top: 70px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.filterColumnHeader {
+  width: 100%;
+  margin: 0 0 0.35rem;
+  padding: 0 0.35rem;
+  box-sizing: border-box;
+  font-family: 'momochidori-variable', sans-serif;
+  font-variation-settings: var(--fv-caption);
+  font-size: clamp(0.58rem, 0.75vw, 0.65rem);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-align: center;
+  color: var(--c2);
+  opacity: 0.85;
+}
+
+.filterLocationActions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.4rem;
+  width: max-content;
+  max-width: min(100%, 17rem);
+  padding: 0 0.35rem;
+  box-sizing: border-box;
+}
+
+.feed-filter-action-btn {
+  box-sizing: border-box;
+  font-family: 'momochidori-variable', sans-serif;
+  font-variation-settings: var(--fv-nav-active);
+  font-size: clamp(0.65rem, 0.95vw, 0.8rem);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border: 1.5px solid var(--c2);
+  background: transparent;
+  color: var(--c2);
+  padding: 0.45rem 0.65rem;
+  min-height: 2.25rem;
+  cursor: pointer;
+  width: 100%;
+  text-align: center;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+#filterSystem .feed-filter-action-btn:hover,
+#filterSystem .feed-filter-action-btn--primary:hover {
+  background-color: var(--c2);
+  color: var(--c3);
+}
+
+.feed-filter-action-btn--primary {
+  background-color: var(--c5, #c9c9c9);
+  color: var(--c2);
+}
+
+html[data-theme="dark"] .feed-filter-action-btn--primary {
+  color: var(--c2);
+}
+
+html[data-theme="dark"] #filterSystem .feed-filter-action-btn--primary:hover {
+  color: var(--c3);
+}
+
+#filterSearchRow {
+  width: 100%;
+  padding: 0.55rem 0.75rem 0.65rem;
+  box-sizing: border-box;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.filterSearchLabel {
+  display: block;
+  margin: 0 0 0.35rem;
+  width: min(100%, 32rem);
+  font-family: 'momochidori-variable', sans-serif;
+  font-variation-settings: var(--fv-caption);
+  font-size: clamp(0.58rem, 0.75vw, 0.65rem);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--c2);
+  opacity: 0.85;
+}
+
+.filterSearchInput {
+  width: min(100%, 32rem);
+  box-sizing: border-box;
+  font-family: 'momochidori-variable', sans-serif;
+  font-variation-settings: var(--fv-subtitle);
+  font-size: clamp(0.7rem, 0.85vw, 0.95rem);
+  letter-spacing: 0.02em;
+  padding: 0.4em 0.45em;
+  border: 1px solid var(--c2);
+  background: transparent;
+  color: var(--c2);
+  accent-color: var(--c1);
+}
+
+.filterSearchInput::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 0.85em;
+  height: 0.85em;
+  margin-left: 0.2em;
+  cursor: pointer;
+  background-color: var(--c1);
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill='black' d='M6 4.59 10.59 0 12 1.41 7.41 6 12 10.59 10.59 12 6 7.41 1.41 12 0 10.59 4.59 6 0 1.41 1.41 0z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill='black' d='M6 4.59 10.59 0 12 1.41 7.41 6 12 10.59 10.59 12 6 7.41 1.41 12 0 10.59 4.59 6 0 1.41 1.41 0z'/%3E%3C/svg%3E");
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+}
+
+.filterSearchInput::placeholder {
+  color: var(--c2);
+  opacity: 0.55;
+}
+
+.filterSearchInput:focus-visible {
+  outline: 1px solid var(--c2);
+  outline-offset: 2px;
+}
+
+#filterSystem.active #filterContent {
+  height: auto;
+  min-height: 9rem;
+  align-items: stretch;
+  padding-top: 0.25rem;
+}
+
+#filterSystem.active .filterBlock {
+  justify-content: flex-start;
+  padding: 0.25rem 0;
 }
 
 #filterToggle {
@@ -1376,6 +1536,33 @@ app-feed-filter,
   cursor: pointer;
   text-transform: uppercase;
   transition: border-bottom 0.3s ease-in-out;
+}
+
+.feed-filter-toggle-label {
+  pointer-events: none;
+}
+
+html[data-fusion-object-lightbox-open] .fusion-sound-env-host {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.fusion-sound-env-host {
+  position: fixed;
+  top: var(--fusion-sound-env-top, 0px);
+  z-index: 32;
+  pointer-events: auto;
+  transition: top 0.35s ease-in-out;
+}
+
+html[data-fusion-sound-placement="filter"] .fusion-sound-env-host {
+  right: clamp(0.5rem, 2vw, 1.25rem);
+  left: auto;
+}
+
+html[data-fusion-sound-placement="default"] .fusion-sound-env-host {
+  left: 1rem;
+  right: auto;
 }
 
 #filterToggle.active {
@@ -1468,6 +1655,7 @@ app-feed-filter,
 .feed-filter-modal {
   position: fixed;
   inset: 0;
+  /* Above `.fusion-sound-env-host` (32) — portaled to `body` on open. */
   z-index: 10050;
   display: flex;
   align-items: center;
@@ -1501,19 +1689,30 @@ app-feed-filter,
   box-sizing: border-box;
 }
 
+.feed-filter-modal__dialog--wide {
+  width: min(100%, 36rem);
+  max-height: min(85vh, 32rem);
+}
+
 .feed-filter-modal__title {
   margin: 0 0 0.35rem;
-  font-size: clamp(1rem, 2.5vw, 1.35rem);
-  font-variation-settings: var(--fv-headline-wide);
+  font-family: 'momochidori-variable', sans-serif;
+  font-variation-settings: var(--fv-nav-active);
+  font-size: clamp(0.75rem, 1.1vw, 0.95rem);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--c2);
 }
 
 .feed-filter-modal__hint {
   margin: 0 0 0.75rem;
-  font-size: clamp(0.75rem, 1.2vw, 0.9rem);
-  opacity: 0.85;
+  font-family: 'momochidori-variable', sans-serif;
+  font-variation-settings: var(--fv-caption);
+  font-size: clamp(0.65rem, 0.95vw, 0.78rem);
+  letter-spacing: 0.04em;
   color: var(--c2);
   line-height: 1.35;
+  opacity: 0.9;
 }
 
 .feed-filter-modal__list {
@@ -1527,37 +1726,81 @@ app-feed-filter,
 }
 
 .feed-filter-modal__option {
-  font-family: inherit;
-  font-size: clamp(0.85rem, 1.2vw, 1rem);
-  text-align: left;
-  padding: 0.55rem 0.65rem;
-  border: 1px solid var(--c2);
-  background: var(--c3, #fff);
+  font-family: 'momochidori-variable', sans-serif;
+  font-variation-settings: var(--fv-nav-active);
+  font-size: clamp(0.65rem, 0.95vw, 0.8rem);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 0.45rem 0.65rem;
+  border: 1.5px solid var(--c2);
+  background: var(--c5, #c9c9c9);
   color: var(--c2);
   cursor: pointer;
-  border-radius: 2px;
-  transition: background 0.15s ease;
+  border-radius: 0;
+  transition: opacity 0.15s ease;
 }
 
 .feed-filter-modal__option:hover,
-.feed-filter-modal__option--all {
-  background: var(--c5, #c9c9c9);
+.feed-filter-modal__option--all:hover {
+  background: var(--c2);
+  color: var(--c3);
+  opacity: 1;
 }
 
 .feed-filter-modal__done {
   margin-top: 0.85rem;
   align-self: stretch;
-  font-family: inherit;
-  font-size: clamp(0.8rem, 1.1vw, 0.95rem);
-  padding: 0.5rem;
-  border: 1px solid var(--c2);
-  background: var(--bg);
+  font-family: 'momochidori-variable', sans-serif;
+  font-variation-settings: var(--fv-nav-active);
+  font-size: clamp(0.65rem, 0.95vw, 0.8rem);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.45rem 0.65rem;
+  min-height: 2.25rem;
+  border: 1.5px solid var(--c2);
+  background: transparent;
   color: var(--c2);
   cursor: pointer;
 }
 
 .feed-filter-modal__done:hover {
-  opacity: 0.88;
+  background-color: var(--c2);
+  color: var(--c3);
+  opacity: 1;
+}
+
+.feed-filter-ledger-columns {
+  column-count: 3;
+  column-gap: 1rem;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-right: 0.15rem;
+}
+
+.feed-filter-ledger-name {
+  display: block;
+  break-inside: avoid;
+  margin: 0 0 0.35rem;
+  font-family: 'momochidori-variable', sans-serif;
+  font-variation-settings: var(--fv-nav-active);
+  font-size: clamp(0.62rem, 0.9vw, 0.75rem);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--c2);
+  cursor: pointer;
+}
+
+.feed-filter-ledger-name:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 768px) {
+  .feed-filter-ledger-columns {
+    column-count: 2;
+  }
 }
 
 .filterLocationTextBlock {
@@ -1702,6 +1945,32 @@ button {
 
 button:hover {
   background: #0056b3;
+}
+
+/* Filter action + modal buttons — theme hovers (override global button styles above). */
+#filterSystem button.feed-filter-action-btn,
+.feed-filter-modal button.feed-filter-modal__option,
+.feed-filter-modal button.feed-filter-modal__done {
+  background: transparent;
+  color: var(--c2);
+  border: 1.5px solid var(--c2);
+  border-radius: 0;
+}
+
+#filterSystem button.feed-filter-action-btn--primary,
+.feed-filter-modal button.feed-filter-modal__option {
+  background-color: var(--c5, #c9c9c9);
+  color: var(--c2);
+}
+
+#filterSystem button.feed-filter-action-btn:hover,
+#filterSystem button.feed-filter-action-btn--primary:hover,
+.feed-filter-modal button.feed-filter-modal__option:hover,
+.feed-filter-modal button.feed-filter-modal__option--all:hover,
+.feed-filter-modal button.feed-filter-modal__done:hover {
+  background-color: var(--c2);
+  color: var(--c3);
+  border-color: var(--c2);
 }
 
 .btn {

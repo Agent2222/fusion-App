@@ -74,12 +74,15 @@ class ObjectsHighlightComponent extends HTMLElement {
             this._teardownLightbox = null;
         }
         const lb = this.shadowRoot?.getElementById('ohLightbox');
-        if (lb) {
+        if (lb instanceof HTMLDialogElement && lb.open) {
+            lb.close();
+        } else if (lb) {
             lb.hidden = true;
             lb.setAttribute('aria-hidden', 'true');
         }
         if (typeof document !== 'undefined') {
             document.body.style.overflow = '';
+            delete document.documentElement.dataset.fusionObjectLightboxOpen;
         }
     }
 
@@ -128,13 +131,6 @@ class ObjectsHighlightComponent extends HTMLElement {
         setBlock(descEl, description, 'oh-lightbox-desc');
         setBlock(copyEl, copy, 'oh-lightbox-copy');
 
-        lb.hidden = false;
-        lb.setAttribute('aria-hidden', 'false');
-
-        if (typeof document !== 'undefined') {
-            document.body.style.overflow = 'hidden';
-        }
-
         if (this._teardownLightbox) {
             this._teardownLightbox();
             this._teardownLightbox = null;
@@ -146,18 +142,35 @@ class ObjectsHighlightComponent extends HTMLElement {
                 this._closeObjectLightbox();
             }
         };
+        const onCancel = (e) => {
+            e.preventDefault();
+            this._closeObjectLightbox();
+        };
         const closeBtn = root.querySelector('.oh-lightbox-close');
         const onCloseClick = () => this._closeObjectLightbox();
         const onImgClick = () => this._closeObjectLightbox();
 
         document.addEventListener('keydown', onKey);
+        lb.addEventListener('cancel', onCancel);
         closeBtn?.addEventListener('click', onCloseClick);
         img.addEventListener('click', onImgClick);
+
+        if (lb instanceof HTMLDialogElement) {
+            document.documentElement.dataset.fusionObjectLightboxOpen = 'true';
+            if (!lb.open) lb.showModal();
+        } else {
+            lb.hidden = false;
+            lb.setAttribute('aria-hidden', 'false');
+            if (typeof document !== 'undefined') {
+                document.body.style.overflow = 'hidden';
+            }
+        }
 
         this._centerLightboxScroll(root);
 
         this._teardownLightbox = () => {
             document.removeEventListener('keydown', onKey);
+            lb.removeEventListener('cancel', onCancel);
             closeBtn?.removeEventListener('click', onCloseClick);
             img.removeEventListener('click', onImgClick);
         };
@@ -240,6 +253,7 @@ class ObjectsHighlightComponent extends HTMLElement {
         }
         if (typeof document !== 'undefined') {
             document.body.style.overflow = '';
+            delete document.documentElement.dataset.fusionObjectLightboxOpen;
         }
     }
 
@@ -250,6 +264,7 @@ class ObjectsHighlightComponent extends HTMLElement {
         }
         if (typeof document !== 'undefined') {
             document.body.style.overflow = '';
+            delete document.documentElement.dataset.fusionObjectLightboxOpen;
         }
 
         this.shadow.innerHTML = `
@@ -419,19 +434,28 @@ class ObjectsHighlightComponent extends HTMLElement {
                     }
                 }
 
-                /* Full-screen lightbox: image scrolls vertically at full width; caption + close stay fixed */
+                /* Full-screen lightbox: top-layer dialog above site chrome (e.g. sound env z-index 32). */
                 .oh-lightbox {
                     position: fixed;
                     inset: 0;
-                    z-index: 200000;
+                    width: 100%;
+                    max-width: none;
+                    height: 100%;
+                    max-height: none;
                     margin: 0;
                     padding: 0;
+                    border: none;
                     box-sizing: border-box;
                     background: #000;
                     overflow: hidden;
+                    color: var(--c3, #fff);
                 }
 
-                .oh-lightbox[hidden] {
+                .oh-lightbox::backdrop {
+                    background: #000;
+                }
+
+                .oh-lightbox:not([open]) {
                     display: none !important;
                 }
 
@@ -547,14 +571,10 @@ class ObjectsHighlightComponent extends HTMLElement {
                     <div class="sect3"></div>
                 </div>
             </div>
-            <div
+            <dialog
                 class="oh-lightbox"
                 id="ohLightbox"
-                hidden
-                aria-modal="true"
-                role="dialog"
                 aria-label="Object"
-                aria-hidden="true"
             >
                 <button type="button" class="oh-lightbox-close" aria-label="Close">×</button>
                 <div class="oh-lightbox-scroll">
@@ -567,7 +587,7 @@ class ObjectsHighlightComponent extends HTMLElement {
                     <p class="oh-lightbox-desc"></p>
                     <p class="oh-lightbox-copy"></p>
                 </div>
-            </div>
+            </dialog>
         `;
     }
 }

@@ -1,16 +1,35 @@
 /**
  * Sticky expandable filter bar for Artists, Editions, and Gallery Access.
- * Use `state="artists" | "editions" | "gallery-access"`; scroll-collapse targets the matching scroll root.
- * Dispatches `fusion-feed-filter` with criteria; pages apply filters to feeds (see `utils/feedFilterApply.js`).
+ * Dispatches `fusion-feed-filter` with criteria; pages hydrate roster data via `hydrateFilterData()`.
  */
-import { ARTIST_LOCATION_OPTIONS, disciplineButtonIdToKey } from '../../utils/feedFilterApply.js';
+import { navigate } from '../../router.js';
+import { artistEnglishBlock } from '../../utils/artistSlug.js';
+import {
+    ARTIST_LOCATION_OPTIONS,
+    DISCIPLINE_OPTIONS,
+    EDITION_CATEGORY_OPTIONS,
+    artistProfileSlug,
+    buildArtistFilterAvailability,
+    buildEditionFilterAvailability,
+    buildGalleryFilterAvailability,
+    disciplineButtonIdToKey,
+    locationKeyToLabel,
+} from '../../utils/feedFilterApply.js';
+import { syncSoundEnvironmentPosition } from '../../utils/soundEnvironmentMount.js';
 
 const SCROLL_DELTA_PX = 4;
 const SCROLL_COLLAPSE_IGNORE_AFTER_OPEN_MS = 1200;
-/** Block scroll-collapse briefly after the user opens the filter (layout / momentum). */
 const SCROLL_COLLAPSE_GUARD_AFTER_CLICK_MS = 1400;
+const SEARCH_DEBOUNCE_MS = 200;
 
 const EVENT_NAME = 'fusion-feed-filter';
+
+/** @type {Record<'artists' | 'editions' | 'gallery-access', string>} */
+const SCROLL_ROOT_BY_STATE = {
+    artists: 'artistsMainContent',
+    editions: 'editionsMainContent',
+    'gallery-access': 'galleryAccessMainContent',
+};
 
 const EDITION_CAT_ID_TO_KEY = {
     editionCatSeries: 'series',
@@ -19,9 +38,89 @@ const EDITION_CAT_ID_TO_KEY = {
     editionCatOther: 'other',
 };
 
+const EDITION_FORMAT_LABELS = {
+    formatPrint: 'Print',
+    formatMultiple: 'Multiple',
+    formatBook: 'Book',
+    formatObject: 'Object',
+    formatDigital: 'Digital',
+    formatOther: 'Other',
+};
+
+const GALLERY_VIEW_LABELS = {
+    galleryPreview: 'Preview',
+    galleryOpening: 'Opening',
+    galleryArchive: 'Archive',
+};
+
+/** @param {string} s */
+function escHtml(s) {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;');
+}
+
+function getArtistLocationModalEl() {
+    const el = document.getElementById('artistLocationModal');
+    return el instanceof HTMLElement ? el : null;
+}
+
+function getGalleryLocationModalEl() {
+    const el = document.getElementById('galleryLocationModal');
+    return el instanceof HTMLElement ? el : null;
+}
+
+function getArtistLedgerModalEl() {
+    const el = document.getElementById('artistLedgerModal');
+    return el instanceof HTMLElement ? el : null;
+}
+
+/** @param {HTMLElement} modal */
+function portalModalToBody(modal) {
+    if (modal.parentElement !== document.body) {
+        document.body.appendChild(modal);
+    }
+}
+
+/** @param {HTMLElement} modal @param {HTMLElement} host */
+function restoreModalToHost(modal, host) {
+    if (modal.parentElement === document.body && host.isConnected) {
+        host.appendChild(modal);
+    }
+}
+
+/** @param {'artists' | 'editions' | 'gallery-access'} state */
+function scrollFilterPageToTop(state) {
+    const scrollRootId = SCROLL_ROOT_BY_STATE[state];
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+    const main = document.getElementById('mainContent');
+    if (main instanceof HTMLElement) main.scrollTop = 0;
+    if (scrollRootId) {
+        const primary = document.getElementById(scrollRootId);
+        if (primary instanceof HTMLElement) primary.scrollTop = 0;
+    }
+}
+
+/** @param {'artists' | 'editions' | 'gallery-access'} state */
+function modalScrollTargets(state) {
+    /** @type {(Element | Window)[]} */
+    const targets = [window];
+    const main = document.getElementById('mainContent');
+    if (main) targets.push(main);
+    const scrollRootId = SCROLL_ROOT_BY_STATE[state];
+    if (scrollRootId) {
+        const primary = document.getElementById(scrollRootId);
+        if (primary) targets.push(primary);
+    }
+    return targets;
+}
+
 /**
  * @param {string} scrollRootId
- * @param {HTMLElement} [host] `app-feed-filter` instance (scoped queries)
+ * @param {HTMLElement} [host]
  */
 function setupFilterSystemAndScrollCollapse(scrollRootId, host) {
     const root = host instanceof HTMLElement ? host : document;
@@ -59,11 +158,11 @@ function setupFilterSystemAndScrollCollapse(scrollRootId, host) {
         syncScrollBaselines();
     };
 
-    /** Keep #filterSystem and #filterToggle in sync (scroll-collapse used to drop only one). */
     const setFilterExpanded = (open) => {
         filterSystem.classList.toggle('active', open);
         filterToggle.classList.toggle('active', open);
         if (open) beginIgnoreScrollCollapseAfterOpen();
+        window.dispatchEvent(new CustomEvent('fusion-filter-expanded-changed'));
     };
 
     const collapseFilterIfActive = () => {
@@ -74,9 +173,8 @@ function setupFilterSystemAndScrollCollapse(scrollRootId, host) {
 
     filterToggle.addEventListener('click', () => {
         const open = !filterSystem.classList.contains('active');
-        if (open) {
-            setFilterExpanded(true);
-        } else {
+        if (open) setFilterExpanded(true);
+        else {
             guardScrollCollapseUntil = 0;
             setFilterExpanded(false);
         }
@@ -85,12 +183,10 @@ function setupFilterSystemAndScrollCollapse(scrollRootId, host) {
     const handleScroll = (el, id) => {
         const st = readScrollTop(el);
         const now = performance.now();
-
         if (now < ignoreScrollCollapseUntil || now < guardScrollCollapseUntil) {
             lastScrollTopById[id] = st;
             return;
         }
-
         if (st <= 0) {
             lastScrollTopById[id] = 0;
             return;
@@ -103,9 +199,7 @@ function setupFilterSystemAndScrollCollapse(scrollRootId, host) {
         const delta = st - prev;
         lastScrollTopById[id] = st;
         if (Math.abs(delta) < SCROLL_DELTA_PX) return;
-        if (delta > 0) {
-            collapseFilterIfActive();
-        }
+        if (delta > 0) collapseFilterIfActive();
     };
 
     for (const [id, el] of scrollPairs()) {
@@ -117,65 +211,52 @@ function setupFilterSystemAndScrollCollapse(scrollRootId, host) {
     }
 
     syncScrollBaselines();
-
-    if (filterSystem.classList.contains('active')) {
-        beginIgnoreScrollCollapseAfterOpen();
-    }
+    if (filterSystem.classList.contains('active')) beginIgnoreScrollCollapseAfterOpen();
 }
 
-function locationModalOptionsHtml() {
-    const allBtn = `<button type="button" class="feed-filter-modal__option feed-filter-modal__option--all" data-location-key="all">All Locations</button>`;
-    const rest = ARTIST_LOCATION_OPTIONS.filter((o) => o.key !== 'all')
+/** @param {string[]} keys */
+function locationModalOptionsHtml(keys) {
+    const allowed = new Set(keys.length ? keys : ARTIST_LOCATION_OPTIONS.map((o) => o.key));
+    allowed.add('all');
+    return ARTIST_LOCATION_OPTIONS.filter((o) => allowed.has(o.key))
         .map(
             (o) =>
-                `<button type="button" class="feed-filter-modal__option" data-location-key="${o.key}">${o.label}</button>`
+                `<button type="button" class="feed-filter-modal__option${o.key === 'all' ? ' feed-filter-modal__option--all' : ''}" data-location-key="${o.key}">${escHtml(o.label)}</button>`
         )
         .join('');
-    return allBtn + rest;
 }
 
-function templateArtists() {
+/** @param {string} id @param {string} label @param {boolean} [active] */
+function chipButton(id, label, active = false) {
+    return `<div class="filterButton${active ? ' active' : ''}" id="${escHtml(id)}">${escHtml(label)}</div>`;
+}
+
+function templateArtistsSkeleton() {
     return `
         <div id="filterSystem" class="feed-filter-system active">
-            <div id="filterToggle" class="active">Filter Artists</div>
+            <div id="filterToggle" class="active">
+                <span class="feed-filter-toggle-label">Filter Artists</span>
+            </div>
             <div id="filterContent">
                 <div id="leftFilter" class="filterBlock">
-                    <div id="locationFilter">
-                        <div class="filterLocationTextBlock" role="button" tabindex="0" aria-expanded="false" aria-haspopup="dialog" id="artistLocationTrigger">
-                            <div class="filterLocationText" id="artistLocationLabel">All Locations</div>
-                            <div class="filterArrow" id="artistLocationArrow">></div>
-                        </div>
+                    <p class="filterColumnHeader">By Location</p>
+                    <div id="locationFilter" class="filterLocationActions">
+                        <button type="button" class="feed-filter-action-btn feed-filter-action-btn--primary" id="artistLocationsBtn">All Locations</button>
+                        <button type="button" class="feed-filter-action-btn" id="artistLedgerBtn">Artists Ledger</button>
                     </div>
                 </div>
                 <div id="middleFilter" class="filterBlock centerFilterBlock">
-                    <div id="connectionFilter" class="filterButtonBlock" data-filter-group="connection">
-                        <div class="filterButton active" id="allConnection" data-filter-group="connection">All</div>
-                        <div class="filterButton" id="alumniConnection" data-filter-group="connection">Alumni</div>
-                        <div class="filterButton" id="userConnection" data-filter-group="connection">Artists</div>
-                        <div class="filterButton" id="2017CohortConnection" data-filter-group="connection">2017</div>
-                        <div class="filterButton" id="2018CohortConnection" data-filter-group="connection">2018</div>
-                        <div class="filterButton" id="2019CohortConnection" data-filter-group="connection">2019</div>
-                        <div class="filterButton" id="2024CohortConnection" data-filter-group="connection">2024</div>
-                        <div class="filterButton" id="2025CohortConnection" data-filter-group="connection">2025</div>
-                        <div class="filterButton" id="2026CohortConnection" data-filter-group="connection">2026</div>
-                    </div>
+                    <p class="filterColumnHeader">By Cohort</p>
+                    <div id="connectionFilter" class="filterButtonBlock" data-filter-group="connection"></div>
                 </div>
                 <div id="rightFilter" class="filterBlock">
-                    <div id="disciplineFilter" class="filterButtonBlock filterButtonBlock--multi" data-multi="true" data-all-id="allDiscipline">
-                        <div class="filterButton active" id="allDiscipline">All</div>
-                        <div class="filterButton" id="sculptureDiscipline">Sculpture</div>
-                        <div class="filterButton" id="paintingDiscipline">Painting</div>
-                        <div class="filterButton" id="installationDiscipline">Installation</div>
-                        <div class="filterButton" id="performanceDiscipline">Performance</div>
-                        <div class="filterButton" id="videoDiscipline">Film/Video</div>
-                        <div class="filterButton" id="performanceArtDiscipline">Performance Art</div>
-                        <div class="filterButton" id="soundDiscipline">Sound</div>
-                        <div class="filterButton" id="illustrationDiscipline">Illustration</div>
-                        <div class="filterButton" id="photographyDiscipline">Photography</div>
-                        <div class="filterButton" id="mixedMediaDiscipline">Mixed Media</div>
-                        <div class="filterButton" id="otherDiscipline">Other</div>
-                    </div>
+                    <p class="filterColumnHeader">By Discipline</p>
+                    <div id="disciplineFilter" class="filterButtonBlock filterButtonBlock--multi" data-multi="true" data-all-id="allDiscipline"></div>
                 </div>
+            </div>
+            <div id="filterSearchRow">
+                <label class="filterSearchLabel" for="filterSearchInput">Find artist by name</label>
+                <input type="search" id="filterSearchInput" class="filterSearchInput" autocomplete="off" placeholder="Search roster…" />
             </div>
         </div>
         <div id="artistLocationModal" class="feed-filter-modal" hidden role="dialog" aria-modal="true" aria-labelledby="artistLocationModalTitle">
@@ -183,81 +264,75 @@ function templateArtists() {
             <div class="feed-filter-modal__dialog">
                 <h2 class="feed-filter-modal__title" id="artistLocationModalTitle">Locations</h2>
                 <p class="feed-filter-modal__hint">Choose a region to filter the roster.</p>
-                <div class="feed-filter-modal__list">${locationModalOptionsHtml()}</div>
+                <div class="feed-filter-modal__list" id="artistLocationModalList"></div>
                 <button type="button" class="feed-filter-modal__done" id="artistLocationModalClose">Done</button>
             </div>
         </div>
-    `;
-}
-
-function templateEditions() {
-    return `
-        <div id="filterSystem" class="feed-filter-system">
-            <div id="filterToggle">Filter Editions</div>
-            <div id="filterContent">
-                <div id="leftFilter" class="filterBlock">
-                    <div id="editionCategoryFilter" class="filterButtonBlock filterButtonBlock--multi filterButtonBlock--compact" data-multi="true" data-all-id="allEditionCategories">
-                        <div class="filterButton active" id="allEditionCategories">All</div>
-                        <div class="filterButton" id="editionCatSeries">Series</div>
-                        <div class="filterButton" id="editionCatMonograph">Monograph</div>
-                        <div class="filterButton" id="editionCatPortfolio">Portfolio</div>
-                        <div class="filterButton" id="editionCatOther">Other</div>
-                    </div>
-                </div>
-                <div id="middleFilter" class="filterBlock centerFilterBlock">
-                    <div id="connectionFilter" class="filterButtonBlock" data-filter-group="editionYear">
-                        <div class="filterButton active" id="allEditionYears" data-filter-group="editionYear">All</div>
-                        <div class="filterButton" id="edition2024" data-filter-group="editionYear">2024</div>
-                        <div class="filterButton" id="edition2025" data-filter-group="editionYear">2025</div>
-                        <div class="filterButton" id="edition2026" data-filter-group="editionYear">2026</div>
-                        <div class="filterButton" id="editionArchive" data-filter-group="editionYear">Archive</div>
-                    </div>
-                </div>
-                <div id="rightFilter" class="filterBlock">
-                    <div id="disciplineFilter" class="filterButtonBlock" data-filter-group="editionFormat">
-                        <div class="filterButton active" id="allEditionFormats" data-filter-group="editionFormat">All</div>
-                        <div class="filterButton" id="formatPrint" data-filter-group="editionFormat">Print</div>
-                        <div class="filterButton" id="formatMultiple" data-filter-group="editionFormat">Multiple</div>
-                        <div class="filterButton" id="formatBook" data-filter-group="editionFormat">Book</div>
-                        <div class="filterButton" id="formatObject" data-filter-group="editionFormat">Object</div>
-                        <div class="filterButton" id="formatDigital" data-filter-group="editionFormat">Digital</div>
-                        <div class="filterButton" id="formatOther" data-filter-group="editionFormat">Other</div>
-                    </div>
-                </div>
+        <div id="artistLedgerModal" class="feed-filter-modal feed-filter-ledger-modal" hidden role="dialog" aria-modal="true" aria-labelledby="artistLedgerModalTitle">
+            <div class="feed-filter-modal__backdrop" id="artistLedgerModalBackdrop"></div>
+            <div class="feed-filter-modal__dialog feed-filter-modal__dialog--wide">
+                <h2 class="feed-filter-modal__title" id="artistLedgerModalTitle">Artists Ledger</h2>
+                <p class="feed-filter-modal__hint">Select an artist to open their profile.</p>
+                <div class="feed-filter-ledger-columns" id="artistLedgerList"></div>
+                <button type="button" class="feed-filter-modal__done" id="artistLedgerModalClose">Done</button>
             </div>
         </div>
     `;
 }
 
-function templateGalleryAccess() {
+function templateEditionsSkeleton() {
     return `
         <div id="filterSystem" class="feed-filter-system">
-            <div id="filterToggle">Filter Gallery Access</div>
+            <div id="filterToggle">
+                <span class="feed-filter-toggle-label">Filter Editions</span>
+            </div>
             <div id="filterContent">
                 <div id="leftFilter" class="filterBlock">
-                    <div id="galleryLocationWrap">
-                        <div class="filterLocationTextBlock" role="button" tabindex="0" aria-expanded="false" aria-haspopup="dialog" id="galleryLocationTrigger">
-                            <div class="filterLocationText" id="galleryLocationLabel">All Locations</div>
-                            <div class="filterArrow" id="galleryLocationArrow">></div>
-                        </div>
+                    <p class="filterColumnHeader">By Category</p>
+                    <div id="editionCategoryFilter" class="filterButtonBlock filterButtonBlock--multi filterButtonBlock--compact" data-multi="true" data-all-id="allEditionCategories"></div>
+                </div>
+                <div id="middleFilter" class="filterBlock centerFilterBlock">
+                    <p class="filterColumnHeader">By Year</p>
+                    <div id="connectionFilter" class="filterButtonBlock" data-filter-group="editionYear"></div>
+                </div>
+                <div id="rightFilter" class="filterBlock">
+                    <p class="filterColumnHeader">By Format</p>
+                    <div id="disciplineFilter" class="filterButtonBlock" data-filter-group="editionFormat"></div>
+                </div>
+            </div>
+            <div id="filterSearchRow">
+                <label class="filterSearchLabel" for="filterSearchInput">Find edition by title</label>
+                <input type="search" id="filterSearchInput" class="filterSearchInput" autocomplete="off" placeholder="Search editions…" />
+            </div>
+        </div>
+    `;
+}
+
+function templateGalleryAccessSkeleton() {
+    return `
+        <div id="filterSystem" class="feed-filter-system">
+            <div id="filterToggle">
+                <span class="feed-filter-toggle-label">Filter Gallery Access</span>
+            </div>
+            <div id="filterContent">
+                <div id="leftFilter" class="filterBlock">
+                    <p class="filterColumnHeader">By Location</p>
+                    <div id="galleryLocationWrap" class="filterLocationActions">
+                        <button type="button" class="feed-filter-action-btn feed-filter-action-btn--primary" id="galleryLocationsBtn">All Locations</button>
                     </div>
                 </div>
                 <div id="middleFilter" class="filterBlock centerFilterBlock">
-                    <div id="connectionFilter" class="filterButtonBlock" data-filter-group="gallerySeason">
-                        <div class="filterButton active" id="allGallerySeason" data-filter-group="gallerySeason">All</div>
-                        <div class="filterButton" id="gallerySeason2024" data-filter-group="gallerySeason">2024</div>
-                        <div class="filterButton" id="gallerySeason2025" data-filter-group="gallerySeason">2025</div>
-                        <div class="filterButton" id="gallerySeason2026" data-filter-group="gallerySeason">2026</div>
-                    </div>
+                    <p class="filterColumnHeader">By Season</p>
+                    <div id="connectionFilter" class="filterButtonBlock" data-filter-group="gallerySeason"></div>
                 </div>
                 <div id="rightFilter" class="filterBlock">
-                    <div id="disciplineFilter" class="filterButtonBlock" data-filter-group="galleryView">
-                        <div class="filterButton active" id="allGalleryView" data-filter-group="galleryView">All</div>
-                        <div class="filterButton" id="galleryPreview" data-filter-group="galleryView">Preview</div>
-                        <div class="filterButton" id="galleryOpening" data-filter-group="galleryView">Opening</div>
-                        <div class="filterButton" id="galleryArchive" data-filter-group="galleryView">Archive</div>
-                    </div>
+                    <p class="filterColumnHeader">By View</p>
+                    <div id="disciplineFilter" class="filterButtonBlock" data-filter-group="galleryView"></div>
                 </div>
+            </div>
+            <div id="filterSearchRow">
+                <label class="filterSearchLabel" for="filterSearchInput">Find artist by name</label>
+                <input type="search" id="filterSearchInput" class="filterSearchInput" autocomplete="off" placeholder="Search roster…" />
             </div>
         </div>
         <div id="galleryLocationModal" class="feed-filter-modal" hidden role="dialog" aria-modal="true" aria-labelledby="galleryLocationModalTitle">
@@ -265,17 +340,14 @@ function templateGalleryAccess() {
             <div class="feed-filter-modal__dialog">
                 <h2 class="feed-filter-modal__title" id="galleryLocationModalTitle">Locations</h2>
                 <p class="feed-filter-modal__hint">Choose a region to filter gallery access.</p>
-                <div class="feed-filter-modal__list">${locationModalOptionsHtml()}</div>
+                <div class="feed-filter-modal__list" id="galleryLocationModalList"></div>
                 <button type="button" class="feed-filter-modal__done" id="galleryLocationModalClose">Done</button>
             </div>
         </div>
     `;
 }
 
-/**
- * @param {HTMLElement} block
- * @param {string} allId
- */
+/** @param {HTMLElement} block @param {HTMLElement} btn @param {string} allId */
 function applyMultiSelect(block, btn, allId) {
     if (!block || !btn) return;
     const allBtn = block.querySelector(`#${CSS.escape(allId)}`);
@@ -300,6 +372,11 @@ function applyMultiSelect(block, btn, allId) {
  * @param {'artists' | 'editions' | 'gallery-access'} state
  */
 function wireFilterLogic(host, state) {
+    /** @type {string} */
+    let searchQuery = '';
+    /** @type {ReturnType<typeof setTimeout> | null} */
+    let searchDebounce = null;
+
     const dispatch = (criteria) => {
         window.dispatchEvent(
             new CustomEvent(EVENT_NAME, {
@@ -316,130 +393,255 @@ function wireFilterLogic(host, state) {
         });
     };
 
+    const updateArtistLocationsBtn = () => {
+        const btn = host.querySelector('#artistLocationsBtn');
+        const k = host._artistLocationKey ?? 'all';
+        if (btn) btn.textContent = locationKeyToLabel(k);
+    };
+
+    const updateGalleryLocationsBtn = () => {
+        const btn = host.querySelector('#galleryLocationsBtn');
+        const k = host._galleryLocationKey ?? 'all';
+        if (btn) btn.textContent = locationKeyToLabel(k);
+    };
+
+    /** @param {HTMLElement | null} block @param {string} allId */
+    const activateOnlyChip = (block, allId) => {
+        if (!(block instanceof HTMLElement)) return;
+        block.querySelectorAll('.filterButton').forEach((b) => {
+            b.classList.toggle('active', b.id === allId);
+        });
+    };
+
+    const resetFilterChipsToAll = () => {
+        if (state === 'artists') {
+            host._artistLocationKey = 'all';
+            updateArtistLocationsBtn();
+            activateOnlyChip(host.querySelector('#connectionFilter'), 'allConnection');
+            activateOnlyChip(host.querySelector('#disciplineFilter'), 'allDiscipline');
+        } else if (state === 'editions') {
+            activateOnlyChip(host.querySelector('#editionCategoryFilter'), 'allEditionCategories');
+            activateOnlyChip(host.querySelector('#connectionFilter'), 'allEditionYears');
+            activateOnlyChip(host.querySelector('#disciplineFilter'), 'allEditionFormats');
+        } else {
+            host._galleryLocationKey = 'all';
+            updateGalleryLocationsBtn();
+            activateOnlyChip(host.querySelector('#connectionFilter'), 'allGallerySeason');
+            activateOnlyChip(host.querySelector('#disciplineFilter'), 'allGalleryView');
+        }
+    };
+
     const closeLocationModal = () => {
-        const modal = host.querySelector('#artistLocationModal');
-        const arrow = host.querySelector('#artistLocationArrow');
-        const trig = host.querySelector('#artistLocationTrigger');
-        if (modal) modal.hidden = true;
-        if (arrow) arrow.classList.remove('active');
-        if (trig) {
-            trig.setAttribute('aria-expanded', 'false');
+        const modal = getArtistLocationModalEl();
+        if (modal) {
+            modal.hidden = true;
+            restoreModalToHost(modal, host);
         }
         document.body.style.overflow = '';
     };
 
     const closeGalleryLocationModal = () => {
-        const modal = host.querySelector('#galleryLocationModal');
-        const arrow = host.querySelector('#galleryLocationArrow');
-        const trig = host.querySelector('#galleryLocationTrigger');
-        if (modal) modal.hidden = true;
-        if (arrow) arrow.classList.remove('active');
-        if (trig) trig.setAttribute('aria-expanded', 'false');
+        const modal = getGalleryLocationModalEl();
+        if (modal) {
+            modal.hidden = true;
+            restoreModalToHost(modal, host);
+        }
         document.body.style.overflow = '';
     };
 
+    const closeLedgerModal = () => {
+        const modal = getArtistLedgerModalEl();
+        if (modal) {
+            modal.hidden = true;
+            restoreModalToHost(modal, host);
+        }
+        document.body.style.overflow = '';
+    };
+
+    const closeAllModals = () => {
+        closeLocationModal();
+        closeGalleryLocationModal();
+        closeLedgerModal();
+    };
+
+    /** @type {Map<string, number>} */
+    const modalScrollTopByKey = new Map();
+    let modalScrollCloseGuardUntil = 0;
+
+    const readScrollTopForModal = (el) =>
+        el === window ? window.pageYOffset || document.documentElement.scrollTop : /** @type {HTMLElement} */ (el).scrollTop;
+
+    const resetModalScrollBaselines = () => {
+        modalScrollTopByKey.clear();
+        for (const el of modalScrollTargets(state)) {
+            const key = el === window ? 'window' : /** @type {HTMLElement} */ (el).id || 'el';
+            modalScrollTopByKey.set(key, readScrollTopForModal(el));
+        }
+    };
+
+    const isAnyModalOpen = () => {
+        const am = getArtistLocationModalEl();
+        const gm = getGalleryLocationModalEl();
+        const lm = getArtistLedgerModalEl();
+        return (
+            (am && !am.hidden) ||
+            (gm && !gm.hidden) ||
+            (lm && !lm.hidden)
+        );
+    };
+
+    const closeModalsOnScroll = (el) => {
+        if (performance.now() < modalScrollCloseGuardUntil) return;
+        if (!isAnyModalOpen()) return;
+
+        const key = el === window ? 'window' : /** @type {HTMLElement} */ (el).id || 'el';
+        const st = readScrollTopForModal(el);
+        const prev = modalScrollTopByKey.get(key);
+        modalScrollTopByKey.set(key, st);
+        if (prev === undefined) return;
+        if (Math.abs(st - prev) < SCROLL_DELTA_PX) return;
+        closeAllModals();
+    };
+
+    /** @type {{ el: Element | Window, handler: () => void }[]} */
+    const modalScrollHandlers = modalScrollTargets(state).map((el) => {
+        const handler = () => closeModalsOnScroll(el);
+        if (el === window) window.addEventListener('scroll', handler, { passive: true });
+        else /** @type {Element} */ (el).addEventListener('scroll', handler, { passive: true });
+        return { el, handler };
+    });
+
+    const openModalCommon = () => {
+        scrollFilterPageToTop(state);
+        modalScrollCloseGuardUntil = performance.now() + 450;
+        document.body.style.overflow = 'hidden';
+        resetModalScrollBaselines();
+    };
+
     const openLocationModal = () => {
-        const modal = host.querySelector('#artistLocationModal');
-        const arrow = host.querySelector('#artistLocationArrow');
-        const trig = host.querySelector('#artistLocationTrigger');
+        const modal = getArtistLocationModalEl();
         if (!modal) return;
         closeDropdownsOnly();
         closeGalleryLocationModal();
+        closeLedgerModal();
+        openModalCommon();
+        portalModalToBody(modal);
         modal.hidden = false;
-        if (arrow) arrow.classList.add('active');
-        if (trig) trig.setAttribute('aria-expanded', 'true');
-        document.body.style.overflow = 'hidden';
     };
 
     const openGalleryLocationModal = () => {
-        const modal = host.querySelector('#galleryLocationModal');
-        const arrow = host.querySelector('#galleryLocationArrow');
-        const trig = host.querySelector('#galleryLocationTrigger');
+        const modal = getGalleryLocationModalEl();
         if (!modal) return;
         closeDropdownsOnly();
         closeLocationModal();
+        closeLedgerModal();
+        openModalCommon();
+        portalModalToBody(modal);
         modal.hidden = false;
-        if (arrow) arrow.classList.add('active');
-        if (trig) trig.setAttribute('aria-expanded', 'true');
-        document.body.style.overflow = 'hidden';
+    };
+
+    const openLedgerModal = () => {
+        const modal = getArtistLedgerModalEl();
+        if (!modal) return;
+        closeDropdownsOnly();
+        closeLocationModal();
+        closeGalleryLocationModal();
+        openModalCommon();
+        portalModalToBody(modal);
+        modal.hidden = false;
     };
 
     /** @param {string} key */
     const setLocationFromKey = (key) => {
-        const k = key || 'all';
-        host._artistLocationKey = k;
-        const label =
-            ARTIST_LOCATION_OPTIONS.find((o) => o.key === k)?.label || 'All Locations';
-        const lbl = host.querySelector('#artistLocationLabel');
-        if (lbl) lbl.textContent = label;
+        host._artistLocationKey = key || 'all';
+        updateArtistLocationsBtn();
         closeLocationModal();
         pushDispatch();
     };
 
     /** @param {string} key */
     const setGalleryLocationFromKey = (key) => {
-        const k = key || 'all';
-        host._galleryLocationKey = k;
-        const label =
-            ARTIST_LOCATION_OPTIONS.find((o) => o.key === k)?.label || 'All Locations';
-        const lbl = host.querySelector('#galleryLocationLabel');
-        if (lbl) lbl.textContent = label;
+        host._galleryLocationKey = key || 'all';
+        updateGalleryLocationsBtn();
         closeGalleryLocationModal();
         pushDispatch();
     };
 
     const onDocKeydown = (ev) => {
-        if (ev.key === 'Escape') {
-            const am = host.querySelector('#artistLocationModal');
-            const gm = host.querySelector('#galleryLocationModal');
-            if (am && !am.hidden) {
-                ev.preventDefault();
-                closeLocationModal();
-            } else if (gm && !gm.hidden) {
-                ev.preventDefault();
-                closeGalleryLocationModal();
-            }
+        if (ev.key !== 'Escape') return;
+        if (isAnyModalOpen()) {
+            ev.preventDefault();
+            closeAllModals();
         }
     };
     document.addEventListener('keydown', onDocKeydown);
 
-    host.addEventListener('click', (e) => {
-        const modalBackdrop = e.target.closest('#artistLocationModalBackdrop');
-        const modalClose = e.target.closest('#artistLocationModalClose');
-        if (modalBackdrop || modalClose) {
+    const onDocumentClick = (e) => {
+        const target = e.target;
+        if (!(target instanceof Element)) return;
+
+        if (target.closest('#artistLocationModalBackdrop') || target.closest('#artistLocationModalClose')) {
             e.preventDefault();
             closeLocationModal();
             return;
         }
-
-        const galleryBackdrop = e.target.closest('#galleryLocationModalBackdrop');
-        const galleryClose = e.target.closest('#galleryLocationModalClose');
-        if (galleryBackdrop || galleryClose) {
+        if (target.closest('#galleryLocationModalBackdrop') || target.closest('#galleryLocationModalClose')) {
             e.preventDefault();
             closeGalleryLocationModal();
             return;
         }
-
-        const locOpt = e.target.closest('.feed-filter-modal__option');
-        if (locOpt && host.contains(locOpt)) {
+        if (target.closest('#artistLedgerModalBackdrop') || target.closest('#artistLedgerModalClose')) {
             e.preventDefault();
-            const key = locOpt.getAttribute('data-location-key') || 'all';
-            if (locOpt.closest('#galleryLocationModal')) {
-                setGalleryLocationFromKey(key);
-            } else {
-                setLocationFromKey(key);
-            }
+            closeLedgerModal();
             return;
         }
 
+        const locOpt = target.closest('.feed-filter-modal__option');
+        if (locOpt) {
+            e.preventDefault();
+            const key = locOpt.getAttribute('data-location-key') || 'all';
+            if (locOpt.closest('#galleryLocationModal')) setGalleryLocationFromKey(key);
+            else if (locOpt.closest('#artistLocationModal')) setLocationFromKey(key);
+            return;
+        }
+
+        const ledgerLink = target.closest('.feed-filter-ledger-name');
+        if (ledgerLink instanceof HTMLAnchorElement) {
+            e.preventDefault();
+            const href = ledgerLink.getAttribute('href') || '/profile';
+            closeLedgerModal();
+            navigate(href);
+            return;
+        }
+
+        if (isAnyModalOpen()) {
+            const am = getArtistLocationModalEl();
+            const gm = getGalleryLocationModalEl();
+            const lm = getArtistLedgerModalEl();
+            if (
+                (am && !am.hidden && am.contains(target)) ||
+                (gm && !gm.hidden && gm.contains(target)) ||
+                (lm && !lm.hidden && lm.contains(target))
+            ) {
+                return;
+            }
+        }
+
+        if (!host.contains(target)) {
+            closeDropdownsOnly();
+            closeAllModals();
+        }
+    };
+    document.addEventListener('click', onDocumentClick);
+
+    host.addEventListener('click', (e) => {
         const btn = e.target.closest('.filterButton');
         if (btn && host.contains(btn)) {
             e.stopPropagation();
             closeDropdownsOnly();
             const block = btn.closest('.filterButtonBlock');
             if (block?.dataset.multi === 'true') {
-                const allId = block.dataset.allId || 'allDiscipline';
-                applyMultiSelect(block, btn, allId);
+                applyMultiSelect(block, btn, block.dataset.allId || 'allDiscipline');
             } else if (block) {
                 block.querySelectorAll('.filterButton').forEach((b) => b.classList.remove('active'));
                 btn.classList.add('active');
@@ -448,44 +650,41 @@ function wireFilterLogic(host, state) {
             return;
         }
 
-        const trig = e.target.closest('#artistLocationTrigger');
-        if (trig && host.contains(trig)) {
+        if (e.target.closest('#artistLocationsBtn')) {
             e.preventDefault();
-            e.stopPropagation();
-            const modal = host.querySelector('#artistLocationModal');
-            const open = modal && modal.hidden;
-            if (open) openLocationModal();
-            else closeLocationModal();
+            openLocationModal();
             return;
         }
-
-        const gltrig = e.target.closest('#galleryLocationTrigger');
-        if (gltrig && host.contains(gltrig)) {
+        if (e.target.closest('#artistLedgerBtn')) {
             e.preventDefault();
-            e.stopPropagation();
-            const modal = host.querySelector('#galleryLocationModal');
-            const open = modal && modal.hidden;
-            if (open) openGalleryLocationModal();
-            else closeGalleryLocationModal();
+            openLedgerModal();
+            return;
+        }
+        if (e.target.closest('#galleryLocationsBtn')) {
+            e.preventDefault();
+            openGalleryLocationModal();
             return;
         }
     });
 
-    document.addEventListener('click', (ev) => {
-        if (!host.contains(ev.target)) {
-            closeDropdownsOnly();
-            const modal = host.querySelector('#artistLocationModal');
-            if (modal && !modal.hidden) closeLocationModal();
-            const gmodal = host.querySelector('#galleryLocationModal');
-            if (gmodal && !gmodal.hidden) closeGalleryLocationModal();
-        }
-    });
+    const searchInput = host.querySelector('#filterSearchInput');
+    if (searchInput instanceof HTMLInputElement) {
+        searchInput.addEventListener('input', () => {
+            if (searchDebounce) clearTimeout(searchDebounce);
+            searchDebounce = setTimeout(() => {
+                const next = searchInput.value.trim();
+                if (next) resetFilterChipsToAll();
+                searchQuery = next;
+                pushDispatch();
+            }, SEARCH_DEBOUNCE_MS);
+        });
+    }
 
     function collectDisciplineKeys() {
         const block = host.querySelector('#disciplineFilter');
         if (!block) return [];
         const allId = block.dataset.allId || 'allDiscipline';
-        const allBtn = host.querySelector(`#${CSS.escape(allId)}`);
+        const allBtn = block.querySelector(`#${CSS.escape(allId)}`);
         if (allBtn?.classList.contains('active')) return [];
         const keys = [];
         block.querySelectorAll('.filterButton.active').forEach((b) => {
@@ -511,34 +710,30 @@ function wireFilterLogic(host, state) {
 
     function pushDispatch() {
         if (state === 'artists') {
-            const conn =
-                host.querySelector('#connectionFilter .filterButton.active')?.id || 'allConnection';
-            const loc = host._artistLocationKey ?? 'all';
             dispatch({
-                connectionId: conn,
+                connectionId:
+                    host.querySelector('#connectionFilter .filterButton.active')?.id || 'allConnection',
                 disciplineKeys: collectDisciplineKeys(),
-                locationKey: loc,
+                locationKey: host._artistLocationKey ?? 'all',
+                nameQuery: searchQuery,
             });
         } else if (state === 'editions') {
-            const year =
-                host.querySelector('#connectionFilter .filterButton.active')?.id || 'allEditionYears';
-            const fmt =
-                host.querySelector('#disciplineFilter .filterButton.active')?.id || 'allEditionFormats';
             dispatch({
-                yearId: year,
-                formatId: fmt,
+                yearId:
+                    host.querySelector('#connectionFilter .filterButton.active')?.id || 'allEditionYears',
+                formatId:
+                    host.querySelector('#disciplineFilter .filterButton.active')?.id || 'allEditionFormats',
                 categoryKeys: collectEditionCategoryKeys(),
+                titleQuery: searchQuery,
             });
         } else {
-            const season =
-                host.querySelector('#connectionFilter .filterButton.active')?.id || 'allGallerySeason';
-            const view =
-                host.querySelector('#disciplineFilter .filterButton.active')?.id || 'allGalleryView';
-            const loc = host._galleryLocationKey ?? 'all';
             dispatch({
-                locationKey: loc,
-                seasonId: season,
-                viewId: view,
+                locationKey: host._galleryLocationKey ?? 'all',
+                seasonId:
+                    host.querySelector('#connectionFilter .filterButton.active')?.id || 'allGallerySeason',
+                viewId:
+                    host.querySelector('#disciplineFilter .filterButton.active')?.id || 'allGalleryView',
+                nameQuery: searchQuery,
             });
         }
     }
@@ -546,7 +741,139 @@ function wireFilterLogic(host, state) {
     host._pushFeedFilter = pushDispatch;
     host._cleanupFeedFilter = () => {
         document.removeEventListener('keydown', onDocKeydown);
+        document.removeEventListener('click', onDocumentClick);
+        if (searchDebounce) clearTimeout(searchDebounce);
+        for (const { el, handler } of modalScrollHandlers) {
+            if (el === window) window.removeEventListener('scroll', handler);
+            else /** @type {Element} */ (el).removeEventListener('scroll', handler);
+        }
     };
+
+    updateArtistLocationsBtn();
+    updateGalleryLocationsBtn();
+}
+
+/** @param {object[]} artists */
+function renderArtistFilterChips(host, artists) {
+    const avail = buildArtistFilterAvailability(artists);
+
+    const conn = host.querySelector('#connectionFilter');
+    if (conn) {
+        /** @type {string[]} */
+        const chips = [chipButton('allConnection', 'All', true)];
+        if (avail.connectionIds.includes('alumniConnection')) chips.push(chipButton('alumniConnection', 'Alumni'));
+        if (avail.connectionIds.includes('userConnection')) chips.push(chipButton('userConnection', 'Artists'));
+        for (const y of avail.cohortYears) {
+            chips.push(chipButton(`${y}CohortConnection`, String(y)));
+        }
+        conn.innerHTML = chips.join('');
+    }
+
+    const disc = host.querySelector('#disciplineFilter');
+    if (disc) {
+        const chips = [chipButton('allDiscipline', 'All', true)];
+        for (const opt of DISCIPLINE_OPTIONS) {
+            if (avail.disciplineKeys.includes(opt.key)) {
+                chips.push(chipButton(`${opt.key}Discipline`, opt.label));
+            }
+        }
+        disc.innerHTML = chips.join('');
+    }
+
+    const list = host.querySelector('#artistLocationModalList');
+    if (list) list.innerHTML = locationModalOptionsHtml(avail.locationKeys);
+
+    const ledger = host.querySelector('#artistLedgerList');
+    if (ledger) {
+        const sorted = [...(artists || [])].sort((a, b) => {
+            const na = String(artistEnglishBlock(a)?.name || '');
+            const nb = String(artistEnglishBlock(b)?.name || '');
+            return na.localeCompare(nb, undefined, { sensitivity: 'base' });
+        });
+        ledger.innerHTML = sorted
+            .map((a) => {
+                const name = String(artistEnglishBlock(a)?.name || 'Artist');
+                const slug = artistProfileSlug(a);
+                if (!slug) return '';
+                return `<a class="feed-filter-ledger-name" href="/profile/${encodeURIComponent(slug)}">${escHtml(name)}</a>`;
+            })
+            .filter(Boolean)
+            .join('');
+    }
+}
+
+/** @param {object[]} items */
+function renderEditionFilterChips(host, items) {
+    const avail = buildEditionFilterAvailability(items);
+
+    const cat = host.querySelector('#editionCategoryFilter');
+    if (cat) {
+        const chips = [chipButton('allEditionCategories', 'All', true)];
+        for (const opt of EDITION_CATEGORY_OPTIONS) {
+            if (opt.key === 'all') continue;
+            if (avail.categoryKeys.includes(opt.key)) {
+                const id =
+                    opt.key === 'series'
+                        ? 'editionCatSeries'
+                        : opt.key === 'monograph'
+                          ? 'editionCatMonograph'
+                          : opt.key === 'portfolio'
+                            ? 'editionCatPortfolio'
+                            : 'editionCatOther';
+                chips.push(chipButton(id, opt.label));
+            }
+        }
+        cat.innerHTML = chips.join('');
+    }
+
+    const year = host.querySelector('#connectionFilter');
+    if (year) {
+        const chips = [chipButton('allEditionYears', 'All', true)];
+        for (const id of avail.yearIds) {
+            if (id === 'editionArchive') chips.push(chipButton(id, 'Archive'));
+            else {
+                const y = String(id).replace(/\D/g, '');
+                if (y) chips.push(chipButton(id, y));
+            }
+        }
+        year.innerHTML = chips.join('');
+    }
+
+    const fmt = host.querySelector('#disciplineFilter');
+    if (fmt) {
+        const chips = [chipButton('allEditionFormats', 'All', true)];
+        for (const id of avail.formatIds) {
+            chips.push(chipButton(id, EDITION_FORMAT_LABELS[id] || id));
+        }
+        fmt.innerHTML = chips.join('');
+    }
+}
+
+/** @param {object[]} artists */
+function renderGalleryFilterChips(host, artists) {
+    const avail = buildGalleryFilterAvailability(artists);
+
+    const list = host.querySelector('#galleryLocationModalList');
+    if (list) list.innerHTML = locationModalOptionsHtml(avail.locationKeys);
+
+    const season = host.querySelector('#connectionFilter');
+    if (season) {
+        const chips = [chipButton('allGallerySeason', 'All', true)];
+        for (const id of avail.seasonIds) {
+            const y = String(id).replace(/\D/g, '');
+            if (y) chips.push(chipButton(id, y));
+        }
+        season.innerHTML = chips.join('');
+    }
+
+    const view = host.querySelector('#disciplineFilter');
+    if (view) {
+        const chips = [chipButton('allGalleryView', 'All', true)];
+        for (const id of avail.viewIds) {
+            chips.push(chipButton(id, GALLERY_VIEW_LABELS[id] || id));
+        }
+        view.innerHTML = chips.join('');
+    }
 }
 
 class FeedFilterComponent extends HTMLElement {
@@ -555,6 +882,10 @@ class FeedFilterComponent extends HTMLElement {
         this._wired = false;
         this._artistLocationKey = 'all';
         this._galleryLocationKey = 'all';
+        /** @type {object[] | null} */
+        this._rosterArtists = null;
+        /** @type {object[] | null} */
+        this._rosterEditions = null;
     }
 
     static get observedAttributes() {
@@ -563,18 +894,35 @@ class FeedFilterComponent extends HTMLElement {
 
     disconnectedCallback() {
         document.body.style.overflow = '';
-        const modal = this.querySelector('#artistLocationModal');
-        if (modal) modal.hidden = true;
-        const arrow = this.querySelector('#artistLocationArrow');
-        if (arrow) arrow.classList.remove('active');
-        const gmodal = this.querySelector('#galleryLocationModal');
-        if (gmodal) gmodal.hidden = true;
-        const garrow = this.querySelector('#galleryLocationArrow');
-        if (garrow) garrow.classList.remove('active');
+        for (const id of ['artistLocationModal', 'galleryLocationModal', 'artistLedgerModal']) {
+            const modal = document.getElementById(id);
+            if (modal) modal.remove();
+        }
         if (typeof this._cleanupFeedFilter === 'function') {
             this._cleanupFeedFilter();
             this._cleanupFeedFilter = null;
         }
+    }
+
+    /**
+     * @param {{ state?: string, artists?: object[], editions?: object[] }} detail
+     */
+    hydrateFilterData(detail) {
+        const state = (detail?.state || this.getAttribute('state') || 'artists').trim();
+        if (state === 'artists' && Array.isArray(detail?.artists)) {
+            this._rosterArtists = detail.artists;
+            renderArtistFilterChips(this, detail.artists);
+        } else if (state === 'editions' && Array.isArray(detail?.editions)) {
+            this._rosterEditions = detail.editions;
+            renderEditionFilterChips(this, detail.editions);
+        } else if (state === 'gallery-access' && Array.isArray(detail?.artists)) {
+            this._rosterArtists = detail.artists;
+            renderGalleryFilterChips(this, detail.artists);
+        }
+        if (typeof this._pushFeedFilter === 'function') {
+            this._pushFeedFilter();
+        }
+        queueMicrotask(() => syncSoundEnvironmentPosition(window.location.pathname));
     }
 
     connectedCallback() {
@@ -583,27 +931,29 @@ class FeedFilterComponent extends HTMLElement {
 
         const raw = (this.getAttribute('state') || 'artists').trim();
         let template;
-        /** @type {string} */
         let scrollRootId;
         /** @type {'artists' | 'editions' | 'gallery-access'} */
         let filterState;
         if (raw === 'editions') {
-            template = templateEditions();
+            template = templateEditionsSkeleton();
             scrollRootId = 'editionsMainContent';
             filterState = 'editions';
         } else if (raw === 'gallery-access') {
-            template = templateGalleryAccess();
+            template = templateGalleryAccessSkeleton();
             scrollRootId = 'galleryAccessMainContent';
             filterState = 'gallery-access';
         } else {
-            template = templateArtists();
+            template = templateArtistsSkeleton();
             scrollRootId = 'artistsMainContent';
             filterState = 'artists';
         }
         this.innerHTML = template;
 
         wireFilterLogic(this, filterState);
-        queueMicrotask(() => setupFilterSystemAndScrollCollapse(scrollRootId, this));
+        queueMicrotask(() => {
+            setupFilterSystemAndScrollCollapse(scrollRootId, this);
+            syncSoundEnvironmentPosition(window.location.pathname);
+        });
     }
 }
 

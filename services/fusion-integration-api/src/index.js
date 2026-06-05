@@ -1,5 +1,5 @@
 /**
- * Fusion integration API — Stripe Payment Intents, Resend, S3 presigned uploads.
+ * Fusion integration API — Stripe Payment Intents, Resend, S3/R2 presigned uploads.
  * Env: see README in this package.
  */
 import 'dotenv/config';
@@ -9,9 +9,14 @@ import express from 'express';
 import Stripe from 'stripe';
 import { Principal } from '@dfinity/principal';
 import { Resend } from 'resend';
-import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getIntegrationActor, pushSubscriptionToCanister } from './canisterActor.js';
+import {
+    getActiveStorage,
+    getStorageHealth,
+    storageCredentialsErrorHint,
+} from './storageBackends.js';
 
 const PORT = Number(process.env.PORT || 8787);
 /** If "1" / "true", only allow DEFAULT + CORS_ORIGINS. Otherwise reflect any Origin (browser CORS always OK; POST still needs API key when set). */
@@ -94,16 +99,6 @@ async function resendRestJson(path, init = {}) {
     return { ok: true, status: r.status, json: j };
 }
 
-const awsRegion = process.env.AWS_REGION || process.env.S3_REGION || '';
-const s3Bucket = process.env.S3_BUCKET || '';
-const awsAccessKeyId = process.env.AWS_ACCESS_KEY_ID || '';
-const awsSecretAccessKey = process.env.AWS_SECRET_ACCESS_KEY || '';
-const awsSessionToken = process.env.AWS_SESSION_TOKEN || '';
-const s3PublicBase =
-    process.env.S3_PUBLIC_BASE_URL ||
-    (s3Bucket && awsRegion
-        ? `https://${s3Bucket}.s3.${awsRegion}.amazonaws.com`
-        : '');
 const s3Prefix = (process.env.S3_KEY_PREFIX || 'uploads/').replace(/^\/+/, '');
 const fusionMediaPublicPrefix = (process.env.S3_FUSION_MEDIA_PUBLIC_PREFIX || 'fusionMedia/uploads/')
     .replace(/^\/+/, '')
@@ -115,21 +110,6 @@ const privateVideoSignedUrlTtlSec = Math.max(
     60,
     Math.min(3600, Number(process.env.S3_PRIVATE_VIDEO_SIGNED_URL_TTL_SEC || 900)),
 );
-
-/** On Render and most PaaS hosts there is no instance role — set AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY. Locally, omit them to use ~/.aws or env profile. */
-let s3Client = null;
-if (awsRegion && s3Bucket) {
-    /** @type {import('@aws-sdk/client-s3').S3ClientConfig} */
-    const s3Config = { region: awsRegion };
-    if (awsAccessKeyId && awsSecretAccessKey) {
-        s3Config.credentials = {
-            accessKeyId: awsAccessKeyId,
-            secretAccessKey: awsSecretAccessKey,
-            ...(awsSessionToken ? { sessionToken: awsSessionToken } : {}),
-        };
-    }
-    s3Client = new S3Client(s3Config);
-}
 
 const app = express();
 app.set('trust proxy', 1);
@@ -311,6 +291,8 @@ async function hasPrivateMediaAccessForPrincipal(principalText) {
 }
 
 app.get('/health', (_req, res) => {
+    const storageHealth = getStorageHealth();
+    const activeStorage = getActiveStorage();
     res.json({
         ok: true,
         stripe: stripeSecret ? 'configured' : 'missing',
@@ -319,9 +301,16 @@ app.get('/health', (_req, res) => {
         stripeAnnualPrice: process.env.STRIPE_ANNUAL_PRICE_ID ? 'configured' : 'missing',
         fusionCanister: integrationIdentityConfigured ? 'configured' : 'missing',
         resend: resendApiKey ? 'configured' : 'missing',
-        s3: s3Client && s3Bucket ? 'configured' : 'missing',
-        /** Hint for Render etc.: set IAM keys when not using a local AWS profile. */
-        s3AwsEnvKeys: Boolean(awsAccessKeyId && awsSecretAccessKey),
+        storageBackend: storageHealth.storageBackend,
+        storage: {
+            active: storageHealth.active,
+            aws: storageHealth.aws,
+            r2: storageHealth.r2,
+        },
+        /** Active upload backend configured (legacy field name). */
+        s3: storageHealth.active === 'configured' ? 'configured' : 'missing',
+        /** Hint for Render etc.: active backend has explicit access keys in env. */
+        s3AwsEnvKeys: Boolean(activeStorage?.hasEnvKeys),
     });
 });
 
@@ -642,6 +631,22 @@ async function markProgramPaymentEmailsSent(paymentIntentId) {
     }
 }
 
+async function stripeChargeFeeCents(charge) {
+    if (!charge || typeof charge !== 'object') return 0;
+    let balanceTx = charge.balance_transaction;
+    if (typeof balanceTx === 'string' && balanceTx && stripe) {
+        try {
+            balanceTx = await stripe.balanceTransactions.retrieve(balanceTx);
+        } catch {
+            return 0;
+        }
+    }
+    if (balanceTx && typeof balanceTx === 'object' && balanceTx.fee != null) {
+        return Math.max(0, Math.round(Number(balanceTx.fee)));
+    }
+    return 0;
+}
+
 async function recordVerifiedProgramPayment(paymentIntent) {
     const actor = await getIntegrationActor();
     if (!actor) {
@@ -678,6 +683,7 @@ async function recordVerifiedProgramPayment(paymentIntent) {
     );
     const applicantName = safeStripeMetaValue(meta.applicantName || charge?.billing_details?.name || 'Unknown', 160);
     const firstName = applicantName && applicantName !== 'Unknown' ? applicantName.split(/\s+/).filter(Boolean)[0] : '';
+    const feeCents = await stripeChargeFeeCents(charge);
     const row = {
         id: paymentIntent.id,
         principal: Principal.fromText(principalText),
@@ -692,6 +698,8 @@ async function recordVerifiedProgramPayment(paymentIntent) {
         status: paymentIntent.status === 'succeeded' ? 'succeeded' : safeStripeMetaValue(paymentIntent.status, 40),
         createdAt,
         dueAt: [],
+        feeCents: BigInt(feeCents),
+        staffNote: '',
     };
     await actor.integrationRecordProgramPayment(
         row,
@@ -797,7 +805,7 @@ app.post('/stripe/program-payment-confirmed', requireApiKey, async (req, res) =>
             return res.status(400).json({ error: 'paymentIntentId required' });
         }
         const pi = await stripe.paymentIntents.retrieve(paymentIntentId, {
-            expand: ['latest_charge'],
+            expand: ['latest_charge.balance_transaction'],
         });
         if (pi.status !== 'succeeded') {
             return res.status(409).json({ error: `PaymentIntent not succeeded: ${pi.status}` });
@@ -930,7 +938,7 @@ app.post('/stripe/program-payment-receipts', requireApiKey, async (req, res) => 
             : [];
         const receipts = [];
         for (const id of ids.slice(0, 50)) {
-            const pi = await stripe.paymentIntents.retrieve(id, { expand: ['latest_charge'] });
+            const pi = await stripe.paymentIntents.retrieve(id, { expand: ['latest_charge.balance_transaction'] });
             const charge = pi.latest_charge && typeof pi.latest_charge === 'object' ? pi.latest_charge : null;
             receipts.push({
                 paymentIntentId: id,
@@ -2132,8 +2140,9 @@ app.post('/resend/broadcasts/:id/send', requireApiKey, async (req, res) => {
 
 app.post('/storage/presign', requireApiKey, async (req, res) => {
     try {
-        if (!s3Client || !s3Bucket) {
-            return res.status(503).json({ error: 'S3 not configured' });
+        const storage = getActiveStorage();
+        if (!storage) {
+            return res.status(503).json({ error: 'Object storage not configured for active backend' });
         }
         let key = req.body?.key;
         const contentType = req.body?.contentType;
@@ -2150,21 +2159,18 @@ app.post('/storage/presign', requireApiKey, async (req, res) => {
             return res.status(400).json({ error: 'Invalid contentType' });
         }
         const command = new PutObjectCommand({
-            Bucket: s3Bucket,
+            Bucket: storage.bucket,
             Key: key,
             ContentType: contentType,
         });
-        const putUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-        const base = s3PublicBase.replace(/\/$/, '');
+        const putUrl = await getSignedUrl(storage.client, command, { expiresIn: 3600 });
+        const base = storage.publicBaseUrl.replace(/\/$/, '');
         const publicUrl = `${base}/${key.split('/').map((seg) => encodeURIComponent(seg)).join('/')}`;
         return res.json({ putUrl, publicUrl });
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         if (/credentials|Could not load credentials/i.test(msg)) {
-            return res.status(503).json({
-                error:
-                    'AWS credentials not available. On Render (and similar), set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY for an IAM user with s3:PutObject on this bucket. Locally you can use ~/.aws/credentials instead.',
-            });
+            return res.status(503).json({ error: storageCredentialsErrorHint() });
         }
         return res.status(500).json({ error: msg });
     }
@@ -2172,8 +2178,9 @@ app.post('/storage/presign', requireApiKey, async (req, res) => {
 
 app.post('/storage/private-video/presign-upload', requireApiKey, async (req, res) => {
     try {
-        if (!s3Client || !s3Bucket) {
-            return res.status(503).json({ error: 'S3 not configured' });
+        const storage = getActiveStorage();
+        if (!storage) {
+            return res.status(503).json({ error: 'Object storage not configured for active backend' });
         }
         const contentType = req.body?.contentType;
         if (
@@ -2186,16 +2193,16 @@ app.post('/storage/private-video/presign-upload', requireApiKey, async (req, res
         const fileName = safePrivateVideoFileName(req.body?.fileName);
         const key = `${privateVideoPrefix}${contentId}/${randomUUID()}-${fileName}`;
         const command = new PutObjectCommand({
-            Bucket: s3Bucket,
+            Bucket: storage.bucket,
             Key: key,
             ContentType: contentType,
         });
-        const putUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+        const putUrl = await getSignedUrl(storage.client, command, { expiresIn: 3600 });
         return res.json({ putUrl, key, fileName, expiresIn: 3600 });
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         if (/credentials|Could not load credentials/i.test(msg)) {
-            return res.status(503).json({ error: 'AWS credentials not available for private video upload.' });
+            return res.status(503).json({ error: storageCredentialsErrorHint() });
         }
         return res.status(500).json({ error: msg });
     }
@@ -2203,8 +2210,9 @@ app.post('/storage/private-video/presign-upload', requireApiKey, async (req, res
 
 app.post('/storage/private-video/sign-playback', requireApiKey, async (req, res) => {
     try {
-        if (!s3Client || !s3Bucket) {
-            return res.status(503).json({ error: 'S3 not configured' });
+        const storage = getActiveStorage();
+        if (!storage) {
+            return res.status(503).json({ error: 'Object storage not configured for active backend' });
         }
         const key = normalizePrivateVideoKey(req.body?.key);
         if (!key) {
@@ -2216,10 +2224,10 @@ app.post('/storage/private-video/sign-playback', requireApiKey, async (req, res)
             return res.status(403).json({ error: 'Membership required' });
         }
         const command = new GetObjectCommand({
-            Bucket: s3Bucket,
+            Bucket: storage.bucket,
             Key: key,
         });
-        const url = await getSignedUrl(s3Client, command, { expiresIn: privateVideoSignedUrlTtlSec });
+        const url = await getSignedUrl(storage.client, command, { expiresIn: privateVideoSignedUrlTtlSec });
         return res.json({
             url,
             expiresAt: new Date(Date.now() + privateVideoSignedUrlTtlSec * 1000).toISOString(),
@@ -2227,7 +2235,7 @@ app.post('/storage/private-video/sign-playback', requireApiKey, async (req, res)
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         if (/credentials|Could not load credentials/i.test(msg)) {
-            return res.status(503).json({ error: 'AWS credentials not available for private video playback.' });
+            return res.status(503).json({ error: storageCredentialsErrorHint() });
         }
         return res.status(500).json({ error: msg });
     }

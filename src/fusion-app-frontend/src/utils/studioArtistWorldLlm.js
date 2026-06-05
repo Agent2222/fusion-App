@@ -7,6 +7,7 @@ import {
     normalizeWorldBlockForStorage,
     worldTextToParagraphs,
 } from './worldNormalize.js';
+import { sanitizeLlmTextOutput } from './llmTextSanitize.js';
 import { worldFieldToTextarea } from './memberProfileForm.js';
 
 /** Max artists per batch run (Select all + staging cap). */
@@ -570,13 +571,19 @@ export async function translateWorldEnToJa(translateEnToJa, worldEn) {
     /** @type {Record<string, unknown>} */
     const out = {};
 
+    /**
+     * @param {string} line
+     * @returns {Promise<string>}
+     */
+    const tr = async (line) => sanitizeLlmTextOutput(await translateEnToJa(line));
+
     const pr = String(w.practice ?? '').trim();
-    out.practice = pr ? (await translateEnToJa(pr)).trim() : '';
+    out.practice = pr ? await tr(pr) : '';
 
     const persParts = worldTextToParagraphs(w.perspective);
     const persJa = [];
     for (const line of persParts) {
-        if (line.trim()) persJa.push((await translateEnToJa(line)).trim());
+        if (line.trim()) persJa.push(await tr(line));
     }
     out.perspective = persJa.length <= 1 ? persJa[0] ?? '' : persJa;
 
@@ -584,14 +591,14 @@ export async function translateWorldEnToJa(translateEnToJa, worldEn) {
     const visJa = [];
     for (let i = 0; i < 4; i++) {
         const line = String(vis[i] ?? '').trim();
-        visJa.push(line ? (await translateEnToJa(line)).trim() : '');
+        visJa.push(line ? await tr(line) : '');
     }
     out.vision = visJa;
 
     const conParts = worldTextToParagraphs(w.constructing);
     const conJa = [];
     for (const line of conParts) {
-        if (line.trim()) conJa.push((await translateEnToJa(line)).trim());
+        if (line.trim()) conJa.push(await tr(line));
     }
     out.constructing = conJa.length <= 1 ? conJa[0] ?? '' : conJa;
 
@@ -599,12 +606,12 @@ export async function translateWorldEnToJa(translateEnToJa, worldEn) {
     const ctxJa = [];
     for (let i = 0; i < 3; i++) {
         const line = String(ctx[i] ?? '').trim();
-        ctxJa.push(line ? (await translateEnToJa(line)).trim() : '');
+        ctxJa.push(line ? await tr(line) : '');
     }
     out.context = ctxJa;
 
     const qu = String(w.quote ?? '').trim();
-    out.quote = qu ? (await translateEnToJa(qu)).trim() : '';
+    out.quote = qu ? await tr(qu) : '';
 
     return normalizeWorldBlockForStorage(out);
 }

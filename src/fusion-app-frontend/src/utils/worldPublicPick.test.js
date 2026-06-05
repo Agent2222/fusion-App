@@ -1,16 +1,26 @@
 import { describe, it, expect } from 'vitest';
+import { worldTextToParagraphs } from './worldNormalize.js';
 import {
     getPublicWorldSourceFromLocales,
+    localesHaveUsableWorldNew,
     needsInitialWorldNew,
     pickPublicWorldField,
     PUBLIC_WORLD_SOURCE_DEFAULT,
     worldFieldHasContent,
 } from './worldPublicPick.js';
 
+const LLM_GARBAGE = "I don't see any source text provided for translation.";
+
 describe('worldFieldHasContent', () => {
     it('treats whitespace-only strings as empty', () => {
         expect(worldFieldHasContent('  ')).toBe(false);
         expect(worldFieldHasContent('x')).toBe(true);
+    });
+
+    it('rejects LLM failure strings', () => {
+        expect(worldFieldHasContent(LLM_GARBAGE)).toBe(false);
+        expect(worldFieldHasContent(['', LLM_GARBAGE])).toBe(false);
+        expect(worldFieldHasContent(['', 'Valid line'])).toBe(true);
     });
 
     it('accepts non-empty arrays of strings', () => {
@@ -20,13 +30,37 @@ describe('worldFieldHasContent', () => {
 });
 
 describe('getPublicWorldSourceFromLocales', () => {
-    it('defaults to newWorld', () => {
+    it('defaults to world when no worldNew content', () => {
         expect(getPublicWorldSourceFromLocales({})).toBe(PUBLIC_WORLD_SOURCE_DEFAULT);
         expect(getPublicWorldSourceFromLocales(null)).toBe(PUBLIC_WORLD_SOURCE_DEFAULT);
     });
 
-    it('reads world when set', () => {
-        expect(getPublicWorldSourceFromLocales({ publicWorldSource: 'world' })).toBe('world');
+    it('defaults to newWorld when worldNew has content and preference unset', () => {
+        expect(
+            getPublicWorldSourceFromLocales({
+                en: { worldNew: { practice: 'Generated bio' } },
+            }),
+        ).toBe('newWorld');
+    });
+
+    it('honors explicit world when set', () => {
+        expect(
+            getPublicWorldSourceFromLocales({
+                publicWorldSource: 'world',
+                en: { worldNew: { practice: 'Generated bio' } },
+            }),
+        ).toBe('world');
+    });
+
+    it('honors explicit newWorld when set', () => {
+        expect(getPublicWorldSourceFromLocales({ publicWorldSource: 'newWorld' })).toBe('newWorld');
+    });
+});
+
+describe('localesHaveUsableWorldNew', () => {
+    it('is true when any locale has usable worldNew text', () => {
+        expect(localesHaveUsableWorldNew({ en: { worldNew: { quote: 'Q' } } })).toBe(true);
+        expect(localesHaveUsableWorldNew({ en: { worldNew: { quote: LLM_GARBAGE } } })).toBe(false);
     });
 });
 
@@ -53,6 +87,18 @@ describe('pickPublicWorldField', () => {
         };
         expect(pickPublicWorldField(loc2, 'practice', 'world')).toBe('B');
     });
+
+    it('falls back from polluted world to worldNew', () => {
+        const polluted = {
+            world: { context: [LLM_GARBAGE, 'Chile (Registered in ).'] },
+            worldNew: { context: ['Based in Santiago', 'Ceramics', 'Upcoming residency'] },
+        };
+        expect(pickPublicWorldField(polluted, 'context', 'world')).toEqual([
+            'Based in Santiago',
+            'Ceramics',
+            'Upcoming residency',
+        ]);
+    });
 });
 
 describe('needsInitialWorldNew', () => {
@@ -73,5 +119,15 @@ describe('needsInitialWorldNew', () => {
                 ja: {},
             }),
         ).toBe(false);
+    });
+});
+
+describe('worldTextToParagraphs', () => {
+    it('filters LLM garbage lines from arrays', () => {
+        expect(worldTextToParagraphs([LLM_GARBAGE, 'Real context line'])).toEqual(['Real context line']);
+    });
+
+    it('returns empty for garbage scalar', () => {
+        expect(worldTextToParagraphs(LLM_GARBAGE)).toEqual([]);
     });
 });

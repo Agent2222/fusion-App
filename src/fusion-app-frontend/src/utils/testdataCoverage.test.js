@@ -11,6 +11,7 @@ const ENTITY_TAB_ROOTS = [
     'allArtists',
     'featuredArtist',
     'applicationPaymentGlobal',
+    'platformUpdateBanner',
     'currentProgramSeason',
 ];
 

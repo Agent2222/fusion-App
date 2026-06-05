@@ -42,8 +42,10 @@ import {
     buildNewApplicantStaffNotificationEmail,
     getProgramDisplayNameFromRow,
     getApplicationPaymentGlobal,
+    getPlatformUpdateBanner,
     getCurrentProgramSeason,
     setApplicationPaymentGlobal,
+    setPlatformUpdateBanner,
     setCurrentProgramSeason,
     setArtistMostRecentProgram,
     applyFeaturedFlagsFromStudioSaveLive,
@@ -66,6 +68,8 @@ import {
     getSubscribers as loadSubscribersFromDataSource,
     getSubscribersCsv,
     getApplicantSlotSecuredStudio,
+    syncApplicantManualDepositStudio,
+    syncApplicantCategoryPaymentStudio,
     setDataSource,
     setResendSegmentConfigOnCanister,
     setSubscriberAudiencesForStudio,
@@ -95,13 +99,22 @@ import {
 import {
     applicantPayloadToPlainNotes,
     applyJournalPlainLocales,
+    APPLICANT_CATEGORY_OPTIONS,
+    applicantCategoryPillHtml,
     buildApplicantApplicationSectionHtml,
+    getApplicantCategory,
+    getApplicantFlightCostCents,
+    getApplicantLocalTravelCostCents,
+    getApplicantIsTester,
+    getApplicantManualDepositSubmitted,
+    hasSavedApplicantCategory,
     journalLocalesToPlain,
-    mergeApplicantInternalNotes,
+    mergeApplicantStaffFields,
     parseApplicantPayload,
     plainNotesToApplicantPayload,
     shortPrincipalDisplay,
     shortRefLabel,
+    suggestApplicantCategoryFromArtist,
 } from '../../utils/studioPlainForms.js';
 import { MAX_MANUAL_FEATURED, readArtistFeaturedMeta } from '../../utils/artistFeaturedExtension.js';
 import { LEGACY_PROFILE_BASE } from '../../utils/studioLegacyProfileUrls.js';
@@ -124,6 +137,7 @@ import {
     syncSubscriptionFromStripeByEmail,
 } from '../../utils/integrationApi.js';
 import { uploadBlobToS3 } from '../../utils/studioS3Upload.js';
+import { prepareImageFileForUpload } from '../../utils/imageUploadPrep.js';
 import {
     renderCommunitySection,
     initCommunitySection,
@@ -281,14 +295,16 @@ export function renderStudioMain(sectionId) {
         case 'schedule':
             return renderManagementPlaceholder(
                 'Schedule',
-                'Program calendars, artist timelines, and event scheduling tools will live here.'
+                'Program calendars, artist timelines, and event scheduling tools will live here.',
+                'schedule',
             );
         case 'finance':
             return renderFinance();
         case 'travel':
             return renderManagementPlaceholder(
                 'Travel',
-                'Travel coordination, accommodation notes, and arrival details will live here.'
+                'Travel coordination, accommodation notes, and arrival details will live here.',
+                'travel',
             );
         case 'artists':
             return renderArtists();
@@ -450,6 +466,7 @@ function renderApplicants() {
                     { id: 'studio-app-tab-accepted', label: 'Approved', value: 'accepted' },
                     { id: 'studio-app-tab-rejected', label: 'Denied', value: 'rejected' },
                     { id: 'studio-app-tab-pulled-out', label: 'Pulled out', value: 'pulledOut' },
+                    { id: 'studio-app-tab-tester', label: 'Tester', value: 'tester' },
                 ],
             })}
             ${studioFilterBarHtml({
@@ -499,9 +516,9 @@ function renderApplicants() {
                             <th>Name</th>
                             <th>Program</th>
                             <th>Status</th>
+                            <th>Category</th>
                             <th>Slot secured</th>
                             <th>Created</th>
-                            <th>Profile</th>
                             <th class="studio-th-actions">View</th>
                             <th class="studio-th-actions">Email</th>
                             <th class="studio-th-actions">Actions</th>
@@ -1391,6 +1408,29 @@ function renderSettings() {
             </div>
             <p class="studio-muted">Same as the loadscreen Debug control. Internet Identity has no site password — recovery uses II docs.</p>
             </section>
+            <section id="studio-platform-banner-tools" class="studio-settings-card" hidden>
+                <h3 class="studio-subheading">Platform update banner</h3>
+                <p class="studio-muted studio-field--full">
+                    Shows a small notice beneath the site header on <strong>public pages only</strong> (hidden on <code>/studio</code>).
+                    Stored in the canister as site setting <code>platformUpdateBanner</code> (admin write on live).
+                </p>
+                <label class="studio-field studio-field--inline studio-field--full">
+                    <input type="checkbox" id="studio-platform-banner-enabled" />
+                    Show platform update banner
+                </label>
+                <label class="studio-field studio-field--full">
+                    <span>Message (English)</span>
+                    <textarea id="studio-platform-banner-en" class="studio-textarea" rows="2" maxlength="512"></textarea>
+                </label>
+                <label class="studio-field studio-field--full">
+                    <span>Message (Japanese)</span>
+                    <textarea id="studio-platform-banner-ja" class="studio-textarea" rows="2" maxlength="512"></textarea>
+                </label>
+                <div class="studio-field-row">
+                    <button type="button" class="studio-btn-primary" id="studio-platform-banner-save">Save banner settings</button>
+                </div>
+                <p id="studio-platform-banner-status" class="studio-muted" role="status" aria-live="polite"></p>
+            </section>
             <div id="studio-db-admin-tools" class="studio-db-admin-tools" hidden>
                 <h3 class="studio-subheading">Admin — full database backup</h3>
                 <p class="studio-muted">
@@ -1452,7 +1492,19 @@ function renderFallback(sectionId) {
     `;
 }
 
-function renderManagementPlaceholder(title, copy) {
+function renderManagementPlaceholder(title, copy, featureId = '') {
+    const perm = featureId ? studioFeatureAccess(featureId) : { visible: true, canEdit: true };
+    if (!perm.visible) {
+        return `
+        <div class="studio-section-stack studio-category-page">
+            ${studioPageHeaderHtml({
+                title,
+                subtitle: 'Management workspace',
+            })}
+            <p class="studio-banner studio-banner--warn">You do not have access to this section.</p>
+        </div>
+    `;
+    }
     return `
         <div class="studio-section-stack studio-category-page">
             ${studioPageHeaderHtml({
@@ -1709,16 +1761,15 @@ function openStudioArtistManageFromRow(tableRow, afterSave, hostEl, listSurface 
                 if (!f) return;
                 const targetInput = root.querySelector('#studio-art-hero-image');
                 try {
-                    await uploadBlobToS3(f, targetInput instanceof HTMLInputElement ? targetInput : null, {
+                    const { file: prepared } = await prepareImageFileForUpload(f);
+                    await uploadBlobToS3(prepared, targetInput instanceof HTMLInputElement ? targetInput : null, {
                         area: 'studio/artists',
                         entityType: 'artist',
                         entityId: String(full.id || ''),
                         fieldKey: 'hero',
                     });
                 } catch (err) {
-                    alert(
-                        `${err instanceof Error ? err.message : String(err)}\n\nConfigure S3 presign under Studio → Services.`
-                    );
+                    alert(err instanceof Error ? err.message : String(err));
                 }
                 t.value = '';
             });
@@ -1732,16 +1783,15 @@ function openStudioArtistManageFromRow(tableRow, afterSave, hostEl, listSurface 
                 if (!f) return;
                 const targetInput = root.querySelector('#studio-art-hero-profile-image');
                 try {
-                    await uploadBlobToS3(f, targetInput instanceof HTMLInputElement ? targetInput : null, {
+                    const { file: prepared } = await prepareImageFileForUpload(f);
+                    await uploadBlobToS3(prepared, targetInput instanceof HTMLInputElement ? targetInput : null, {
                         area: 'studio/artists',
                         entityType: 'artist',
                         entityId: String(full.id || ''),
                         fieldKey: 'heroProfile',
                     });
                 } catch (err) {
-                    alert(
-                        `${err instanceof Error ? err.message : String(err)}\n\nConfigure S3 presign under Studio → Services.`
-                    );
+                    alert(err instanceof Error ? err.message : String(err));
                 }
                 t.value = '';
             });
@@ -1759,16 +1809,15 @@ function openStudioArtistManageFromRow(tableRow, afterSave, hostEl, listSurface 
                     `input[data-art-locale="${loc}"][data-art-path="${path}"]`
                 );
                 try {
-                    await uploadBlobToS3(f, targetInput instanceof HTMLInputElement ? targetInput : null, {
+                    const { file: prepared } = await prepareImageFileForUpload(f);
+                    await uploadBlobToS3(prepared, targetInput instanceof HTMLInputElement ? targetInput : null, {
                         area: 'studio/artists',
                         entityType: 'artist',
                         entityId: String(full.id || ''),
                         fieldKey: `${loc}-intro-${slot}`,
                     });
                 } catch (err) {
-                    alert(
-                        `${err instanceof Error ? err.message : String(err)}\n\nConfigure S3 presign under Studio → Services.`
-                    );
+                    alert(err instanceof Error ? err.message : String(err));
                 }
                 t.value = '';
             });
@@ -2260,9 +2309,6 @@ function programCardScalars(p) {
     };
 }
 
-/**
- * @param {string} status
- */
 function applicantStatusPillHtml(status) {
     const s = String(status || '');
     const label =
@@ -2290,6 +2336,61 @@ function applicantStatusPillHtml(status) {
     else if (s === 'rejected') cls = 'studio-status-pill--rejected';
     else if (s === 'pulledOut') cls = 'studio-status-pill--rescinded';
     return `<span class="studio-status-pill ${cls}">${escapeHtml(label)}</span>`;
+}
+
+function applicantCategoryPillHtmlLocal(category) {
+    return applicantCategoryPillHtml(category, escapeHtml);
+}
+
+/**
+ * @param {object} applicantRow
+ * @param {object[]} artists
+ * @returns {object | null}
+ */
+function resolveArtistForApplicant(applicantRow, artists) {
+    const row = applicantRow && typeof applicantRow === 'object' ? applicantRow : {};
+    const id = String(row.id || '');
+    const pipe = id.indexOf('|');
+    if (pipe > 0) {
+        const artistId = id.slice(0, pipe);
+        const found = (Array.isArray(artists) ? artists : []).find((a) => String(a?.id || '') === artistId);
+        if (found) return found;
+    }
+    const em = String(row.email || '')
+        .trim()
+        .toLowerCase();
+    if (!em) return null;
+    for (const artist of Array.isArray(artists) ? artists : []) {
+        const direct = studioArtistApplicantEmail(artist).trim().toLowerCase();
+        if (direct && direct === em) return artist;
+        const locales = artist?.locales && typeof artist.locales === 'object' ? artist.locales : null;
+        if (!locales) continue;
+        for (const code of ['en', 'ja']) {
+            const block = locales[code];
+            if (!block || typeof block !== 'object') continue;
+            const localeEmail = String(
+                /** @type {Record<string, unknown>} */ (block).email ??
+                    /** @type {Record<string, unknown>} */ (block).contactEmail ??
+                    '',
+            )
+                .trim()
+                .toLowerCase();
+            if (localeEmail && localeEmail === em) return artist;
+        }
+    }
+    return null;
+}
+
+function applicantCategorySelectHtml(selectedCategory) {
+    const selected = String(selectedCategory || 'general');
+    const options = APPLICANT_CATEGORY_OPTIONS.map(
+        (o) =>
+            `<option value="${escapeHtml(o.value)}"${o.value === selected ? ' selected' : ''}>${escapeHtml(o.label)}</option>`,
+    ).join('');
+    return `<label class="studio-field studio-field--full">
+      <span>Category</span>
+      <select id="studio-app-modal-category" class="studio-select">${options}</select>
+    </label>`;
 }
 
 function applicantSlotSecuredPillHtml(slotSecured) {
@@ -2353,7 +2454,7 @@ function syncApplicantWorkflowControl(root) {
     }
 }
 
-function applicantWorkflowControlHtml(status, slotSecured = false) {
+function applicantWorkflowControlHtml(status, slotSecured = false, manualDepositSubmitted = false, isTester = false) {
     const state = applicantWorkflowState(status, slotSecured);
     const checked = (value) => (value ? 'checked' : '');
     return `<fieldset class="studio-app-workflow" aria-label="Applicant workflow">
@@ -2383,8 +2484,16 @@ function applicantWorkflowControlHtml(status, slotSecured = false) {
           <option value="pulledOut" ${state.decisionValue === 'pulledOut' ? 'selected' : ''}>Pulled out</option>
         </select>
       </label>
+      <label class="studio-app-workflow__step">
+        <input type="checkbox" id="studio-app-step-manual-deposit" ${checked(manualDepositSubmitted)} />
+        <span><strong>Manual deposit submitted</strong><small>Payment received outside the member dashboard</small></span>
+      </label>
+      <label class="studio-app-workflow__step">
+        <input type="checkbox" id="studio-app-step-is-tester" ${checked(isTester)} />
+        <span><strong>Tester</strong><small>Hidden from All and status tabs; visible under Tester filter only</small></span>
+      </label>
       <label class="studio-app-workflow__step studio-app-workflow__step--readonly">
-        <input type="checkbox" id="studio-app-step-slot-secured" ${checked(state.slotSecured)} disabled />
+        <input type="checkbox" id="studio-app-step-slot-secured" ${checked(state.slotSecured || manualDepositSubmitted)} disabled />
         <span><strong>Slot secured</strong><small>Completed after deposit or full payment</small></span>
       </label>
     </fieldset>`;
@@ -2451,7 +2560,7 @@ async function initDashboard(mainEl) {
         }
         const pendingWrap = mainEl.querySelector('#studio-dashboard-pending-wrap');
         const pendingList = mainEl.querySelector('#studio-dashboard-pending-list');
-        if (pendingWrap && pendingList && studioFeatureAccess('artists').visible) {
+        if (pendingWrap && pendingList && studioFeatureAccess('pending-approval').visible) {
             try {
                 const all = await getArtistsForStudio();
                 const pending = all.filter(
@@ -2905,15 +3014,31 @@ async function initApplicants(mainEl) {
     const countHeader = mainEl.querySelector('#studio-applicants-header-count');
     const searchInput = mainEl.querySelector('#studio-applicants-search');
 
+    const appPerm = studioFeatureAccess('applicants');
+    if (!appPerm.visible) {
+        if (banner) {
+            banner.className = 'studio-banner studio-banner--warn';
+            banner.textContent = 'You do not have access to this section.';
+            banner.style.display = 'block';
+        }
+        mainEl.querySelector('.studio-section-accordion')?.setAttribute('hidden', '');
+        mainEl.querySelector('.studio-table-wrap')?.setAttribute('hidden', '');
+        pagination?.setAttribute('hidden', '');
+        return;
+    }
+    const canEditApplicants = appPerm.canEdit;
+
     /** @type {object[]} */
     let allRows = [];
     let page = 0;
-    /** @type {'all' | 'pending' | 'reviewing' | 'postInterviewReview' | 'needsInfo' | 'accepted' | 'rejected' | 'pulledOut'} */
+    /** @type {'all' | 'pending' | 'reviewing' | 'postInterviewReview' | 'needsInfo' | 'accepted' | 'rejected' | 'pulledOut' | 'tester'} */
     let statusTab = 'all';
     /** @type {Map<string, string>} */
     let applicantEmailToSlug = new Map();
     /** @type {{ id: string, name: string, email: string }[]} */
     let applicantArtistOptions = [];
+    /** @type {object[]} */
+    let applicantArtistsFull = [];
 
     let canDeleteApplicants = false;
     if (getDataSource() === 'test') {
@@ -2950,8 +3075,13 @@ async function initApplicants(mainEl) {
 
     const filteredRows = () => {
         let rows = allRows;
-        if (statusTab !== 'all') {
-            rows = rows.filter((r) => String(r.status) === statusTab);
+        if (statusTab === 'tester') {
+            rows = rows.filter((r) => getApplicantIsTester(r.payloadJson));
+        } else {
+            rows = rows.filter((r) => !getApplicantIsTester(r.payloadJson));
+            if (statusTab !== 'all') {
+                rows = rows.filter((r) => String(r.status) === statusTab);
+            }
         }
         const q = (searchInput instanceof HTMLInputElement ? searchInput.value : '').trim().toLowerCase();
         if (q) {
@@ -2997,63 +3127,66 @@ async function initApplicants(mainEl) {
         if (!slice.length) {
             tbody.innerHTML = `<tr><td colspan="10">${allRows.length ? 'No applicants match filters.' : 'No applicants.'}</td></tr>`;
         } else {
-            const origin = getPublicSiteOrigin();
             const delBtn = (id) =>
-                canDeleteApplicants
+                canEditApplicants && canDeleteApplicants
                     ? `<td class="studio-td-actions"><button type="button" class="studio-btn-danger studio-app-delete" data-id="${escapeHtml(id)}">Delete</button></td>`
+                    : '<td class="studio-td-actions">—</td>';
+            const emailBtn = (id) =>
+                canEditApplicants
+                    ? `<td class="studio-td-actions"><button type="button" class="studio-btn-ghost studio-app-email" data-id="${escapeHtml(id)}">Send email</button></td>`
                     : '<td class="studio-td-actions">—</td>';
             tbody.innerHTML = slice
                 .map((r) => {
-                    const em = String(r.email || '')
-                        .trim()
-                        .toLowerCase();
-                    const slug = em ? applicantEmailToSlug.get(em) : '';
-                    const profileCell = slug
-                        ? `<a href="${escapeHtml(`${origin}/profile/${encodeURIComponent(slug)}`)}" target="_blank" rel="noopener noreferrer" class="studio-app-profile-link">/${escapeHtml(slug)}</a>`
-                        : '<span class="studio-muted">—</span>';
                     return `
         <tr class="studio-app-row" data-id="${escapeHtml(r.id)}" tabindex="0" role="button">
             <td>${escapeHtml(r.email)}</td>
             <td>${escapeHtml(r.fullName || '')}</td>
             <td>${escapeHtml(r.programId)}</td>
             <td>${applicantStatusPillHtml(r.status)}</td>
+            <td>${applicantCategoryPillHtmlLocal(getApplicantCategory(r.payloadJson))}</td>
             <td>${applicantSlotSecuredPillHtml(Boolean(r.slotSecured))}</td>
             <td><span class="studio-muted" title="${escapeHtml(r.createdAt || '')}">${escapeHtml(formatStudioDate(r.createdAt))}</span></td>
-            <td>${profileCell}</td>
             <td class="studio-td-actions"><button type="button" class="studio-btn-ghost studio-app-view" data-id="${escapeHtml(r.id)}">View</button></td>
-            <td class="studio-td-actions"><button type="button" class="studio-btn-ghost studio-app-email" data-id="${escapeHtml(r.id)}">Send email</button></td>
+            ${emailBtn(r.id)}
             ${delBtn(r.id)}
         </tr>`;
                 })
                 .join('');
             tbody.querySelectorAll('.studio-app-row').forEach((tr) => {
-                const openEdit = () => openApplicantModal(tr.getAttribute('data-id'));
+                const openRow = () => {
+                    const id = tr.getAttribute('data-id');
+                    if (!id) return;
+                    if (canEditApplicants) openApplicantModal(id);
+                    else openApplicantViewModal(id);
+                };
                 tr.addEventListener('click', (ev) => {
                     const t = ev.target && /** @type {Element} */ (ev.target).closest?.(
-                        '.studio-app-delete, .studio-app-view, .studio-app-email, .studio-app-profile-link',
+                        '.studio-app-delete, .studio-app-view, .studio-app-email',
                     );
                     if (t) {
                         ev.preventDefault();
                         return;
                     }
-                    openEdit();
+                    openRow();
                 });
                 tr.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter' || e.key === ' ') openEdit();
+                    if (e.key === 'Enter' || e.key === ' ') openRow();
                 });
             });
+            if (canEditApplicants) {
+                tbody.querySelectorAll('.studio-app-email').forEach((btn) => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const id = btn.getAttribute('data-id');
+                        if (id) openApplicantEmailModal(id);
+                    });
+                });
+            }
             tbody.querySelectorAll('.studio-app-view').forEach((btn) => {
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     const id = btn.getAttribute('data-id');
                     if (id) openApplicantViewModal(id);
-                });
-            });
-            tbody.querySelectorAll('.studio-app-email').forEach((btn) => {
-                btn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    const id = btn.getAttribute('data-id');
-                    if (id) openApplicantEmailModal(id);
                 });
             });
         }
@@ -3076,15 +3209,19 @@ async function initApplicants(mainEl) {
         allRows = await Promise.all(
             allRows.map(async (row) => ({
                 ...row,
-                slotSecured: await getApplicantSlotSecuredStudio(row.id, row.programId),
+                slotSecured:
+                    (await getApplicantSlotSecuredStudio(row.id, row.programId, row.payloadJson)) ||
+                    getApplicantManualDepositSubmitted(row.payloadJson),
             })),
         );
         try {
             const artists = await getArtistsForStudio();
+            applicantArtistsFull = Array.isArray(artists) ? artists : [];
             applicantEmailToSlug = buildApplicantEmailToSlugMap(artists);
             applicantArtistOptions = buildApplicantArtistOptions(artists);
             populateApplicantArtistSelect();
         } catch {
+            applicantArtistsFull = [];
             applicantEmailToSlug = new Map();
             applicantArtistOptions = [];
             populateApplicantArtistSelect();
@@ -3167,6 +3304,11 @@ async function initApplicants(mainEl) {
         if (!r) return;
         const { internalNotes, rawInvalid } = parseApplicantPayload(r.payloadJson);
         const initialNotes = rawInvalid ? applicantPayloadToPlainNotes(r.payloadJson) : internalNotes;
+        const initialManualDeposit = getApplicantManualDepositSubmitted(r.payloadJson);
+        const initialIsTester = getApplicantIsTester(r.payloadJson);
+        const initialCategory = getApplicantCategory(r.payloadJson);
+        const initialFlightCostUsd = (getApplicantFlightCostCents(r.payloadJson) / 100).toFixed(2);
+        const initialLocalTravelUsd = (getApplicantLocalTravelCostCents(r.payloadJson) / 100).toFixed(2);
         const em = String(r.email || '')
             .trim()
             .toLowerCase();
@@ -3189,12 +3331,19 @@ async function initApplicants(mainEl) {
             <h3 class="studio-subheading">Application</h3>
             ${appBlock}
             <div class="studio-app-status-with-email">
-              <div class="studio-app-status-with-email__status">${applicantWorkflowControlHtml(r.status, false)}</div>
+              <div class="studio-app-status-with-email__status">${applicantWorkflowControlHtml(r.status, false, initialManualDeposit, initialIsTester)}</div>
               <div class="studio-app-status-with-email__send">
                 <span class="studio-sr-only">Send email to applicant</span>
                 <button type="button" class="studio-btn-ghost" id="studio-app-modal-send-email">Send email</button>
               </div>
             </div>
+            ${applicantCategorySelectHtml(initialCategory)}
+            <label class="studio-field"><span>Flight / ticket cost (USD)</span>
+              <input type="text" id="studio-app-modal-flight-cost" class="studio-input" inputmode="decimal" placeholder="0.00" value="${escapeHtml(initialFlightCostUsd === '0.00' ? '' : initialFlightCostUsd)}" />
+            </label>
+            <label class="studio-field"><span>Local travel (USD)</span>
+              <input type="text" id="studio-app-modal-local-travel" class="studio-input" inputmode="decimal" placeholder="0.00" value="${escapeHtml(initialLocalTravelUsd === '0.00' ? '' : initialLocalTravelUsd)}" />
+            </label>
             <label class="studio-field studio-field--full"><span>Internal notes (staff only)</span>
               <textarea id="studio-app-modal-notes" class="studio-textarea" rows="6" placeholder="Visible in Studio only; not sent to the applicant."></textarea>
             </label>
@@ -3213,8 +3362,49 @@ async function initApplicants(mainEl) {
 
         const makePayloadForSave = () => {
             const rawInner = root.querySelector('#studio-app-modal-notes')?.value ?? '';
+            const manualDepositInput = root.querySelector('#studio-app-step-manual-deposit');
+            const testerInput = root.querySelector('#studio-app-step-is-tester');
+            const categoryInput = root.querySelector('#studio-app-modal-category');
+            const manualDepositSubmitted =
+                manualDepositInput instanceof HTMLInputElement && manualDepositInput.checked;
+            const isTester = testerInput instanceof HTMLInputElement && testerInput.checked;
+            const applicantCategory =
+                categoryInput instanceof HTMLSelectElement ? categoryInput.value : initialCategory;
+            const flightCostInput = root.querySelector('#studio-app-modal-flight-cost');
+            const flightCostRaw =
+                flightCostInput instanceof HTMLInputElement ? flightCostInput.value.trim() : '';
+            const flightCostCents = flightCostRaw
+                ? Math.max(0, Math.round(Number(flightCostRaw.replace(/[^0-9.]/g, '')) * 100))
+                : 0;
+            const localTravelInput = root.querySelector('#studio-app-modal-local-travel');
+            const localTravelRaw =
+                localTravelInput instanceof HTMLInputElement ? localTravelInput.value.trim() : '';
+            const localTravelCostCents = localTravelRaw
+                ? Math.max(0, Math.round(Number(localTravelRaw.replace(/[^0-9.]/g, '')) * 100))
+                : 0;
             if (rawInvalid) return r.payloadJson;
-            return mergeApplicantInternalNotes(rawInner, r.payloadJson);
+            return mergeApplicantStaffFields(
+                {
+                    internalNotes: rawInner,
+                    manualDepositSubmitted,
+                    applicantCategory,
+                    isTester,
+                    flightCostCents,
+                    localTravelCostCents,
+                },
+                r.payloadJson,
+            );
+        };
+
+        const syncApplicantDepositUi = () => {
+            const manualDepositInput = root.querySelector('#studio-app-step-manual-deposit');
+            const slotInput = root.querySelector('#studio-app-step-slot-secured');
+            const manual =
+                manualDepositInput instanceof HTMLInputElement && manualDepositInput.checked;
+            const paymentSecured = slotInput instanceof HTMLInputElement && slotInput.dataset.paymentSecured === 'true';
+            if (slotInput instanceof HTMLInputElement) {
+                slotInput.checked = paymentSecured || manual;
+            }
         };
 
         root.querySelector('#studio-app-modal-send-email')?.addEventListener('click', () => {
@@ -3224,18 +3414,68 @@ async function initApplicants(mainEl) {
             });
         });
         root.querySelectorAll('.studio-app-workflow input, #studio-app-decision-status').forEach((el) => {
-            el.addEventListener('change', () => syncApplicantWorkflowControl(root));
+            el.addEventListener('change', () => {
+                syncApplicantWorkflowControl(root);
+                syncApplicantDepositUi();
+            });
         });
         void (async () => {
-            const slotSecured = await getApplicantSlotSecuredStudio(r.id, r.programId);
+            const slotSecured = await getApplicantSlotSecuredStudio(r.id, r.programId, r.payloadJson);
             const slotInput = root.querySelector('#studio-app-step-slot-secured');
-            if (slotInput instanceof HTMLInputElement) slotInput.checked = slotSecured;
+            if (slotInput instanceof HTMLInputElement) {
+                slotInput.dataset.paymentSecured = slotSecured ? 'true' : 'false';
+                slotInput.checked = slotSecured || initialManualDeposit;
+            }
+            if (!rawInvalid && !hasSavedApplicantCategory(r.payloadJson)) {
+                const artist = resolveArtistForApplicant(r, applicantArtistsFull);
+                const suggested = suggestApplicantCategoryFromArtist(artist, r.programId);
+                const notesTa = root.querySelector('#studio-app-modal-notes');
+                const notesValue = notesTa instanceof HTMLTextAreaElement ? notesTa.value : initialNotes;
+                const payloadJson = mergeApplicantStaffFields(
+                    {
+                        internalNotes: notesValue,
+                        manualDepositSubmitted: initialManualDeposit,
+                        applicantCategory: suggested,
+                        isTester: initialIsTester,
+                        flightCostCents: getApplicantFlightCostCents(r.payloadJson),
+                        localTravelCostCents: getApplicantLocalTravelCostCents(r.payloadJson),
+                    },
+                    r.payloadJson,
+                );
+                try {
+                    await upsertApplicantStudio({ ...r, payloadJson });
+                    r.payloadJson = payloadJson;
+                    const idx = allRows.findIndex((x) => x.id === r.id);
+                    if (idx >= 0) allRows[idx] = { ...allRows[idx], payloadJson };
+                    const categoryInput = root.querySelector('#studio-app-modal-category');
+                    if (categoryInput instanceof HTMLSelectElement) {
+                        categoryInput.value = suggested;
+                    }
+                    await syncApplicantCategoryPaymentStudio(r.id);
+                    renderPage();
+                } catch {
+                    /* auto-set is best-effort; staff can save manually */
+                }
+            }
         })();
         root.querySelector('#studio-app-modal-save')?.addEventListener('click', async () => {
             const status = applicantWorkflowStatusFromRoot(root);
             const payloadJson = makePayloadForSave();
+            const manualDepositInput = root.querySelector('#studio-app-step-manual-deposit');
+            const categoryInput = root.querySelector('#studio-app-modal-category');
+            const manualDepositSubmitted =
+                manualDepositInput instanceof HTMLInputElement && manualDepositInput.checked;
+            const previousCategory = getApplicantCategory(r.payloadJson);
+            const nextCategory =
+                categoryInput instanceof HTMLSelectElement ? categoryInput.value : previousCategory;
             try {
                 await upsertApplicantStudio({ ...r, status, payloadJson });
+                if (manualDepositSubmitted) {
+                    await syncApplicantManualDepositStudio(r.id);
+                }
+                if (nextCategory !== previousCategory) {
+                    await syncApplicantCategoryPaymentStudio(r.id);
+                }
                 statusAtOpen = status;
                 close();
                 await reload();
@@ -3313,6 +3553,11 @@ async function initApplicants(mainEl) {
         page = 0;
         renderPage();
     });
+
+    if (!canEditApplicants) {
+        mainEl.querySelector('.studio-section-accordion')?.setAttribute('hidden', '');
+    }
+
     mainEl.querySelector('#studio-applicants-generate-access-code')?.addEventListener('click', async () => {
         try {
             const code = await adminCreateProgramApplicationAccessCodeStudio();
@@ -3915,9 +4160,22 @@ async function initPendingApproval(mainEl) {
     const countEl = mainEl.querySelector('#studio-pending-approval-header-count');
     const manageHost = mainEl.querySelector('#studio-pending-manage-surface');
     const listSurface = mainEl.querySelector('#studio-pending-list-surface');
+
+    const statusPerm = studioFeatureAccess('pending-approval');
+    if (!statusPerm.visible) {
+        if (tbody) {
+            tbody.innerHTML =
+                '<tr><td colspan="6"><p class="studio-banner studio-banner--warn">You do not have access to this section.</p></td></tr>';
+        }
+        return;
+    }
+
+    const canManageStatus = statusPerm.canEdit;
     const canSendRosterBlast = studioFeatureAccess('artists').canEdit;
     const emailPermTitle = 'Email (requires Edit permission for Artists in Studio → Permissions)';
     const emailBtnDisabled = canSendRosterBlast ? '' : ' disabled';
+    const manageBtnDisabled = canManageStatus ? '' : ' disabled';
+    const manageTitle = canManageStatus ? '' : ' title="Requires Edit permission for Status"';
     /** @type {object[]} */
     let allStatusRows = [];
 
@@ -3970,7 +4228,7 @@ async function initPendingApproval(mainEl) {
                 <td><a class="studio-action-link" href="/profile/${encodeURIComponent(
                     slugRaw
                 )}" target="_blank" rel="noopener">Open profile</a></td>
-                <td class="studio-td-actions"><button type="button" class="studio-btn-ghost studio-art-pending-manage" data-id="${idEsc}">MANAGE</button></td>
+                <td class="studio-td-actions"><button type="button" class="studio-btn-ghost studio-art-pending-manage" data-id="${idEsc}"${manageBtnDisabled}${manageTitle}>MANAGE</button></td>
             </tr>`;
             })
             .join('');
@@ -3986,6 +4244,7 @@ async function initPendingApproval(mainEl) {
         });
         tbody.querySelectorAll('.studio-art-pending-manage').forEach((btn) => {
             btn.addEventListener('click', () => {
+                if (!canManageStatus) return;
                 const id = btn.getAttribute('data-id');
                 const row = allStatusRows.find((x) => String(x.id) === String(id));
                 if (row) {
@@ -7075,6 +7334,71 @@ function studioSettingsConfirmModal(opts) {
     });
 }
 
+async function initPlatformUpdateBannerTools(mainEl) {
+    const wrap = mainEl.querySelector('#studio-platform-banner-tools');
+    const enabledEl = mainEl.querySelector('#studio-platform-banner-enabled');
+    const enEl = mainEl.querySelector('#studio-platform-banner-en');
+    const jaEl = mainEl.querySelector('#studio-platform-banner-ja');
+    const saveBtn = mainEl.querySelector('#studio-platform-banner-save');
+    const statusEl = mainEl.querySelector('#studio-platform-banner-status');
+
+    const setStatus = (t) => {
+        if (statusEl) statusEl.textContent = t || '';
+    };
+
+    if (!wrap) return;
+
+    if (!studioFeatureAccess('settings').canEdit) {
+        wrap.hidden = true;
+        return;
+    }
+
+    if (getDataSource() === 'live') {
+        const { getAuthenticatedFusionBackendActor } = await import('../../utils/earlyAccessSubscribe.js');
+        const actor = await getAuthenticatedFusionBackendActor();
+        let isAdmin = false;
+        if (actor && typeof actor.isCallerAdmin === 'function') {
+            try {
+                isAdmin = await actor.isCallerAdmin();
+            } catch {
+                isAdmin = false;
+            }
+        }
+        if (!isAdmin) {
+            wrap.hidden = true;
+            return;
+        }
+    }
+
+    wrap.hidden = false;
+
+    try {
+        const cfg = await getPlatformUpdateBanner();
+        if (enabledEl instanceof HTMLInputElement) enabledEl.checked = Boolean(cfg.enabled);
+        if (enEl instanceof HTMLTextAreaElement) enEl.value = cfg.messageEn;
+        if (jaEl instanceof HTMLTextAreaElement) jaEl.value = cfg.messageJa;
+    } catch (e) {
+        setStatus(e instanceof Error ? e.message : String(e));
+    }
+
+    saveBtn?.addEventListener('click', async () => {
+        setStatus('Saving…');
+        if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = true;
+        try {
+            await setPlatformUpdateBanner({
+                enabled: enabledEl instanceof HTMLInputElement ? enabledEl.checked : false,
+                messageEn: enEl instanceof HTMLTextAreaElement ? enEl.value.trim() : '',
+                messageJa: jaEl instanceof HTMLTextAreaElement ? jaEl.value.trim() : '',
+            });
+            setStatus('Banner settings saved.');
+        } catch (e) {
+            setStatus(e instanceof Error ? e.message : String(e));
+        } finally {
+            if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = false;
+        }
+    });
+}
+
 async function initSettings(mainEl) {
     const ds = mainEl.querySelector('#studio-set-datasource');
     const net = mainEl.querySelector('#studio-set-network');
@@ -7102,6 +7426,8 @@ async function initSettings(mainEl) {
     import('../../config.js').then((cfg) => {
         if (net) net.textContent = cfg.DEV_MODE ? 'devMode true (local / fetch root key)' : 'devMode false (icp-api.io)';
     });
+
+    await initPlatformUpdateBannerTools(mainEl);
 
     const adminWrap = mainEl.querySelector('#studio-db-admin-tools');
     const adminStatus = mainEl.querySelector('#studio-db-admin-status');

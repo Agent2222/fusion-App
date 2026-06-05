@@ -230,6 +230,12 @@ class JoinNetworkComponent extends HTMLElement {
     this._joinNetworkBlock = null;
     /** @type {(() => void) | null} */
     this._unsubData = null;
+    /** Studio editor live preview — no canister fetch, Stripe, or II. */
+    this._studioPreview = false;
+    /** @type {{ modalType?: ModalType, stage?: string, locale?: 'en'|'ja', flowDraft?: Record<string, unknown>, globalBullets?: string[], selectedPlan?: string, previewMode?: 'band'|'modal', context?: string } | null} */
+    this._studioPreviewState = null;
+    /** @type {'en'|'ja'|null} */
+    this._studioPreviewLocale = null;
     }
 
     get active() {
@@ -333,15 +339,20 @@ class JoinNetworkComponent extends HTMLElement {
   }
 
     connectedCallback() {
+    this._studioPreview = this.hasAttribute("data-studio-preview");
     window.addEventListener("fusion-localechange", this._onLocaleChange);
     window.addEventListener("fusion-auth-change", this._onFusionAuthChange);
     this._modalType = resolveModalType(this);
-    const restoredPending = this._restorePendingMembershipFromStorage();
+    const restoredPending = this._studioPreview ? false : this._restorePendingMembershipFromStorage();
     const dbg = (this.getAttribute("stage") || "").trim().toLowerCase();
     if (!restoredPending && STAGES.includes(/** @type {FlowStage} */ (dbg))) {
       this._stage = /** @type {FlowStage} */ (dbg);
     }
         this.render();
+    if (this._studioPreview) {
+      this.hidden = false;
+      return;
+    }
     if (this._unsubData) this._unsubData();
     this._unsubData = subscribeDataSource(() => void this._reloadJoinCopy());
     void this._reloadJoinCopy();
@@ -378,13 +389,98 @@ class JoinNetworkComponent extends HTMLElement {
     return /** @type {HTMLDivElement} */ (el);
   }
 
+  _isStudioPreview() {
+    return this._studioPreview || this.hasAttribute("data-studio-preview");
+  }
+
   _getLocale() {
+    if (this._studioPreviewLocale === "ja" || this._studioPreviewLocale === "en") {
+      return this._studioPreviewLocale;
+    }
     return typeof window.getLocale === "function" && window.getLocale() === "ja"
       ? "ja"
       : "en";
   }
 
+  /**
+   * Studio editor live preview — inject draft copy without canister fetch.
+   * @param {{ modalType?: ModalType, stage?: string, locale?: 'en'|'ja', flowDraft?: Record<string, unknown>, globalBullets?: string[], selectedPlan?: string, previewMode?: 'band'|'modal', context?: string }} state
+   */
+  setStudioPreviewState(state) {
+    if (!this._isStudioPreview()) return;
+    this._studioPreviewState = state || {};
+    const st = this._studioPreviewState;
+    if (st.context) this.setAttribute("context", st.context);
+    if (st.modalType) {
+      this._modalType = st.modalType;
+      this.setAttribute("data-modal-type", st.modalType);
+    }
+    if (st.flowDraft && typeof st.flowDraft === "object") {
+      this._joinNetworkFlow = /** @type {Record<string, unknown>} */ (st.flowDraft);
+    }
+    this._joinWhatsIncludedGlobalBullets = Array.isArray(st.globalBullets)
+      ? st.globalBullets.map((x) => String(x ?? "").trim()).filter(Boolean)
+      : [];
+    this._studioPreviewLocale =
+      st.locale === "ja" || st.locale === "en" ? st.locale : null;
+    const plan = st.selectedPlan === "annual" ? "annual" : "bimonthly";
+    this._joinSubscriptionTier = plan === "annual" ? "annual" : "bimonthly";
+
+    const rawStage = String(st.stage || "entry");
+    this._joinExemptCodePath = rawStage === "linkAccountExempt";
+    if (rawStage === "band") {
+      this._stage = "entry";
+    } else if (rawStage === "linkAccountExempt") {
+      this._stage = "linkAccount";
+    } else if (STAGES.includes(/** @type {FlowStage} */ (rawStage))) {
+      this._stage = /** @type {FlowStage} */ (rawStage);
+    }
+
+    this._fillBandCopy();
+    this._fillDialogCopy();
+    this._applyStudioPreviewLayout(st.previewMode || "modal", rawStage);
+  }
+
+  /**
+   * @param {'band'|'modal'} previewMode
+   * @param {string} editorStage
+   */
+  _applyStudioPreviewLayout(previewMode, editorStage) {
+    const root = this.shadowRoot;
+    if (!root) return;
+    const dlg = root.querySelector(".jn-dialog");
+    const band = root.querySelector(".join-network-band");
+    const hostInner = root.querySelector(".join-network-host");
+    const bandMode = previewMode === "band" || editorStage === "band";
+
+    this.hidden = false;
+    if (hostInner instanceof HTMLElement) {
+      hostInner.classList.toggle("join-network-host--band-only", bandMode);
+      hostInner.classList.toggle("join-network-host--modal-only", !bandMode);
+    }
+    if (band instanceof HTMLElement) {
+      band.hidden = false;
+    }
+    if (dlg instanceof HTMLDialogElement) {
+      dlg.classList.add("jn-dialog--studio-preview");
+      if (bandMode) {
+        dlg.removeAttribute("open");
+      } else {
+        dlg.setAttribute("open", "");
+        this._showStage(this._stage);
+        const stripeMount = this.querySelector("[data-jn-stripe-mount]");
+        if (stripeMount instanceof HTMLElement) {
+          stripeMount.innerHTML =
+            '<p class="jn-studio-stripe-placeholder">Stripe preview (disabled in Studio)</p>';
+        }
+        const payHint = root.querySelector("#jnPayStripeHint");
+        if (payHint) payHint.textContent = "";
+      }
+    }
+  }
+
   async _reloadJoinCopy() {
+    if (this._isStudioPreview()) return;
     const [flow, block] = await Promise.all([
       getContentBundleForStudio("join-network-flow"),
       getContentBundleForStudio("join-network"),
@@ -472,6 +568,10 @@ class JoinNetworkComponent extends HTMLElement {
   }
 
   async _syncPageJoinVisibility() {
+    if (this._isStudioPreview()) {
+      this.hidden = false;
+      return;
+    }
     if (!this._shouldHideHostWhenAuthenticated()) {
       this.hidden = false;
       return;
@@ -1213,6 +1313,14 @@ class JoinNetworkComponent extends HTMLElement {
       if (payBack) {
         payBack.hidden = this._joinMode === "resubscribe";
       }
+      if (this._isStudioPreview()) {
+        const stripeMount = this.querySelector("[data-jn-stripe-mount]");
+        if (stripeMount instanceof HTMLElement) {
+          stripeMount.innerHTML =
+            '<p class="jn-studio-stripe-placeholder">Stripe preview (disabled in Studio)</p>';
+        }
+        return;
+      }
       // `_fillDialogCopy` ends with `_showStage(this._stage)` (e.g. on locale change). Re-running
       // prepare would tear down and create a second Subscription clientSecret — only init when needed.
       const stillOnPayment = prev === "payment";
@@ -1694,6 +1802,7 @@ class JoinNetworkComponent extends HTMLElement {
   }
 
   async _prepareStripePayment() {
+    if (this._isStudioPreview()) return;
     const myGen = ++this._stripePrepareGen;
     const root = this.shadowRoot;
     if (!root) return;
@@ -2751,6 +2860,36 @@ class JoinNetworkComponent extends HTMLElement {
                 :host([data-header-bridge]) .join-network-host { padding: 0; margin: 0; min-height: 0; }
                 `;
       }
+      if (this.hasAttribute("data-studio-preview")) {
+        extra += `
+                :host([data-studio-preview]) { display: block !important; visibility: visible !important; }
+                :host([data-studio-preview]) .join-network-host { padding: 0; margin: 0; min-height: 0; }
+                :host([data-studio-preview]) .jn-dialog.jn-dialog--studio-preview {
+                    position: relative;
+                    display: block;
+                    width: 100%;
+                    max-width: 100%;
+                    margin: 0;
+                    padding: 0;
+                    border: 0;
+                    background: transparent;
+                    color: inherit;
+                }
+                :host([data-studio-preview]) .jn-dialog.jn-dialog--studio-preview::backdrop { display: none; }
+                :host([data-studio-preview]) .join-network-host--band-only .jn-dialog { display: none !important; }
+                :host([data-studio-preview]) .join-network-host--modal-only .join-network-band {
+                    opacity: 0.45;
+                    pointer-events: none;
+                }
+                :host([data-studio-preview]) .jn-studio-stripe-placeholder {
+                    margin: 0.75rem 0;
+                    padding: 0.65rem 0.75rem;
+                    font-size: 0.82rem;
+                    border: 1px dashed rgba(255,255,255,0.25);
+                    color: rgba(255,255,255,0.75);
+                }
+                `;
+      }
       styleEl.textContent += extra;
     }
 
@@ -2866,6 +3005,17 @@ class JoinNetworkComponent extends HTMLElement {
   _wire() {
     const root = this.shadowRoot;
     if (!root) return;
+    if (this._isStudioPreview()) {
+      root.querySelector("#jnPlanGrid")?.addEventListener("click", (e) => {
+        const btn = e.target?.closest?.("[data-jn-subscription-tier]");
+        if (!(btn instanceof HTMLButtonElement)) return;
+        const t = btn.getAttribute("data-jn-subscription-tier");
+        if (t !== "bimonthly" && t !== "annual") return;
+        this._joinSubscriptionTier = t;
+        this._syncJoinPlanSelectionUi();
+      });
+      return;
+    }
     const dlg = root.querySelector(".jn-dialog");
     const openBtn = root.querySelector("#bandOpenBtn");
     const closeBtn = root.querySelector(".jn-close");

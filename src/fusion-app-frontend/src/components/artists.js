@@ -51,6 +51,51 @@ function excludeFeaturedFromPool(artists, keys) {
     });
 }
 
+const FEATURED_SEARCH_SCROLL_TOP_OFFSET_PX = 200;
+
+/** @returns {HTMLElement | null} */
+function getArtistsPageScrollRoot() {
+    const featured = document.getElementById('featuredArtist2');
+    if (!(featured instanceof HTMLElement)) return null;
+
+    /** @type {(HTMLElement | null)[]} */
+    const candidates = [
+        document.getElementById('mainContent'),
+        document.getElementById('artistsMainContent'),
+    ];
+
+    for (const el of candidates) {
+        if (!(el instanceof HTMLElement) || !el.contains(featured)) continue;
+        const { overflowY } = getComputedStyle(el);
+        if (overflowY === 'auto' || overflowY === 'scroll' || el.scrollHeight > el.clientHeight + 1) {
+            return el;
+        }
+    }
+
+    const main = document.getElementById('mainContent');
+    return main instanceof HTMLElement ? main : null;
+}
+
+/** Scroll featured strip into view (~200px from top) after name search. */
+function scrollToFeaturedArtistSection() {
+    const el = document.getElementById('featuredArtist2');
+    if (!(el instanceof HTMLElement)) return;
+
+    const offset = FEATURED_SEARCH_SCROLL_TOP_OFFSET_PX;
+    const scrollRoot = getArtistsPageScrollRoot();
+
+    if (scrollRoot instanceof HTMLElement) {
+        const rootRect = scrollRoot.getBoundingClientRect();
+        const elRect = el.getBoundingClientRect();
+        const nextTop = scrollRoot.scrollTop + (elRect.top - rootRect.top) - offset;
+        scrollRoot.scrollTo({ top: Math.max(0, nextTop), behavior: 'smooth' });
+        return;
+    }
+
+    const nextTop = window.pageYOffset + el.getBoundingClientRect().top - offset;
+    window.scrollTo({ top: Math.max(0, nextTop), behavior: 'smooth' });
+}
+
 export function render() {
     return `
         <div class="page artists-page">
@@ -78,42 +123,63 @@ export default function initArtists() {
         const feat = await getFeaturedArtists();
         const featuredKeys = featuredArtistExclusionKeys(feat);
         const featuredArtist = document.getElementById('featuredArtist2');
-        if (featuredArtist && typeof featuredArtist.setFeaturedArtist === 'function') {
-            featuredArtist.setFeaturedArtist({ artists: feat || [] });
-            if (typeof featuredArtist.createArtistCard === 'function') {
-                await featuredArtist.createArtistCard(feat.length);
+        const defaultCriteria = {
+            connectionId: 'allConnection',
+            disciplineKeys: [],
+            locationKey: 'all',
+            nameQuery: '',
+        };
+        let skipSearchScroll = true;
+
+        const applyArtistsPageFilters = async (criteria) => {
+            const nameSearching = Boolean(String(criteria.nameQuery || '').trim());
+            const filteredFeatured = buildFeedPool(applyArtistFilters(feat || [], criteria));
+
+            if (featuredArtist && typeof featuredArtist.setFeaturedArtist === 'function') {
+                featuredArtist.setFeaturedArtist({ artists: filteredFeatured });
+                if (typeof featuredArtist.createArtistCard === 'function') {
+                    await featuredArtist.createArtistCard(filteredFeatured.length);
+                }
+                featuredArtist.hideAllArtistsButton();
             }
-            featuredArtist.hideAllArtistsButton();
-        }
+
+            const artistsFeed = document.getElementById('artistsFeed');
+            if (artistsFeed && typeof artistsFeed.setArtists === 'function') {
+                const pool = nameSearching
+                    ? all || []
+                    : excludeFeaturedFromPool(all || [], featuredKeys);
+                artistsFeed.setArtists(buildFeedPool(applyArtistFilters(pool, criteria)));
+            }
+
+            if (nameSearching && !skipSearchScroll) {
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        scrollToFeaturedArtistSection();
+                    });
+                });
+            }
+            skipSearchScroll = false;
+        };
 
         const artistsFeed = document.getElementById('artistsFeed');
         if (artistsFeed && typeof artistsFeed.setArtists === 'function') {
             _artistsFeedFilterHandler = (e) => {
                 const ev = /** @type {CustomEvent} */ (e);
                 if (ev.detail?.state !== 'artists') return;
-                const raw = excludeFeaturedFromPool(all || [], featuredKeys);
-                const filtered = applyArtistFilters(raw, ev.detail.criteria || {});
-                artistsFeed.setArtists(buildFeedPool(filtered));
+                void applyArtistsPageFilters(ev.detail.criteria || defaultCriteria);
             };
             window.addEventListener('fusion-feed-filter', _artistsFeedFilterHandler);
 
-            const defaultCriteria = {
-                connectionId: 'allConnection',
-                disciplineKeys: [],
-                locationKey: 'all',
-            };
-            const initialPool = applyArtistFilters(
-                excludeFeaturedFromPool(all || [], featuredKeys),
-                defaultCriteria
-            );
-            artistsFeed.setArtists(buildFeedPool(initialPool));
-
             queueMicrotask(() => {
                 const ff = document.querySelector('app-feed-filter[state="artists"]');
-                if (ff && typeof ff._pushFeedFilter === 'function') {
-                    ff._pushFeedFilter();
+                if (ff && typeof ff.hydrateFilterData === 'function') {
+                    ff.hydrateFilterData({ state: 'artists', artists: all || [] });
+                } else {
+                    void applyArtistsPageFilters(defaultCriteria);
                 }
             });
+        } else {
+            void applyArtistsPageFilters(defaultCriteria);
         }
     })();
 }
