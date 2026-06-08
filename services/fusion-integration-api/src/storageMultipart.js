@@ -10,7 +10,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { presignUploadPartUrl } from './storagePresign.js';
 
-const DEFAULT_PART_SIZE = 10 * 1024 * 1024;
+const DEFAULT_PART_SIZE = 32 * 1024 * 1024;
 const MIN_PART_SIZE = 5 * 1024 * 1024;
 const MAX_PARTS = 10_000;
 
@@ -80,7 +80,7 @@ export async function presignUploadPart(client, bucket, key, uploadId, partNumbe
         UploadId: uploadId,
         PartNumber: partNumber,
     });
-    return presignUploadPartUrl(client, command, 3600);
+    return presignUploadPartUrl(client, command, 6 * 3600);
 }
 
 /**

@@ -195,6 +195,8 @@ Example rule (adjust origins):
 ]
 ```
 
+**Multipart video uploads** (files over ~100 MB) send many sequential PUT requests. Each part must return an **ETag** header — without `"ExposeHeaders": ["ETag"]` in bucket CORS, parts can appear to upload but multipart completion fails. Mid-upload "connection dropped" errors are often network timeouts; the uploader retries each part up to 4 times automatically.
+
 After saving the bucket CORS config in AWS, wait a minute and retry (or new presigned URL).
 
 If POSTs return **401**, either remove `INTEGRATION_API_KEY` on Render for testing or set **`VITE_INTEGRATION_API_KEY`** and Studio bearer to the same value.

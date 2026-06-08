@@ -19,6 +19,18 @@ import { openUploadProgressModal } from '../components/studio/uploadProgressModa
 import { assertIntegrationUploadReady } from './studioS3Upload.js';
 
 const COMMUNITY_MEDIA_ROOT_PREFIX = 'fusionMedia/uploads/';
+const PART_UPLOAD_MAX_ATTEMPTS = 4;
+
+/**
+ * @param {number} bytes
+ */
+function formatUploadBytes(bytes) {
+    const n = Math.max(0, Number(bytes) || 0);
+    if (n >= 1024 * 1024 * 1024) return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+    if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+    if (n >= 1024) return `${Math.round(n / 1024)} KB`;
+    return `${n} B`;
+}
 
 /**
  * @param {File | Blob} file
@@ -35,31 +47,57 @@ function normalizeVideoContentType(file) {
 
 /**
  * @param {number} status
+ * @param {{ partNumber?: number, partCount?: number, bytesUploaded?: number }} [ctx]
  */
-function uploadFailureMessage(status) {
+function uploadFailureMessage(status, ctx = {}) {
+    const partLabel =
+        ctx.partNumber != null
+            ? `part ${ctx.partNumber}${ctx.partCount ? ` of ${ctx.partCount}` : ''}`
+            : '';
+    const progressLabel =
+        ctx.bytesUploaded != null && ctx.bytesUploaded > 0
+            ? ` (~${formatUploadBytes(ctx.bytesUploaded)} uploaded)`
+            : '';
+
     if (status === 0) {
+        if (ctx.partNumber != null && ctx.partNumber > 1) {
+            return (
+                `Connection dropped while uploading ${partLabel}${progressLabel}. ` +
+                'Large uploads often fail here due to network timeouts — retry the upload on a stable connection. ' +
+                'If it always fails at the same spot, confirm bucket CORS includes PUT, AllowedHeaders "*", and ExposeHeaders "ETag".'
+            );
+        }
         return (
             'Upload blocked by the browser (usually bucket CORS or CSP). ' +
             'In Cloudflare R2 or AWS S3, add your exact Studio origin to bucket CORS with PUT allowed, ' +
-            'then retry. See docs/DEPLOY_RENDER_AND_ICP.md → Object storage CORS.'
+            'AllowedHeaders ["*"], and ExposeHeaders ["ETag"]. See docs/DEPLOY_RENDER_AND_ICP.md → Object storage CORS.'
         );
     }
     if (status === 403) {
-        return 'Upload rejected (HTTP 403). Check storage credentials, presigned URL expiry, and that Content-Type matches the file.';
+        return `Upload rejected (HTTP 403)${partLabel ? ` on ${partLabel}` : ''}. Check storage credentials and presigned URL expiry.`;
     }
-    return `Upload failed: HTTP ${status}`;
+    return `Upload failed: HTTP ${status}${partLabel ? ` (${partLabel})` : ''}`;
+}
+
+/**
+ * @param {number} ms
+ */
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
  * @param {string} putUrl
  * @param {Blob} body
- * @param {{ contentType?: string, signal?: AbortSignal, onProgress?: (loaded: number, total: number) => void }} [opts]
+ * @param {{ contentType?: string, signal?: AbortSignal, onProgress?: (loaded: number, total: number) => void, partNumber?: number, partCount?: number, bytesUploaded?: number }} [opts]
  */
 function xhrPut(putUrl, body, opts = {}) {
-    const { contentType, signal, onProgress } = opts;
+    const { contentType, signal, onProgress, partNumber, partCount, bytesUploaded } = opts;
+    const errCtx = { partNumber, partCount, bytesUploaded };
     return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open('PUT', putUrl, true);
+        xhr.timeout = 0;
         if (contentType) {
             xhr.setRequestHeader('Content-Type', contentType);
         }
@@ -79,14 +117,59 @@ function xhrPut(putUrl, body, opts = {}) {
         xhr.onload = () => {
             if (xhr.status >= 200 && xhr.status < 300) {
                 const etag = xhr.getResponseHeader('ETag') || xhr.getResponseHeader('etag') || '';
-                resolve(String(etag).replace(/^"|"$/g, ''));
+                const cleaned = String(etag).replace(/^"|"$/g, '');
+                if (!cleaned) {
+                    reject(
+                        new Error(
+                            `Upload ${partNumber != null ? `part ${partNumber} ` : ''}returned no ETag. ` +
+                                'Add "ExposeHeaders": ["ETag"] to your R2/S3 bucket CORS rule (required to finish multipart uploads).',
+                        ),
+                    );
+                    return;
+                }
+                resolve(cleaned);
                 return;
             }
-            reject(new Error(uploadFailureMessage(xhr.status)));
+            reject(new Error(uploadFailureMessage(xhr.status, errCtx)));
         };
-        xhr.onerror = () => reject(new Error(uploadFailureMessage(xhr.status || 0)));
+        xhr.onerror = () => reject(new Error(uploadFailureMessage(xhr.status || 0, errCtx)));
+        xhr.ontimeout = () =>
+            reject(
+                new Error(
+                    `Upload timed out${partNumber != null ? ` on part ${partNumber}` : ''}. Retry on a stable network connection.`,
+                ),
+            );
         xhr.send(body);
     });
+}
+
+/**
+ * @param {() => Promise<string>} getPutUrl
+ * @param {Blob} body
+ * @param {{ contentType?: string, signal?: AbortSignal, onProgress?: (loaded: number, total: number) => void, partNumber?: number, partCount?: number, bytesUploaded?: number, onRetry?: (attempt: number, maxAttempts: number) => void }} opts
+ */
+async function putWithRetries(getPutUrl, body, opts) {
+    let lastError = null;
+    for (let attempt = 1; attempt <= PART_UPLOAD_MAX_ATTEMPTS; attempt++) {
+        if (opts.signal?.aborted) {
+            throw new DOMException('Aborted', 'AbortError');
+        }
+        if (attempt > 1) {
+            opts.onRetry?.(attempt, PART_UPLOAD_MAX_ATTEMPTS);
+            await sleep(400 * attempt);
+        }
+        try {
+            const putUrl = await getPutUrl();
+            return await xhrPut(putUrl, body, opts);
+        } catch (err) {
+            lastError = err instanceof Error ? err : new Error(String(err));
+            if (lastError instanceof DOMException && lastError.name === 'AbortError') {
+                throw lastError;
+            }
+            if (attempt >= PART_UPLOAD_MAX_ATTEMPTS) break;
+        }
+    }
+    throw lastError || new Error('Upload failed');
 }
 
 function shortId8() {
@@ -100,6 +183,32 @@ function truncatedSafeBase(fileName, maxStem = 40) {
         return `${safe.slice(0, dot).slice(0, maxStem)}${safe.slice(dot)}`;
     }
     return safe.slice(0, maxStem + 16);
+}
+
+/**
+ * @param {number} partNumber
+ * @param {number} partCount
+ * @param {number} partSize
+ * @param {number} fileSize
+ * @param {(loaded: number, total: number, phase: string) => void} report
+ * @param {() => Promise<string>} getPutUrl
+ * @param {Blob} chunk
+ * @param {AbortSignal} signal
+ */
+async function uploadMultipartPart(partNumber, partCount, partSize, fileSize, report, getPutUrl, chunk, signal) {
+    const start = (partNumber - 1) * partSize;
+    return putWithRetries(getPutUrl, chunk, {
+        signal,
+        partNumber,
+        partCount,
+        bytesUploaded: start,
+        onProgress: (loaded) => {
+            report(start + loaded, fileSize, `Uploading part ${partNumber} of ${partCount}…`);
+        },
+        onRetry: (attempt, maxAttempts) => {
+            report(start, fileSize, `Retrying part ${partNumber} of ${partCount} (${attempt}/${maxAttempts})…`);
+        },
+    });
 }
 
 /**
@@ -138,7 +247,7 @@ export async function uploadVideoFile(file, opts = {}) {
                     contentType,
                 });
                 report(0, file.size, 'Uploading…');
-                await xhrPut(signed.putUrl, file, {
+                await putWithRetries(async () => signed.putUrl, file, {
                     contentType,
                     signal: abortController.signal,
                     onProgress: (loaded, total) => report(loaded, total, 'Uploading…'),
@@ -155,24 +264,30 @@ export async function uploadVideoFile(file, opts = {}) {
                 fileSize: file.size,
             });
             const parts = [];
-            const partSize = Number(init.partSize) || 10 * 1024 * 1024;
+            const partSize = Number(init.partSize) || 32 * 1024 * 1024;
             const partCount = Number(init.partCount) || Math.ceil(file.size / partSize);
             try {
                 for (let partNumber = 1; partNumber <= partCount; partNumber++) {
                     const start = (partNumber - 1) * partSize;
                     const end = Math.min(file.size, start + partSize);
                     const chunk = file.slice(start, end);
-                    const { putUrl } = await presignPrivateVideoMultipartPart({
-                        key: init.key,
-                        uploadId: init.uploadId,
+                    const etag = await uploadMultipartPart(
                         partNumber,
-                    });
-                    const etag = await xhrPut(putUrl, chunk, {
-                        signal: abortController.signal,
-                        onProgress: (loaded) => {
-                            report(start + loaded, file.size, `Uploading part ${partNumber} of ${partCount}…`);
+                        partCount,
+                        partSize,
+                        file.size,
+                        report,
+                        async () => {
+                            const { putUrl } = await presignPrivateVideoMultipartPart({
+                                key: init.key,
+                                uploadId: init.uploadId,
+                                partNumber,
+                            });
+                            return putUrl;
                         },
-                    });
+                        chunk,
+                        abortController.signal,
+                    );
                     parts.push({ partNumber, etag });
                 }
                 modal?.update({ phase: 'Finishing upload…', percent: 99 });
@@ -196,7 +311,7 @@ export async function uploadVideoFile(file, opts = {}) {
             modal?.update({ phase: 'Preparing upload…' });
             const { putUrl, publicUrl } = await presignUpload(key, contentType, { rootPrefix });
             report(0, file.size, 'Uploading…');
-            await xhrPut(putUrl, file, {
+            await putWithRetries(async () => putUrl, file, {
                 contentType,
                 signal: abortController.signal,
                 onProgress: (loaded, total) => report(loaded, total, 'Uploading…'),
@@ -214,24 +329,30 @@ export async function uploadVideoFile(file, opts = {}) {
             rootPrefix,
         });
         const parts = [];
-        const partSize = Number(init.partSize) || 10 * 1024 * 1024;
+        const partSize = Number(init.partSize) || 32 * 1024 * 1024;
         const partCount = Number(init.partCount) || Math.ceil(file.size / partSize);
         try {
             for (let partNumber = 1; partNumber <= partCount; partNumber++) {
                 const start = (partNumber - 1) * partSize;
                 const end = Math.min(file.size, start + partSize);
                 const chunk = file.slice(start, end);
-                const { putUrl } = await presignPublicMultipartPart({
-                    key: init.key,
-                    uploadId: init.uploadId,
+                const etag = await uploadMultipartPart(
                     partNumber,
-                });
-                const etag = await xhrPut(putUrl, chunk, {
-                    signal: abortController.signal,
-                    onProgress: (loaded) => {
-                        report(start + loaded, file.size, `Uploading part ${partNumber} of ${partCount}…`);
+                    partCount,
+                    partSize,
+                    file.size,
+                    report,
+                    async () => {
+                        const { putUrl } = await presignPublicMultipartPart({
+                            key: init.key,
+                            uploadId: init.uploadId,
+                            partNumber,
+                        });
+                        return putUrl;
                     },
-                });
+                    chunk,
+                    abortController.signal,
+                );
                 parts.push({ partNumber, etag });
             }
             modal?.update({ phase: 'Finishing upload…', percent: 99 });

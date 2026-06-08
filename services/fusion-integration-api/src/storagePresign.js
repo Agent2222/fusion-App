@@ -11,7 +11,7 @@ const PUT_OBJECT_PRESIGN_OPTS = {
 
 /** @type {import('@aws-sdk/s3-request-presigner').RequestPresigningArguments} */
 const UPLOAD_PART_PRESIGN_OPTS = {
-    expiresIn: 3600,
+    expiresIn: 6 * 3600,
 };
 
 /**
