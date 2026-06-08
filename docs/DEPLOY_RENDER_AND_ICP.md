@@ -216,6 +216,26 @@ If POSTs return **401**, either remove `INTEGRATION_API_KEY` on Render for testi
 
 ---
 
+## Videos page rollout (checklist)
+
+After Motoko changes to `CommunityVideoRecord` / featured config:
+
+1. **`dfx generate fusion-app-backend`** (or frontend `npm run build` which runs prebuild generate)
+2. **`dfx deploy fusion-app-backend`** (or your CI pipeline)
+3. Deploy **Integration API** with multipart routes **before** large Studio uploads in production
+4. Rebuild + deploy **asset canister** (`npm run build` in frontend workspace)
+5. Smoke test:
+   - Nav: Editions → Community → **Videos** → Journal → Context
+   - Public **`/videos`**: grid + hero swap; member full-video playback
+   - **`/community`**: featured row from canister; **View all** → `/videos`
+   - **Studio → Videos**: small preview (single PUT + progress), large full video (>100 MB multipart + cancel)
+   - **Frame capture** from local file and CDN preview URL
+   - Set featured rail + hero; verify on `/community`
+
+PostHog events: `videos_page_data_loaded`, `studio_video_upload_*`, `studio_featured_updated` (see `videosPosthog.js`).
+
+---
+
 ## Reference
 
 - R2 migration / failover: [MIGRATE_AWS_S3_TO_CLOUDFLARE_R2.md](MIGRATE_AWS_S3_TO_CLOUDFLARE_R2.md)

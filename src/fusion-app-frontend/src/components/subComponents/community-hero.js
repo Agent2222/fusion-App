@@ -1,6 +1,7 @@
 import { getMembershipAccessForCaller } from '../../utils/database.js';
 import { getAuthSnapshot } from '../../utils/icAuth.js';
 import { signPrivateVideoPlayback } from '../../utils/integrationApi.js';
+import { normalizePrivateVideoStorageKey } from '../../utils/privateVideoKey.js';
 import { PH_LOADER_BASE_STYLES, programHeroLoaderHtml } from '../../utils/programHeroLoader.js';
 import { captureCommunityEvent, communityDestinationProps } from '../../utils/communityPosthog.js';
 
@@ -131,12 +132,22 @@ class CommunityHero extends HTMLElement {
         this._activeChapterTab = 'people';
         this._signedFullVideoUrl = '';
         this._unlockError = '';
+        this._fullPlaybackFailed = false;
         this._lastMediaKey = '';
+        this._lastGateSignature = '';
+        this._refreshGateTimer = 0;
+        this._refreshInFlight = false;
         this._profileTransitionTimer = 0;
         this._topicOverlayTimer = 0;
         this._railResizeObserver = null;
         this._onAuth = () => {
-            void this._refreshGate();
+            if (this._refreshGateTimer) {
+                window.clearTimeout(this._refreshGateTimer);
+            }
+            this._refreshGateTimer = window.setTimeout(() => {
+                this._refreshGateTimer = 0;
+                void this._refreshGate();
+            }, 200);
         };
     }
 
@@ -148,6 +159,10 @@ class CommunityHero extends HTMLElement {
 
     disconnectedCallback() {
         window.removeEventListener('fusion-auth-change', this._onAuth);
+        if (this._refreshGateTimer) {
+            window.clearTimeout(this._refreshGateTimer);
+            this._refreshGateTimer = 0;
+        }
         if (this._profileTransitionTimer) {
             window.clearTimeout(this._profileTransitionTimer);
             this._profileTransitionTimer = 0;
@@ -208,13 +223,15 @@ class CommunityHero extends HTMLElement {
         if (nextMediaKey !== this._lastMediaKey) {
             this._signedFullVideoUrl = '';
             this._unlockError = '';
+            this._fullPlaybackFailed = false;
+            this._lastGateSignature = '';
             this._lastMediaKey = nextMediaKey;
         }
         if (this.isConnected) void this._refreshGate();
     }
 
     async _refreshGate() {
-        if (!this._data) return;
+        if (!this._data || this._refreshInFlight) return;
         let gate = '';
         try {
             gate = await getMembershipAccessForCaller();
@@ -222,23 +239,59 @@ class CommunityHero extends HTMLElement {
             gate = '';
         }
         const canWatch = gate === 'ok' || gate === 'exempt';
-        this._signedFullVideoUrl = '';
-        this._unlockError = '';
-        const fullVideoKey = String(this._data.fullVideoKey ?? '').trim();
-        if (canWatch && fullVideoKey) {
+        const fullVideoKey = normalizePrivateVideoStorageKey(this._data.fullVideoKey);
+        let principalText = '';
+        if (canWatch) {
             try {
                 const snap = await getAuthSnapshot();
-                if (!snap.authenticated) throw new Error('Sign in required');
-                const signed = await signPrivateVideoPlayback({
-                    key: fullVideoKey,
-                    principal: snap.principal.toText(),
-                });
-                this._signedFullVideoUrl = String(signed.url || '').trim();
+                if (snap.authenticated) principalText = snap.principal.toText();
             } catch {
-                this._unlockError = 'Could not unlock full video. Please try again.';
+                principalText = '';
             }
         }
+        const gateSignature = `${canWatch ? '1' : '0'}|${fullVideoKey}|${principalText}`;
+        if (
+            gateSignature === this._lastGateSignature
+            && (this._signedFullVideoUrl || this._fullPlaybackFailed || !fullVideoKey || !canWatch)
+        ) {
+            this.render(canWatch);
+            return;
+        }
+        this._refreshInFlight = true;
+        this._lastGateSignature = gateSignature;
+        this._unlockError = '';
+        if (!canWatch || !fullVideoKey) {
+            this._signedFullVideoUrl = '';
+            this._fullPlaybackFailed = false;
+            this._refreshInFlight = false;
+            this.render(canWatch);
+            return;
+        }
+        if (!this._fullPlaybackFailed) {
+            this._signedFullVideoUrl = '';
+        }
+        try {
+            if (!principalText) throw new Error('Sign in required');
+            const signed = await signPrivateVideoPlayback({
+                key: fullVideoKey,
+                principal: principalText,
+            });
+            this._signedFullVideoUrl = String(signed.url || '').trim();
+            if (this._signedFullVideoUrl) {
+                this._fullPlaybackFailed = false;
+            }
+        } catch {
+            this._signedFullVideoUrl = '';
+            this._unlockError = 'Could not unlock full video. Please try again.';
+        }
+        this._refreshInFlight = false;
         this.render(canWatch);
+    }
+
+    _requestFullVideoUnlock() {
+        this._fullPlaybackFailed = false;
+        this._lastGateSignature = '';
+        void this._refreshGate();
     }
 
     /**
@@ -251,8 +304,11 @@ class CommunityHero extends HTMLElement {
         const artistById = new Map(this._artists.map((artist) => [String(artist?.id ?? ''), artist]));
         const legacyVideoUrl = String(d.videoUrl ?? '').trim();
         const previewVideoUrl = String(d.previewVideoUrl ?? '').trim();
-        const fullVideoKey = String(d.fullVideoKey ?? '').trim();
-        const fullTimelineActive = Boolean(canWatch && this._signedFullVideoUrl && fullVideoKey);
+        const fullVideoKey = normalizePrivateVideoStorageKey(d.fullVideoKey);
+        const signedFullReady = Boolean(
+            canWatch && this._signedFullVideoUrl && fullVideoKey && !this._fullPlaybackFailed,
+        );
+        const fullTimelineActive = signedFullReady;
         const previewChapterSource = Array.isArray(d.previewChapters) ? d.previewChapters : d.chapters;
         const previewTopicSource = Array.isArray(d.previewTopics) ? d.previewTopics : d.topics;
         const fullChapterSource = Array.isArray(d.fullChapters) && d.fullChapters.length
@@ -313,10 +369,10 @@ class CommunityHero extends HTMLElement {
         const primaryMode = canWatch ? 'watch' : 'join';
         const isLegacyPublicVideo = Boolean(legacyVideoUrl && !previewVideoUrl && !fullVideoKey);
         const videoUrl =
-            canWatch && this._signedFullVideoUrl
+            signedFullReady
                 ? this._signedFullVideoUrl
                 : previewVideoUrl || (isLegacyPublicVideo ? legacyVideoUrl : '');
-        const hasLockedFullVideo = Boolean(fullVideoKey && !this._signedFullVideoUrl);
+        const hasLockedFullVideo = Boolean(fullVideoKey && canWatch && !signedFullReady);
         const videoTier = fullTimelineActive ? 'full' : videoUrl ? 'preview' : 'none';
         const trackingBase = () => ({
             hero_source: this._activeIndex >= 0 ? 'exclusive' : 'hero',
@@ -327,7 +383,9 @@ class CommunityHero extends HTMLElement {
             has_full_video: Boolean(fullVideoKey),
         });
         const emptyCopy = hasLockedFullVideo
-            ? 'Members-only full video'
+            ? (this._fullPlaybackFailed
+                ? 'Full video unavailable — showing preview'
+                : 'Members-only full video')
             : 'Video URL (Studio)';
         const chapterButtons = chapters.map((chapter, i) => {
             const active = i === this._activeChapterIndex;
@@ -1041,11 +1099,12 @@ class CommunityHero extends HTMLElement {
         }
         syncTabUi();
         syncActiveTopicUi();
-        if (vid && canWatch && fullVideoKey && this._signedFullVideoUrl) {
+        if (vid && signedFullReady) {
             vid.addEventListener('error', () => {
                 captureCommunityEvent('community_hero_full_video_playback_failed', trackingBase());
-                this._signedFullVideoUrl = '';
-                void this._refreshGate();
+                this._fullPlaybackFailed = true;
+                this._unlockError = 'Full video could not load. Showing preview instead.';
+                this.render(canWatch);
             }, { once: true });
         }
         const openJoinModal = (trigger) => {
@@ -1061,12 +1120,12 @@ class CommunityHero extends HTMLElement {
                 openJoinModal(trigger);
                 return;
             }
-            if (canWatch && fullVideoKey && !this._signedFullVideoUrl) {
+            if (canWatch && fullVideoKey && !signedFullReady) {
                 captureCommunityEvent('community_hero_full_video_unlock_requested', {
                     ...trackingBase(),
                     trigger,
                 });
-                void this._refreshGate();
+                this._requestFullVideoUnlock();
                 return;
             }
             captureCommunityEvent('community_hero_watch_clicked', {
@@ -1119,12 +1178,12 @@ class CommunityHero extends HTMLElement {
                     window.dispatchEvent(new CustomEvent('fusion-open-join-network', { detail: {} }));
                     return;
                 }
-                if (canWatch && fullVideoKey && !this._signedFullVideoUrl) {
+                if (canWatch && fullVideoKey && !signedFullReady) {
                     captureCommunityEvent('community_hero_full_video_unlock_requested', {
                         ...trackingBase(),
                         trigger: 'video_surface',
                     });
-                    void this._refreshGate();
+                    void this._requestFullVideoUnlock();
                     return;
                 }
                 captureCommunityEvent('community_hero_video_toggled', {
@@ -1196,14 +1255,14 @@ class CommunityHero extends HTMLElement {
                     syncActiveChapterUi();
                     return;
                 }
-                if (canWatch && fullVideoKey && !this._signedFullVideoUrl) {
+                if (canWatch && fullVideoKey && !signedFullReady) {
                     captureCommunityEvent('community_hero_full_video_unlock_requested', {
                         ...trackingBase(),
                         trigger: 'people_timestamp',
                         timestamp_index: idx,
                         timestamp_sec: chapter.timestampSec,
                     });
-                    void this._refreshGate();
+                    void this._requestFullVideoUnlock();
                     syncActiveChapterUi();
                     return;
                 }
@@ -1245,14 +1304,14 @@ class CommunityHero extends HTMLElement {
                     showTopicOverlay(topic);
                     return;
                 }
-                if (canWatch && fullVideoKey && !this._signedFullVideoUrl) {
+                if (canWatch && fullVideoKey && !signedFullReady) {
                     captureCommunityEvent('community_hero_full_video_unlock_requested', {
                         ...trackingBase(),
                         trigger: 'idea_timestamp',
                         timestamp_index: idx,
                         timestamp_sec: topic.timestampSec,
                     });
-                    void this._refreshGate();
+                    void this._requestFullVideoUnlock();
                     syncTabUi();
                     syncActiveTopicUi();
                     showTopicOverlay(topic);

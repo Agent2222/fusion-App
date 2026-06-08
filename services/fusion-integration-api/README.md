@@ -84,4 +84,20 @@ stripe listen --forward-to localhost:8787/webhooks/stripe
 - `POST /resend/contacts/segment` — add contact to segment (body must include `segmentId` or `segment_id`, forwarded to `POST /segments/{id}/contacts` on Resend; path may require adjustment for your Resend API version)
 - `POST /resend/broadcasts` — body `{ segmentId, subject, html, name?, text?, from?, send? }` — uses Node Resend SDK `broadcasts.create` when available
 - `POST /resend/broadcasts/:id/send` — send a draft broadcast
-- `POST /storage/presign` — body `{ key, contentType }`
+- `POST /storage/presign` — body `{ key, contentType }` — single presigned PUT (files ≤ ~100 MB recommended)
+- `POST /storage/multipart/init` — body `{ key, contentType, fileSize, rootPrefix? }` → `{ uploadId, key, partSize, partCount }`
+- `POST /storage/multipart/presign-part` — body `{ key, uploadId, partNumber }` → `{ putUrl }`
+- `POST /storage/multipart/complete` — body `{ key, uploadId, parts: [{ partNumber, etag }] }` → `{ key, publicUrl }`
+- `POST /storage/multipart/abort` — body `{ key, uploadId }` — cancel in-flight multipart upload
+- `POST /storage/private-video/presign-upload` — body `{ contentId, fileName, contentType }` — single PUT for small private full videos
+- `POST /storage/private-video/multipart/init` — same shape as public multipart init (private key prefix)
+- `POST /storage/private-video/multipart/presign-part` / `complete` / `abort` — mirror public multipart routes for gated full videos
+
+**Multipart env (optional):**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MULTIPART_THRESHOLD_BYTES` | `104857600` (100 MB) | Frontend uses multipart above this size |
+| `MULTIPART_PART_SIZE_BYTES` | `10485760` (10 MB) | Part size (≥ 5 MiB for R2/S3) |
+
+Works on both **AWS S3** and **Cloudflare R2** via the same `@aws-sdk/client-s3` backend selected by `STORAGE_BACKEND`.

@@ -77,6 +77,16 @@ export const config = {
       comingSoonMessage: 'Forming',
       comingSoonCopy: 'The network is actively taking shape.',
     },
+
+    videos: {
+      status: {
+        public: true,
+        dev: true,
+      },
+      message: 'Studio visits and conversations from Fusion artists in Japan.',
+      comingSoonMessage: 'Curating',
+      comingSoonCopy: 'New videos are being added to the library.',
+    },
   
     context: {
       status: {

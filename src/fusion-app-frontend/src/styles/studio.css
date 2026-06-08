@@ -1338,6 +1338,15 @@ button.studio-audience-pill.studio-pill.studio-pill--active {
   align-items: center;
   justify-content: center;
   padding: 1rem;
+  /* Portal modals sit on body — mirror studio dashboard tokens when outside .studio-app */
+  --studio-btn-primary-bg: var(--c2, #111111);
+  --studio-btn-primary-fg: var(--c3, #ffffff);
+  --studio-btn-ghost-border: var(--c2, #111111);
+  --studio-btn-ghost-fg: var(--c2, #111111);
+  --studio-btn-ghost-bg: var(--c3, #ffffff);
+  --studio-card-bg: #ffffff;
+  --studio-muted: #66615c;
+  font-family: 'momochidori-variable', Arial, sans-serif;
 }
 
 .studio-modal-backdrop {
@@ -1351,7 +1360,7 @@ button.studio-audience-pill.studio-pill.studio-pill--active {
   z-index: 1;
   background: var(--c3, #fff);
   border-radius: 0;
-  border: 1px solid #e2e8f0;
+  border: 1px solid color-mix(in srgb, var(--c2, #111) 14%, #e2e8f0);
   box-shadow: 0 20px 50px rgba(15, 23, 42, 0.2);
   width: min(920px, 96vw);
   max-width: min(920px, 96vw);
@@ -1447,13 +1456,131 @@ button.studio-audience-pill.studio-pill.studio-pill--active {
   font-size: 0.78em;
 }
 
+.studio-modal-body .studio-btn-primary,
+.studio-modal-body .studio-btn-ghost,
+.studio-modal-body .studio-btn-secondary,
+.studio-modal-body .studio-btn-danger {
+  font-family: inherit;
+}
+
+/* Outrank index.css global `button { background: #007bff }` inside portaled modals */
+.studio-modal-root .studio-modal-body button.studio-tabs__tab {
+  font-size: 0.82rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 0;
+  background: var(--studio-card-bg, #fff);
+  color: var(--c2, #111);
+}
+
+.studio-modal-root .studio-modal-body button.studio-btn-primary {
+  background: var(--studio-btn-primary-bg);
+  color: var(--studio-btn-primary-fg);
+  border: 1px solid var(--studio-btn-primary-bg);
+  border-radius: 0;
+  font-size: 0.8rem;
+  padding: 0.5rem 1.1rem;
+}
+
+.studio-modal-root .studio-modal-body button.studio-btn-primary:hover {
+  filter: brightness(1.08);
+  background: var(--studio-btn-primary-bg);
+}
+
+.studio-modal-root .studio-modal-body button.studio-btn-ghost,
+.studio-modal-root .studio-modal-body button.studio-btn-secondary {
+  background: var(--studio-btn-ghost-bg);
+  color: var(--studio-btn-ghost-fg);
+  border: 1px solid var(--studio-btn-ghost-border);
+  border-radius: 0;
+  font-size: 0.8rem;
+  padding: 0.45rem 0.95rem;
+}
+
+.studio-modal-root .studio-modal-body button.studio-btn-secondary {
+  color: var(--studio-btn-primary-bg);
+  border-color: var(--studio-btn-primary-bg);
+}
+
+.studio-modal-root .studio-modal-body button.studio-btn-danger {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #b91c1c;
+  border-radius: 0;
+  font-size: 0.8rem;
+  padding: 0.45rem 1rem;
+}
+
+.studio-modal-root .studio-modal-body button.studio-btn-danger:hover {
+  background: #fee2e2;
+  color: #7f1d1d;
+}
+
+.studio-modal-root .studio-modal-body .studio-file-label {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  padding: 0.45rem 0.95rem;
+  border-radius: 0;
+  border: 1px solid var(--studio-btn-ghost-border);
+  background: var(--studio-btn-ghost-bg);
+  color: var(--studio-btn-ghost-fg);
+  font-variation-settings: var(--fv-label);
+  font-size: 0.8rem;
+}
+
+.studio-modal-form--video .studio-video-editor-tabs {
+  margin-top: 0;
+}
+
+.studio-modal-form--video .studio-video-editor-tabs .studio-tabs__list {
+  margin-bottom: 1rem;
+}
+
+.studio-modal-form--video .studio-video-panel {
+  margin-bottom: 0.5rem;
+}
+
+.studio-modal-form--video .studio-field {
+  margin-bottom: 0.75rem;
+}
+
+.studio-modal-form--video .studio-community__file-actions {
+  margin: 0.5rem 0 1rem;
+}
+
+.studio-modal-form--video .studio-subheading {
+  margin: 1rem 0 0.5rem;
+  font-size: 0.82rem;
+  font-variation-settings: var(--fv-label-strong);
+}
+
+.studio-modal-form--video .studio-subheading:first-of-type {
+  margin-top: 0;
+}
+
+.studio-video-editor-tabs .studio-tabs__tab {
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+
+.studio-video-editor-pills .studio-pill,
+.studio-video-editor-pills > span {
+  display: inline-block;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.68rem;
+  border: 1px solid color-mix(in srgb, var(--c2, #111) 18%, transparent);
+  background: var(--studio-card-bg, #fff);
+  color: var(--c2, #111);
+  font-variation-settings: var(--fv-label);
+}
+
 .studio-modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 0.75rem;
   margin-top: 0.5rem;
   padding-top: 0.5rem;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid color-mix(in srgb, var(--c2, #111) 12%, transparent);
 }
 
 .studio-send-blast-footer {
@@ -5576,4 +5703,199 @@ a.studio-app-payload-link:hover {
   color: #111111 !important;
   border-color: #111111 !important;
   filter: none !important;
+}
+
+/* ----- Studio → Videos workspace ----- */
+.studio-videos-page .studio-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.studio-videos-featured-section {
+  margin: 1.5rem 0 2rem;
+}
+
+.studio-videos-featured-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.studio-videos-featured-rail {
+  display: flex;
+  gap: 0.85rem;
+  overflow-x: auto;
+  padding-bottom: 0.35rem;
+  scroll-snap-type: x proximity;
+}
+
+.studio-videos-featured-card {
+  flex: 0 0 min(220px, 72vw);
+  display: grid;
+  gap: 0.55rem;
+  padding: 0;
+  border: 1px solid var(--am-border, #dedbd8);
+  border-radius: 8px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+  scroll-snap-align: start;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.studio-videos-featured-card.is-selected {
+  border-color: #111;
+  box-shadow: 0 0 0 1px #111;
+}
+
+.studio-videos-featured-card__media {
+  aspect-ratio: 16 / 9;
+  background: #ece9e6 center/cover no-repeat;
+  border-radius: 7px 7px 0 0;
+}
+
+.studio-videos-featured-card__body {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.55rem 0.65rem 0.75rem;
+}
+
+.studio-videos-featured-card__body strong {
+  font-size: 0.82rem;
+  line-height: 1.25;
+}
+
+.studio-videos-featured-card__body span {
+  font-size: 0.72rem;
+  color: #666;
+}
+
+.studio-videos-featured-card__pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.25rem;
+}
+
+.studio-videos-featured-card__hero {
+  margin-top: 0.35rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 0.68rem;
+  padding: 0.2rem 0.45rem;
+  cursor: pointer;
+}
+
+.studio-videos-featured-card__hero.is-hero {
+  background: #111;
+  color: #fff;
+  border-color: #111;
+}
+
+.studio-videos-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0 0 1rem;
+}
+
+.studio-videos-row {
+  cursor: pointer;
+}
+
+.studio-videos-row:hover td {
+  background: #faf8f6;
+}
+
+.studio-community__featured-preview {
+  margin-top: 1rem;
+}
+
+.studio-community__featured-hero-summary {
+  margin: 1rem 0;
+  max-width: 28rem;
+}
+
+.studio-upload-progress-root .studio-modal-panel {
+  max-width: 28rem;
+}
+
+.studio-upload-progress-body {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.studio-upload-progress-name {
+  margin: 0;
+  font-weight: 600;
+}
+
+.studio-upload-progress-bar-wrap {
+  height: 8px;
+  background: #ece9e6;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.studio-upload-progress-bar {
+  height: 100%;
+  width: 0%;
+  background: #111;
+  transition: width 0.15s linear;
+}
+
+.studio-upload-progress-pct {
+  margin: 0;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.studio-upload-progress-phase--error {
+  color: #b42318;
+}
+
+.studio-video-editor {
+  display: grid;
+  grid-template-columns: minmax(200px, 240px) 1fr;
+  gap: 1.25rem;
+  min-height: 420px;
+}
+
+.studio-video-editor-rail {
+  display: grid;
+  gap: 0.75rem;
+  align-content: start;
+}
+
+.studio-video-editor-poster {
+  aspect-ratio: 16 / 9;
+  background: #ece9e6 center/cover no-repeat;
+  border-radius: 0;
+  border: 1px solid color-mix(in srgb, var(--c2, #111) 14%, transparent);
+}
+
+.studio-video-editor-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.studio-video-editor-tabs {
+  display: block;
+  margin-bottom: 0;
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+@media (max-width: 900px) {
+  .studio-video-editor {
+    grid-template-columns: 1fr;
+  }
 }

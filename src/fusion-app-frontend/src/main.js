@@ -63,6 +63,7 @@ import "./components/subComponents/quoteRow.js";
 import "./components/subComponents/audioRow.js";
 import "./components/subComponents/joinNetwork.js";
 import "./components/subComponents/community-hero.js";
+import "./components/subComponents/videosFeed.js";
 import "./components/subComponents/exclusive-content-highlight.js";
 import "./components/subComponents/community-connect.js";
 import "./components/subComponents/community-network-cards.js";

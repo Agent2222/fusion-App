@@ -6,6 +6,7 @@ describe('pathnameToPageStatusKey', () => {
         expect(pathnameToPageStatusKey('/')).toBe('home');
         expect(pathnameToPageStatusKey('/gallery-access')).toBe('galleryAccess');
         expect(pathnameToPageStatusKey('/community')).toBe('community');
+        expect(pathnameToPageStatusKey('/videos')).toBe('videos');
         expect(pathnameToPageStatusKey('/context')).toBe('context');
         expect(pathnameToPageStatusKey('/programs')).toBe('programs');
         expect(pathnameToPageStatusKey('/programs/foo')).toBe('programs');

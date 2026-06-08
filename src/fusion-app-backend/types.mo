@@ -338,6 +338,37 @@ module {
         localesJson : Text;
     };
 
+    /// Studio-managed community video library (`/videos`, Community featured row).
+    public type CommunityVideoRecord = {
+        id : Text;
+        slug : Text;
+        visible : Bool;
+        publishedAt : Text;
+        sortOrder : Nat;
+        updatedAt : Text;
+        previewVideoUrl : Text;
+        fullVideoKey : Text;
+        fullVideoFileName : Text;
+        posterUrl : Text;
+        imageUrl : Text;
+        legacyVideoUrl : Text;
+        overlayTitle : Text;
+        overlayGuests : Text;
+        overlayDuration : Text;
+        localesJson : Text;
+        previewChaptersJson : Text;
+        previewTopicsJson : Text;
+        fullChaptersJson : Text;
+        fullTopicsJson : Text;
+    };
+
+    /// Up to six featured video ids for `/community` + optional hero id.
+    public type CommunityFeaturedVideosConfig = {
+        featuredVideoIds : [Text];
+        heroVideoId : ?Text;
+        updatedAt : Text;
+    };
+
     public type ApplicantStatus = {
         #pending;
         #reviewing;

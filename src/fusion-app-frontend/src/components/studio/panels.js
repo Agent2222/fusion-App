@@ -142,6 +142,7 @@ import {
     renderCommunitySection,
     initCommunitySection,
 } from './sections/communityStudio.js';
+import { initVideosSection } from './sections/videosStudio.js';
 import {
     renderContent,
     initContent,
@@ -232,6 +233,7 @@ export const STUDIO_NAV_GROUPS = [
             { id: 'journal', label: 'Journal' },
             { id: 'sound', label: 'Sound' },
             { id: 'community', label: 'Community' },
+            { id: 'videos', label: 'Videos' },
             { id: 'content', label: 'Content' },
             { id: 'email', label: 'Email' },
             { id: 'ai', label: 'Assistance' },
@@ -322,6 +324,8 @@ export function renderStudioMain(sectionId) {
             return renderSound();
         case 'community':
             return renderCommunitySection();
+        case 'videos':
+            return '<div id="studio-videos-root" class="studio-section-root"></div>';
         case 'home':
             return renderHome();
         case 'content':
@@ -2514,6 +2518,7 @@ const STUDIO_INIT = {
     journal: initJournal,
     sound: initSound,
     community: initCommunitySection,
+    videos: initVideosSection,
     content: initContent,
     email: initEmail,
     ai: initAi,

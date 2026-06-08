@@ -1023,3 +1023,52 @@ export async function signPrivateVideoPlayback(opts) {
     }
     return res.json();
 }
+
+export const MULTIPART_THRESHOLD_BYTES = 100 * 1024 * 1024;
+
+async function integrationPost(path, body) {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const res = await fetch(`${base}${path}`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    return res.json();
+}
+
+export function initPublicMultipartUpload(body) {
+    return integrationPost('/storage/multipart/init', body);
+}
+
+export function presignPublicMultipartPart(body) {
+    return integrationPost('/storage/multipart/presign-part', body);
+}
+
+export function completePublicMultipartUpload(body) {
+    return integrationPost('/storage/multipart/complete', body);
+}
+
+export function abortPublicMultipartUpload(body) {
+    return integrationPost('/storage/multipart/abort', body);
+}
+
+export function initPrivateVideoMultipartUpload(body) {
+    return integrationPost('/storage/private-video/multipart/init', body);
+}
+
+export function presignPrivateVideoMultipartPart(body) {
+    return integrationPost('/storage/private-video/multipart/presign-part', body);
+}
+
+export function completePrivateVideoMultipartUpload(body) {
+    return integrationPost('/storage/private-video/multipart/complete', body);
+}
+
+export function abortPrivateVideoMultipartUpload(body) {
+    return integrationPost('/storage/private-video/multipart/abort', body);
+}

@@ -15,6 +15,7 @@ export const ICON_KEYS = {
         'nav-journal',
         'nav-sound',
         'nav-community',
+        'nav-videos',
         'nav-content',
         'nav-email',
         'nav-ai',

@@ -5,7 +5,7 @@
 
 import { config, DEV_MODE } from '../config.js';
 
-/** @typedef {'home'|'programs'|'galleryAccess'|'editions'|'journal'|'community'|'context'} PageStatusKey */
+/** @typedef {'home'|'programs'|'galleryAccess'|'editions'|'journal'|'community'|'videos'|'context'} PageStatusKey */
 
 /**
  * @param {unknown} entry
@@ -29,6 +29,7 @@ export function pathnameToPageStatusKey(pathname) {
     if (path === '/' || path === '') return 'home';
     if (path === '/gallery-access') return 'galleryAccess';
     if (path === '/community') return 'community';
+    if (path === '/videos') return 'videos';
     if (path === '/context') return 'context';
 
     if (path === '/programs' || path.startsWith('/program/') || path.startsWith('/programs/')) {
@@ -106,6 +107,9 @@ function joinNetworkAttrsForGate(path, pageKey) {
     }
     if (pageKey === 'community') {
         return { ...base, context: 'community', modal: 'membership', marginTop: '100px', marginBottom: '0px' };
+    }
+    if (pageKey === 'videos') {
+        return { ...base, context: 'videos', modal: 'membership', marginTop: '80px', marginBottom: '80px' };
     }
     if (pageKey === 'context') {
         return { ...base, context: 'context', modal: 'membership', marginTop: '125px', marginBottom: '250px' };
@@ -273,6 +277,18 @@ export function renderGatedPageHtml(path, copy, pageKey) {
 
     if (pageKey === 'community') {
         return inner;
+    }
+
+    if (pageKey === 'videos') {
+        return `
+            <div class="page videos-page">
+                <main id="videosMain" class="main-cont">
+                    <div id="videosMainContent" class="feed-container">
+                        ${inner}
+                    </div>
+                </main>
+            </div>
+        `;
     }
 
     if (pageKey === 'context') {

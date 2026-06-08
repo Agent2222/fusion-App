@@ -17,6 +17,17 @@ import {
     getStorageHealth,
     storageCredentialsErrorHint,
 } from './storageBackends.js';
+import {
+    MULTIPART_PART_SIZE_BYTES,
+    MULTIPART_THRESHOLD_BYTES,
+    abortMultipartUpload,
+    completeMultipartUpload,
+    computeMultipartPlan,
+    createMultipartUpload,
+    presignUploadPart,
+    privateVideoObjectKey,
+    publicUrlForKey,
+} from './storageMultipart.js';
 
 const PORT = Number(process.env.PORT || 8787);
 /** If "1" / "true", only allow DEFAULT + CORS_ORIGINS. Otherwise reflect any Origin (browser CORS always OK; POST still needs API key when set). */
@@ -250,8 +261,23 @@ function safePrivateVideoFileName(fileName) {
  * @param {unknown} key
  */
 function normalizePrivateVideoKey(key) {
-    const k = String(key ?? '').trim().replace(/^\/+/, '');
-    return k.startsWith(privateVideoPrefix) ? k : '';
+    const raw = String(key ?? '').trim();
+    if (!raw) return '';
+    let path = raw.replace(/^\/+/, '');
+    if (/^https?:\/\//i.test(raw)) {
+        try {
+            path = new URL(raw).pathname.replace(/^\/+/, '');
+            path = path.split('/').map((seg) => decodeURIComponent(seg)).join('/');
+        } catch {
+            return '';
+        }
+    }
+    const prefix = privateVideoPrefix.replace(/^\/+/, '');
+    const withSlash = prefix.endsWith('/') ? prefix : `${prefix}/`;
+    if (path.startsWith(withSlash)) return path;
+    const embedded = path.indexOf(`/${withSlash}`);
+    if (embedded >= 0) return path.slice(embedded + 1);
+    return '';
 }
 
 /**
@@ -2237,6 +2263,250 @@ app.post('/storage/private-video/sign-playback', requireApiKey, async (req, res)
         if (/credentials|Could not load credentials/i.test(msg)) {
             return res.status(503).json({ error: storageCredentialsErrorHint() });
         }
+        return res.status(500).json({ error: msg });
+    }
+});
+
+function resolvePublicUploadKey(body) {
+    let key = body?.key;
+    const contentType = body?.contentType;
+    if (typeof key !== 'string' || !key.length) {
+        return { error: 'Invalid key' };
+    }
+    key = key.replace(/^\/+/, '');
+    const rootPrefix = String(body?.rootPrefix || '').replace(/^\/+/, '').replace(/\/?$/, '/');
+    const requestedPrefix = rootPrefix === fusionMediaPublicPrefix ? fusionMediaPublicPrefix : s3Prefix;
+    if (!key.startsWith(requestedPrefix)) {
+        key = `${requestedPrefix}${key}`;
+    }
+    if (typeof contentType !== 'string' || !contentType.length) {
+        return { error: 'Invalid contentType' };
+    }
+    return { key, contentType };
+}
+
+app.post('/storage/multipart/init', requireApiKey, async (req, res) => {
+    try {
+        const storage = getActiveStorage();
+        if (!storage) {
+            return res.status(503).json({ error: 'Object storage not configured for active backend' });
+        }
+        const resolved = resolvePublicUploadKey(req.body);
+        if (resolved.error) return res.status(400).json({ error: resolved.error });
+        const fileSize = Number(req.body?.fileSize);
+        if (!Number.isFinite(fileSize) || fileSize <= 0) {
+            return res.status(400).json({ error: 'Invalid fileSize' });
+        }
+        const { partSize, partCount } = computeMultipartPlan(fileSize);
+        const uploadId = await createMultipartUpload(
+            storage.client,
+            storage.bucket,
+            resolved.key,
+            resolved.contentType,
+        );
+        return res.json({
+            uploadId,
+            key: resolved.key,
+            partSize,
+            partCount,
+            thresholdBytes: MULTIPART_THRESHOLD_BYTES,
+        });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/credentials|Could not load credentials/i.test(msg)) {
+            return res.status(503).json({ error: storageCredentialsErrorHint() });
+        }
+        return res.status(500).json({ error: msg });
+    }
+});
+
+app.post('/storage/multipart/presign-part', requireApiKey, async (req, res) => {
+    try {
+        const storage = getActiveStorage();
+        if (!storage) {
+            return res.status(503).json({ error: 'Object storage not configured for active backend' });
+        }
+        const key = String(req.body?.key || '').replace(/^\/+/, '');
+        const uploadId = String(req.body?.uploadId || '').trim();
+        const partNumber = Number(req.body?.partNumber);
+        if (!key || !uploadId || !Number.isInteger(partNumber) || partNumber < 1) {
+            return res.status(400).json({ error: 'Invalid multipart presign params' });
+        }
+        const putUrl = await presignUploadPart(
+            storage.client,
+            storage.bucket,
+            key,
+            uploadId,
+            partNumber,
+        );
+        return res.json({ putUrl, partNumber });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/credentials|Could not load credentials/i.test(msg)) {
+            return res.status(503).json({ error: storageCredentialsErrorHint() });
+        }
+        return res.status(500).json({ error: msg });
+    }
+});
+
+app.post('/storage/multipart/complete', requireApiKey, async (req, res) => {
+    try {
+        const storage = getActiveStorage();
+        if (!storage) {
+            return res.status(503).json({ error: 'Object storage not configured for active backend' });
+        }
+        const key = String(req.body?.key || '').replace(/^\/+/, '');
+        const uploadId = String(req.body?.uploadId || '').trim();
+        const parts = req.body?.parts;
+        if (!key || !uploadId || !Array.isArray(parts) || !parts.length) {
+            return res.status(400).json({ error: 'Invalid multipart complete params' });
+        }
+        const normalized = parts.map((p) => ({
+            partNumber: Number(p?.partNumber),
+            etag: String(p?.etag || p?.ETag || '').replace(/^"|"$/g, ''),
+        }));
+        if (normalized.some((p) => !Number.isInteger(p.partNumber) || p.partNumber < 1 || !p.etag)) {
+            return res.status(400).json({ error: 'Invalid part entries' });
+        }
+        await completeMultipartUpload(storage.client, storage.bucket, key, uploadId, normalized);
+        const publicUrl = publicUrlForKey(storage.publicBaseUrl, key);
+        return res.json({ key, publicUrl });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/credentials|Could not load credentials/i.test(msg)) {
+            return res.status(503).json({ error: storageCredentialsErrorHint() });
+        }
+        return res.status(500).json({ error: msg });
+    }
+});
+
+app.post('/storage/multipart/abort', requireApiKey, async (req, res) => {
+    try {
+        const storage = getActiveStorage();
+        if (!storage) {
+            return res.status(503).json({ error: 'Object storage not configured for active backend' });
+        }
+        const key = String(req.body?.key || '').replace(/^\/+/, '');
+        const uploadId = String(req.body?.uploadId || '').trim();
+        if (!key || !uploadId) {
+            return res.status(400).json({ error: 'Invalid multipart abort params' });
+        }
+        await abortMultipartUpload(storage.client, storage.bucket, key, uploadId);
+        return res.json({ ok: true });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return res.status(500).json({ error: msg });
+    }
+});
+
+app.post('/storage/private-video/multipart/init', requireApiKey, async (req, res) => {
+    try {
+        const storage = getActiveStorage();
+        if (!storage) {
+            return res.status(503).json({ error: 'Object storage not configured for active backend' });
+        }
+        const contentType = req.body?.contentType;
+        if (
+            typeof contentType !== 'string' ||
+            (!/^video\//i.test(contentType) && contentType !== 'application/octet-stream')
+        ) {
+            return res.status(400).json({ error: 'Invalid contentType (video/* required)' });
+        }
+        const fileSize = Number(req.body?.fileSize);
+        if (!Number.isFinite(fileSize) || fileSize <= 0) {
+            return res.status(400).json({ error: 'Invalid fileSize' });
+        }
+        const contentId = safePathPart(req.body?.contentId || 'community-video', 80) || 'community-video';
+        const fileName = safePrivateVideoFileName(req.body?.fileName);
+        const key = privateVideoObjectKey(contentId, fileName, privateVideoPrefix);
+        const { partSize, partCount } = computeMultipartPlan(fileSize);
+        const uploadId = await createMultipartUpload(storage.client, storage.bucket, key, contentType);
+        return res.json({
+            uploadId,
+            key,
+            fileName,
+            partSize,
+            partCount,
+            expiresIn: 3600,
+            thresholdBytes: MULTIPART_THRESHOLD_BYTES,
+        });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/credentials|Could not load credentials/i.test(msg)) {
+            return res.status(503).json({ error: storageCredentialsErrorHint() });
+        }
+        return res.status(500).json({ error: msg });
+    }
+});
+
+app.post('/storage/private-video/multipart/presign-part', requireApiKey, async (req, res) => {
+    try {
+        const storage = getActiveStorage();
+        if (!storage) {
+            return res.status(503).json({ error: 'Object storage not configured for active backend' });
+        }
+        const key = normalizePrivateVideoKey(req.body?.key) || String(req.body?.key || '').replace(/^\/+/, '');
+        const uploadId = String(req.body?.uploadId || '').trim();
+        const partNumber = Number(req.body?.partNumber);
+        if (!key || !key.startsWith(privateVideoPrefix) || !uploadId || !Number.isInteger(partNumber) || partNumber < 1) {
+            return res.status(400).json({ error: 'Invalid private multipart presign params' });
+        }
+        const putUrl = await presignUploadPart(storage.client, storage.bucket, key, uploadId, partNumber);
+        return res.json({ putUrl, partNumber });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/credentials|Could not load credentials/i.test(msg)) {
+            return res.status(503).json({ error: storageCredentialsErrorHint() });
+        }
+        return res.status(500).json({ error: msg });
+    }
+});
+
+app.post('/storage/private-video/multipart/complete', requireApiKey, async (req, res) => {
+    try {
+        const storage = getActiveStorage();
+        if (!storage) {
+            return res.status(503).json({ error: 'Object storage not configured for active backend' });
+        }
+        const key = normalizePrivateVideoKey(req.body?.key) || String(req.body?.key || '').replace(/^\/+/, '');
+        const uploadId = String(req.body?.uploadId || '').trim();
+        const parts = req.body?.parts;
+        if (!key || !key.startsWith(privateVideoPrefix) || !uploadId || !Array.isArray(parts) || !parts.length) {
+            return res.status(400).json({ error: 'Invalid private multipart complete params' });
+        }
+        const normalized = parts.map((p) => ({
+            partNumber: Number(p?.partNumber),
+            etag: String(p?.etag || p?.ETag || '').replace(/^"|"$/g, ''),
+        }));
+        if (normalized.some((p) => !Number.isInteger(p.partNumber) || p.partNumber < 1 || !p.etag)) {
+            return res.status(400).json({ error: 'Invalid part entries' });
+        }
+        await completeMultipartUpload(storage.client, storage.bucket, key, uploadId, normalized);
+        return res.json({ key, fileName: key.split('/').pop() || key });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/credentials|Could not load credentials/i.test(msg)) {
+            return res.status(503).json({ error: storageCredentialsErrorHint() });
+        }
+        return res.status(500).json({ error: msg });
+    }
+});
+
+app.post('/storage/private-video/multipart/abort', requireApiKey, async (req, res) => {
+    try {
+        const storage = getActiveStorage();
+        if (!storage) {
+            return res.status(503).json({ error: 'Object storage not configured for active backend' });
+        }
+        const key = normalizePrivateVideoKey(req.body?.key) || String(req.body?.key || '').replace(/^\/+/, '');
+        const uploadId = String(req.body?.uploadId || '').trim();
+        if (!key || !uploadId) {
+            return res.status(400).json({ error: 'Invalid private multipart abort params' });
+        }
+        await abortMultipartUpload(storage.client, storage.bucket, key, uploadId);
+        return res.json({ ok: true });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
         return res.status(500).json({ error: msg });
     }
 });

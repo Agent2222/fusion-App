@@ -135,6 +135,13 @@ const routes = {
         description: 'Fusion’s artist community and membership programs.',
         contentGenerator: 'generateCommunityContent'
     },
+    '/videos': {
+        loader: () => import('./components/videos.js'),
+        title: 'Videos | Fusion',
+        description: 'Studio visits, conversations, and member-only full videos from Fusion artists.',
+        contentGenerator: 'generateVideosContent',
+        isFullPage: false,
+    },
     '/context': {
         loader: () => import('./components/context.js'),
         title: 'Context | Mission & Ecosystem | Fusion',

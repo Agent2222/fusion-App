@@ -1,85 +1,127 @@
-# Media storage redundancy: AWS S3 + CloudFront with Cloudflare R2 failover
+# Media storage redundancy: AWS S3 + Cloudflare R2
 
-**Status:** R2 **reads** live on CDN — **writes blocked until you ship code + Render**  
+**Purpose:** Living runbook for Fusion media — initial R2 failover **complete**; use this doc for health checks, future outages, and AWS failback.  
 **Created:** 2026-06  
-**Updated:** 2026-06-05 — CDN verified; dual-backend code **not deployed**; Render env **not updated**
+**Updated:** 2026-06 — **Live on R2** (reads + writes verified)
 
 ---
 
-## What's done
+## Current production state
 
-| Area | Status |
-|------|--------|
-| R2 bucket **`fusion-app`** + object migration | Done |
-| Custom domain **`cdn.fusionart.world`** on R2 | Done |
-| Canonical CDN reads (`curl -I` **200**) | Done |
-| Dual-backend + CSP changes | Done **in repo only** — not on Render or IC yet |
+| Layer | Active now | Notes |
+|-------|------------|--------|
+| **CDN** | `cdn.fusionart.world` → R2 custom domain | Same hostname as before; no canister URL changes |
+| **Object storage** | R2 bucket **`fusion-app`** | Migrated copy of S3 keys |
+| **Upload presign** | `STORAGE_BACKEND=r2` on Render | Toggle only — no code deploy needed to switch |
+| **AWS S3 + CloudFront** | Standby (keep env vars + bucket) | Fail back when account healthy — [Step 10](#step-10--failback-to-aws-when-account--cloudfront-are-healthy) |
+| **Canister URLs** | `https://cdn.fusionart.world/uploads/…` | Unchanged |
 
-**Reads work today** — existing media loads from `cdn.fusionart.world` via DNS.  
-**Uploads do not** — Integration API on Render still presigns to AWS (old code + env). Studio uploads will fail or land on the wrong backend until you complete the steps below.
+**Ops notes**
+
+- New uploads land on **R2 only** until you fail back to AWS.
+- Do **not** delete the AWS bucket or CloudFront distribution.
+- Record in your team runbook: **R2 became primary ~2026-06** (for sync direction on failback).
 
 ---
 
-## Next steps — do in this order
+## Quick health checks (anytime)
 
-Nothing here requires Motoko / backend canister changes.
+```bash
+# CDN reads
+curl -I "https://cdn.fusionart.world/uploads/studio/editions/edition/ed_1776103056186/image.jpg"
+curl -I "https://cdn.fusionart.world/fusionMedia/uploads/Zac-Foster-Preview.mp4"
 
-### Step A — Push and deploy Integration API code (Render)
+# Upload backend
+curl -s "https://fusion-app-sycs.onrender.com/health" | jq '.storageBackend, .storage'
+```
 
-The dual-backend module is local only. Render must get the new code before env vars take effect.
+Expect: both CDN URLs **200**; `/health` shows `"storageBackend": "r2"` and `"storage": { "active": "configured", "r2": "configured" }`.
 
-1. **Commit and push** to the branch Render deploys from (`main` or your production branch):
-   - [`services/fusion-integration-api/src/storageBackends.js`](../services/fusion-integration-api/src/storageBackends.js)
-   - [`services/fusion-integration-api/src/index.js`](../services/fusion-integration-api/src/index.js)
-   - Doc/README updates (optional but fine to include)
+For upload issues: Studio test + DevTools (presign `putUrl` on `*.r2.cloudflarestorage.com`, no CSP/CORS errors). See [DEPLOY_RENDER_AND_ICP.md](DEPLOY_RENDER_AND_ICP.md).
 
-2. **Set Render environment variables** (Dashboard → your integration service → Environment):
+---
+
+## Future use — when to open this doc
+
+| Scenario | Section |
+|----------|---------|
+| AWS / CloudFront outage again | [Failover to R2](#failover-to-r2-reference) (already done once — repeat DNS + `STORAGE_BACKEND=r2`) |
+| AWS restored — return to primary | [Step 10 — Failback to AWS](#step-10--failback-to-aws-when-account--cloudfront-are-healthy) |
+| Keep buckets aligned | [Step 9 — Ongoing sync](#step-9--ongoing-sync-after-aws-is-restored) |
+| Wrong path / 404 on CDN | [Troubleshooting — 404](#troubleshooting--404-on-test-urls) |
+| Env var reference | [Production values](#production-values-fusion), [Integration API](#reference--integration-api-implemented), [Render README](../services/fusion-integration-api/README.md) |
+
+### Failover to R2 (reference)
+
+If AWS breaks again and R2 is already warm:
+
+1. Confirm objects on **`fusion-app`** (or sync S3 → R2 — Step 9).
+2. Point **`cdn.fusionart.world`** DNS to R2 custom domain (Cloudflare → R2 → bucket **`fusion-app`** → Custom Domains).
+3. Set **`STORAGE_BACKEND=r2`** on Render; redeploy Integration API.
+4. Confirm R2 **CORS** includes current site origins.
+5. Run [quick health checks](#quick-health-checks-anytime) + one Studio upload.
+
+No frontend/canister deploy required unless CSP or Integration API code changed since last failover.
+
+---
+
+## Initial migration — completed (archive)
+
+<details>
+<summary>Full cutover checklist (Steps A–D) — completed 2026-06</summary>
+
+| Step | What | Status |
+|------|------|--------|
+| A | Integration API dual-backend + Render `STORAGE_BACKEND=r2` | Done |
+| B | R2 CORS on **`fusion-app`** | Done |
+| C | Frontend CSP + asset canister deploy | Done |
+| D | Smoke test (reads + Studio/profile uploads) | Done |
+
+Also completed earlier: R2 bucket creation, S3→R2 object copy, custom domain **`cdn.fusionart.world`**, canonical CDN URL verification.
+
+</details>
+
+<details>
+<summary>Step A — Render env (reference copy)</summary>
 
 ```bash
 STORAGE_BACKEND=r2
 
 R2_BUCKET=fusion-app
-R2_ACCESS_KEY_ID=<your-r2-token-access-key-id>
-R2_SECRET_ACCESS_KEY=<your-r2-token-secret>
+R2_ACCESS_KEY_ID=<r2-token-access-key-id>
+R2_SECRET_ACCESS_KEY=<r2-token-secret>
 R2_ENDPOINT=https://<CLOUDFLARE_ACCOUNT_ID>.r2.cloudflarestorage.com
 R2_PUBLIC_BASE_URL=https://cdn.fusionart.world
 S3_PUBLIC_BASE_URL=https://cdn.fusionart.world
 
-# Keep AWS vars for future failback — do not delete
+# Keep for failback
 AWS_REGION=us-east-2
 S3_BUCKET=fusion-media-aws
 AWS_ACCESS_KEY_ID=<existing>
 AWS_SECRET_ACCESS_KEY=<existing>
 ```
 
-3. **Trigger deploy** — Render auto-deploys on push, or use **Manual Deploy** after saving env.
+Code: [`storageBackends.js`](../services/fusion-integration-api/src/storageBackends.js), [`index.js`](../services/fusion-integration-api/src/index.js). CSP: [`.ic-assets.json5`](../src/fusion-app-frontend/public/.ic-assets.json5).
 
-4. **Verify** (no Studio needed yet):
-
-```bash
-curl -s "https://fusion-app-sycs.onrender.com/health" | jq .
-```
-
-Expect **`storageBackend": "r2"`** and **`storage.r2": "configured"`**.  
-If `/health` lacks `storageBackend`, Render is still on **old code** — confirm push landed and redeploy finished.
-
-- [ ] R2 dual-backend code pushed to Render's branch
-- [ ] Render env vars saved (`STORAGE_BACKEND=r2` + all `R2_*`)
-- [ ] Integration API redeployed
-- [ ] `/health` shows `storageBackend: "r2"` and `storage.active: "configured"`
+</details>
 
 ---
 
-### Step B — R2 CORS (Cloudflare dashboard)
+## Code status (deployed)
 
-Required for browser **PUT** to presigned R2 URLs. Can be done before or right after Step A; must be done before testing uploads.
+| Item | Location | Status |
+|------|----------|--------|
+| Dual-backend presign (`STORAGE_BACKEND=aws\|r2`) | [`storageBackends.js`](../services/fusion-integration-api/src/storageBackends.js), [`index.js`](../services/fusion-integration-api/src/index.js) | **Deployed** (Render) |
+| `/health` reports `storageBackend`, `storage.aws`, `storage.r2` | Integration API | **Deployed** |
+| CSP `connect-src` for R2 presign PUT | [`.ic-assets.json5`](../src/fusion-app-frontend/public/.ic-assets.json5) | **Deployed** (asset canister) |
+| Env docs | README, DEPLOY doc | Done |
 
-Cloudflare → **R2** → bucket **`fusion-app`** → **CORS policy**. Origins must match exactly (scheme + host, **no trailing slash**):
+Reads and uploads target R2 while `STORAGE_BACKEND=r2`. No Motoko changes.
 
-- `https://fusionart.world`
-- `https://www.fusionart.world`
-- Your mainnet asset canister, e.g. `https://<canister-id>.icp0.io`
-- Local dev if needed: `http://localhost:3000`, `http://<canister>.localhost:4943`
+<details>
+<summary>R2 CORS policy (reference — bucket fusion-app)</summary>
+
+Origins must match browser `Origin` exactly (no trailing slash):
 
 ```json
 [
@@ -96,100 +138,6 @@ Cloudflare → **R2** → bucket **`fusion-app`** → **CORS policy**. Origins m
   }
 ]
 ```
-
-- [ ] CORS saved on R2 bucket **`fusion-app`**
-
----
-
-### Step C — Push, build, and deploy frontend (asset canister)
-
-CSP must allow `PUT` to `*.r2.cloudflarestorage.com`. That change is in [`.ic-assets.json5`](../src/fusion-app-frontend/public/.ic-assets.json5) but **not live** until you rebuild and deploy assets.
-
-1. **Commit and push** (same branch as your IC deploy):
-   - `src/fusion-app-frontend/public/.ic-assets.json5`
-   - Any other pending frontend changes on your branch
-
-2. **Build and deploy** (your usual flow):
-
-```bash
-cd src/fusion-app-frontend
-npm run build
-# from repo root, your usual:
-# dfx deploy fusion-app-frontend --network ic
-```
-
-3. After deploy, hard refresh or incognito when testing uploads.
-
-- [ ] Frontend changes pushed
-- [ ] `npm run build` succeeded
-- [ ] Asset canister deployed to mainnet
-
----
-
-### Step D — Smoke test (reads + writes)
-
-| Test | Expected |
-|------|----------|
-| Edition test image | [CDN URL](https://cdn.fusionart.world/uploads/studio/editions/edition/ed_1776103056186/image.jpg) → **200** |
-| Community test video | [CDN URL](https://cdn.fusionart.world/fusionMedia/uploads/Zac-Foster-Preview.mp4) → **200** |
-| Public `/profile/:slug`, `/artists`, `/programs` | Images load |
-| Studio → artist → hero upload | Presign → PUT to `*.r2.cloudflarestorage.com` → Save → reload shows image |
-| Member settings → profile image | Same |
-| DevTools Console on upload | No CSP or CORS errors |
-
-Quick upload check after Steps A–C:
-
-- Studio → Services → test connection (Integration API)
-- Upload a small image in Studio or member profile settings
-- In Network tab: presign response `putUrl` host should be **`….r2.cloudflarestorage.com`**
-
-- [ ] Public site reads OK
-- [ ] Studio / profile uploads OK
-- [ ] No CSP / CORS errors in DevTools
-
----
-
-### Step E — Later (when AWS is healthy)
-
-Sync buckets and fail back — see [Step 9](#step-9--ongoing-sync-after-aws-is-restored) and [Step 10](#step-10--failback-to-aws-when-account--cloudfront-are-healthy) below.
-
----
-
-## Code status (done in repo, not deployed)
-
-| Item | Location | Status |
-|------|----------|--------|
-| Dual-backend presign (`STORAGE_BACKEND=aws\|r2`) | [`storageBackends.js`](../services/fusion-integration-api/src/storageBackends.js), [`index.js`](../services/fusion-integration-api/src/index.js) | **Done in repo** — deploy Step A |
-| `/health` reports `storageBackend`, `storage.aws`, `storage.r2` | Integration API | **Done** |
-| CSP `connect-src` for R2 presign PUT | [`.ic-assets.json5`](../src/fusion-app-frontend/public/.ic-assets.json5) | **Done in repo** — deploy Step C |
-| Env docs | [`services/fusion-integration-api/README.md`](../services/fusion-integration-api/README.md), [`docs/DEPLOY_RENDER_AND_ICP.md`](DEPLOY_RENDER_AND_ICP.md) | **Done** |
-
-No Motoko changes. Reads use `https://cdn.fusionart.world/…` via DNS (already working). Uploads need Steps A + B + C.
-
----
-
-## Checklist archive (Cloudflare / CDN — done)
-
-<details>
-<summary>§1–2 — CDN reads and custom domain (completed)</summary>
-
-### Verify objects on R2 (reads) ✓
-
-**Verified 2026-06-05** (`curl -I`):
-
-| URL | Result |
-|-----|--------|
-| `…/uploads/studio/editions/edition/ed_1776103056186/image.jpg` | **200** (`image/jpeg`) |
-| `…/fusionMedia/uploads/Zac-Foster-Preview.mp4` | **200** (`video/mp4`) |
-
-- [x] Edition test image **200**
-- [x] Community test video **200**
-- [ ] Public site images (optional spot-check — Step D)
-
-### R2 custom domain ✓
-
-- [x] **`cdn.fusionart.world`** on bucket **`fusion-app`**
-- [x] Dead CloudFront CNAME removed
 
 </details>
 
@@ -213,25 +161,22 @@ No Motoko changes. Reads use `https://cdn.fusionart.world/…` via DNS (already 
 
 ---
 
-## Goal
+## Goal (long-term)
 
-Keep **AWS S3 + CloudFront** as the **long-term primary** when healthy. Use **Cloudflare R2** as a **mirrored redundancy option** you can toggle during AWS outages — and as the **active stack now** while CloudFront DNS is broken.
+Keep **AWS S3 + CloudFront** as the **primary when healthy**. Use **R2** as mirrored redundancy — failover is env + DNS, not a canister migration.
 
-This is **not** a one-way decommission of AWS. Both backends can coexist; switching is a **controlled failover / failback**, not a permanent cutover.
+Both backends stay configured on Render; switching is **`STORAGE_BACKEND`** + optional DNS flip on `cdn.fusionart.world`.
 
 ---
 
 ## Where you are now
 
-| Step | Status |
+| Item | Status |
 |------|--------|
-| R2 bucket + migration | Done |
-| Custom domain + CDN reads | Done |
-| **Push + deploy Integration API (Step A)** | **Not started** |
-| **Render `STORAGE_BACKEND=r2` env (Step A)** | **Not started** |
-| **R2 CORS (Step B)** | **Not started** |
-| **Frontend build + asset canister (Step C)** | **Not started** |
-| Full smoke test (Step D) | After A–C |
+| Live on R2 (CDN + uploads) | **Done** |
+| Dual-backend code deployed | **Done** |
+| AWS failback | **When ready** — Step 10 |
+| Ongoing S3 ↔ R2 sync | **Optional** — Step 9 after AWS restored |
 
 ---
 
@@ -288,27 +233,51 @@ Presign routes use the active backend from [`storageBackends.js`](../services/fu
 
 Routes: `POST /storage/presign`, `POST /storage/private-video/presign-upload`, `POST /storage/private-video/sign-playback`.
 
+**Large video uploads (Studio → Videos):** multipart routes mirror single PUT on both AWS and R2:
+
+- `POST /storage/multipart/init|presign-part|complete|abort`
+- `POST /storage/private-video/multipart/init|presign-part|complete|abort`
+
+Default threshold **100 MB** (`MULTIPART_THRESHOLD_BYTES`); part size **10 MB** (`MULTIPART_PART_SIZE_BYTES`, ≥ R2 5 MiB minimum). See [Integration API README](../services/fusion-integration-api/README.md).
+
 Saved URLs in the canister stay `https://cdn.fusionart.world/…` — frontend rewrite unchanged.
 
 ---
 
 ## Reference — CSP (implemented)
 
-Browser uploads `PUT` to `https://….r2.cloudflarestorage.com` — allowed in **`connect-src`** in [`.ic-assets.json5`](../src/fusion-app-frontend/public/.ic-assets.json5).
+| CSP directive | Hosts | Used for |
+|---------------|-------|----------|
+| **`connect-src`** | `https://*.amazonaws.com`, `https://*.r2.cloudflarestorage.com` | Presigned **PUT** uploads (Studio / profile) |
+| **`media-src`** | `https://cdn.fusionart.world`, `https://*.amazonaws.com`, `https://*.r2.cloudflarestorage.com` | Public CDN media **and** presigned **GET** for members-only full video (`<video src>`) |
 
-`img-src` / `media-src` stay on `https://cdn.fusionart.world` only (reads use custom domain).
+Configured in [`.ic-assets.json5`](../src/fusion-app-frontend/public/.ic-assets.json5).  
+**Important:** `connect-src` does **not** cover `<video>` / `<audio>` — those require **`media-src`**.
+
+Public previews (`fusionMedia/uploads/…`) load from `cdn.fusionart.world`.  
+Private full videos (`fusionMedia/private-video/…`) are **not** public on the CDN — members get a time-limited presigned URL via `POST /storage/private-video/sign-playback` (works on **AWS or R2** via `STORAGE_BACKEND`).
+
+**Key format (canister / Studio `fullVideoKey`):** flat object key under the prefix, for example:
+
+```text
+fusionMedia/private-video/Rodolfo-Full.mp4
+```
+
+Do **not** use `https://cdn.fusionart.world/fusionMedia/private-video/…` in `fullVideoKey` — that path is private; playback uses sign-playback, not the public CDN.
+
+After CSP changes: rebuild frontend + redeploy asset canister.
 
 ---
 
-## Step 7 — Steady state on R2 (while AWS is down)
+## Steady state on R2 (current)
 
-You are **live on R2** for reads (DNS) and writes (Integration API). No canister URL migration needed.
+Production is on R2 for reads (DNS) and writes (Integration API). No canister URL migration needed.
 
-**Ops notes**
+**Remember**
 
-- New uploads land **only** on R2 until you fail back to AWS.
-- Keep AWS S3 bucket and CloudFront distribution **frozen** (do not delete).
-- Document the date R2 became primary for later sync direction.
+- New uploads land on R2 until failback.
+- Keep AWS S3 + CloudFront frozen for future primary.
+- Before failback: sync **R2 → S3** for objects uploaded while on R2.
 
 ---
 
@@ -328,7 +297,7 @@ You are **live on R2** for reads (DNS) and writes (Integration API). No canister
 2. Verify CloudFront: `dig YOUR_DISTRIBUTION.cloudfront.net A +short` returns IPs.
 3. Set `STORAGE_BACKEND=aws` on Render; redeploy Integration API.
 4. Point `cdn.fusionart.world` DNS back to CloudFront (or keep on R2 — document choice).
-5. Run smoke tests (checklist §6).
+5. Run [quick health checks](#quick-health-checks-anytime) + Studio upload test.
 6. Schedule **S3 → R2** sync so R2 stays a warm mirror.
 
 ---
@@ -382,7 +351,7 @@ You are **live on R2** for reads (DNS) and writes (Integration API). No canister
 |--------|----------|
 | `uploads/` | Default; most Studio + member uploads |
 | `fusionMedia/uploads/` | Community media |
-| `fusionMedia/private-video/` | Gated video (signed GET) |
+| `fusionMedia/private-video/` | Gated video (signed GET); keys like `fusionMedia/private-video/Rodolfo-Full.mp4` |
 
 ---
 
@@ -442,41 +411,16 @@ for (const prefix of ['uploads/studio/editions/', 'fusionMedia/uploads/']) {
 
 ---
 
-## Completed — migration phases (archive)
+## Runbook notes (optional)
 
-<details>
-<summary>Phase 3: R2 custom domain (done)</summary>
-
-- **`cdn.fusionart.world`** attached to R2 bucket **`fusion-app`**
-- Dead CloudFront CNAME removed
-
-</details>
-
-<details>
-<summary>Phase 1–2: R2 setup and asset copy (done)</summary>
-
-- R2 bucket **`fusion-app`** + API token created  
-- Objects synced from S3 → **`fusion-app`** with **identical keys**  
-- Prefixes: `uploads/`, `fusionMedia/uploads/`, `fusionMedia/private-video/`, `uploads/legacyProfiles/`  
-- Verified test objects: edition image + `Zac-Foster-Preview.mp4`
-
-</details>
-
----
-
-## Open questions (for you to confirm)
-
-- [ ] Cloudflare **account ID** recorded in team runbook (for `R2_ENDPOINT`)
-- [x] `cdn.fusionart.world` on R2 custom domain
-- [x] Canonical test URLs return **200**
-- [ ] Integration API deployed with dual-backend code
-- [ ] Render `STORAGE_BACKEND=r2` + smoke tests pass
-- [ ] AWS account restoration timeline (for failback)
+- [ ] Cloudflare **account ID** in team secrets/runbook (for `R2_ENDPOINT`)
+- [ ] AWS account restoration timeline documented
+- [ ] Scheduled **S3 → R2** sync after failback (Step 9), if you want R2 as warm mirror
 
 ---
 
 ## Related docs
 
 - [DEPLOY_RENDER_AND_ICP.md](DEPLOY_RENDER_AND_ICP.md) — Integration API env, CORS, smoke tests  
-- [services/fusion-integration-api/README.md](../services/fusion-integration-api/README.md) — presign routes  
+- [services/fusion-integration-api/README.md](../services/fusion-integration-api/README.md) — presign routes and `STORAGE_BACKEND`  
 - [delete-later.md](delete-later.md) — legacy CDN profile URL tools in Studio  

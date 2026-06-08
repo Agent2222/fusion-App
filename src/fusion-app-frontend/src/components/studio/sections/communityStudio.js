@@ -6,13 +6,14 @@ import {
     adminSetCommunityPageStudio,
     getCommunityArtistsForStudio,
     getCommunityDataMode,
+    getCommunityFeaturedVideosStudio,
+    listCommunityVideosStudio,
 } from '../../../utils/database.js';
-import { presignPrivateVideoUpload } from '../../../utils/integrationApi.js';
 import { toCloudFrontAssetUrl } from '../../../utils/assetDistribution.js';
-import { uploadBlobToS3 } from '../../../utils/studioS3Upload.js';
 import { studioPageHeaderHtml } from '../../../utils/studioCategoryLayout.js';
 import { studioFeatureAccess } from '../../../utils/studioShellState.js';
-import { finalizeCommunityExclusiveForSave, resolveCommunityHero } from '../../../utils/communityPageDefaults.js';
+import { featuredCardHtml } from './videosStudio.js';
+import { parseVideoLocales } from '../../../utils/videoPageModel.js';
 
 function escapeHtml(s) {
     return String(s ?? '')
@@ -197,7 +198,7 @@ function exclusiveTabLabelBase(label) {
 export function renderCommunitySection() {
     const tabs = [
         ['overview', 'Overview'],
-        ['exclusive', 'Exclusive'],
+        ['featured', 'Featured'],
         ['connect', 'Connect'],
         ['network', 'Network'],
         ['sessions', 'Sessions'],
@@ -207,7 +208,7 @@ export function renderCommunitySection() {
         <div class="studio-section-stack studio-category-page studio-community">
             ${studioPageHeaderHtml({
                 title: 'Community',
-                subtitle: '/community landing — landing hero from exclusive features, connect, network cards, sessions, promo',
+                subtitle: '/community landing — featured videos, connect, network cards, sessions, promo',
                 countId: 'studio-community-header-count',
                 countLabel: '',
             })}
@@ -259,20 +260,16 @@ function communitySectionActive(sections, key) {
 
 /**
  * @param {Record<string, unknown>} bundle
+ * @param {{ featuredCount: number, heroLabel: string }} featuredSummary
  */
-function renderSectionToggles(bundle) {
+function renderSectionToggles(bundle, featuredSummary) {
     const sections = bundle.sections && typeof bundle.sections === 'object' ? bundle.sections : {};
-    const exclusive = Array.isArray(bundle.exclusive) ? bundle.exclusive : [];
-    const { index: heroIndex } = resolveCommunityHero(
-        exclusive,
-        bundle.hero && typeof bundle.hero === 'object' ? bundle.hero : {},
-    );
     const activeCount = COMMUNITY_SECTION_TOGGLES.filter(([key]) => communitySectionActive(sections, key)).length;
     return `
         <div class="studio-community__section-head">
             <p class="studio-kicker">Page map</p>
             <h3 class="studio-subheading">Community page structure</h3>
-            <p class="studio-muted">Start here to decide what appears publicly. Mark one exclusive feature as the landing hero in the Exclusive tab.</p>
+            <p class="studio-muted">Start here to decide what appears publicly. Featured videos and landing hero are managed in the Featured tab or Content → Videos.</p>
         </div>
         <div class="studio-community__overview-grid">
             <div class="studio-community__summary-card">
@@ -280,11 +277,11 @@ function renderSectionToggles(bundle) {
                 <span>Sections active</span>
             </div>
             <div class="studio-community__summary-card">
-                <strong>${escapeHtml(String(exclusive.filter((item) => item && typeof item === 'object' && item.visible !== false).length))}/${escapeHtml(String(exclusive.length || 6))}</strong>
-                <span>Exclusive features visible</span>
+                <strong>${escapeHtml(String(featuredSummary.featuredCount))}/6</strong>
+                <span>Featured videos</span>
             </div>
             <div class="studio-community__summary-card">
-                <strong>${heroIndex >= 0 ? `Feature ${heroIndex + 1}` : 'None'}</strong>
+                <strong>${escapeHtml(featuredSummary.heroLabel)}</strong>
                 <span>Landing hero</span>
             </div>
             <div class="studio-community__summary-card">
@@ -351,6 +348,7 @@ function renderExclusiveFeatureCard(c, i, artists, field) {
                         ${field(`st-com-ex-${i}-poster`, 'Poster image URL', c.posterUrl)}
                         ${field(`st-com-ex-${i}-preview-video`, 'Public preview video URL', c.previewVideoUrl)}
                         ${field(`st-com-ex-${i}-full-key`, 'Members-only full video key', c.fullVideoKey)}
+                        <p class="studio-muted studio-community__field-hint">Object key in storage, not a CDN URL. Example: <code>fusionMedia/private-video/Rodolfo-Full.mp4</code>. Use the key from “Upload full video” or paste a migrated key.</p>
                         ${field(`st-com-ex-${i}-full-name`, 'Members-only full video file name', c.fullVideoFileName)}
                     </div>
                     <div class="studio-community__file-actions">
@@ -670,6 +668,48 @@ function renderSessionsForm(bundle) {
 }
 
 /**
+ * @param {Record<string, unknown>[]} videos
+ * @param {{ featuredVideoIds: string[], heroVideoId: string | null }} featuredCfg
+ */
+function renderFeaturedTab(videos, featuredCfg) {
+    const featured = featuredCfg.featuredVideoIds
+        .map((id) => videos.find((v) => String(v.id) === id))
+        .filter(Boolean);
+    const preview = featured.length
+        ? featured
+        : videos.filter((v) => v.visible !== false).slice(0, 6);
+    const cards = preview.map((rec) =>
+        featuredCardHtml(rec, featuredCfg.featuredVideoIds.includes(String(rec.id)), {
+            isHero: String(rec.id) === String(featuredCfg.heroVideoId || ''),
+        }),
+    );
+    const heroRec = videos.find((v) => String(v.id) === String(featuredCfg.heroVideoId || ''));
+    const heroLocales = heroRec ? parseVideoLocales(heroRec.localesJson) : null;
+    const heroLabel = heroLocales
+        ? String(heroLocales.headlineEn || heroLocales.headlineJa || heroRec?.slug || 'Video')
+        : preview.length
+          ? 'Default (first featured)'
+          : 'None';
+    return `
+        <div class="studio-community__panel-intro">
+            <div>
+                <p class="studio-kicker">Featured</p>
+                <h3 class="studio-subheading">Community video row</h3>
+                <p class="studio-muted">Up to six videos appear on /community. Edit the library and featured selection in <a href="/studio#videos">Content → Videos</a>.</p>
+            </div>
+            <a class="studio-btn-primary" href="/studio#videos">Open Videos workspace</a>
+        </div>
+        <div class="studio-community__summary-card studio-community__featured-hero-summary">
+            <strong>${escapeHtml(heroLabel)}</strong>
+            <span>Landing hero on /community</span>
+        </div>
+        <div class="studio-videos-featured-rail studio-community__featured-preview" id="studio-com-featured-rail">
+            ${cards.length ? cards.join('') : '<p class="studio-muted">No videos in the library yet. Add videos in Content → Videos.</p>'}
+        </div>
+    `;
+}
+
+/**
  * @param {HTMLElement} mainEl
  */
 export async function initCommunitySection(mainEl) {
@@ -687,14 +727,26 @@ export async function initCommunitySection(mainEl) {
         return;
     }
 
-    bindExclusiveMediaUploadHandlers();
-
     /** @type {Record<string, unknown>} */
     let bundle = {};
     /** @type {Array<Record<string, unknown>>} */
     let studioArtists = [];
+    /** @type {Record<string, unknown>[]} */
+    let communityVideos = [];
+    /** @type {{ featuredVideoIds: string[], heroVideoId: string | null }} */
+    let featuredCfg = { featuredVideoIds: [], heroVideoId: null };
     let openDetails = new Set();
-    let activeExclusiveTab = 0;
+
+    const featuredSummary = () => {
+        const count = featuredCfg.featuredVideoIds.length
+            || communityVideos.filter((v) => v.visible !== false).slice(0, 6).length;
+        const heroRec = communityVideos.find((v) => String(v.id) === String(featuredCfg.heroVideoId || ''));
+        const heroLocales = heroRec ? parseVideoLocales(heroRec.localesJson) : null;
+        const heroLabel = heroLocales
+            ? String(heroLocales.headlineEn || heroLocales.headlineJa || heroRec?.slug || 'Video')
+            : count ? 'Default' : 'None';
+        return { featuredCount: Math.min(count, 6), heroLabel };
+    };
 
     const root = mainEl.querySelector('[data-studio-tabs="community"]');
     if (root) {
@@ -724,70 +776,10 @@ export async function initCommunitySection(mainEl) {
             const el = mainEl.querySelector(`#${id}`);
             return el instanceof HTMLInputElement ? el.checked : true;
         };
-        const chaptersFor = (featureKey) => {
-            const rows = mainEl.querySelectorAll(`[data-chapter-row="${featureKey}"]`);
-            return Array.from(rows)
-                .map((row) => {
-                    const artistId = String(row.querySelector('.st-com-chapter-artist')?.value ?? '').trim();
-                    const timestampSec = timestampFromInput(row.querySelector('.st-com-chapter-time')?.value ?? '');
-                    return artistId ? { artistId, timestampSec } : null;
-                })
-                .filter(Boolean)
-                .sort((a, b) => a.timestampSec - b.timestampSec);
-        };
-        const topicsFor = (featureKey) => {
-            const rows = mainEl.querySelectorAll(`[data-topic-row="${featureKey}"]`);
-            return Array.from(rows)
-                .map((row) => {
-                    const titleEn = String(row.querySelector('.st-com-topic-title-en')?.value ?? '').trim();
-                    const titleJa = String(row.querySelector('.st-com-topic-title-ja')?.value ?? '').trim();
-                    const quoteEn = String(row.querySelector('.st-com-topic-quote-en')?.value ?? '').trim();
-                    const quoteJa = String(row.querySelector('.st-com-topic-quote-ja')?.value ?? '').trim();
-                    const timestampSec = timestampFromInput(row.querySelector('.st-com-topic-time')?.value ?? '');
-                    return titleEn || titleJa || quoteEn || quoteJa
-                        ? { timestampSec, titleEn, titleJa, quoteEn, quoteJa }
-                        : null;
-                })
-                .filter(Boolean)
-                .sort((a, b) => a.timestampSec - b.timestampSec);
-        };
 
         const sections = Object.fromEntries(
             COMMUNITY_SECTION_TOGGLES.map(([key]) => [key, checked(`st-com-section-${key}`)]),
         );
-
-        const exclusiveDraft = [0, 1, 2, 3, 4, 5].map((i) => ({
-            isHero: checked(`st-com-ex-${i}-hero`),
-            visible: checked(`st-com-ex-${i}-visible`),
-            imageUrl: val(`st-com-ex-${i}-img`),
-            posterUrl: val(`st-com-ex-${i}-poster`),
-            previewVideoUrl: val(`st-com-ex-${i}-preview-video`),
-            fullVideoKey: val(`st-com-ex-${i}-full-key`),
-            fullVideoFileName: val(`st-com-ex-${i}-full-name`),
-            videoUrl: val(`st-com-ex-${i}-video`),
-            overlayTitle: val(`st-com-ex-${i}-ov-title`),
-            overlayGuests: val(`st-com-ex-${i}-ov-guests`),
-            overlayDuration: val(`st-com-ex-${i}-ov-dur`),
-            lineEn: val(`st-com-ex-${i}-en`),
-            lineJa: val(`st-com-ex-${i}-ja`),
-            kickerEn: val(`st-com-ex-${i}-k-en`),
-            kickerJa: val(`st-com-ex-${i}-k-ja`),
-            headlineEn: val(`st-com-ex-${i}-h-en`),
-            headlineJa: val(`st-com-ex-${i}-h-ja`),
-            bodyEn: val(`st-com-ex-${i}-b-en`),
-            bodyJa: val(`st-com-ex-${i}-b-ja`),
-            ctaJoinLabelEn: val(`st-com-ex-${i}-cta-join-en`),
-            ctaJoinLabelJa: val(`st-com-ex-${i}-cta-join-ja`),
-            ctaWatchLabelEn: val(`st-com-ex-${i}-cta-watch-en`),
-            ctaWatchLabelJa: val(`st-com-ex-${i}-cta-watch-ja`),
-            chapters: chaptersFor(`ex-${i}-preview`),
-            topics: topicsFor(`ex-${i}-preview`),
-            previewChapters: chaptersFor(`ex-${i}-preview`),
-            previewTopics: topicsFor(`ex-${i}-preview`),
-            fullChapters: chaptersFor(`ex-${i}-full`),
-            fullTopics: topicsFor(`ex-${i}-full`),
-        }));
-        const { exclusive, hero } = finalizeCommunityExclusiveForSave(exclusiveDraft);
 
         const bites = [0, 1, 2].map((i) => ({
             titleEn: val(`st-com-cn-b${i}-ten`),
@@ -838,106 +830,28 @@ export async function initCommunitySection(mainEl) {
             sublineJa: val('st-com-pr-s-ja'),
         };
 
-        return {
+        const next = {
             ...bundle,
             sections,
-            hero,
-            exclusive,
             connect,
             networkCards,
             sessions,
             promo,
         };
-    }
-
-    /**
-     * @param {HTMLElement | null} card
-     * @param {string} url
-     */
-    function updateExclusiveFeaturePreview(card, url) {
-        const preview = card?.querySelector('.studio-community__feature-preview');
-        if (preview instanceof HTMLElement && url) {
-            preview.style.backgroundImage = `url("${encodeURI(url)}")`;
-        }
-    }
-
-    function bindExclusiveMediaUploadHandlers() {
-        const root = mainEl.querySelector('#studio-com-form-exclusive');
-        if (!root || root.dataset.exclusiveUploadBound === '1') return;
-        root.dataset.exclusiveUploadBound = '1';
-        root.addEventListener('change', async (ev) => {
-            const input = ev.target;
-            if (!(input instanceof HTMLInputElement) || input.type !== 'file') return;
-            const file = input.files?.[0];
-            if (!file) return;
-
-            const match = /^st-com-ex-(\d+)-(image|poster|preview|full)-file$/.exec(input.id || '');
-            const featureIndex = Number(match?.[1] ?? input.dataset.featureIndex ?? -1);
-            const kind = String(match?.[2] ?? input.dataset.uploadKind ?? '').trim();
-            if (!Number.isInteger(featureIndex) || featureIndex < 0 || featureIndex > 5 || !kind) return;
-
-            const card = input.closest('.studio-community__feature-card');
-            const i = featureIndex;
-            const urlField =
-                kind === 'poster'
-                    ? card?.querySelector(`#st-com-ex-${i}-poster`)
-                    : kind === 'preview'
-                      ? card?.querySelector(`#st-com-ex-${i}-preview-video`)
-                      : kind === 'image'
-                        ? card?.querySelector(`#st-com-ex-${i}-img`)
-                        : null;
-
-            try {
-                show(`Uploading Feature ${i + 1} ${kind}…`, 'info');
-                if (kind === 'full') {
-                    const keyIn = card?.querySelector(`#st-com-ex-${i}-full-key`);
-                    const nameIn = card?.querySelector(`#st-com-ex-${i}-full-name`);
-                    const signed = await presignPrivateVideoUpload({
-                        contentId: `community-exclusive-${i + 1}`,
-                        fileName: file.name,
-                        contentType: file.type || 'application/octet-stream',
-                    });
-                    const put = await fetch(signed.putUrl, {
-                        method: 'PUT',
-                        body: file,
-                        headers: { 'Content-Type': file.type || 'application/octet-stream' },
-                    });
-                    if (!put.ok) throw new Error(`Private video upload failed: HTTP ${put.status}`);
-                    if (keyIn instanceof HTMLInputElement) keyIn.value = signed.key;
-                    if (nameIn instanceof HTMLInputElement) nameIn.value = signed.fileName || file.name;
-                    show(`Feature ${i + 1} members-only full video uploaded.`, 'info');
-                } else {
-                    const url = await uploadBlobToS3(
-                        file,
-                        urlField instanceof HTMLInputElement ? urlField : null,
-                        {
-                            area: 'studio/community',
-                            entityType: 'community',
-                            entityId: `exclusive-${i + 1}`,
-                            fieldKey: kind === 'preview' ? 'preview-video' : kind,
-                        },
-                    );
-                    if (kind === 'image' || kind === 'poster') {
-                        updateExclusiveFeaturePreview(card, url);
-                    }
-                    show(`Feature ${i + 1} ${kind} uploaded.`, 'info');
-                }
-            } catch (err) {
-                show(err instanceof Error ? err.message : String(err), 'warn');
-            }
-            input.value = '';
-        });
+        delete next.exclusive;
+        delete next.hero;
+        return next;
     }
 
     function fillForms() {
         const fs = mainEl.querySelector('#studio-com-form-overview');
-        const fe = mainEl.querySelector('#studio-com-form-exclusive');
+        const ff = mainEl.querySelector('#studio-com-form-featured');
         const fc = mainEl.querySelector('#studio-com-form-connect');
         const fn = mainEl.querySelector('#studio-com-form-network');
         const fss = mainEl.querySelector('#studio-com-form-sessions');
         const fp = mainEl.querySelector('#studio-com-form-promo');
-        if (fs) fs.innerHTML = renderSectionToggles(bundle);
-        if (fe) fe.innerHTML = renderExclusiveForm(bundle, studioArtists, activeExclusiveTab);
+        if (fs) fs.innerHTML = renderSectionToggles(bundle, featuredSummary());
+        if (ff) ff.innerHTML = renderFeaturedTab(communityVideos, featuredCfg);
         if (fc) fc.innerHTML = renderConnectForm(bundle);
         if (fn) fn.innerHTML = renderNetworkForm(bundle);
         if (fss) fss.innerHTML = renderSessionsForm(bundle);
@@ -954,27 +868,6 @@ export async function initCommunitySection(mainEl) {
             if (savedPreview === expectedPreview) return last;
         }
         return last;
-    }
-
-    function timestampOwnerFor(featureKey) {
-        const m = /^ex-(\d+)-(preview|full)$/.exec(String(featureKey || ''));
-        if (!m) return null;
-        const idx = Number(m[1]);
-        const mode = m[2];
-        if (idx < 0) return null;
-        const exclusive = Array.isArray(bundle.exclusive) ? [...bundle.exclusive] : [];
-        const item = exclusive[idx] && typeof exclusive[idx] === 'object' ? /** @type {Record<string, unknown>} */ (exclusive[idx]) : {};
-        exclusive[idx] = item;
-        bundle.exclusive = exclusive;
-        return { owner: item, mode };
-    }
-
-    function setTimestampList(owner, mode, kind, list) {
-        const prop = `${mode}${kind}`;
-        owner[prop] = list;
-        if (mode === 'preview') {
-            owner[kind === 'Chapters' ? 'chapters' : 'topics'] = list;
-        }
     }
 
     function rememberOpenDetails() {
@@ -1011,96 +904,9 @@ export async function initCommunitySection(mainEl) {
         restoreOpenDetails();
     }
 
-    function syncExclusiveFeatureTab(idx) {
-        const heroInput = mainEl.querySelector(`#st-com-ex-${idx}-hero`);
-        const visibleInput = mainEl.querySelector(`#st-com-ex-${idx}-visible`);
-        const isHero = heroInput instanceof HTMLInputElement && heroInput.checked;
-        const visible = isHero || (visibleInput instanceof HTMLInputElement && visibleInput.checked);
-        const tab = mainEl.querySelector(`.studio-community__feature-tab[data-feature-tab="${idx}"]`);
-        const panel = mainEl.querySelector(`#studio-com-ex-panel-${idx} .studio-community__feature-card`);
-        const headlineInput = mainEl.querySelector(`#st-com-ex-${idx}-h-en`) || mainEl.querySelector(`#st-com-ex-${idx}-en`);
-        const label = exclusiveTabLabelBase(String(headlineInput?.value ?? `Feature ${idx + 1}`));
-        if (tab instanceof HTMLElement) {
-            tab.classList.toggle('studio-community__feature-tab--hidden', !visible);
-            tab.textContent = `${label}${exclusiveTabSuffix({ isHero, visible })}`;
-        }
-        if (panel instanceof HTMLElement) {
-            panel.classList.toggle('studio-community__feature-card--hidden', !visible);
-            const heroNote = heroInput?.closest('.studio-community__feature-visible')?.querySelector('small');
-            const visibleEl = panel.querySelector('[data-feature-visible]');
-            const visibleNote = visibleEl?.closest('.studio-community__feature-visible')?.querySelector('small');
-            if (heroNote) {
-                heroNote.textContent = isHero
-                    ? 'Shown as the main community video on page load'
-                    : 'Select to use this feature as the landing hero';
-            }
-            if (visibleEl instanceof HTMLInputElement) {
-                visibleEl.disabled = isHero;
-                if (isHero) visibleEl.checked = true;
-            }
-            if (visibleNote) {
-                visibleNote.textContent = isHero
-                    ? 'Landing hero is always visible in the exclusive row'
-                    : visible
-                      ? 'Shown in the exclusive content row'
-                      : 'Hidden from the public page';
-            }
-        }
-    }
-
-    mainEl.addEventListener('change', (e) => {
-        const t = e.target;
-        if (!(t instanceof HTMLInputElement)) return;
-
-        const heroMatch = /^st-com-ex-(\d+)-hero$/.exec(t.id);
-        if (heroMatch) {
-            const idx = Number(heroMatch[1]);
-            if (!Number.isInteger(idx) || idx < 0) return;
-            if (!t.checked) {
-                t.checked = true;
-                return;
-            }
-            [0, 1, 2, 3, 4, 5].forEach((i) => {
-                if (i === idx) return;
-                const other = mainEl.querySelector(`#st-com-ex-${i}-hero`);
-                if (other instanceof HTMLInputElement) other.checked = false;
-                syncExclusiveFeatureTab(i);
-            });
-            syncExclusiveFeatureTab(idx);
-            return;
-        }
-
-        const visibleMatch = /^st-com-ex-(\d+)-visible$/.exec(t.id);
-        if (!visibleMatch) return;
-        const idx = Number(visibleMatch[1]);
-        if (!Number.isInteger(idx) || idx < 0) return;
-        syncExclusiveFeatureTab(idx);
-    });
-
     mainEl.addEventListener('click', (e) => {
         const t = e.target;
         if (!(t instanceof HTMLElement)) return;
-        const featureTab = t.closest('.studio-community__feature-tab[data-feature-tab]');
-        if (featureTab instanceof HTMLElement) {
-            e.preventDefault();
-            const idx = Number(featureTab.getAttribute('data-feature-tab'));
-            if (!Number.isInteger(idx) || idx < 0 || idx > 5) return;
-            activeExclusiveTab = idx;
-            const workspace = mainEl.querySelector('[data-studio-tabs="community-exclusive"]');
-            if (!workspace) return;
-            const tabs = workspace.querySelectorAll('.studio-community__feature-tab[role="tab"]');
-            const panels = workspace.querySelectorAll('.studio-community__feature-panel[role="tabpanel"]');
-            tabs.forEach((tab, j) => {
-                const on = j === idx;
-                tab.classList.toggle('is-active', on);
-                tab.setAttribute('aria-selected', on ? 'true' : 'false');
-                if (panels[j]) {
-                    panels[j].classList.toggle('is-active', on);
-                    panels[j].toggleAttribute('hidden', !on);
-                }
-            });
-            return;
-        }
         if (t.id === 'st-com-net-add') {
             e.preventDefault();
             bundle = collectFromDom();
@@ -1112,64 +918,6 @@ export async function initCommunitySection(mainEl) {
             e.preventDefault();
             bundle = collectFromDom();
             bundle.sessions = [...(Array.isArray(bundle.sessions) ? bundle.sessions : []), {}];
-            refillFormsPreservingDetails();
-            return;
-        }
-        if (t.classList.contains('st-com-chapter-add')) {
-            e.preventDefault();
-            const featureKey = t.getAttribute('data-feature') || '';
-            bundle = collectFromDom();
-            const target = timestampOwnerFor(featureKey);
-            if (target) {
-                const prop = `${target.mode}Chapters`;
-                const chapters = Array.isArray(target.owner[prop]) ? [...target.owner[prop]] : [];
-                chapters.push({ artistId: '', timestampSec: 0 });
-                setTimestampList(target.owner, target.mode, 'Chapters', chapters);
-            }
-            refillFormsPreservingDetails();
-            return;
-        }
-        if (t.classList.contains('st-com-chapter-del')) {
-            e.preventDefault();
-            const featureKey = t.getAttribute('data-feature') || '';
-            const chapterIndex = Number(t.getAttribute('data-chapter-index') ?? -1);
-            bundle = collectFromDom();
-            const target = timestampOwnerFor(featureKey);
-            if (target) {
-                const prop = `${target.mode}Chapters`;
-                const chapters = Array.isArray(target.owner[prop]) ? [...target.owner[prop]] : [];
-                if (chapterIndex >= 0) chapters.splice(chapterIndex, 1);
-                setTimestampList(target.owner, target.mode, 'Chapters', chapters);
-            }
-            refillFormsPreservingDetails();
-            return;
-        }
-        if (t.classList.contains('st-com-topic-add')) {
-            e.preventDefault();
-            const featureKey = t.getAttribute('data-feature') || '';
-            bundle = collectFromDom();
-            const target = timestampOwnerFor(featureKey);
-            if (target) {
-                const prop = `${target.mode}Topics`;
-                const topics = Array.isArray(target.owner[prop]) ? [...target.owner[prop]] : [];
-                topics.push({ timestampSec: 0, titleEn: '', titleJa: '', quoteEn: '', quoteJa: '' });
-                setTimestampList(target.owner, target.mode, 'Topics', topics);
-            }
-            refillFormsPreservingDetails();
-            return;
-        }
-        if (t.classList.contains('st-com-topic-del')) {
-            e.preventDefault();
-            const featureKey = t.getAttribute('data-feature') || '';
-            const topicIndex = Number(t.getAttribute('data-topic-index') ?? -1);
-            bundle = collectFromDom();
-            const target = timestampOwnerFor(featureKey);
-            if (target) {
-                const prop = `${target.mode}Topics`;
-                const topics = Array.isArray(target.owner[prop]) ? [...target.owner[prop]] : [];
-                if (topicIndex >= 0) topics.splice(topicIndex, 1);
-                setTimestampList(target.owner, target.mode, 'Topics', topics);
-            }
             refillFormsPreservingDetails();
             return;
         }
@@ -1204,6 +952,15 @@ export async function initCommunitySection(mainEl) {
     } catch (e) {
         show(e instanceof Error ? e.message : String(e), 'warn');
         bundle = {};
+    }
+    try {
+        [communityVideos, featuredCfg] = await Promise.all([
+            listCommunityVideosStudio(),
+            getCommunityFeaturedVideosStudio(),
+        ]);
+        if (!Array.isArray(communityVideos)) communityVideos = [];
+    } catch {
+        communityVideos = [];
     }
     try {
         studioArtists = await getCommunityArtistsForStudio();

@@ -391,6 +391,7 @@ class HeaderComponent extends HTMLElement {
             document.getElementById('editionsMainContent'),
             document.getElementById('galleryAccessMainContent'),
             document.getElementById('journalMainContent'),
+            document.getElementById('videosMainContent'),
             document.getElementById('programViewMainContent'),
             document.getElementById('profileMainContent'),
             document.getElementById('settingsMainContent'),
@@ -1155,8 +1156,9 @@ class HeaderComponent extends HTMLElement {
             '/programs': en ? 'Programs' : 'プログラム',
             '/gallery-access': en ? 'Gallery Access' : 'ギャラリーアクセス',
             '/editions': en ? 'Editions' : 'エディション',
-            '/journal': en ? 'Journal' : 'ジャーナル',
             '/community': en ? 'Community' : 'コミュニティ',
+            '/videos': en ? 'Videos' : '動画',
+            '/journal': en ? 'Journal' : 'ジャーナル',
             '/context': en ? 'Context' : 'コンテキスト',
         };
         root.querySelectorAll('a.headerNavLink').forEach((a) => {
@@ -2022,8 +2024,9 @@ class HeaderComponent extends HTMLElement {
                         <a class="headerNavLink" href="/programs">${en ? 'Programs' : 'プログラム'}</a>
                         <a class="headerNavLink" href="/gallery-access">${en ? 'Gallery Access' : 'ギャラリーアクセス'}</a>
                         <a class="headerNavLink" href="/editions">${en ? 'Editions' : 'エディション'}</a>
-                        <a class="headerNavLink" href="/journal">${en ? 'Journal' : 'ジャーナル'}</a>
                         <a class="headerNavLink" href="/community">${en ? 'Community' : 'コミュニティ'}</a>
+                        <a class="headerNavLink" href="/videos">${en ? 'Videos' : '動画'}</a>
+                        <a class="headerNavLink" href="/journal">${en ? 'Journal' : 'ジャーナル'}</a>
                         <a class="headerNavLink" href="/context">${en ? 'Context' : 'コンテキスト'}</a>
                     </nav>
                     <div id="headerCtas">

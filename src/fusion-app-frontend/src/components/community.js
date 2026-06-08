@@ -1,8 +1,8 @@
 /**
  * `/community` landing — CMS from canister (`getCommunityPagePublic`).
  */
-import { getCommunityArtistsPublic, getCommunityPagePublic } from '../utils/database.js';
-import { resolveCommunityHero, featureItemWithoutFlags } from '../utils/communityPageDefaults.js';
+import { getCommunityArtistsPublic, getCommunityLandingVideosBundle, getCommunityPagePublic } from '../utils/database.js';
+import { featureItemWithoutFlags } from '../utils/communityPageDefaults.js';
 import { captureCommunityEvent } from '../utils/communityPosthog.js';
 
 export function render() {
@@ -46,19 +46,22 @@ export default async function initCommunity() {
 
     let data;
     let artists = [];
+    let videoBundle = {
+        featuredItems: [],
+        heroItem: {},
+        heroIndex: -1,
+    };
     try {
-        data = await getCommunityPagePublic();
+        [data, videoBundle, artists] = await Promise.all([
+            getCommunityPagePublic(),
+            getCommunityLandingVideosBundle(),
+            getCommunityArtistsPublic(),
+        ]);
     } catch {
         data = {};
         captureCommunityEvent('community_page_data_load_failed', { source: 'community_page' });
     }
-    try {
-        artists = await getCommunityArtistsPublic();
-        if (!Array.isArray(artists)) artists = [];
-    } catch {
-        artists = [];
-        captureCommunityEvent('community_page_data_load_failed', { source: 'community_artists' });
-    }
+    if (!Array.isArray(artists)) artists = [];
 
     const hero = document.getElementById('communityHero');
     const exc = document.getElementById('communityExclusive');
@@ -72,9 +75,21 @@ export default async function initCommunity() {
 
     const sections = data?.sections && typeof data.sections === 'object' ? data.sections : {};
     const active = (key) => /** @type {Record<string, unknown>} */ (sections)[key] !== false;
-    const legacyHero = data?.hero && typeof data.hero === 'object' ? data.hero : {};
-    const exclusive = Array.isArray(data?.exclusive) ? data.exclusive : [];
-    const { item: heroItem, index: heroIndex } = resolveCommunityHero(exclusive, legacyHero);
+    const exclusive = videoBundle.featuredItems.length
+        ? videoBundle.featuredItems
+        : Array.isArray(data?.exclusive) ? data.exclusive : [];
+    const heroItem = videoBundle.featuredItems.length
+        ? videoBundle.heroItem
+        : exclusive[videoBundle.heroIndex >= 0 ? videoBundle.heroIndex : 0] || {};
+    const heroIndex = videoBundle.featuredItems.length
+        ? (() => {
+              const hid = videoBundle.heroItem?.videoId;
+              if (!hid) return videoBundle.heroIndex >= 0 ? videoBundle.heroIndex : 0;
+              const ix = exclusive.findIndex((it) => String(it?.videoId ?? '') === String(hid));
+              return ix >= 0 ? ix : 0;
+          })()
+        : exclusive.findIndex((item) => item?.isHero === true);
+    const resolvedHeroIndex = heroIndex >= 0 ? heroIndex : 0;
     const visibleExclusiveCount = exclusive.filter((item) => item?.visible !== false).length;
     const connect = data?.connect && typeof data.connect === 'object' ? data.connect : {};
     const networkCards = Array.isArray(data?.networkCards) ? data.networkCards : [];
@@ -91,7 +106,7 @@ export default async function initCommunity() {
         join_active: active('join'),
         exclusive_count: exclusive.length,
         exclusive_visible_count: visibleExclusiveCount,
-        hero_exclusive_index: heroIndex,
+        hero_exclusive_index: resolvedHeroIndex,
         network_card_count: networkCards.length,
         session_count: sessions.length,
         artist_count: artists.length,
@@ -104,7 +119,7 @@ export default async function initCommunity() {
         el.style.display = visible ? '' : 'none';
     };
 
-    const setActiveHero = (item, index = heroIndex) => {
+    const setActiveHero = (item, index = resolvedHeroIndex) => {
         const activeItem = item && typeof item === 'object' ? item : heroItem;
         if (hero && typeof hero.setData === 'function') {
             hero.setData(activeItem, { artists, activeIndex: index });
@@ -115,17 +130,17 @@ export default async function initCommunity() {
     };
 
     if (hero && typeof hero.setData === 'function') {
-        hero.setData(heroItem, { artists, activeIndex: heroIndex });
+        hero.setData(heroItem, { artists, activeIndex: resolvedHeroIndex });
     }
     if (exc && typeof exc.setData === 'function') {
-        exc.setData(exclusive, { activeIndex: heroIndex });
+        exc.setData(exclusive, { activeIndex: resolvedHeroIndex });
     }
     if (conn && typeof conn.setData === 'function') conn.setData(connect);
     if (net && typeof net.setData === 'function') net.setData(networkCards);
     if (sess && typeof sess.setData === 'function') sess.setData(sessions);
     if (promo && typeof promo.setData === 'function') promo.setData(promoData);
 
-    setVisible(hero, active('hero') && heroIndex >= 0);
+    setVisible(hero, active('hero') && resolvedHeroIndex >= 0);
     setVisible(exc, active('exclusive') && visibleExclusiveCount > 0);
     setVisible(conn, active('connect'));
     setVisible(netSection, active('network'));

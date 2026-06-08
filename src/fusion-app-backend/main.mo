@@ -124,6 +124,16 @@ persistent actor {
   /// `/community` landing JSON (Studio-managed; validated only by size — clients parse).
   stable var communityPageJsonStable : Text = "{}";
 
+  /// Community video library (`/videos`); Studio “community” / Videos section.
+  stable var communityVideosStable : [(Text, Types.CommunityVideoRecord)] = [];
+
+  /// Featured video ids (max 6) + hero for `/community` landing.
+  stable var communityFeaturedVideosStable : Types.CommunityFeaturedVideosConfig = {
+    featuredVideoIds = [];
+    heroVideoId = null;
+    updatedAt = "";
+  };
+
   /// Card “Profile” headshot URLs — **append-only** stable slot; separate from `artistsStable` / `ArtistCore` for safe upgrades.
   stable var artistHeroProfileImageStable : [(Text, Text)] = [];
 
@@ -198,6 +208,9 @@ persistent actor {
 
   transient var contentBySlug : _HashMap.HashMap<Text, Types.ContentPageRecord> =
     _HashMap.HashMap<Text, Types.ContentPageRecord>(0, Text.equal, Text.hash);
+
+  transient var communityVideosById : _HashMap.HashMap<Text, Types.CommunityVideoRecord> =
+    _HashMap.HashMap<Text, Types.CommunityVideoRecord>(0, Text.equal, Text.hash);
 
   transient var applicantsById : _HashMap.HashMap<Text, Types.ApplicantRecord> =
     _HashMap.HashMap<Text, Types.ApplicantRecord>(0, Text.equal, Text.hash);
@@ -390,6 +403,9 @@ persistent actor {
   };
   for (entry in contentPagesStable.vals()) {
     contentBySlug.put(entry.0, entry.1);
+  };
+  for (entry in communityVideosStable.vals()) {
+    communityVideosById.put(entry.0, entry.1);
   };
   for (entry in applicantsStable.vals()) {
     applicantsById.put(entry.0, entry.1);
@@ -1374,6 +1390,7 @@ persistent actor {
     journalsStable := _Iter.toArray(journalsById.entries());
     editionsStable := _Iter.toArray(editionsById.entries());
     contentPagesStable := _Iter.toArray(contentBySlug.entries());
+    communityVideosStable := _Iter.toArray(communityVideosById.entries());
     applicantsStable := _Iter.toArray(applicantsById.entries());
     archivedApplicantsStable := _Iter.toArray(archivedApplicantsById.entries());
     programPaymentSummariesStable := _Iter.toArray(programPaymentSummariesByKey.entries());
@@ -1553,6 +1570,16 @@ persistent actor {
       contentBySlug.put(entry.0, entry.1);
     };
     contentPagesStable := [];
+
+    communityVideosById := _HashMap.HashMap<Text, Types.CommunityVideoRecord>(
+      communityVideosStable.size(),
+      Text.equal,
+      Text.hash
+    );
+    for (entry in communityVideosStable.vals()) {
+      communityVideosById.put(entry.0, entry.1);
+    };
+    communityVideosStable := [];
 
     applicantsById := _HashMap.HashMap<Text, Types.ApplicantRecord>(0, Text.equal, Text.hash);
     for (entry in applicantsStable.vals()) {
@@ -4164,6 +4191,140 @@ persistent actor {
       Debug.trap("Community page JSON too large");
     };
     communityPageJsonStable := json;
+  };
+
+  // ===== Community videos (`/videos` library + featured row) =====
+
+  private let maxCommunityFeaturedVideos : Nat = 6;
+
+  private func compareCommunityVideos(
+    a : Types.CommunityVideoRecord,
+    b : Types.CommunityVideoRecord,
+  ) : Order.Order {
+    if (a.sortOrder != b.sortOrder) {
+      if (a.sortOrder < b.sortOrder) { #less } else { #greater };
+    } else {
+      Text.compare(b.publishedAt, a.publishedAt);
+    };
+  };
+
+  private func sortedVisibleCommunityVideos() : [Types.CommunityVideoRecord] {
+    let vals = _Iter.toArray(communityVideosById.vals());
+    let visible = Array.filter<Types.CommunityVideoRecord>(
+      vals,
+      func(v : Types.CommunityVideoRecord) : Bool { v.visible },
+    );
+    Array.sort(visible, compareCommunityVideos);
+  };
+
+  private func sortedAllCommunityVideos() : [Types.CommunityVideoRecord] {
+    let vals = _Iter.toArray(communityVideosById.vals());
+    Array.sort(vals, compareCommunityVideos);
+  };
+
+  private func sliceCommunityVideos(
+    rows : [Types.CommunityVideoRecord],
+    offset : Nat,
+    limit : Nat,
+  ) : [Types.CommunityVideoRecord] {
+    if (limit == 0) { return [] };
+    let total = rows.size();
+    if (offset >= total) { return [] };
+    let end = Nat.min(total, offset + limit);
+    let out = Buffer.Buffer<Types.CommunityVideoRecord>(end - offset);
+    var i = offset;
+    while (i < end) {
+      out.add(rows[i]);
+      i += 1;
+    };
+    Buffer.toArray(out);
+  };
+
+  private func validateFeaturedVideoIds(ids : [Text]) {
+    if (ids.size() > maxCommunityFeaturedVideos) {
+      Debug.trap("At most six featured videos");
+    };
+    for (id in ids.vals()) {
+      switch (communityVideosById.get(id)) {
+        case null { Debug.trap("Featured video id not found") };
+        case (?_) {};
+      };
+    };
+  };
+
+  public query func listCommunityVideosPublic(offset : Nat, limit : Nat) : async [Types.CommunityVideoRecord] {
+    let rows = sortedVisibleCommunityVideos();
+    sliceCommunityVideos(rows, offset, limit);
+  };
+
+  public query func getCommunityFeaturedVideosPublic() : async Types.CommunityFeaturedVideosConfig {
+    communityFeaturedVideosStable;
+  };
+
+  public shared query (msg) func listCommunityVideos() : async [Types.CommunityVideoRecord] {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "community");
+    sortedAllCommunityVideos();
+  };
+
+  public shared query (msg) func getCommunityVideo(videoId : Text) : async ?Types.CommunityVideoRecord {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "community");
+    communityVideosById.get(videoId);
+  };
+
+  public shared (msg) func upsertCommunityVideo(rec : Types.CommunityVideoRecord) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "community");
+    if (rec.id.size() == 0) { Debug.trap("Video id required") };
+    communityVideosById.put(rec.id, rec);
+  };
+
+  public shared (msg) func deleteCommunityVideo(videoId : Text) : async Bool {
+    assertAdmin(msg.caller);
+    switch (communityVideosById.remove(videoId)) {
+      case null { false };
+      case (?_) {
+        let cfg = communityFeaturedVideosStable;
+        let filtered = Array.filter<Text>(
+          cfg.featuredVideoIds,
+          func(id : Text) : Bool { id != videoId },
+        );
+        let hero = switch (cfg.heroVideoId) {
+          case (?h) { if (h == videoId) { null } else { ?h } };
+          case null { null };
+        };
+        communityFeaturedVideosStable := {
+          featuredVideoIds = filtered;
+          heroVideoId = hero;
+          updatedAt = cfg.updatedAt;
+        };
+        true;
+      };
+    };
+  };
+
+  public shared query (msg) func adminGetCommunityFeaturedVideos() : async Types.CommunityFeaturedVideosConfig {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "community");
+    communityFeaturedVideosStable;
+  };
+
+  public shared (msg) func adminSetCommunityFeaturedVideos(cfg : Types.CommunityFeaturedVideosConfig) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "community");
+    validateFeaturedVideoIds(cfg.featuredVideoIds);
+    switch (cfg.heroVideoId) {
+      case null {};
+      case (?heroId) {
+        var found = false;
+        for (id in cfg.featuredVideoIds.vals()) {
+          if (id == heroId) { found := true };
+        };
+        if (not found) { Debug.trap("Hero video must be in featured set") };
+      };
+    };
+    communityFeaturedVideosStable := cfg;
   };
 
   public query func listJournalEntries() : async [Types.JournalRecord] {

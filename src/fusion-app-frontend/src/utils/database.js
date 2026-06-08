@@ -3462,6 +3462,8 @@ export async function adminSetJournalLayoutStudio(rows) {
 
 const LS_SOUND_ENV = 'fusion-sound-environment';
 const LS_COMMUNITY_PAGE = 'fusion-community-page-json';
+const LS_COMMUNITY_VIDEOS = 'fusion-community-videos';
+const LS_COMMUNITY_FEATURED = 'fusion-community-featured-videos';
 
 /** @returns {Record<string, unknown>} */
 function defaultSoundEnvironmentJs() {
@@ -3660,6 +3662,289 @@ export async function adminSetCommunityPageStudio(bundle) {
     }
     await actor.adminSetCommunityPage(text);
     return { mode: 'live', bytes: text.length };
+}
+
+// ===== Community videos (`/videos` library) =====
+
+/**
+ * @param {unknown} row
+ */
+function mapCommunityVideoFromActor(row) {
+    if (!row || typeof row !== 'object') return null;
+    const r = /** @type {Record<string, unknown>} */ (row);
+    return {
+        id: String(r.id ?? ''),
+        slug: String(r.slug ?? ''),
+        visible: r.visible !== false,
+        publishedAt: String(r.publishedAt ?? ''),
+        sortOrder: Number(r.sortOrder ?? 0),
+        updatedAt: String(r.updatedAt ?? ''),
+        previewVideoUrl: String(r.previewVideoUrl ?? ''),
+        fullVideoKey: String(r.fullVideoKey ?? ''),
+        fullVideoFileName: String(r.fullVideoFileName ?? ''),
+        posterUrl: String(r.posterUrl ?? ''),
+        imageUrl: String(r.imageUrl ?? ''),
+        legacyVideoUrl: String(r.legacyVideoUrl ?? ''),
+        overlayTitle: String(r.overlayTitle ?? ''),
+        overlayGuests: String(r.overlayGuests ?? ''),
+        overlayDuration: String(r.overlayDuration ?? ''),
+        localesJson: String(r.localesJson ?? '{}'),
+        previewChaptersJson: String(r.previewChaptersJson ?? '[]'),
+        previewTopicsJson: String(r.previewTopicsJson ?? '[]'),
+        fullChaptersJson: String(r.fullChaptersJson ?? '[]'),
+        fullTopicsJson: String(r.fullTopicsJson ?? '[]'),
+    };
+}
+
+/** @returns {Promise<object[]>} */
+async function readCommunityVideosTestStore() {
+    const cur = readStudioLs(LS_COMMUNITY_VIDEOS);
+    return Array.isArray(cur) ? cur : [];
+}
+
+/** @param {object[]} list */
+function writeCommunityVideosTestStore(list) {
+    writeStudioLs(LS_COMMUNITY_VIDEOS, list);
+}
+
+/** @returns {Promise<{ featuredVideoIds: string[], heroVideoId: string | null, updatedAt: string }>} */
+async function readCommunityFeaturedTestStore() {
+    const cur = readStudioLs(LS_COMMUNITY_FEATURED);
+    if (cur && typeof cur === 'object' && !Array.isArray(cur)) {
+        const o = /** @type {Record<string, unknown>} */ (cur);
+        return {
+            featuredVideoIds: Array.isArray(o.featuredVideoIds) ? o.featuredVideoIds.map(String) : [],
+            heroVideoId: o.heroVideoId != null && o.heroVideoId !== '' ? String(o.heroVideoId) : null,
+            updatedAt: String(o.updatedAt ?? ''),
+        };
+    }
+    return { featuredVideoIds: [], heroVideoId: null, updatedAt: '' };
+}
+
+/** @param {{ featuredVideoIds: string[], heroVideoId: string | null, updatedAt: string }} cfg */
+function writeCommunityFeaturedTestStore(cfg) {
+    writeStudioLs(LS_COMMUNITY_FEATURED, cfg);
+}
+
+/**
+ * @param {{ limit?: number, offset?: number, visibleOnly?: boolean }} [opts]
+ * @returns {Promise<object[]>}
+ */
+export async function listCommunityVideosPublic(opts = {}) {
+    const limit = Math.max(1, Math.min(500, Math.floor(Number(opts.limit) || 500)));
+    const offset = Math.max(0, Math.floor(Number(opts.offset) || 0));
+    const { normalizeCommunityVideoRecord } = await import('./videoPageModel.js');
+    if (shouldUseCommunityTestData()) {
+        let rows = await readCommunityVideosTestStore();
+        if (opts.visibleOnly !== false) rows = rows.filter((r) => r?.visible !== false);
+        return rows.slice(offset, offset + limit).map((r) => normalizeCommunityVideoRecord(r));
+    }
+    try {
+        const actor = await getFusionBackendActor();
+        if (!actor || typeof actor.listCommunityVideosPublic !== 'function') return [];
+        const rows = await actor.listCommunityVideosPublic(BigInt(offset), BigInt(limit));
+        return (Array.isArray(rows) ? rows : [])
+            .map(mapCommunityVideoFromActor)
+            .filter(Boolean)
+            .map((r) => normalizeCommunityVideoRecord(r));
+    } catch {
+        return [];
+    }
+}
+
+/** @returns {Promise<{ featuredVideoIds: string[], heroVideoId: string | null, updatedAt: string }>} */
+export async function getCommunityFeaturedVideosPublic() {
+    if (shouldUseCommunityTestData()) {
+        return readCommunityFeaturedTestStore();
+    }
+    try {
+        const actor = await getFusionBackendActor();
+        if (!actor || typeof actor.getCommunityFeaturedVideosPublic !== 'function') {
+            return { featuredVideoIds: [], heroVideoId: null, updatedAt: '' };
+        }
+        const cfg = await actor.getCommunityFeaturedVideosPublic();
+        let heroVideoId = null;
+        const heroOpt = cfg?.heroVideoId;
+        if (Array.isArray(heroOpt) && heroOpt.length) heroVideoId = String(heroOpt[0]);
+        return {
+            featuredVideoIds: Array.isArray(cfg?.featuredVideoIds) ? cfg.featuredVideoIds.map(String) : [],
+            heroVideoId,
+            updatedAt: String(cfg?.updatedAt ?? ''),
+        };
+    } catch {
+        return { featuredVideoIds: [], heroVideoId: null, updatedAt: '' };
+    }
+}
+
+/** @returns {Promise<object[]>} */
+export async function listCommunityVideosStudio() {
+    const { normalizeCommunityVideoRecord } = await import('./videoPageModel.js');
+    if (shouldUseCommunityTestData()) {
+        return (await readCommunityVideosTestStore()).map((r) => normalizeCommunityVideoRecord(r));
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.listCommunityVideos !== 'function') {
+        throw new Error('listCommunityVideos unavailable — run dfx generate fusion-app-backend.');
+    }
+    const rows = await actor.listCommunityVideos();
+    return (Array.isArray(rows) ? rows : [])
+        .map(mapCommunityVideoFromActor)
+        .filter(Boolean)
+        .map((r) => normalizeCommunityVideoRecord(r));
+}
+
+/**
+ * @param {string} videoId
+ */
+export async function getCommunityVideoStudio(videoId) {
+    const id = String(videoId ?? '').trim();
+    if (!id) return null;
+    const { normalizeCommunityVideoRecord } = await import('./videoPageModel.js');
+    if (shouldUseCommunityTestData()) {
+        const row = (await readCommunityVideosTestStore()).find((v) => String(v?.id) === id);
+        return row ? normalizeCommunityVideoRecord(row) : null;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.getCommunityVideo !== 'function') return null;
+    const opt = await actor.getCommunityVideo(id);
+    const row = Array.isArray(opt) && opt.length ? opt[0] : opt && typeof opt === 'object' ? opt : null;
+    return row ? normalizeCommunityVideoRecord(mapCommunityVideoFromActor(row)) : null;
+}
+
+/**
+ * @param {Record<string, unknown>} rec
+ */
+export async function upsertCommunityVideoStudio(rec) {
+    const { communityVideoRecordToCandid, normalizeCommunityVideoRecord } = await import('./videoPageModel.js');
+    const normalized = normalizeCommunityVideoRecord(rec);
+    normalized.updatedAt = new Date().toISOString();
+    if (shouldUseCommunityTestData()) {
+        const list = await readCommunityVideosTestStore();
+        const ix = list.findIndex((v) => String(v?.id) === String(normalized.id));
+        if (ix >= 0) list[ix] = normalized;
+        else list.push(normalized);
+        writeCommunityVideosTestStore(list);
+        return normalized;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.upsertCommunityVideo !== 'function') {
+        throw new Error('upsertCommunityVideo unavailable — run dfx generate fusion-app-backend.');
+    }
+    await actor.upsertCommunityVideo(communityVideoRecordToCandid(normalized));
+    return normalized;
+}
+
+/**
+ * @param {string} videoId
+ */
+export async function deleteCommunityVideoStudio(videoId) {
+    const id = String(videoId ?? '').trim();
+    if (!id) return false;
+    if (shouldUseCommunityTestData()) {
+        const list = (await readCommunityVideosTestStore()).filter((v) => String(v?.id) !== id);
+        writeCommunityVideosTestStore(list);
+        const cfg = await readCommunityFeaturedTestStore();
+        writeCommunityFeaturedTestStore({
+            ...cfg,
+            featuredVideoIds: cfg.featuredVideoIds.filter((x) => x !== id),
+            heroVideoId: cfg.heroVideoId === id ? null : cfg.heroVideoId,
+        });
+        return true;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.deleteCommunityVideo !== 'function') return false;
+    return actor.deleteCommunityVideo(id);
+}
+
+/** @returns {Promise<{ featuredVideoIds: string[], heroVideoId: string | null, updatedAt: string }>} */
+export async function getCommunityFeaturedVideosStudio() {
+    if (shouldUseCommunityTestData()) {
+        return readCommunityFeaturedTestStore();
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminGetCommunityFeaturedVideos !== 'function') {
+        return getCommunityFeaturedVideosPublic();
+    }
+    const cfg = await actor.adminGetCommunityFeaturedVideos();
+    let heroVideoId = null;
+    const heroOpt = cfg?.heroVideoId;
+    if (Array.isArray(heroOpt) && heroOpt.length) heroVideoId = String(heroOpt[0]);
+    return {
+        featuredVideoIds: Array.isArray(cfg?.featuredVideoIds) ? cfg.featuredVideoIds.map(String) : [],
+        heroVideoId,
+        updatedAt: String(cfg?.updatedAt ?? ''),
+    };
+}
+
+/**
+ * @param {{ featuredVideoIds: string[], heroVideoId: string | null }} cfg
+ */
+export async function setCommunityFeaturedVideosStudio(cfg) {
+    const payload = {
+        featuredVideoIds: (Array.isArray(cfg.featuredVideoIds) ? cfg.featuredVideoIds : []).slice(0, 6).map(String),
+        heroVideoId: cfg.heroVideoId ? String(cfg.heroVideoId) : null,
+        updatedAt: new Date().toISOString(),
+    };
+    if (shouldUseCommunityTestData()) {
+        writeCommunityFeaturedTestStore(payload);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminSetCommunityFeaturedVideos !== 'function') {
+        throw new Error('adminSetCommunityFeaturedVideos unavailable — run dfx generate fusion-app-backend.');
+    }
+    await actor.adminSetCommunityFeaturedVideos({
+        featuredVideoIds: payload.featuredVideoIds,
+        heroVideoId: payload.heroVideoId ? [payload.heroVideoId] : [],
+        updatedAt: payload.updatedAt,
+    });
+}
+
+/** Import legacy exclusive[] when library empty. */
+export async function migrateLegacyCommunityVideosIfEmpty() {
+    const existing = await listCommunityVideosStudio().catch(() => []);
+    if (existing.length) return { migrated: 0, skipped: true };
+    const page = await getCommunityPagePublic();
+    const exclusive = Array.isArray(page?.exclusive) ? page.exclusive : [];
+    const { legacyExclusiveItemToVideoRecord } = await import('./videoPageModel.js');
+    const featuredIds = [];
+    let heroId = null;
+    for (let i = 0; i < exclusive.length; i++) {
+        const item = exclusive[i];
+        if (!item || typeof item !== 'object' || item.visible === false) continue;
+        const rec = legacyExclusiveItemToVideoRecord(item, i);
+        await upsertCommunityVideoStudio(rec);
+        featuredIds.push(String(rec.id));
+        if (item.isHero === true) heroId = String(rec.id);
+    }
+    if (featuredIds.length) {
+        await setCommunityFeaturedVideosStudio({
+            featuredVideoIds: featuredIds.slice(0, 6),
+            heroVideoId: heroId || featuredIds[0] || null,
+        });
+    }
+    return { migrated: featuredIds.length, skipped: false };
+}
+
+/** @returns {Promise<{ allVideos: object[], featuredItems: object[], catalogItems: object[], heroItem: Record<string, unknown>, heroIndex: number, featuredRecords: object[], featuredVideoIds: string[] }>} */
+export async function getCommunityLandingVideosBundle() {
+    const { partitionVideosForPage } = await import('./videoPageModel.js');
+    await migrateLegacyCommunityVideosIfEmpty().catch(() => {});
+    const [allVideos, featuredCfg] = await Promise.all([
+        listCommunityVideosPublic({ limit: 500, offset: 0, visibleOnly: false }),
+        getCommunityFeaturedVideosPublic(),
+    ]);
+    const visibleVideos = allVideos.filter((v) => v.visible !== false);
+    const partition = partitionVideosForPage(visibleVideos, featuredCfg);
+    return {
+        allVideos: visibleVideos,
+        featuredRecords: partition.featuredRecords,
+        featuredItems: partition.recentItems,
+        catalogItems: partition.catalogItems,
+        featuredVideoIds: partition.featuredIds,
+        heroItem: partition.heroItem,
+        heroIndex: partition.heroIndex,
+    };
 }
 
 /**

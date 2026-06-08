@@ -1,3 +1,4 @@
+import { navigate } from '../../router.js';
 import { PH_LOADER_BASE_STYLES, programHeroLoaderHtml } from '../../utils/programHeroLoader.js';
 import { captureCommunityEvent } from '../../utils/communityPosthog.js';
 
@@ -72,12 +73,18 @@ class ExclusiveContentHighlight extends HTMLElement {
                         background: var(--bg, #f8f4f0);
                     }
                 </style>
-                ${programHeroLoaderHtml({ wrapperClass: 'community-exclusive-pending-loader', ariaLabel: 'Loading exclusive content' })}
+                ${programHeroLoaderHtml({ wrapperClass: 'community-exclusive-pending-loader', ariaLabel: 'Loading featured videos' })}
             `;
             return;
         }
         const loc =
             typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
+        const sectionTitle = loc === 'ja' ? 'おすすめ動画' : 'Featured Videos';
+        const emptyCopy = loc === 'ja' ? 'おすすめ動画はありません。' : 'No featured videos right now.';
+        const hideViewAll =
+            this.getAttribute('data-hide-view-all') === '1' ||
+            this.getAttribute('data-hide-view-all') === 'true';
+        const viewAllLabel = loc === 'ja' ? 'すべて見る' : 'View all';
         const cards = this._allItems
             .map((raw, sourceIndex) => ({ raw, sourceIndex }))
             .filter(({ raw }) => exclusiveItemVisible(raw));
@@ -111,7 +118,7 @@ class ExclusiveContentHighlight extends HTMLElement {
                 `;
             })
             .join('')
-            : '<p class="ech-empty">No exclusive content is visible right now.</p>';
+            : `<p class="ech-empty">${esc(emptyCopy)}</p>`;
 
         this.shadow.innerHTML = `
             <style>
@@ -134,7 +141,7 @@ class ExclusiveContentHighlight extends HTMLElement {
                     font-variation-settings: var(--fv-label);
                 }
                 .ech-view {
-                    display: none;
+                    display: inline-block;
                     font-size: clamp(0.78rem, 1vw, 0.88rem);
                     font-variation-settings: var(--fv-body);
                     text-decoration: underline; cursor: pointer; border: none; background: none; color: inherit;
@@ -226,8 +233,8 @@ class ExclusiveContentHighlight extends HTMLElement {
                 }
             </style>
             <div class="ech-head">
-                <span class="ech-title">EXCLUSIVE CONTENT</span>
-                <button type="button" class="ech-view" id="echViewAll">View all</button>
+                <span class="ech-title">${esc(sectionTitle)}</span>
+                ${hideViewAll ? '' : `<button type="button" class="ech-view" id="echViewAll">${esc(viewAllLabel)}</button>`}
             </div>
             <div class="ech-row">${blocks}</div>
         `;
@@ -260,6 +267,14 @@ class ExclusiveContentHighlight extends HTMLElement {
                 select(Number(card?.getAttribute('data-index') ?? -1), 'play_button');
             });
         });
+
+        const viewAllBtn = this.shadow.querySelector('#echViewAll');
+        if (viewAllBtn) {
+            viewAllBtn.addEventListener('click', () => {
+                captureCommunityEvent('videos_view_all_clicked', { source: 'community_exclusive' });
+                navigate('/videos');
+            });
+        }
 
         const row = this.shadow.querySelector('.ech-row');
         if (row) {
