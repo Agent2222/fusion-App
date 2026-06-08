@@ -39,7 +39,12 @@ function createS3Client(opts) {
         opts;
     if (!region || !bucket) return null;
     /** @type {import('@aws-sdk/client-s3').S3ClientConfig} */
-    const config = { region };
+    const config = {
+        region,
+        // Avoid auto CRC32 checksums on presigned PUTs — browsers cannot send x-amz-checksum-* headers.
+        requestChecksumCalculation: 'WHEN_REQUIRED',
+        responseChecksumValidation: 'WHEN_REQUIRED',
+    };
     if (endpoint) {
         config.endpoint = endpoint;
     }

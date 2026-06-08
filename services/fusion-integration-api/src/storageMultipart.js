@@ -8,7 +8,7 @@ import {
     CreateMultipartUploadCommand,
     UploadPartCommand,
 } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { presignUploadPartUrl } from './storagePresign.js';
 
 const DEFAULT_PART_SIZE = 10 * 1024 * 1024;
 const MIN_PART_SIZE = 5 * 1024 * 1024;
@@ -80,7 +80,7 @@ export async function presignUploadPart(client, bucket, key, uploadId, partNumbe
         UploadId: uploadId,
         PartNumber: partNumber,
     });
-    return getSignedUrl(client, command, { expiresIn: 3600 });
+    return presignUploadPartUrl(client, command, 3600);
 }
 
 /**

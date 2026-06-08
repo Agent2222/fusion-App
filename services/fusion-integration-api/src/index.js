@@ -11,6 +11,7 @@ import { Principal } from '@dfinity/principal';
 import { Resend } from 'resend';
 import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { presignPutObjectUrl } from './storagePresign.js';
 import { getIntegrationActor, pushSubscriptionToCanister } from './canisterActor.js';
 import {
     getActiveStorage,
@@ -2189,7 +2190,7 @@ app.post('/storage/presign', requireApiKey, async (req, res) => {
             Key: key,
             ContentType: contentType,
         });
-        const putUrl = await getSignedUrl(storage.client, command, { expiresIn: 3600 });
+        const putUrl = await presignPutObjectUrl(storage.client, command, 3600);
         const base = storage.publicBaseUrl.replace(/\/$/, '');
         const publicUrl = `${base}/${key.split('/').map((seg) => encodeURIComponent(seg)).join('/')}`;
         return res.json({ putUrl, publicUrl });
@@ -2223,7 +2224,7 @@ app.post('/storage/private-video/presign-upload', requireApiKey, async (req, res
             Key: key,
             ContentType: contentType,
         });
-        const putUrl = await getSignedUrl(storage.client, command, { expiresIn: 3600 });
+        const putUrl = await presignPutObjectUrl(storage.client, command, 3600);
         return res.json({ putUrl, key, fileName, expiresIn: 3600 });
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);

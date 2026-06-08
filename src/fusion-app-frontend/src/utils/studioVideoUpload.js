@@ -21,17 +21,48 @@ import { assertIntegrationUploadReady } from './studioS3Upload.js';
 const COMMUNITY_MEDIA_ROOT_PREFIX = 'fusionMedia/uploads/';
 
 /**
+ * @param {File | Blob} file
+ */
+function normalizeVideoContentType(file) {
+    const t = String(file?.type || '').trim();
+    if (t && /^video\//i.test(t)) return t;
+    const name = String(file instanceof File ? file.name : '').toLowerCase();
+    if (name.endsWith('.mp4')) return 'video/mp4';
+    if (name.endsWith('.webm')) return 'video/webm';
+    if (name.endsWith('.mov')) return 'video/quicktime';
+    return 'application/octet-stream';
+}
+
+/**
+ * @param {number} status
+ */
+function uploadFailureMessage(status) {
+    if (status === 0) {
+        return (
+            'Upload blocked by the browser (usually bucket CORS or CSP). ' +
+            'In Cloudflare R2 or AWS S3, add your exact Studio origin to bucket CORS with PUT allowed, ' +
+            'then retry. See docs/DEPLOY_RENDER_AND_ICP.md → Object storage CORS.'
+        );
+    }
+    if (status === 403) {
+        return 'Upload rejected (HTTP 403). Check storage credentials, presigned URL expiry, and that Content-Type matches the file.';
+    }
+    return `Upload failed: HTTP ${status}`;
+}
+
+/**
  * @param {string} putUrl
  * @param {Blob} body
- * @param {string} contentType
- * @param {AbortSignal} [signal]
- * @param {(loaded: number, total: number) => void} [onPartProgress]
+ * @param {{ contentType?: string, signal?: AbortSignal, onProgress?: (loaded: number, total: number) => void }} [opts]
  */
-function xhrPut(putUrl, body, contentType, signal, onPartProgress) {
+function xhrPut(putUrl, body, opts = {}) {
+    const { contentType, signal, onProgress } = opts;
     return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open('PUT', putUrl, true);
-        xhr.setRequestHeader('Content-Type', contentType);
+        if (contentType) {
+            xhr.setRequestHeader('Content-Type', contentType);
+        }
         if (signal) {
             if (signal.aborted) {
                 reject(new DOMException('Aborted', 'AbortError'));
@@ -43,17 +74,17 @@ function xhrPut(putUrl, body, contentType, signal, onPartProgress) {
             });
         }
         xhr.upload.onprogress = (ev) => {
-            if (ev.lengthComputable) onPartProgress?.(ev.loaded, ev.total);
+            if (ev.lengthComputable) onProgress?.(ev.loaded, ev.total);
         };
         xhr.onload = () => {
             if (xhr.status >= 200 && xhr.status < 300) {
                 const etag = xhr.getResponseHeader('ETag') || xhr.getResponseHeader('etag') || '';
                 resolve(String(etag).replace(/^"|"$/g, ''));
-            } else {
-                reject(new Error(`Upload failed: HTTP ${xhr.status}`));
+                return;
             }
+            reject(new Error(uploadFailureMessage(xhr.status)));
         };
-        xhr.onerror = () => reject(new Error('Upload network error'));
+        xhr.onerror = () => reject(new Error(uploadFailureMessage(xhr.status || 0)));
         xhr.send(body);
     });
 }
@@ -78,7 +109,7 @@ function truncatedSafeBase(fileName, maxStem = 40) {
 export async function uploadVideoFile(file, opts = {}) {
     assertIntegrationUploadReady();
     const kind = opts.kind === 'full' ? 'full' : 'preview';
-    const contentType = file.type || 'application/octet-stream';
+    const contentType = normalizeVideoContentType(file);
     const contentId = String(opts.contentId || opts.videoId || 'community-video').trim() || 'community-video';
     const useMultipart = file.size > MULTIPART_THRESHOLD_BYTES;
 
@@ -107,8 +138,10 @@ export async function uploadVideoFile(file, opts = {}) {
                     contentType,
                 });
                 report(0, file.size, 'Uploading…');
-                await xhrPut(signed.putUrl, file, contentType, abortController.signal, (loaded, total) => {
-                    report(loaded, total, 'Uploading…');
+                await xhrPut(signed.putUrl, file, {
+                    contentType,
+                    signal: abortController.signal,
+                    onProgress: (loaded, total) => report(loaded, total, 'Uploading…'),
                 });
                 modal?.complete();
                 return { key: signed.key, fileName: signed.fileName || file.name };
@@ -134,20 +167,12 @@ export async function uploadVideoFile(file, opts = {}) {
                         uploadId: init.uploadId,
                         partNumber,
                     });
-                    const etag = await xhrPut(
-                        putUrl,
-                        chunk,
-                        contentType,
-                        abortController.signal,
-                        (loaded) => {
-                            const aggregate = start + loaded;
-                            report(
-                                aggregate,
-                                file.size,
-                                `Uploading part ${partNumber} of ${partCount}…`,
-                            );
+                    const etag = await xhrPut(putUrl, chunk, {
+                        signal: abortController.signal,
+                        onProgress: (loaded) => {
+                            report(start + loaded, file.size, `Uploading part ${partNumber} of ${partCount}…`);
                         },
-                    );
+                    });
                     parts.push({ partNumber, etag });
                 }
                 modal?.update({ phase: 'Finishing upload…', percent: 99 });
@@ -171,8 +196,10 @@ export async function uploadVideoFile(file, opts = {}) {
             modal?.update({ phase: 'Preparing upload…' });
             const { putUrl, publicUrl } = await presignUpload(key, contentType, { rootPrefix });
             report(0, file.size, 'Uploading…');
-            await xhrPut(putUrl, file, contentType, abortController.signal, (loaded, total) => {
-                report(loaded, total, 'Uploading…');
+            await xhrPut(putUrl, file, {
+                contentType,
+                signal: abortController.signal,
+                onProgress: (loaded, total) => report(loaded, total, 'Uploading…'),
             });
             const url = toCloudFrontAssetUrl(publicUrl);
             modal?.complete();
@@ -199,8 +226,11 @@ export async function uploadVideoFile(file, opts = {}) {
                     uploadId: init.uploadId,
                     partNumber,
                 });
-                const etag = await xhrPut(putUrl, chunk, contentType, abortController.signal, (loaded) => {
-                    report(start + loaded, file.size, `Uploading part ${partNumber} of ${partCount}…`);
+                const etag = await xhrPut(putUrl, chunk, {
+                    signal: abortController.signal,
+                    onProgress: (loaded) => {
+                        report(start + loaded, file.size, `Uploading part ${partNumber} of ${partCount}…`);
+                    },
                 });
                 parts.push({ partNumber, etag });
             }
