@@ -2194,6 +2194,7 @@ export const testData = {
         journals: [
             {
                 id: 1,
+                entryStatus: 'published',
                 imageSrc: journal1,
                 link: "/journal/entry/1",
                 en: {
@@ -2212,6 +2213,7 @@ export const testData = {
             },
             {
                 id: 2,
+                entryStatus: 'published',
                 imageSrc: journal2,
                 link: "/journal/entry/2",
                 en: {
@@ -2230,6 +2232,7 @@ export const testData = {
             },
             {
                 id: 3,
+                entryStatus: 'published',
                 imageSrc: journal3,
                 link: "/journal/entry/3",
                 en: {

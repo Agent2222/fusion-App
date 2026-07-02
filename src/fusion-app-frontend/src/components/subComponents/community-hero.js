@@ -3,6 +3,7 @@ import { getAuthSnapshot } from '../../utils/icAuth.js';
 import { signPrivateVideoPlayback } from '../../utils/integrationApi.js';
 import { normalizePrivateVideoStorageKey } from '../../utils/privateVideoKey.js';
 import { PH_LOADER_BASE_STYLES, programHeroLoaderHtml } from '../../utils/programHeroLoader.js';
+import { withSeoVideoLabel } from '../../utils/mediaAltSeo.js';
 import { captureCommunityEvent, communityDestinationProps } from '../../utils/communityPosthog.js';
 
 function esc(s) {
@@ -365,14 +366,15 @@ class CommunityHero extends HTMLElement {
         const overlayGuests = String(d.overlayGuests ?? '').trim();
         const overlayDuration = String(d.overlayDuration ?? '').trim();
 
-        const primaryLabel = canWatch ? watchLabel : joinLabel;
-        const primaryMode = canWatch ? 'watch' : 'join';
+        const chVideoLabel = withSeoVideoLabel(headline || 'Community video');
         const isLegacyPublicVideo = Boolean(legacyVideoUrl && !previewVideoUrl && !fullVideoKey);
         const videoUrl =
             signedFullReady
                 ? this._signedFullVideoUrl
                 : previewVideoUrl || (isLegacyPublicVideo ? legacyVideoUrl : '');
+        const hasGuestPreview = Boolean(videoUrl && !canWatch && !signedFullReady);
         const hasLockedFullVideo = Boolean(fullVideoKey && canWatch && !signedFullReady);
+        const showDualCtas = hasGuestPreview && !canWatch;
         const videoTier = fullTimelineActive ? 'full' : videoUrl ? 'preview' : 'none';
         const trackingBase = () => ({
             hero_source: this._activeIndex >= 0 ? 'exclusive' : 'hero',
@@ -542,9 +544,19 @@ class CommunityHero extends HTMLElement {
                     color: inherit;
                     opacity: 0.92;
                 }
-                .ch-cta {
+                .ch-copy.ch-copy--has-video .ch-kicker,
+                .ch-copy.ch-copy--has-video .ch-headline,
+                .ch-copy.ch-copy--has-video .ch-body {
+                    cursor: pointer;
+                }
+                .ch-cta-row {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 0.5rem;
                     align-self: flex-start;
                     margin-top: 0.5rem;
+                }
+                .ch-cta {
                     padding: 0.72rem 1.25rem;
                     border: 1px solid rgba(255,255,255,0.78);
                     background: rgba(0,0,0,0.28);
@@ -556,6 +568,11 @@ class CommunityHero extends HTMLElement {
                     border-radius: 2px;
                 }
                 .ch-cta:hover { background: rgba(255,255,255,0.12); }
+                .ch-cta--secondary {
+                    background: transparent;
+                    border-color: rgba(255,255,255,0.42);
+                }
+                .ch-cta--secondary:hover { background: rgba(255,255,255,0.08); }
                 .ch-locked {
                     display: flex;
                     align-items: center;
@@ -597,6 +614,10 @@ class CommunityHero extends HTMLElement {
                 .ch-overlay.is-hidden {
                     opacity: 0;
                     visibility: hidden;
+                }
+                .ch-overlay.ch-overlay--interactive {
+                    pointer-events: auto;
+                    cursor: pointer;
                 }
                 .ch-overlay > span {
                     pointer-events: auto;
@@ -943,16 +964,22 @@ class CommunityHero extends HTMLElement {
             <div class="ch-wrap">
                 <div class="ch-stage">
                     <div class="ch-media">
-                        ${videoUrl ? `<video id="chVideo" class="ch-video" playsinline controls controlsList="nodownload" ${posterUrl ? `poster="${esc(posterUrl)}"` : ''} src="${esc(videoUrl)}"></video>` : `<div class="ch-locked">${esc(emptyCopy)}</div>`}
-                        <div id="ch-copy" class="ch-copy">
+                        ${videoUrl ? `<video id="chVideo" class="ch-video" playsinline controls controlsList="nodownload" aria-label="${esc(chVideoLabel)}" title="${esc(chVideoLabel)}" ${posterUrl ? `poster="${esc(posterUrl)}"` : ''} src="${esc(videoUrl)}"></video>` : `<div class="ch-locked">${esc(emptyCopy)}</div>`}
+                        <div id="ch-copy" class="ch-copy${videoUrl ? ' ch-copy--has-video' : ''}">
                             <div class="ch-kicker">${esc(kicker)}</div>
                             <h1 class="ch-headline">${esc(headline)}</h1>
                             <p class="ch-body">${esc(body)}</p>
                             ${this._unlockError ? `<p class="ch-unlock-note">${esc(this._unlockError)}</p>` : ''}
                             ${fullVideoKey && !canWatch ? `<p class="ch-unlock-note">Preview available. Join the community to unlock the full video.</p>` : ''}
-                            <button type="button" class="ch-cta" id="chPrimary">${esc(primaryLabel)}</button>
+                            <div class="ch-cta-row">
+                                ${showDualCtas
+                                    ? `<button type="button" class="ch-cta" id="chPrimary">${esc(loc === 'ja' ? 'プレビューを見る' : 'WATCH PREVIEW')}</button>
+                                       <button type="button" class="ch-cta ch-cta--secondary" id="chJoinCta">${esc(loc === 'ja' ? 'ネットワークに参加' : 'JOIN NETWORK')}</button>`
+                                    : `<button type="button" class="ch-cta" id="chPrimary">${esc(canWatch ? watchLabel : joinLabel)}</button>`
+                                }
+                            </div>
                         </div>
-                        <div class="ch-overlay"${videoUrl ? ` role="button" tabindex="0" aria-label="${esc(primaryLabel)}"` : ''}>
+                        <div class="ch-overlay${videoUrl ? ' ch-overlay--interactive' : ''}"${videoUrl ? ` role="button" tabindex="0" aria-label="${esc(canWatch ? watchLabel : (showDualCtas ? (loc === 'ja' ? 'プレビューを見る' : 'Watch preview') : joinLabel))}"` : ''}>
                             ${overlayTitle ? `<span><strong>${esc(overlayTitle)}</strong></span>` : ''}
                             ${overlayGuests ? `<span>${esc(overlayGuests)}</span>` : ''}
                             ${overlayDuration ? `<span>${esc(overlayDuration)}</span>` : ''}
@@ -1117,6 +1144,24 @@ class CommunityHero extends HTMLElement {
         const requestHeroPlayback = (trigger) => {
             if (!vid) return;
             if (!canWatch) {
+                if (hasGuestPreview) {
+                    captureCommunityEvent('community_hero_video_toggled', {
+                        ...trackingBase(),
+                        action: vid.paused || vid.ended ? 'play' : 'pause',
+                        trigger,
+                    });
+                    if (vid.paused || vid.ended) {
+                        try {
+                            void vid.play();
+                        } catch {
+                            /* autoplay policy */
+                        }
+                    } else {
+                        vid.pause();
+                    }
+                    vid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    return;
+                }
                 openJoinModal(trigger);
                 return;
             }
@@ -1170,7 +1215,7 @@ class CommunityHero extends HTMLElement {
                 const rect = vid.getBoundingClientRect();
                 const controlsBand = Math.max(48, rect.height * 0.16);
                 if (event.clientY >= rect.bottom - controlsBand || isNativeControlTarget(event)) return;
-                if (primaryMode === 'join' && !videoUrl) {
+                if (!videoUrl && !canWatch) {
                     captureCommunityEvent('community_hero_unlock_clicked', {
                         ...trackingBase(),
                         trigger: 'video_surface',
@@ -1203,9 +1248,18 @@ class CommunityHero extends HTMLElement {
             });
             syncCopyVisibility();
         }
+        if (copy instanceof HTMLElement && vid) {
+            copy.addEventListener('click', (event) => {
+                if (!(event.target instanceof Element)) return;
+                if (event.target.closest('#chPrimary, .ch-unlock-note, button')) return;
+                if (!event.target.closest('.ch-kicker, .ch-headline, .ch-body')) return;
+                event.preventDefault();
+                event.stopPropagation();
+                requestHeroPlayback('hero_copy_text');
+            });
+        }
         if (overlay instanceof HTMLElement && vid) {
             overlay.addEventListener('click', (event) => {
-                if (!(event.target instanceof Element) || !event.target.closest('.ch-overlay > span')) return;
                 event.preventDefault();
                 event.stopPropagation();
                 requestHeroPlayback('overlay_text');
@@ -1218,7 +1272,19 @@ class CommunityHero extends HTMLElement {
         }
         if (btn instanceof HTMLButtonElement) {
             btn.addEventListener('click', () => {
-                requestHeroPlayback('primary_cta');
+                if (showDualCtas) {
+                    requestHeroPlayback('watch_preview_cta');
+                } else if (canWatch) {
+                    requestHeroPlayback('primary_cta');
+                } else {
+                    openJoinModal('primary_cta');
+                }
+            });
+        }
+        const joinBtn = this.shadow.querySelector('#chJoinCta');
+        if (joinBtn instanceof HTMLButtonElement) {
+            joinBtn.addEventListener('click', () => {
+                openJoinModal('join_cta');
             });
         }
         this.shadow.querySelectorAll('[data-chapter-tab]').forEach((tab) => {
@@ -1244,7 +1310,7 @@ class CommunityHero extends HTMLElement {
                 if (!chapter) return;
                 this._activeChapterIndex = idx;
                 this.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                if (!canWatch && fullVideoKey) {
+                if (!canWatch && fullVideoKey && !hasGuestPreview) {
                     captureCommunityEvent('community_hero_unlock_clicked', {
                         ...trackingBase(),
                         trigger: 'people_timestamp',
@@ -1291,7 +1357,7 @@ class CommunityHero extends HTMLElement {
                 this._activeTopicIndex = idx;
                 this._activeChapterTab = 'ideas';
                 this.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                if (!canWatch && fullVideoKey) {
+                if (!canWatch && fullVideoKey && !hasGuestPreview) {
                     captureCommunityEvent('community_hero_unlock_clicked', {
                         ...trackingBase(),
                         trigger: 'idea_timestamp',

@@ -6,6 +6,7 @@ import { submitEarlyAccessToCanister } from '../../utils/earlyAccessSubscribe.js
 import { withSeoVideoLabel } from '../../utils/mediaAltSeo.js';
 import posthog from 'posthog-js';
 import { metaTrack } from '../../utils/metaPixel.js';
+import { syncPosthogConversionPerson } from '../../utils/posthogConversionIdentity.js';
 
 // Load Screen Custom Element Component
 class LoadScreenComponent extends HTMLElement {
@@ -291,6 +292,8 @@ class LoadScreenComponent extends HTMLElement {
         this._loadscreenIsAdmin = false;
         /** After a successful “click to enter”, do not let `_applyLoadscreenWelcomeMode` reveal #enterAction again (e.g. on `fusion-auth-change`). */
         this._userHasEnteredSite = false;
+        this._dynamicCirclesPaused = false;
+        this._dynamicCirclesResumeConfig = null;
         this._onFusionAuthChange = null;
     }
 
@@ -328,6 +331,7 @@ class LoadScreenComponent extends HTMLElement {
     }
 
     dynamicCircles(configName) {
+        if (this._dynamicCirclesPaused) return;
         // ensure we never have more than one interval running
         if (this.currentDynamicCIntervals.interval) {
             clearInterval(this.currentDynamicCIntervals.interval);
@@ -335,7 +339,7 @@ class LoadScreenComponent extends HTMLElement {
         }
 
         this.currentDynamicCIntervals.interval = setInterval(() => {
-            if (!this.shadowRoot) return;
+            if (!this.shadowRoot || this._dynamicCirclesPaused) return;
 
             const c1Element = this.shadow.querySelector('.circle1');
             const c2Element = this.shadow.querySelector('.circle2');
@@ -437,6 +441,45 @@ class LoadScreenComponent extends HTMLElement {
         }, 2000);
     }
 
+  /**
+   * Pause ambient circle motion (e.g. journal entry reading view).
+   */
+    pauseDynamicCircles() {
+        if (this._dynamicCirclesPaused) return;
+        this._dynamicCirclesPaused = true;
+        this._dynamicCirclesResumeConfig = this.selectedConfig || 'comingSoon2';
+        if (this.currentDynamicCIntervals.interval) {
+            clearInterval(this.currentDynamicCIntervals.interval);
+            this.currentDynamicCIntervals.interval = null;
+        }
+        ['.circle1', '.circle2', '.circle3', '.circle4', '.circle5'].forEach((sel) => {
+            const el = this.shadow?.querySelector(sel);
+            if (el) gsap.killTweensOf(el);
+        });
+    }
+
+    /**
+     * Resume circle motion after `pauseDynamicCircles`.
+     */
+    resumeDynamicCircles() {
+        if (!this._dynamicCirclesPaused) return;
+        this._dynamicCirclesPaused = false;
+        const cfg = this._dynamicCirclesResumeConfig || this.selectedConfig || 'comingSoon2';
+        this._dynamicCirclesResumeConfig = null;
+        this.transitionPositionConfig(cfg);
+    }
+
+    /**
+     * @param {string} path
+     */
+    syncDynamicCirclesForPath(path) {
+        const p = String(path || '/');
+        const isJournalEntry =
+            p.startsWith('/journal/entry/') && p.slice('/journal/entry/'.length).split('/').filter(Boolean)[0];
+        if (isJournalEntry) this.pauseDynamicCircles();
+        else this.resumeDynamicCircles();
+    }
+
     transitionPositionConfig(configName) {
         if (!this.shadowRoot) return;
 
@@ -536,7 +579,7 @@ class LoadScreenComponent extends HTMLElement {
         if (!hasActive && this.currentDynamicCIntervals.interval) {
             clearInterval(this.currentDynamicCIntervals.interval);
             this.currentDynamicCIntervals.interval = null;
-        } else if (hasActive && !this.currentDynamicCIntervals.interval) {
+        } else if (hasActive && !this.currentDynamicCIntervals.interval && !this._dynamicCirclesPaused) {
             this.dynamicCircles(effectiveConfigName);
         }
     }
@@ -844,6 +887,7 @@ class LoadScreenComponent extends HTMLElement {
         let path = window.location.pathname;
         if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
         activateDeactivate(path);
+        this.syncDynamicCirclesForPath(path);
 
         const enterText = this.shadowRoot.querySelector('#enterAction');
         if (enterText) {
@@ -1146,6 +1190,7 @@ class LoadScreenComponent extends HTMLElement {
             try {
                 await submitEarlyAccessToCanister(email, category, '', '');
 
+                syncPosthogConversionPerson({ email });
                 posthog.capture('early_access_submitted', {
                     source: 'loadscreen',
                     category: category || 'unknown',

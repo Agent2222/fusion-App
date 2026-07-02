@@ -1,6 +1,10 @@
 import { ERROR_USER_INTERRUPT } from "@dfinity/auth-client";
 import posthog from "posthog-js";
 import { metaTrack } from "../../utils/metaPixel.js";
+import {
+  identifyPosthogAfterInternetIdentityLogin,
+  syncPosthogConversionPerson,
+} from "../../utils/posthogConversionIdentity.js";
 
 /**
  * Join FUSION — band + multi-stage modal (`data-modal-type`: membership | access | apply).
@@ -1402,10 +1406,23 @@ class JoinNetworkComponent extends HTMLElement {
   }
 
   /**
+   * Header bridge keeps the dialog hidden until link step needs user attention.
+   */
+  _ensureJoinDialogVisible() {
+    const root = this.shadowRoot;
+    const dlg = root?.querySelector(".jn-dialog");
+    if (dlg && typeof dlg.showModal === "function" && !dlg.open) {
+      dlg.showModal();
+    }
+  }
+
+  /**
    * After pay-first checkout + II sign-in: link Stripe subscription to principal, register account, finish confirmation.
    */
   async _tryCompletePendingLink() {
-    if (this._stage !== "linkAccount") return;
+    if (this._stage !== "linkAccount") {
+      if (!this._restorePendingMembershipFromStorage()) return;
+    }
     if (this._joinExemptCodePath) {
       await this._tryCompleteExemptAccessCodeJoin();
       return;
@@ -1428,6 +1445,11 @@ class JoinNetworkComponent extends HTMLElement {
       if (signInBtn) signInBtn.hidden = true;
       const principal = identity.getPrincipal().toText();
       const email = this._getEmailForSubscription();
+      identifyPosthogAfterInternetIdentityLogin(principal, {
+        email,
+        firstName: this._formFirstName,
+        lastName: this._formLastName,
+      });
       await linkSubscriptionToPrincipal({
         fusionPendingId: this._fusionPendingId,
         email,
@@ -1478,8 +1500,14 @@ class JoinNetworkComponent extends HTMLElement {
       }
       clearPendingMembershipPayload();
       await this._afterJoinSaved();
+      if (this.hasAttribute("data-header-bridge")) {
+        this._ensureJoinDialogVisible();
+      }
     } catch (e) {
       if (DEV_MODE) console.error("[JoinNetwork] link pending", e);
+      if (this.hasAttribute("data-header-bridge")) {
+        this._ensureJoinDialogVisible();
+      }
       if (linkingEl) {
         linkingEl.textContent = "";
         linkingEl.hidden = true;
@@ -1650,6 +1678,34 @@ class JoinNetworkComponent extends HTMLElement {
   }
 
   /**
+   * Sent immediately after Stripe payment, before Internet Identity link completes.
+   * @param {string} email
+   */
+  async _sendPostPaymentLinkInternetIdentityEmail(email) {
+    const em = String(email || "").trim();
+    if (!em.includes("@")) return;
+    try {
+      await sendEmail({
+        to: em,
+        subject: "You're in — next: link Internet Identity",
+        text: [
+          "Thanks — your Fusion membership payment is recorded.",
+          "",
+          "One more step: open fusionart.world and choose Register (or Sign in), then continue with Internet Identity using the same browser.",
+          "That links your payment to a login you can reuse.",
+          "",
+          "If Internet Identity doesn't open, try again in the same browser or use Register with this email.",
+          "",
+          "Questions? Reply to this email or use Contact on the site.",
+        ].join("\n"),
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn("[JoinNetwork] post-payment email failed:", msg);
+    }
+  }
+
+  /**
    * Shared tail: optional early-access + register (when `_preStripeCanisterSyncDone` is false), welcome email, confirmation stage.
    */
   async _afterJoinSaved() {
@@ -1671,6 +1727,11 @@ class JoinNetworkComponent extends HTMLElement {
           fullName,
           this._modalType,
         );
+        syncPosthogConversionPerson({
+          email,
+          firstName: this._formFirstName,
+          lastName: this._formLastName,
+        });
         posthog.capture("early_access_submitted", {
           category: cat,
           modal_type: this._modalType,
@@ -1726,14 +1787,13 @@ class JoinNetworkComponent extends HTMLElement {
       try {
         await sendEmail({
           to: email,
-          subject: "You're in — next: link Internet Identity",
+          subject: "You're in — Fusion membership active",
           text: [
-            "Thanks — your FUSION access is recorded (email and signup details).",
+            "Thanks — your Fusion membership is linked to your Internet Identity login.",
             "",
-            "Active membership on your account requires completing Register with Internet Identity and, if you paid before signing in, linking that payment to your login — then your profile can unlock.",
+            "Next: open Profile setup on the site to finish your artist profile and apply for programs.",
             "",
-            "Next step: sign in with Internet Identity on the site (Register) so we can tie this access to a login you can reuse.",
-            "If II doesn't open or fails, try again in the same browser, or continue later from Register with this email.",
+            "Use the same Internet Identity login each time you return.",
             "",
             "Questions? Reply to this email or use Contact on the site.",
           ].join("\n"),
@@ -2925,9 +2985,10 @@ class JoinNetworkComponent extends HTMLElement {
       (!detail || detail.mode !== "resubscribe") &&
       readPendingMembershipPayload();
     const resumeLink =
-      pendingRestore?.paymentCompleted &&
-      pendingRestore?.fusionPendingId &&
-      (!detail || detail.mode !== "resubscribe");
+      (!detail || detail.mode !== "resubscribe") &&
+      (Boolean(detail?.resumePendingLink) ||
+        (pendingRestore?.paymentCompleted &&
+          pendingRestore?.fusionPendingId));
 
     if (resumeLink) {
       this._joinExemptCodePath = false;
@@ -3104,6 +3165,11 @@ class JoinNetworkComponent extends HTMLElement {
         fullName,
         email,
       });
+      syncPosthogConversionPerson({
+        email,
+        firstName: fn,
+        lastName: ln,
+      });
       prefetchFusionBackendActor();
       if (codeNorm.length === 8) {
         try {
@@ -3176,8 +3242,20 @@ class JoinNetworkComponent extends HTMLElement {
       const errEl = root.querySelector("#jnLinkErr");
       if (errEl) errEl.textContent = "";
       try {
-        const { loginInternetIdentity } = await import("../../utils/icAuth.js");
+        const { getAuthSnapshot, loginInternetIdentity } =
+          await import("../../utils/icAuth.js");
         await loginInternetIdentity();
+        const snap = await getAuthSnapshot();
+        if (snap.authenticated) {
+          identifyPosthogAfterInternetIdentityLogin(
+            snap.principal.toText(),
+            {
+              email: this._formEmail,
+              firstName: this._formFirstName,
+              lastName: this._formLastName,
+            },
+          );
+        }
       } catch (e) {
         if (e === ERROR_USER_INTERRUPT) return;
         if (errEl) {
@@ -3249,6 +3327,11 @@ class JoinNetworkComponent extends HTMLElement {
           const pageContext = String(
             this.getAttribute("context") || "home",
           ).trim() || "home";
+          syncPosthogConversionPerson({
+            email,
+            firstName: this._formFirstName,
+            lastName: this._formLastName,
+          });
           posthog.capture("membership_payment_completed", {
             modal_type:
               this._modalType ||
@@ -3282,6 +3365,9 @@ class JoinNetworkComponent extends HTMLElement {
               /* ignore */
             }
             markPendingMembershipPaymentCompleted();
+            void this._sendPostPaymentLinkInternetIdentityEmail(
+              this._getEmailForSubscription(),
+            );
             this._showStage("linkAccount");
             return;
           }

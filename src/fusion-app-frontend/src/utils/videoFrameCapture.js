@@ -183,11 +183,11 @@ export function mountVideoFrameCapture(container, opts) {
         const videoId = String(opts.videoId || 'draft').trim() || 'draft';
         try {
             setStatus('Uploading captured frame…');
-            let file = new File([capturedBlob], 'poster.jpg', { type: 'image/jpeg' });
-            file = await prepareImageFileForUpload(file);
+            const captureFile = new File([capturedBlob], 'poster.jpg', { type: 'image/jpeg' });
+            const { file: preparedFile } = await prepareImageFileForUpload(captureFile);
             const urls = {};
             if (target === 'both' || target === 'poster') {
-                urls.posterUrl = await uploadBlobToS3(file, null, {
+                urls.posterUrl = await uploadBlobToS3(preparedFile, null, {
                     area: 'studio/videos',
                     entityType: 'video',
                     entityId: videoId,
@@ -195,7 +195,7 @@ export function mountVideoFrameCapture(container, opts) {
                 });
             }
             if (target === 'both' || target === 'image') {
-                urls.imageUrl = await uploadBlobToS3(file, null, {
+                urls.imageUrl = await uploadBlobToS3(preparedFile, null, {
                     area: 'studio/videos',
                     entityType: 'video',
                     entityId: videoId,

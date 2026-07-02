@@ -12,7 +12,10 @@ import {
   getArtists,
   getDataSource,
   ensureMyLinkedArtistProfile,
+  getMembershipAccessForCaller,
   getAccountForCaller,
+  getMyAccountContactForCaller,
+  setMyAccountContactForCaller,
   updateMyArtistPublicSlug,
   updateMyArtistVisibility,
   normalizeArtistRosterVisibility,
@@ -44,6 +47,7 @@ import {
 import { normalizeLocalesWorldForStorage } from "../utils/worldNormalize.js";
 import {
   getPublicWorldSourceFromLocales,
+  localesHaveUsableWorldNew,
   needsInitialWorldNew,
   worldFieldHasContent,
 } from "../utils/worldPublicPick.js";
@@ -70,6 +74,8 @@ import {
   PROGRAM_OWN_FLIGHT_CREDIT_CENTS,
   PROGRAM_RESIDENCY_BASE_TOTAL_CENTS,
   resolveProgramDepositCents,
+  isMemberProgramDepositPaid,
+  countPaymentPlanMonthsUntilStart,
 } from "../utils/programPaymentMoney.js";
 import { normalizeApplicantCategory } from "../utils/studioPlainForms.js";
 import { studioIconHref } from "../utils/studioIconRegistry.js";
@@ -147,6 +153,13 @@ let mpdStoryWorldDisplaySource = "world";
 /** @type {Record<string, unknown> | null} */
 let mpdStoryWorldDraft = null;
 let mpdStoryWorldNewAvailable = false;
+/** Profile context for module-level upload helpers (synced from initSettingsProfile.load). */
+let mpdCurrentArtistId = "";
+let mpdProfileSlug = "";
+/** @type {(msg: string) => void} */
+let mpdWriteStatus = () => {};
+/** @type {Map<string, string>} */
+const mpdLocalPreviewObjectUrls = new Map();
 /** @type {'inactive' | 'pending' | 'private' | 'public'} */
 let mpdBackendRosterVisibility = "inactive";
 /** @type {Array<Record<string, unknown>>} */
@@ -282,7 +295,7 @@ function mpdRelativeDaysFromIso(iso) {
 async function mpdPrepareImageFile(f) {
   const { file, heicWarning } = await prepareImageFileForUpload(f, MPD_MAX_IMAGE_BYTES);
   if (heicWarning) {
-    setStatus(
+    mpdNotifyStatus(
       "HEIC photo accepted — if preview fails, export as JPEG or WebP and upload again.",
     );
   }
@@ -312,12 +325,26 @@ function setMpdMediaUploadsEnabled(enabled) {
 }
 
 /**
+ * @param {string} msg
+ */
+function mpdNotifyStatus(msg) {
+  mpdWriteStatus(msg || "");
+  if (!msg) return;
+  const statusLine = document.getElementById("settingsProfileStatus");
+  if (statusLine) {
+    statusLine.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+}
+
+/**
  * @param {HTMLInputElement} t
  * @returns {boolean}
  */
 function mpdImageUploadReady(t) {
-  if (currentArtistId || getDataSource() === "test") return true;
-  setStatus("Profile still loading — wait a moment, then try your upload again.");
+  if (mpdCurrentArtistId || mpdProfileSlug || getDataSource() === "test") return true;
+  mpdNotifyStatus(
+    "Profile still loading — wait a moment, then try your upload again.",
+  );
   t.value = "";
   return false;
 }
@@ -386,9 +413,6 @@ function setVal(id, v) {
 }
 
 function getMpdProfileQuoteForSave() {
-  if (mpdStoryWorldDisplaySource === "newWorld" && mpdStoryWorldDraft) {
-    return String(mpdStoryWorldDraft.quote ?? "").trim();
-  }
   return getVal("mpd_w_quote").trim();
 }
 
@@ -433,6 +457,145 @@ function setMpdMediaSurfaceState(key, state) {
   const hasPreview = Boolean(state.hasPreview ?? state.hasMedia);
   surface.classList.toggle("has-media", Boolean(state.hasMedia));
   surface.classList.toggle("has-preview", hasPreview);
+}
+
+/** @param {string} key */
+function mpdRevokeLocalPreview(key) {
+  const prev = mpdLocalPreviewObjectUrls.get(key);
+  if (prev) {
+    URL.revokeObjectURL(prev);
+    mpdLocalPreviewObjectUrls.delete(key);
+  }
+}
+
+/**
+ * Show immediate thumbnail from a selected file before S3 upload completes.
+ * @param {string} key hero | heroProfile | intro-0..2
+ * @param {File} file
+ */
+function showMpdLocalImagePreview(key, file) {
+  mpdRevokeLocalPreview(key);
+  const url = URL.createObjectURL(file);
+  mpdLocalPreviewObjectUrls.set(key, url);
+
+  const introMatch = /^intro-(\d+)$/.exec(key);
+  if (introMatch) {
+    const i = Number(introMatch[1]);
+    setMpdMediaSurfaceState(key, { hasMedia: false, hasPreview: true });
+    setIntroSpinnerVisible(i, false);
+    const th = /** @type {HTMLImageElement | null} */ (
+      document.getElementById(`mpd_intro_${i}_thumb`)
+    );
+    if (th) {
+      th.src = url;
+      th.style.display = "block";
+    }
+    return;
+  }
+
+  if (key === "hero") {
+    setMpdMediaSurfaceState("hero", { hasMedia: false, hasPreview: true });
+    setHeroSpinnerVisible(false);
+    const heroPrev = /** @type {HTMLImageElement | null} */ (
+      document.getElementById("mpd_hero_preview")
+    );
+    if (heroPrev) {
+      heroPrev.src = url;
+      heroPrev.style.display = "block";
+    }
+    return;
+  }
+
+  if (key === "heroProfile") {
+    setMpdMediaSurfaceState("heroProfile", { hasMedia: false, hasPreview: true });
+    setHeroProfileSpinnerVisible(false);
+    const prev = /** @type {HTMLImageElement | null} */ (
+      document.getElementById("mpd_hero_profile_preview")
+    );
+    if (prev) {
+      prev.src = url;
+      prev.style.display = "block";
+    }
+  }
+}
+
+/**
+ * @param {string} key intro-0..2
+ * @param {string} remoteUrl
+ */
+function mpdFinishIntroRemotePreview(key, remoteUrl) {
+  mpdRevokeLocalPreview(key);
+  const introMatch = /^intro-(\d+)$/.exec(key);
+  if (!introMatch) return;
+  const i = Number(introMatch[1]);
+  setMpdMediaSurfaceState(key, { hasMedia: true, hasPreview: true });
+  const th = /** @type {HTMLImageElement | null} */ (
+    document.getElementById(`mpd_intro_${i}_thumb`)
+  );
+  if (!th) return;
+  th.style.display = "none";
+  th.onload = () => {
+    setIntroSpinnerVisible(i, false);
+    th.style.display = "block";
+    th.onload = null;
+    th.onerror = null;
+  };
+  th.onerror = () => {
+    setIntroSpinnerVisible(i, false);
+    setMpdMediaSurfaceState(key, { hasMedia: true, hasPreview: false });
+    mpdNotifyStatus("Preview could not load. Save and refresh, or try another image.");
+    th.onload = null;
+    th.onerror = null;
+  };
+  th.src = cacheBustMpdPreviewUrl(remoteUrl);
+  if (th.complete && th.naturalHeight > 0) {
+    setIntroSpinnerVisible(i, false);
+    th.style.display = "block";
+    th.onload = null;
+    th.onerror = null;
+  }
+}
+
+/**
+ * @param {string} key
+ */
+function mpdFailImagePreview(key) {
+  mpdRevokeLocalPreview(key);
+  setMpdMediaSurfaceState(key, { hasMedia: false, hasPreview: false });
+  if (key === "hero") {
+    const heroPrev = /** @type {HTMLImageElement | null} */ (
+      document.getElementById("mpd_hero_preview")
+    );
+    if (heroPrev) {
+      heroPrev.removeAttribute("src");
+      heroPrev.style.display = "none";
+    }
+    setHeroSpinnerVisible(false);
+    return;
+  }
+  if (key === "heroProfile") {
+    const prev = /** @type {HTMLImageElement | null} */ (
+      document.getElementById("mpd_hero_profile_preview")
+    );
+    if (prev) {
+      prev.removeAttribute("src");
+      prev.style.display = "none";
+    }
+    setHeroProfileSpinnerVisible(false);
+    return;
+  }
+  const introMatch = /^intro-(\d+)$/.exec(key);
+  if (introMatch) {
+    const i = Number(introMatch[1]);
+    setIntroSpinnerVisible(i, false);
+    const th = /** @type {HTMLImageElement | null} */ (
+      document.getElementById(`mpd_intro_${i}_thumb`)
+    );
+    if (th) {
+      th.removeAttribute("src");
+      th.style.display = "none";
+    }
+  }
 }
 
 function updateHeroProfileCardCopy() {
@@ -517,6 +680,44 @@ function dispatchProfileSaveStatus(state, message = "", meta = {}) {
   );
 }
 
+/** @param {unknown} err */
+function formatMemberProfileSaveError(err) {
+  const raw = err instanceof Error ? err.message : String(err ?? "");
+  const blob = `${raw} ${err && typeof err === "object" && "message" in err ? String(/** @type {{ message?: unknown }} */ (err).message) : ""}`;
+  if (/No linked artist on account/i.test(blob)) {
+    return "Your account is not linked to a profile yet. Refresh this page, or contact Fusion if the problem continues.";
+  }
+  if (/Linked artist not found/i.test(blob)) {
+    return "Your linked profile record could not be found. Refresh this page, or contact Fusion for help.";
+  }
+  if (/No account for caller/i.test(blob)) {
+    return "No member account was found for this login. Sign in with Internet Identity and complete profile setup.";
+  }
+  if (/Active membership required/i.test(blob)) {
+    return "Translation requires an active membership. Choose Just save to update your profile without translation, or renew membership first.";
+  }
+  if (/Text too long for Studio LLM/i.test(blob)) {
+    return "Some text is too long to translate automatically. Choose Just save, or shorten your bio and story sections.";
+  }
+  if (/Image URL too long|Profile image URL too long/i.test(blob)) {
+    return "An image URL is too long to save. Try re-uploading the image, or use a shorter hosted URL.";
+  }
+  if (/Audio URL too long/i.test(blob)) {
+    return "The audio URL is too long to save. Try re-uploading the file.";
+  }
+  if (/Anonymous caller/i.test(blob)) {
+    return "Your session expired. Sign in again, then retry saving.";
+  }
+  if (
+    raw &&
+    raw.length < 280 &&
+    !/Request ID:|Reject code:|ic0\.trap|Canister called/i.test(raw)
+  ) {
+    return raw;
+  }
+  return "Profile could not be saved. Try Just save without translation, refresh the page, or contact Fusion if this keeps happening.";
+}
+
 /** @param {unknown} value */
 function cloneMpdValue(value) {
   try {
@@ -567,23 +768,8 @@ function readMpdStoryWorldTextDraftFromDom() {
 
 /** @returns {Record<string, unknown>} */
 function readMpdProfileDraftForSave() {
-  const draft = readProfileDraftFromDom(getVal);
-  if (mpdStoryWorldDisplaySource === "world") {
-    mpdStoryWorldDraft = readMpdStoryWorldTextDraftFromDom();
-    return draft;
-  }
-  if (!mpdStoryWorldDraft) return draft;
-  const world =
-    draft.world && typeof draft.world === "object" && !Array.isArray(draft.world)
-      ? /** @type {Record<string, unknown>} */ (draft.world)
-      : {};
-  return {
-    ...draft,
-    world: {
-      ...world,
-      .../** @type {Record<string, unknown>} */ (cloneMpdValue(mpdStoryWorldDraft)),
-    },
-  };
+  mpdStoryWorldDraft = readMpdStoryWorldTextDraftFromDom();
+  return readProfileDraftFromDom(getVal);
 }
 
 /** @param {Record<string, unknown>} world */
@@ -650,32 +836,48 @@ function renderPublicWorldSourceToggle(source, newWorldAvailable) {
 }
 
 /**
+ * Public profile toggle only — which block visitors see (World vs New World).
+ * @param {Record<string, unknown>} locales
+ * @param {unknown} [requested]
+ */
+function syncMpdPublicWorldSource(locales, requested) {
+  mpdStoryWorldNewAvailable = localesHaveUsableWorldNew(locales);
+  let source =
+    requested === "world" || requested === "newWorld"
+      ? requested
+      : getPublicWorldSourceFromLocales(locales);
+  if (source === "newWorld" && !mpdStoryWorldNewAvailable) source = "world";
+  renderPublicWorldSourceToggle(source, mpdStoryWorldNewAvailable);
+}
+
+/**
+ * Story tab editor — always editable Story & World (`world`) fields.
+ * @param {Record<string, unknown>} locales
+ * @param {'en' | 'ja'} active
+ * @param {boolean} [captureCurrent]
+ */
+function loadMpdStoryWorldEditor(locales, active, captureCurrent = false) {
+  if (captureCurrent) {
+    mpdStoryWorldDraft = readMpdStoryWorldTextDraftFromDom();
+  }
+  const world = mpdWorldBlockFromLocales(locales, active, "world");
+  mpdStoryWorldNewAvailable = localesHaveUsableWorldNew(locales);
+  setMpdStoryFieldsFromWorld(
+    mpdStoryWorldDraft || mpdStoryTextBlockFromWorld(world),
+  );
+  setMpdStoryFieldsReadonly(false);
+  mpdStoryWorldDisplaySource = "world";
+}
+
+/**
  * @param {Record<string, unknown>} locales
  * @param {'en' | 'ja'} active
  * @param {unknown} requested
  * @param {boolean} [captureCurrent]
  */
 function applyMpdStoryWorldDisplay(locales, active, requested, captureCurrent = true) {
-  if (captureCurrent && mpdStoryWorldDisplaySource === "world") {
-    mpdStoryWorldDraft = readMpdStoryWorldTextDraftFromDom();
-  }
-  const world = mpdWorldBlockFromLocales(locales, active, "world");
-  const worldNew = mpdWorldBlockFromLocales(locales, active, "worldNew");
-  mpdStoryWorldNewAvailable = mpdStoryTextBlockHasContent(worldNew);
-  const source =
-    requested === "newWorld" && mpdStoryWorldNewAvailable ? "newWorld" : "world";
-  if (source === "newWorld") {
-    setMpdStoryFieldsFromWorld(worldNew);
-    setMpdStoryFieldsReadonly(true);
-  } else {
-    setMpdStoryFieldsFromWorld(
-      mpdStoryWorldDraft ||
-        mpdStoryTextBlockFromWorld(world),
-    );
-    setMpdStoryFieldsReadonly(false);
-  }
-  mpdStoryWorldDisplaySource = source;
-  renderPublicWorldSourceToggle(source, mpdStoryWorldNewAvailable);
+  loadMpdStoryWorldEditor(locales, active, captureCurrent);
+  syncMpdPublicWorldSource(locales, requested);
 }
 
 /** @param {unknown} raw */
@@ -812,23 +1014,33 @@ async function buildSmartProfileLocales(prev, draft, val, options = {}) {
     out.en = cloneMpdValue(draft);
     out.ja = cloneMpdValue(draft);
   } else {
-    const source = inferProfileDraftLanguage(draft);
-    if (source === "ja") {
-      out.ja = cloneMpdValue(draft);
-      out.en = await translateProfileDraftBlock(draft, "en", "ja");
-    } else if (source === "en") {
-      out.en = cloneMpdValue(draft);
-      out.ja = await translateProfileDraftBlock(draft, "ja", "en");
-    } else {
-      out.en = await translateProfileDraftBlock(draft, "en", "auto");
-      out.ja = await translateProfileDraftBlock(draft, "ja", "auto");
+    try {
+      const source = inferProfileDraftLanguage(draft);
+      if (source === "ja") {
+        out.ja = cloneMpdValue(draft);
+        out.en = await translateProfileDraftBlock(draft, "en", "ja");
+      } else if (source === "en") {
+        out.en = cloneMpdValue(draft);
+        out.ja = await translateProfileDraftBlock(draft, "ja", "en");
+      } else {
+        out.en = await translateProfileDraftBlock(draft, "en", "auto");
+        out.ja = await translateProfileDraftBlock(draft, "ja", "auto");
+      }
+    } catch (translateErr) {
+      const hint = formatMemberProfileSaveError(translateErr);
+      throw new Error(
+        hint.includes("Just save") ? hint : `${hint} Try Just save without translation.`,
+      );
     }
   }
   preserveWorldNew("en");
   preserveWorldNew("ja");
   const srcPick = val("mpd_public_world_source");
-  if (srcPick === "world" || srcPick === "newWorld") {
-    out.publicWorldSource = srcPick;
+  // Only persist an explicit opt-in to Story & World; New World is the public default.
+  if (srcPick === "world") {
+    out.publicWorldSource = "world";
+  } else {
+    delete out.publicWorldSource;
   }
   return normalizeLocalesWorldForStorage(out);
 }
@@ -913,12 +1125,8 @@ function fillFormFromLocales(locales, active) {
   );
   if (devTa && DEV_MODE) devTa.value = safeJsonStringify(locales);
   renderLinkRows(Array.isArray(b.links) ? b.links : []);
-  applyMpdStoryWorldDisplay(
-    locales,
-    active,
-    getPublicWorldSourceFromLocales(locales),
-    false,
-  );
+  loadMpdStoryWorldEditor(locales, active, false);
+  syncMpdPublicWorldSource(locales, getPublicWorldSourceFromLocales(locales));
   syncMpdAudioSectionVisibility(locales);
 }
 
@@ -1623,13 +1831,6 @@ const mpdParseUsdCents = parseUsdDisplayToCents;
 const MPD_PROGRAM_BASE_TOTAL_CENTS = PROGRAM_RESIDENCY_BASE_TOTAL_CENTS;
 const MPD_PROGRAM_OWN_FLIGHT_CREDIT_CENTS = PROGRAM_OWN_FLIGHT_CREDIT_CENTS;
 
-function mpdDateMonthsUntil(startText) {
-  const d = new Date(String(startText || ""));
-  if (Number.isNaN(d.getTime())) return 0;
-  const now = new Date();
-  return Math.max(0, (d.getUTCFullYear() - now.getUTCFullYear()) * 12 + (d.getUTCMonth() - now.getUTCMonth()));
-}
-
 function mpdPaymentSummaryFor(programId, payments) {
   return (payments.summaries || []).find((x) => String(x.programId || "") === String(programId)) || null;
 }
@@ -1641,18 +1842,19 @@ function mpdPaymentPlanFor(id, payments) {
 
 function mpdSlotSecuredProgramIds(payments) {
   const secured = new Set();
-  for (const summary of payments?.summaries || []) {
-    const status = String(summary?.depositStatus || "");
-    if (status === "paid" || status === "paid_full") {
-      const programId = String(summary?.programId || "");
+  const approved = Array.isArray(payments?.approvedPrograms) ? payments.approvedPrograms : [];
+  for (const approval of approved) {
+    if (approval?.manualDepositSubmitted === true) {
+      const programId = String(approval?.programId || "");
       if (programId) secured.add(programId);
     }
   }
-  for (const row of payments?.ledger || []) {
-    const type = String(row?.paymentType || "");
-    const status = String(row?.status || "").toLowerCase();
-    if ((type === "deposit" || type === "full_payment") && (status === "succeeded" || status === "paid")) {
-      const programId = String(row?.programId || "");
+  for (const summary of payments?.summaries || []) {
+    const programId = String(summary?.programId || "");
+    const approval = approved.find((x) => String(x.programId || "") === programId);
+    const ledger = (payments?.ledger || []).filter((x) => String(x.programId || "") === programId);
+    const depositCents = mpdCents(summary?.depositAmountCents);
+    if (isMemberProgramDepositPaid(approval, summary, ledger, depositCents)) {
       if (programId) secured.add(programId);
     }
   }
@@ -1674,6 +1876,7 @@ function normalizeMpdProgramPaymentViewModels(programs, payments) {
       const imageSrc = firstNonEmptyString(ja.imageSrc, en.imageSrc, program.image);
       const imageAlt = firstNonEmptyString(en.imageAlt, focus, title);
       const startText = firstNonEmptyString(en.startDate, en.start, en.programStart, en.programPage?.startDate);
+      const programYear = firstNonEmptyString(en.year, en.programYear, en.programPage?.year);
       const depositCents = resolveProgramDepositCents(program);
       const summary = mpdPaymentSummaryFor(programId, payments);
       const applicantCategory = normalizeApplicantCategory(
@@ -1696,13 +1899,8 @@ function normalizeMpdProgramPaymentViewModels(programs, payments) {
       const ledger = (payments.ledger || [])
         .filter((x) => String(x.programId || "") === programId)
         .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
-      const hasConfirmedSlotPayment = ledger.some((row) => {
-        const type = String(row.paymentType || "");
-        const status = String(row.status || "").toLowerCase();
-        return (type === "deposit" || type === "full_payment") && (status === "succeeded" || status === "paid");
-      });
-      const paymentStarted = totalPaidCents > 0 || ledger.length > 0 || Boolean(activePlan);
-      const depositPaid = ["paid", "paid_full"].includes(String(summary?.depositStatus || "")) || hasConfirmedSlotPayment;
+      const depositPaid = isMemberProgramDepositPaid(approval, summary, ledger, depositCents);
+      const paymentStarted = totalPaidCents > 0 || ledger.length > 0 || Boolean(activePlan) || depositPaid;
       return {
         programId,
         applicationId: String(approval.applicationId || ""),
@@ -1712,6 +1910,7 @@ function normalizeMpdProgramPaymentViewModels(programs, payments) {
         imageSrc,
         imageAlt,
         startText,
+        programYear,
         email: String(approval.email || ""),
         fullName: String(approval.fullName || ""),
         depositCents,
@@ -2173,7 +2372,7 @@ function openMpdManualPaymentModal(item) {
 }
 
 function mpdPaymentPlanOptions(item) {
-  const months = mpdDateMonthsUntil(item.startText);
+  const months = countPaymentPlanMonthsUntilStart(item.startText, item.programYear);
   const max = Math.max(0, months);
   const options = [];
   for (let count = max; count >= 2; count -= 1) {
@@ -2351,12 +2550,104 @@ function closeMpdMembershipCancelModal() {
   modal.setAttribute("aria-hidden", "true");
 }
 
+/** @type {'noAccount' | 'exempt' | 'ok' | 'needsSubscription' | ''} */
+let mpdMembershipGate = "";
+/** Cached account contact email for settings sidebar messages. */
+let mpdKnownContactEmail = "";
+
+/**
+ * @param {string} raw
+ * @returns {boolean}
+ */
+function mpdLooksLikeEmail(raw) {
+  const v = String(raw || "").trim();
+  return v.includes("@") && v.length >= 5;
+}
+
+/**
+ * Resolve the best email for settings contact messages.
+ * @returns {Promise<string>}
+ */
+async function resolveSettingsProfileContactEmail() {
+  if (mpdKnownContactEmail && mpdLooksLikeEmail(mpdKnownContactEmail)) {
+    return mpdKnownContactEmail.trim();
+  }
+  try {
+    const contact = await getMyAccountContactForCaller();
+    const fromAccount = String(contact?.email || "").trim();
+    if (mpdLooksLikeEmail(fromAccount)) {
+      mpdKnownContactEmail = fromAccount;
+      return fromAccount;
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    const snap = await getAuthSnapshot();
+    if (snap.authenticated) {
+      const { getStoredBillingEmailForPrincipal } = await import(
+        "../utils/integrationApi.js"
+      );
+      const billing = String(
+        getStoredBillingEmailForPrincipal(snap.principal.toText()) || "",
+      ).trim();
+      if (mpdLooksLikeEmail(billing)) {
+        mpdKnownContactEmail = billing;
+        return billing;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  const draft = getProfileSetupDraft();
+  const fromDraft = String(draft.email || "").trim();
+  if (mpdLooksLikeEmail(fromDraft)) {
+    mpdKnownContactEmail = fromDraft;
+    return fromDraft;
+  }
+  return "";
+}
+
+/**
+ * Show email field in sidebar contact when we do not have a stored contact email.
+ * @param {string} [knownEmail]
+ */
+function updateSettingsProfileContactEmailField(knownEmail = mpdKnownContactEmail) {
+  const wrap = document.getElementById("settingsProfileNavContactEmailWrap");
+  const input = document.getElementById("settingsProfileNavContactEmail");
+  if (!wrap || !(input instanceof HTMLInputElement)) return;
+  const hasEmail = mpdLooksLikeEmail(knownEmail);
+  wrap.hidden = hasEmail;
+  if (hasEmail) {
+    input.value = knownEmail.trim();
+    input.removeAttribute("required");
+  } else {
+    if (!input.value.trim()) input.value = "";
+    input.setAttribute("required", "required");
+  }
+}
+
 function openMpdSaveChoiceModal() {
   const modal = document.getElementById("mpdSaveChoiceModal");
   if (!modal) return;
   document.body.appendChild(modal);
   modal.hidden = false;
   modal.setAttribute("aria-hidden", "false");
+  const translateBtn = /** @type {HTMLButtonElement | null} */ (
+    modal.querySelector("#mpdSaveChoiceTranslate")
+  );
+  const translateNote = modal.querySelector("#mpdSaveChoiceTranslateNote");
+  const translationBlocked = mpdMembershipGate === "needsSubscription";
+  if (translateBtn) {
+    translateBtn.disabled = translationBlocked;
+    translateBtn.setAttribute("aria-disabled", translationBlocked ? "true" : "false");
+  }
+  if (translateNote) {
+    translateNote.textContent = translationBlocked
+      ? "Translation needs an active membership. Use Just save to update your profile without translation."
+      : "";
+    translateNote.toggleAttribute("hidden", !translationBlocked);
+  }
 }
 
 function closeMpdSaveChoiceModal() {
@@ -2833,6 +3124,16 @@ export function generateSettingsProfileContent() {
                         <p class="studio-nav-contact__headline">
                             Questions or issues? Message the Fusion team—we usually reply within a few business days.
                         </p>
+                        <label id="settingsProfileNavContactEmailWrap" class="studio-nav-contact__email-wrap" hidden>
+                            <span class="studio-nav-contact__email-label">Your email (so we can reply)</span>
+                            <input
+                                type="email"
+                                id="settingsProfileNavContactEmail"
+                                class="studio-nav-contact__input studio-nav-contact__input--email"
+                                placeholder="you@example.com"
+                                autocomplete="email"
+                            />
+                        </label>
                         <textarea
                             id="settingsProfileNavContactMessage"
                             class="studio-nav-contact__input"
@@ -3033,12 +3334,12 @@ export function generateSettingsProfileContent() {
                         <div class="mpd-panel" id="mpd-panel-story" data-mpd-panel="story" hidden>
                             <section class="member-profile-dashboard__card" id="mpd-story">
                                 <div class="mpd-story-public-source">
-                                    <input type="hidden" id="mpd_public_world_source" value="world" />
+                                    <input type="hidden" id="mpd_public_world_source" value="newWorld" />
                                     <div class="mpd-world-source-toggle" role="group" aria-label="Show on my public profile">
-                                        <button type="button" class="mpd-world-source-toggle__btn is-active" data-mpd-world-source="world" aria-pressed="true">World</button>
-                                        <button type="button" class="mpd-world-source-toggle__btn" data-mpd-world-source="newWorld" aria-pressed="false" disabled aria-disabled="true">New World</button>
+                                        <button type="button" class="mpd-world-source-toggle__btn" data-mpd-world-source="world" aria-pressed="false">World</button>
+                                        <button type="button" class="mpd-world-source-toggle__btn is-active" data-mpd-world-source="newWorld" aria-pressed="true" disabled aria-disabled="true">New World</button>
                                     </div>
-                                    <p class="mpd-world-source-note" id="mpd_public_world_source_note">World will display on your profile.</p>
+                                    <p class="mpd-world-source-note" id="mpd_public_world_source_note">New World will display on your profile.</p>
                                 </div>
                                 <h2>Story &amp; World</h2>
                                 <div class="mpd-story-dual-grid">
@@ -3307,6 +3608,7 @@ export function generateSettingsProfileContent() {
                                 Just save is faster and copies the visible text into both profile languages without translation.
                             </p>
                         </div>
+                        <p id="mpdSaveChoiceTranslateNote" class="mpd-save-choice-modal__note" hidden></p>
                         <div class="mpd-save-choice-modal__actions">
                             <button type="button" class="studio-btn-primary" id="mpdSaveChoiceTranslate">
                                 Translate and save
@@ -3432,6 +3734,7 @@ export default function initSettingsProfile() {
   const setStatus = (t) => {
     if (statusEl) statusEl.textContent = t || "";
   };
+  mpdWriteStatus = setStatus;
 
   const setInitialProfileLoading = (visible) => {
     if (!initialLoadingEl) return;
@@ -3541,6 +3844,8 @@ export default function initSettingsProfile() {
     profileAudioUrl = "";
     profileSlug = "";
     currentArtistId = "";
+    mpdCurrentArtistId = "";
+    mpdProfileSlug = "admin-preview";
     mpdBackendRosterVisibility = "inactive";
     fillFormFromLocales(
       /** @type {Record<string, unknown>} */ (localesState),
@@ -3555,6 +3860,7 @@ export default function initSettingsProfile() {
     updateHeroProfilePreview();
     refreshBaseline();
     setInitialProfileLoading(false);
+    setMpdMediaUploadsEnabled(true);
     if (formWrap) formWrap.removeAttribute("hidden");
   };
 
@@ -3616,17 +3922,17 @@ export default function initSettingsProfile() {
       if (localesState && typeof localesState === "object") {
         /** @type {Record<string, unknown>} */ (localesState).publicWorldSource = "world";
       }
-      applyMpdStoryWorldDisplay(
+      loadMpdStoryWorldEditor(
         /** @type {Record<string, unknown>} */ (localesState || mergedSaved),
         activeLocale,
+        false,
+      );
+      syncMpdPublicWorldSource(
+        /** @type {Record<string, unknown>} */ (localesState || mergedSaved),
         "world",
       );
       finishMpdOperation("new-world-generation", "error", friendly);
       return false;
-    } finally {
-      if (activeMpdOperations.has("new-world-generation")) {
-        finishMpdOperation("new-world-generation", "idle");
-      }
     }
   };
 
@@ -4072,8 +4378,18 @@ export default function initSettingsProfile() {
     let willAutoGen = false;
     profileSaveInFlight = true;
     if (isStorySave) setStoryPanelAsyncBusy(true);
+    /** @type {boolean} */
+    let profileSaveFinished = false;
     try {
+      if (getDataSource() !== "test") {
+        await ensureMyLinkedArtistProfile();
+      }
       const recBeforeSave = await getMyArtistRecord();
+      if (!recBeforeSave) {
+        throw new Error(
+          "Your profile could not be loaded for saving. Refresh this page and try again.",
+        );
+      }
       const pBefore = recBeforeSave?.profile;
       const priorVis =
         pBefore && typeof pBefore === "object"
@@ -4151,8 +4467,9 @@ export default function initSettingsProfile() {
           if (side) side.textContent = finalSlug ? `/${finalSlug}` : "—";
         } catch (slugErr) {
           slugSaveFailed = true;
-          const slugMessage = `${slugErr instanceof Error ? slugErr.message : String(slugErr)} (Other changes were saved.)`;
+          const slugMessage = `${formatMemberProfileSaveError(slugErr)} (Other changes were saved.)`;
           finishMpdOperation("profile-save", "error", slugMessage);
+          profileSaveFinished = true;
         }
       }
       willAutoGen =
@@ -4166,11 +4483,13 @@ export default function initSettingsProfile() {
         const worldGenerationOk = await runMemberWorldGenerationAfterSave(merged);
         if (optionalSaveWarnings.length) {
           const warnText = optionalSaveWarnings.join(" ");
-          setStatus(`Profile saved, but some media did not persist: ${warnText}`);
-          finishMpdOperation("profile-save", "error", warnText);
+          const warnMessage = `Profile saved, but some media did not persist: ${warnText}`;
+          setStatus(warnMessage);
+          finishMpdOperation("profile-save", "saved", warnMessage);
         } else {
-          finishMpdOperation("profile-save", "idle", "Profile saved.");
+          finishMpdOperation("profile-save", "saved", "Profile saved.");
         }
+        profileSaveFinished = true;
         if (worldGenerationOk) {
           dispatchProfileSaveStatus("saved", "Profile saved", {
             operation: "Profile",
@@ -4180,12 +4499,12 @@ export default function initSettingsProfile() {
         }
       }
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      finishMpdOperation("profile-save", "error", message);
+      finishMpdOperation("profile-save", "error", formatMemberProfileSaveError(e));
+      profileSaveFinished = true;
     } finally {
       profileSaveInFlight = false;
-      if (activeMpdOperations.has("profile-save")) {
-        finishMpdOperation("profile-save", "idle");
+      if (!profileSaveFinished && activeMpdOperations.has("profile-save")) {
+        finishMpdOperation("profile-save", "error", "Profile save did not complete. Try again.");
       }
       if (isStorySave || willAutoGen) setStoryPanelAsyncBusy(false);
     }
@@ -4217,6 +4536,13 @@ export default function initSettingsProfile() {
     };
     heroPrev.onerror = () => {
       setHeroSpinnerVisible(false);
+      setMpdMediaSurfaceState("hero", {
+        hasMedia: Boolean(getVal("mpd_hero_url").trim()),
+        hasPreview: false,
+      });
+      mpdNotifyStatus("Preview could not load. Save and refresh, or try another image.");
+      heroPrev.removeAttribute("src");
+      heroPrev.style.display = "none";
       heroPrev.onload = null;
       heroPrev.onerror = null;
     };
@@ -4258,6 +4584,13 @@ export default function initSettingsProfile() {
     };
     prev.onerror = () => {
       setHeroProfileSpinnerVisible(false);
+      setMpdMediaSurfaceState("heroProfile", {
+        hasMedia: Boolean(getVal("mpd_hero_profile_url").trim()),
+        hasPreview: false,
+      });
+      mpdNotifyStatus("Preview could not load. Save and refresh, or try another image.");
+      prev.removeAttribute("src");
+      prev.style.display = "none";
       prev.onload = null;
       prev.onerror = null;
     };
@@ -4445,9 +4778,9 @@ export default function initSettingsProfile() {
       if (worldSourceBtn && rootEl.contains(worldSourceBtn)) {
         e.preventDefault();
         if (!localesState) return;
-        applyMpdStoryWorldDisplay(
+        mpdStoryWorldDraft = readMpdStoryWorldTextDraftFromDom();
+        syncMpdPublicWorldSource(
           /** @type {Record<string, unknown>} */ (localesState),
-          activeLocale,
           worldSourceBtn.getAttribute("data-mpd-world-source"),
         );
         return;
@@ -4521,6 +4854,7 @@ export default function initSettingsProfile() {
           t.value = "";
           return;
         }
+        showMpdLocalImagePreview("hero", f);
         if (
           !beginMpdOperation("hero-upload", {
             operation: "Main artwork",
@@ -4529,6 +4863,8 @@ export default function initSettingsProfile() {
             pendingMessage: "Still uploading main artwork...",
           })
         ) {
+          mpdFailImagePreview("hero");
+          mpdNotifyStatus("Another upload is in progress. Wait for it to finish, then try again.");
           t.value = "";
           return;
         }
@@ -4544,6 +4880,7 @@ export default function initSettingsProfile() {
           setVal("mpd_hero_url", url);
           heroImageUrl = url;
           mediaUploadRevision += 1;
+          mpdRevokeLocalPreview("hero");
           updateHeroPreview(true);
           updateHeroProfilePreview(true);
           finishMpdOperation(
@@ -4552,7 +4889,9 @@ export default function initSettingsProfile() {
             "Main artwork uploaded. Save to apply this change.",
           );
         } catch (err) {
-          setHeroSpinnerVisible(false);
+          mpdRevokeLocalPreview("hero");
+          updateHeroPreview(true);
+          updateHeroProfilePreview(true);
           finishMpdOperation(
             "hero-upload",
             "error",
@@ -4578,6 +4917,7 @@ export default function initSettingsProfile() {
           t.value = "";
           return;
         }
+        showMpdLocalImagePreview("heroProfile", f);
         if (
           !beginMpdOperation("hero-profile-upload", {
             operation: "Profile card",
@@ -4586,6 +4926,8 @@ export default function initSettingsProfile() {
             pendingMessage: "Still uploading profile card...",
           })
         ) {
+          mpdFailImagePreview("heroProfile");
+          mpdNotifyStatus("Another upload is in progress. Wait for it to finish, then try again.");
           t.value = "";
           return;
         }
@@ -4601,6 +4943,7 @@ export default function initSettingsProfile() {
           setVal("mpd_hero_profile_url", url);
           heroProfileImageUrl = url;
           mediaUploadRevision += 1;
+          mpdRevokeLocalPreview("heroProfile");
           updateHeroProfilePreview(true);
           finishMpdOperation(
             "hero-profile-upload",
@@ -4608,7 +4951,8 @@ export default function initSettingsProfile() {
             "Profile card uploaded. Save to apply this change.",
           );
         } catch (err) {
-          setHeroProfileSpinnerVisible(false);
+          mpdRevokeLocalPreview("heroProfile");
+          updateHeroProfilePreview(true);
           finishMpdOperation(
             "hero-profile-upload",
             "error",
@@ -4677,16 +5021,20 @@ export default function initSettingsProfile() {
           t.value = "";
           return;
         }
-        const introKey = `intro-upload-${i}`;
+        const introKey = `intro-${i}`;
+        showMpdLocalImagePreview(introKey, f);
+        const introOpKey = `intro-upload-${i}`;
         const introLabel = `Introductory work ${i + 1}`;
         if (
-          !beginMpdOperation(introKey, {
+          !beginMpdOperation(introOpKey, {
             operation: introLabel,
             detail: `Uploading ${introLabel.toLowerCase()}`,
             message: `Uploading ${introLabel.toLowerCase()}…`,
             pendingMessage: `Still uploading ${introLabel.toLowerCase()}...`,
           })
         ) {
+          mpdFailImagePreview(introKey);
+          mpdNotifyStatus("Another upload is in progress. Wait for it to finish, then try again.");
           t.value = "";
           return;
         }
@@ -4701,51 +5049,22 @@ export default function initSettingsProfile() {
           });
           setVal(`mpd_intro_${i}_src`, url);
           mediaUploadRevision += 1;
-          const th = /** @type {HTMLImageElement | null} */ (
-            document.getElementById(`mpd_intro_${i}_thumb`)
-          );
-          if (th) {
-            setMpdMediaSurfaceState(`intro-${i}`, {
-              hasMedia: true,
-              hasPreview: true,
-            });
-            th.style.display = "none";
-            th.onload = () => {
-              setIntroSpinnerVisible(i, false);
-              th.style.display = "block";
-              th.onload = null;
-              th.onerror = null;
-            };
-            th.onerror = () => {
-              setIntroSpinnerVisible(i, false);
-              th.onload = null;
-              th.onerror = null;
-            };
-            th.src = cacheBustMpdPreviewUrl(url);
-            if (th.complete && th.naturalHeight > 0) {
-              setIntroSpinnerVisible(i, false);
-              th.style.display = "block";
-              th.onload = null;
-              th.onerror = null;
-            }
-          } else {
-            setIntroSpinnerVisible(i, false);
-          }
+          mpdFinishIntroRemotePreview(introKey, url);
           finishMpdOperation(
-            introKey,
+            introOpKey,
             "saved",
             `${introLabel} uploaded. Save to apply this change.`,
           );
         } catch (err) {
-          setIntroSpinnerVisible(i, false);
+          mpdFailImagePreview(introKey);
           finishMpdOperation(
-            introKey,
+            introOpKey,
             "error",
             err instanceof Error ? err.message : String(err),
           );
         } finally {
-          if (activeMpdOperations.has(introKey)) {
-            finishMpdOperation(introKey, "idle");
+          if (activeMpdOperations.has(introOpKey)) {
+            finishMpdOperation(introOpKey, "idle");
           }
           hideMpdUploadOverlay();
         }
@@ -4834,12 +5153,26 @@ export default function initSettingsProfile() {
         const msgEl = document.getElementById(
           "settingsProfileNavContactMessage",
         );
+        const emailEl = document.getElementById("settingsProfileNavContactEmail");
         const statusEl = document.getElementById(
           "settingsProfileNavContactStatus",
         );
         const text = String(msgEl?.value || "").trim();
         if (!text) {
           if (statusEl) statusEl.textContent = "Enter a message.";
+          return;
+        }
+        let emailLine = await resolveSettingsProfileContactEmail();
+        if (!mpdLooksLikeEmail(emailLine) && emailEl instanceof HTMLInputElement) {
+          emailLine = String(emailEl.value || "").trim();
+        }
+        if (!mpdLooksLikeEmail(emailLine)) {
+          updateSettingsProfileContactEmailField("");
+          if (statusEl) {
+            statusEl.textContent =
+              "Add your email address so we can reply, then send again.";
+          }
+          emailEl?.focus();
           return;
         }
         if (statusEl) statusEl.textContent = "Sending…";
@@ -4858,23 +5191,28 @@ export default function initSettingsProfile() {
             );
             displayName = String(en.name ?? "").trim();
           }
-          let emailLine = "n/a";
-          try {
-            const acc = await getAccountForCaller();
-            if (acc && typeof acc === "object") {
-              const raw =
-                /** @type {Record<string, unknown>} */ (acc).email ??
-                /** @type {Record<string, unknown>} */ (acc).emailAddress;
-              if (raw != null && String(raw).trim())
-                emailLine = String(raw).trim();
+          if (snap.authenticated && mpdLooksLikeEmail(emailLine)) {
+            let accountHasEmail = false;
+            try {
+              const existing = await getMyAccountContactForCaller();
+              accountHasEmail = mpdLooksLikeEmail(existing?.email);
+            } catch {
+              /* ignore */
             }
-          } catch {
-            /* ignore */
-          }
-          if (emailLine === "n/a") {
-            const draft = getProfileSetupDraft();
-            if (draft.email && String(draft.email).trim())
-              emailLine = String(draft.email).trim();
+            if (!accountHasEmail) {
+              const saved = await setMyAccountContactForCaller({
+                firstName: fn,
+                lastName: ln,
+                email: emailLine,
+              });
+              if (!saved) {
+                throw new Error(
+                  "Could not save your email to your profile. Try again or refresh the page.",
+                );
+              }
+            }
+            mpdKnownContactEmail = emailLine;
+            updateSettingsProfileContactEmailField(emailLine);
           }
           const principalText =
             snap.authenticated && snap.principal
@@ -5006,6 +5344,14 @@ export default function initSettingsProfile() {
       } else {
         const adminCaller = await isRealAdminCaller();
         adminViewingMemberPerspective = adminCaller && memberPerspective;
+      }
+    }
+
+    if (!isTest && snap.authenticated) {
+      try {
+        mpdMembershipGate = await getMembershipAccessForCaller();
+      } catch {
+        mpdMembershipGate = "";
       }
     }
 
@@ -5142,7 +5488,11 @@ export default function initSettingsProfile() {
       })();
     }
     currentArtistId = String(p.id ?? "");
-    setMpdMediaUploadsEnabled(Boolean(currentArtistId) || getDataSource() === "test");
+    mpdCurrentArtistId = currentArtistId;
+    mpdProfileSlug = profileSlug;
+    setMpdMediaUploadsEnabled(
+      Boolean(currentArtistId || profileSlug) || getDataSource() === "test",
+    );
     profileAudioUrl = String(p.audioUrl ?? "");
     setVal("mpd_hero_url", heroImageUrl);
     setVal("mpd_hero_profile_url", heroProfileImageUrl);
@@ -5201,6 +5551,10 @@ export default function initSettingsProfile() {
 
     showMpdPanel(panelKeyFromHash());
 
+    void resolveSettingsProfileContactEmail().then((email) => {
+      updateSettingsProfileContactEmailField(email);
+    });
+
     applySettingsProfileDocumentSeo(dashTitle);
   };
 
@@ -5225,7 +5579,6 @@ export default function initSettingsProfile() {
     const fromBtn = pendingProfileSaveButton;
     pendingProfileSaveButton = undefined;
     if (action !== "save") return;
-    if (!fromBtn) return;
     void saveProfileFromDom(fromBtn, { translate: detail.translate !== false });
   };
   window.addEventListener("fusion-settings-profile-save-choice", _mpdSaveChoiceHandler);
@@ -5259,10 +5612,6 @@ export default function initSettingsProfile() {
           e instanceof Error ? e.message : String(e),
         );
         return;
-      } finally {
-        if (activeMpdOperations.has("membership-sync")) {
-          finishMpdOperation("membership-sync", "idle");
-        }
       }
       void load({ force: true });
     });

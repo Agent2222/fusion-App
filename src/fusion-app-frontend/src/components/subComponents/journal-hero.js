@@ -2,6 +2,8 @@ import { navigate } from '../../router.js';
 import { mergeLocaleDeep, firstNonEmptyString } from '../../utils/localeFallback.js';
 import { escapeHtml, previewPlainText } from '../../utils/textPreview.js';
 import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
+import { filterPublishedJournalEntries } from '../../utils/journalPublicVisibility.js';
+import { resolveJournalEntryLink } from '../../utils/journalEntryModalHelpers.js';
 
 // Placeholder — structure, content, and styles TBD
 class JournalHeroComponent extends HTMLElement {
@@ -14,6 +16,8 @@ class JournalHeroComponent extends HTMLElement {
         this._scrollRaf = null;
         /** @type {null | (() => void)} */
         this._teardownPagination = null;
+        /** @type {null | (() => void)} */
+        this._onLocaleChange = null;
     }
 
     get active() {
@@ -27,7 +31,11 @@ class JournalHeroComponent extends HTMLElement {
     }
 
     setJournalHero(data) {
-        this.data = data;
+        const raw = Array.isArray(data?.journals) ? data.journals : [];
+        let pool = filterPublishedJournalEntries(raw);
+        if (!pool.length && raw.length) pool = raw;
+        const journals = pool.slice(0, 3);
+        this.data = data && typeof data === 'object' ? { ...data, journals } : { journals: [] };
         this.render();
     }
 
@@ -79,7 +87,7 @@ class JournalHeroComponent extends HTMLElement {
             const journalImage = firstNonEmptyString(row.imageSrc, ja?.imageSrc, en?.imageSrc);
             const journalTitle = slice.title ?? '';
             const journalDescription = previewPlainText(slice.description ?? '', 250);
-            const journalLink = row.link || '#';
+            const journalLink = resolveJournalEntryLink(row.link, journalTitle, row.id) || '#';
 
             const journalCard = document.createElement('div');
             journalCard.classList.add('journal-card');
@@ -194,12 +202,22 @@ class JournalHeroComponent extends HTMLElement {
                 navigate(a.getAttribute('href'));
             });
         }
+        if (!this._onLocaleChange) {
+            this._onLocaleChange = () => {
+                if (this.data?.journals?.length) this.createJournals();
+            };
+            window.addEventListener('fusion-localechange', this._onLocaleChange);
+        }
     }
 
     disconnectedCallback() {
         if (typeof this._teardownPagination === 'function') {
             this._teardownPagination();
             this._teardownPagination = null;
+        }
+        if (this._onLocaleChange) {
+            window.removeEventListener('fusion-localechange', this._onLocaleChange);
+            this._onLocaleChange = null;
         }
     }
 

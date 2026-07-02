@@ -190,6 +190,24 @@ export function feedRowLoaderHtml(opts = {}) {
     });
 }
 
+/** `app-artists-feed` while the pool is loading or cards are being built. */
+export const ARTISTS_FEED_PENDING_WRAPPER_STYLES = `
+                .artists-feed-pending-loader {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 100%;
+                    box-sizing: border-box;
+                    padding: 2rem 1rem 2.5rem;
+                }
+                .feed-grid.feed-grid--loading {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    min-height: clamp(16rem, 40vh, 28rem);
+                }
+`;
+
 /** `app-confirmed-artists-feed` while `setConfirmedArtistsFeed` not yet called. */
 export const CONFIRMED_ARTISTS_PENDING_WRAPPER_STYLES = `
                 .confirmed-artists-pending-loader {

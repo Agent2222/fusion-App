@@ -1515,6 +1515,126 @@ function planLabelFromSubscription(sub) {
 }
 
 /**
+ * @param {import('stripe').Stripe.Price | null | undefined} price
+ * @returns {'monthly' | 'bimonthly' | 'annual' | 'other'}
+ */
+function cadenceKeyFromPrice(price) {
+    if (!price?.recurring) return 'other';
+    const interval = price.recurring.interval;
+    const count = price.recurring.interval_count || 1;
+    if (interval === 'month' && count === 1) return 'monthly';
+    if (interval === 'month' && count === 2) return 'bimonthly';
+    if (interval === 'year' && count === 1) return 'annual';
+    return 'other';
+}
+
+/**
+ * @param {number} unitAmount
+ * @param {string | undefined} interval
+ * @param {number | undefined} intervalCount
+ * @returns {number}
+ */
+function mrrCentsFromPrice(unitAmount, interval, intervalCount) {
+    const n = unitAmount;
+    const count = intervalCount || 1;
+    if (typeof n !== 'number' || !Number.isFinite(n) || n < 0) return 0;
+    if (interval === 'month') return Math.round(n / count);
+    if (interval === 'year') return Math.round(n / (12 * count));
+    return 0;
+}
+
+/**
+ * @param {import('stripe').Stripe.Subscription} sub
+ * @param {import('stripe').Stripe.Price | null | undefined} price
+ * @returns {boolean}
+ */
+function isFusionMembershipSubscription(sub, price) {
+    const membershipPriceIds = [process.env.STRIPE_PRICE_ID, process.env.STRIPE_ANNUAL_PRICE_ID].filter(Boolean);
+    const priceId = typeof price?.id === 'string' ? price.id : '';
+    if (priceId && membershipPriceIds.includes(priceId)) return true;
+    const subMeta = sub.metadata && typeof sub.metadata === 'object' ? sub.metadata : {};
+    if (safeContactText(subMeta.principal)) return true;
+    const customer = sub.customer;
+    if (customer && typeof customer === 'object' && !('deleted' in customer && customer.deleted)) {
+        const custMeta = customer.metadata && typeof customer.metadata === 'object' ? customer.metadata : {};
+        if (safeContactText(custMeta.principal)) return true;
+    }
+    return false;
+}
+
+/**
+ * @param {import('stripe').Stripe} stripeClient
+ * @param {'active' | 'trialing'} status
+ * @returns {Promise<import('stripe').Stripe.Subscription[]>}
+ */
+async function listAllStripeSubscriptionsByStatus(stripeClient, status) {
+    /** @type {import('stripe').Stripe.Subscription[]} */
+    const all = [];
+    /** @type {string | undefined} */
+    let startingAfter;
+    while (true) {
+        const page = await stripeClient.subscriptions.list({
+            status,
+            limit: 100,
+            expand: ['data.items.data.price', 'data.customer'],
+            ...(startingAfter ? { starting_after: startingAfter } : {}),
+        });
+        all.push(...page.data);
+        if (!page.has_more || !page.data.length) break;
+        startingAfter = page.data[page.data.length - 1]?.id;
+    }
+    return all;
+}
+
+/**
+ * @param {import('stripe').Stripe.Subscription[]} subscriptions
+ */
+function aggregateMembershipRevenueFromSubscriptions(subscriptions) {
+    const seen = new Set();
+    let mrrCents = 0;
+    let monthlyCents = 0;
+    let bimonthlyCents = 0;
+    let annualCents = 0;
+    let otherCents = 0;
+    let active = 0;
+    let trialing = 0;
+    let included = 0;
+
+    for (const sub of subscriptions) {
+        if (!sub?.id || seen.has(sub.id)) continue;
+        seen.add(sub.id);
+        if (sub.status !== 'active' && sub.status !== 'trialing') continue;
+
+        const firstItem = sub.items?.data?.[0];
+        const price = firstItem?.price;
+        if (!isFusionMembershipSubscription(sub, price)) continue;
+
+        const unitAmount = price?.unit_amount;
+        if (typeof unitAmount !== 'number' || !Number.isFinite(unitAmount)) continue;
+
+        included += 1;
+        if (sub.status === 'active') active += 1;
+        if (sub.status === 'trialing') trialing += 1;
+
+        const interval = price?.recurring?.interval;
+        const count = price?.recurring?.interval_count || 1;
+        const cadence = cadenceKeyFromPrice(price);
+        mrrCents += mrrCentsFromPrice(unitAmount, interval, count);
+
+        if (cadence === 'monthly') monthlyCents += unitAmount;
+        else if (cadence === 'bimonthly') bimonthlyCents += unitAmount;
+        else if (cadence === 'annual') annualCents += unitAmount;
+        else otherCents += unitAmount;
+    }
+
+    return {
+        mrrCents,
+        cadence: { monthlyCents, bimonthlyCents, annualCents, otherCents },
+        counts: { active, trialing, included },
+    };
+}
+
+/**
  * Find customer by `metadata.principal`, pick the best subscription (active/trialing first), push to canister.
  * @param {import('stripe').Stripe} stripeClient
  * @param {string} principalText
@@ -1795,6 +1915,30 @@ app.post('/stripe/member-billing-summary', requireApiKey, async (req, res) => {
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         return res.status(500).json({ error: msg });
+    }
+});
+
+/** Studio Finance: aggregate active/trialing membership subscription revenue by cadence + MRR. */
+app.post('/stripe/membership-revenue-summary', requireApiKey, async (req, res) => {
+    try {
+        if (!stripe) {
+            return res.status(503).json({ ok: false, error: 'Stripe not configured' });
+        }
+        const [activeSubs, trialingSubs] = await Promise.all([
+            listAllStripeSubscriptionsByStatus(stripe, 'active'),
+            listAllStripeSubscriptionsByStatus(stripe, 'trialing'),
+        ]);
+        const agg = aggregateMembershipRevenueFromSubscriptions([...activeSubs, ...trialingSubs]);
+        return res.json({
+            ok: true,
+            currency: 'usd',
+            mrrCents: agg.mrrCents,
+            cadence: agg.cadence,
+            counts: agg.counts,
+        });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return res.status(500).json({ ok: false, error: msg });
     }
 });
 

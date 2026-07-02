@@ -7,7 +7,7 @@ import { router } from "./router.js";
 import { DEV_MODE } from "./config.js";
 import "./index.css";
 import posthog from "posthog-js";
-import { registerFusionAttributionFromUrl } from "./utils/attribution.js";
+import { registerFusionAttribution } from "./utils/attribution.js";
 import { metaTrackPageView } from "./utils/metaPixel.js";
 
 /** Set `VITE_PUBLIC_POSTHOG_KEY` (and optionally `VITE_PUBLIC_POSTHOG_HOST`) in the build env for production analytics. */
@@ -17,6 +17,7 @@ if (POSTHOG_KEY) {
     api_host: import.meta.env.VITE_PUBLIC_POSTHOG_HOST,
     defaults: "2026-01-30",
   });
+  registerFusionAttribution();
 } else if (DEV_MODE) {
   console.warn(
     "[PostHog] VITE_PUBLIC_POSTHOG_KEY is unset; events are not initialized. Set it in deploy for analytics.",
@@ -80,6 +81,7 @@ import "./components/subComponents/artistsGAFeed.js";
 import "./components/subComponents/program-block.js";
 import "./components/subComponents/editionsFeed.js";
 import "./components/subComponents/veteranBanner.js";
+import "./components/subComponents/residency-alumni-table.js";
 
 const LOCALE_STORAGE_KEY = "fusion-locale";
 
@@ -116,6 +118,9 @@ applyLocaleToDocument(window.locale);
 if (typeof window !== "undefined") {
   window.addEventListener("routeChange", (event) => {
     if (DEV_MODE) console.log("Route changed to:", event.detail.path);
+    if (POSTHOG_KEY) {
+      registerFusionAttribution();
+    }
     metaTrackPageView();
     if (POSTHOG_KEY) {
       posthog.capture("$pageview", { $current_url: window.location.href });
@@ -131,7 +136,7 @@ if (typeof window !== "undefined") {
 // Initialize the application
 document.addEventListener("DOMContentLoaded", () => {
   if (DEV_MODE) console.log("Application initialized");
-  registerFusionAttributionFromUrl();
+  registerFusionAttribution();
 
   // Fonts: Typekit + document.fonts.ready, then set `fonts-ready` (diagnostics / future use).
   // Capped wait so a hung Typekit never blocks this flag forever; enter is not gated on fonts (loadscreen.js).

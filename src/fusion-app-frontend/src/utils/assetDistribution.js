@@ -54,11 +54,44 @@ export function isUploadedAssetUrl(url) {
 }
 
 /**
+ * @param {string} s
+ */
+function looksLikeHtmlOrRichText(s) {
+    const t = String(s).trim();
+    if (!t) return false;
+    if (/<[a-z][\s\S]*>/i.test(t)) return true;
+    if (/&lt;[a-z]/i.test(t)) return true;
+    if (/%3C[a-z]/i.test(t)) return true;
+    if (/^https?:\/\//i.test(t) && /" alt=|%22|%3E/i.test(t)) return true;
+    return false;
+}
+
+/**
+ * Rewrite upload URLs inside HTML attributes only (never treat the whole string as a URL).
+ * @param {string} html
+ */
+export function rewriteUploadedUrlsInHtml(html) {
+    const s = String(html ?? '');
+    if (!s) return s;
+    return s.replace(
+        /((?:src|href)\s*=\s*["'])([^"']+)(["'])/gi,
+        (match, prefix, url, suffix) => {
+            if (!/\/uploads\//i.test(url)) return match;
+            const next = toCloudFrontAssetUrl(url);
+            return next && next !== url ? `${prefix}${next}${suffix}` : match;
+        }
+    );
+}
+
+/**
  * @param {unknown} value
  * @returns {unknown}
  */
 export function distributeUploadedAssetUrls(value) {
-    if (typeof value === 'string') return toCloudFrontAssetUrl(value);
+    if (typeof value === 'string') {
+        if (looksLikeHtmlOrRichText(value)) return rewriteUploadedUrlsInHtml(value);
+        return toCloudFrontAssetUrl(value);
+    }
     if (Array.isArray(value)) return value.map((item) => distributeUploadedAssetUrls(item));
     if (value && typeof value === 'object') {
         /** @type {Record<string, unknown>} */

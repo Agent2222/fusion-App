@@ -1,3 +1,5 @@
+import { journalBodyPlainText } from './journalBodyHtml.js';
+
 /**
  * @param {unknown} s
  * @returns {string}
@@ -11,14 +13,20 @@ export function escapeHtml(s) {
 }
 
 /**
- * Plain-text preview for card copy: strip simple HTML tags, collapse whitespace, truncate.
+ * Plain-text preview for card copy: strip HTML, collapse whitespace, truncate.
  * @param {unknown} raw
  * @param {number} [maxLen]
  * @returns {string}
  */
 export function previewPlainText(raw, maxLen = 250) {
-    const s = String(raw ?? '');
-    const stripped = s.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    const s = String(raw ?? '').trim();
+    if (!s) return '';
+    const looksHtml =
+        /<[a-z][\s\S]*>/i.test(s) ||
+        /&lt;[a-z]/i.test(s) ||
+        (/^https?:\/\//i.test(s) && /" alt=|%22|%3E/i.test(s));
+    let stripped = looksHtml ? journalBodyPlainText(s) : s.replace(/\s+/g, ' ').trim();
+    if (!stripped) return '';
     if (stripped.length <= maxLen) return stripped;
     return `${stripped.slice(0, maxLen).trim()}...`;
 }

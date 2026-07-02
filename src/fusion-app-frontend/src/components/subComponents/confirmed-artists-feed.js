@@ -10,7 +10,7 @@ function openArtistProfileInNewTab(slug) {
 }
 import { artistDisplayDiscipline, artistDisplayName } from '../../utils/artistSlug.js';
 import { applyArtistCardImage } from '../../utils/artistCardPlaceholder.js';
-import { getArtistCardProfileUrl } from '../../utils/artistCardImageMode.js';
+import { resolveArtistPublicCardImageUrl } from '../../utils/artistCardImageMode.js';
 import {
     PH_LOADER_BASE_STYLES,
     CONFIRMED_ARTISTS_PENDING_WRAPPER_STYLES,
@@ -116,8 +116,8 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
             </div>
         `;
         const cfImg = card.querySelector('.artist-card-image img');
-        /* Program confirmed strip: profile/headshot first, then hero/artwork (independent of header toggle). */
-        applyArtistCardImage(cfImg, getArtistCardProfileUrl(artist));
+        /* Program confirmed strip: profile when staff-approved, otherwise artwork. */
+        applyArtistCardImage(cfImg, resolveArtistPublicCardImageUrl(artist));
 
         return card;
     }
@@ -541,7 +541,7 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
                     width: 100%;
                     aspect-ratio: 3 / 4;
                     overflow: hidden;
-                    background: var(--c2);
+                    background: var(--c3);
                 }
 
                 .artist-card-image img {
@@ -556,7 +556,7 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
                 .artist-card-image img.artist-card-img--placeholder {
                     object-fit: contain;
                     object-position: center;
-                    background: var(--c2);
+                    background: var(--c3);
                 }
 
                 .artist-card-content {

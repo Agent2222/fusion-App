@@ -11,6 +11,10 @@ import {
 } from './memberProfileForm.js';
 import { normalizeLocalesWorldForStorage } from './worldNormalize.js';
 import { normalizeArtistRosterVisibility } from './database.js';
+import {
+    getPublicWorldSourceFromLocales,
+    localesHaveUsableWorldNew,
+} from './worldPublicPick.js';
 
 /** Used by Studio “Translate to New World” to map `world.*` → `worldNew.*` via LLM. */
 export const STUDIO_WORLD_TO_NEW_PATHS = [
@@ -28,6 +32,51 @@ export const STUDIO_WORLD_TO_NEW_PATHS = [
  */
 function asObj(v) {
     return v !== null && typeof v === 'object' && !Array.isArray(v) ? /** @type {Record<string, unknown>} */ (v) : {};
+}
+
+/**
+ * Pill toggle for staff: which world block visitors see on `/profile/:slug`.
+ * @param {ParentNode} root
+ * @param {Record<string, unknown> | null | undefined} locales
+ * @param {'world' | 'newWorld'} [requested]
+ */
+export function syncStudioPublicWorldSource(root, locales, requested) {
+    const loc = locales && typeof locales === 'object' ? locales : {};
+    const newWorldAvailable = localesHaveUsableWorldNew(loc);
+    let source =
+        requested === 'world' || requested === 'newWorld'
+            ? requested
+            : getPublicWorldSourceFromLocales(loc);
+    if (source === 'newWorld' && !newWorldAvailable) source = 'world';
+
+    const hidden = root.querySelector('#studio-art-public-world-source');
+    if (hidden instanceof HTMLInputElement) hidden.value = source;
+
+    const note = root.querySelector('#studio-art-public-world-source-note');
+    if (note) {
+        note.textContent =
+            source === 'newWorld'
+                ? 'New World will display on the public profile.'
+                : 'Story & World will display on the public profile.';
+    }
+
+    root.querySelectorAll('[data-studio-world-source]').forEach((btn) => {
+        if (!(btn instanceof HTMLButtonElement)) return;
+        const buttonSource = btn.getAttribute('data-studio-world-source');
+        const isNewWorld = buttonSource === 'newWorld';
+        const active = buttonSource === source;
+        btn.classList.toggle('is-active', active);
+        btn.classList.toggle('is-disabled', isNewWorld && !newWorldAvailable);
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        btn.disabled = Boolean(isNewWorld && !newWorldAvailable);
+        if (isNewWorld && !newWorldAvailable) {
+            btn.setAttribute('aria-disabled', 'true');
+            btn.title = 'New World unlocks after generated copy is available.';
+        } else {
+            btn.removeAttribute('aria-disabled');
+            btn.removeAttribute('title');
+        }
+    });
 }
 
 /**
@@ -247,6 +296,10 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
             Upload → URL
           </label>
         </div>
+        <label class="studio-field studio-field--checkbox studio-field--grow">
+          <input type="checkbox" name="art-hero-profile-image-approved" id="studio-art-hero-profile-image-approved" ${a.heroProfileImageApproved ? 'checked' : ''} />
+          <span>Profile image approved (show headshot on cards and program pages; otherwise artwork)</span>
+        </label>
         <div class="studio-modal-fields-row">
           <label class="studio-field"><span>Visibility</span>
             <select name="art-visibility" class="studio-input" id="studio-art-visibility">
@@ -285,6 +338,15 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
           ${genCodeBtn}
         </div>
         <p class="studio-muted" style="margin:0 0 0.75rem;font-size:0.85rem">If this screen stayed open while the code was redeemed, close and reopen Manage (or reload the roster) before saving so you do not write back an old code.</p>
+        <h4 class="studio-prog-subhead">Public profile display</h4>
+        <div class="studio-world-source-control">
+          <input type="hidden" id="studio-art-public-world-source" name="art-public-world-source" value="newWorld" />
+          <div class="studio-world-source-toggle" role="group" aria-label="Public profile world source">
+            <button type="button" class="studio-world-source-toggle__btn" data-studio-world-source="world" aria-pressed="false">World</button>
+            <button type="button" class="studio-world-source-toggle__btn is-active" data-studio-world-source="newWorld" aria-pressed="true">New World</button>
+          </div>
+          <p class="studio-world-source-note" id="studio-art-public-world-source-note">New World will display on the public profile.</p>
+        </div>
         <h4 class="studio-prog-subhead">Feed filter defaults</h4>
         <div class="studio-modal-fields-row">
           <label class="studio-field"><span>connection</span><input name="art-filter-connection" class="studio-input" value="${esc(escapeHtml, String(filter.connection ?? ''))}" /></label>
@@ -339,17 +401,20 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
           ${rowWorldParas2(escapeHtml, 'Constructing', 'world.constructing', en, ja)}
           ${rowWorldParas2(escapeHtml, 'Context', 'world.context', en, ja)}
         </div>
-        <h4 class="studio-prog-subhead">Reinterpret to New World</h4>
-        <p class="studio-modal-hint">Enter a style prompt, then run <strong>Translate to New World</strong> to fill the <strong>New World</strong> tab using the IC LLM (English and Japanese).</p>
+        <h4 class="studio-prog-subhead">Generate &amp; reinterpret</h4>
+        <p class="studio-modal-hint"><strong>New World from base</strong> uses the <strong>Identity</strong> tab (bio, discipline, location, quote) to generate Kamauu-style copy into empty <strong>World</strong> and <strong>New World</strong> fields (live IC LLM). <strong>Translate to New World</strong> sends the full <strong>World</strong> tab through the same Kamauu JSON pipeline as <strong>Generate New World from bio (batch)</strong> — optional style prompt below.</p>
         <label class="studio-field studio-field--stack" style="margin-bottom:0.75rem">
-          <span>Prompt</span>
-          <textarea id="studio-art-new-world-prompt" class="studio-textarea" rows="3" spellcheck="true" placeholder="e.g. Shorter, more poetic; emphasize craft and place."></textarea>
+          <span>Style prompt (Translate to New World — optional)</span>
+          <textarea id="studio-art-new-world-prompt" class="studio-textarea" rows="3" spellcheck="true" placeholder="Leave empty for default Kamauu-style output (same as batch). e.g. Shorter, more poetic; emphasize craft and place."></textarea>
         </label>
-        <button type="button" class="studio-btn-primary" id="studio-art-translate-to-new-world">Translate to New World</button>
+        <div class="studio-art-world-actions">
+          <button type="button" class="studio-btn-secondary" id="studio-art-new-world-from-base">New World from base</button>
+          <button type="button" class="studio-btn-primary" id="studio-art-translate-to-new-world">Translate to New World</button>
+        </div>
       </div>
 
       <div id="studio-art-panel-new-world" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-art-tab-new-world" hidden>
-        <p class="studio-modal-hint">LLM‑refined copy (optional). Public profiles prefer <code>worldNew</code> when present unless the artist sets their profile to prefer Story &amp; World (<code>world</code>) in member settings.</p>
+        <p class="studio-modal-hint">LLM‑refined copy (optional). Public profiles default to <strong>New World</strong> when generated copy exists; staff can override on the Roster tab.</p>
         <div class="studio-prog-locale-form">
           <div class="studio-prog-col-headers" aria-hidden="true">
             <span class="studio-prog-grid-label"></span>
@@ -539,10 +604,22 @@ export function collectArtistRecordFromForm(root, baseArtist) {
     normalized.audioDisplayForArtist =
         audioDisplayCb instanceof HTMLInputElement && audioDisplayCb.checked;
 
+    const worldSourceEl = root.querySelector('#studio-art-public-world-source');
+    const srcPick =
+        worldSourceEl instanceof HTMLInputElement ? String(worldSourceEl.value ?? '').trim() : '';
+    if (srcPick === 'world') {
+        normalized.publicWorldSource = 'world';
+    } else {
+        delete normalized.publicWorldSource;
+    }
+
     const id = String(fd.get('art-id') || base.id || '').trim();
     const slug = String(fd.get('art-slug') || base.slug || '').trim();
     const image = String(fd.get('art-image') ?? '');
     const heroProfileImage = String(fd.get('art-hero-profile-image') ?? '');
+    const heroProfileApprovedCb = form.querySelector('#studio-art-hero-profile-image-approved');
+    const heroProfileImageApproved =
+        heroProfileApprovedCb instanceof HTMLInputElement && heroProfileApprovedCb.checked;
     const visibility = normalizeArtistRosterVisibility(
         String(fd.get('art-visibility') != null ? fd.get('art-visibility') : 'public')
     );
@@ -573,6 +650,7 @@ export function collectArtistRecordFromForm(root, baseArtist) {
         slug,
         image,
         heroProfileImage,
+        heroProfileImageApproved,
         quote: String(fd.get('art-profile-quote') ?? '').trim(),
         audioUrl: String(fd.get('art-audio-url') ?? '').trim(),
         audioTitle: String(fd.get('art-audio-title') ?? '').trim(),
@@ -618,4 +696,66 @@ export function initArtistManageTabs(root) {
     tabs.forEach((tab) => {
         tab.addEventListener('click', () => activate(tab));
     });
+}
+
+const MANAGE_FORM_WORLD_PATHS = [
+    'world.practice',
+    'world.quote',
+    'world.perspective',
+    'world.vision',
+    'world.constructing',
+    'world.context',
+    'worldNew.practice',
+    'worldNew.quote',
+    'worldNew.perspective',
+    'worldNew.vision',
+    'worldNew.constructing',
+    'worldNew.context',
+];
+
+/**
+ * Current form state merged onto a loaded artist row (includes unsaved Identity edits).
+ * @param {ParentNode} root
+ * @param {object} baseArtist
+ */
+export function artistRowForLlmFromManageForm(root, baseArtist) {
+    const collected = collectArtistRecordFromForm(root, baseArtist);
+    return {
+        ...(baseArtist && typeof baseArtist === 'object' ? baseArtist : {}),
+        ...collected,
+        quote: collected.quote ?? String(baseArtist?.quote ?? ''),
+        locales: collected.locales,
+    };
+}
+
+/**
+ * Write `world` and `worldNew` EN/JA fields from merged locales into the manage form.
+ * @param {ParentNode} root
+ * @param {Record<string, unknown>} locales
+ */
+export function patchManageFormWorldFields(root, locales) {
+    if (!locales || typeof locales !== 'object') return;
+    for (const loc of ['en', 'ja']) {
+        const block =
+            locales[loc] && typeof locales[loc] === 'object'
+                ? /** @type {Record<string, unknown>} */ (locales[loc])
+                : {};
+        for (const path of MANAGE_FORM_WORLD_PATHS) {
+            const el = root.querySelector(
+                `[data-art-locale="${loc}"][data-art-path="${path}"]`,
+            );
+            if (!(el instanceof HTMLTextAreaElement)) continue;
+            const kind = el.getAttribute('data-art-kind') || '';
+            const parts = path.split('.');
+            const fieldKey = parts[parts.length - 1];
+            const blockKey = parts[0];
+            const worldLike =
+                block[blockKey] && typeof block[blockKey] === 'object' && !Array.isArray(block[blockKey])
+                    ? /** @type {Record<string, unknown>} */ (block[blockKey])
+                    : {};
+            const raw = worldLike[fieldKey];
+            el.value =
+                kind === 'world-paras' ? worldFieldToTextarea(raw) : String(raw ?? '');
+        }
+    }
 }

@@ -157,8 +157,10 @@ class SoundEnvironment extends HTMLElement {
             : '';
         return (
             page === 'community' ||
+            page === 'videos' ||
             path === '/studio' ||
             path === '/community' ||
+            path === '/videos' ||
             path.startsWith('/settings') ||
             path === '/profile' ||
             path.startsWith('/profile/')
@@ -694,6 +696,16 @@ class SoundEnvironment extends HTMLElement {
             --se-track-mix: color-mix(in srgb, var(--c2) 28%, var(--bg) 72%);
             color: var(--se-ink);
             pointer-events: none;
+        }
+        :host([data-mobile-menu="true"]) .se-wrap,
+        :host([data-mobile-menu="true"]) .se-wrap.se-pan-open {
+            display: block;
+            width: 100%;
+            min-width: 0;
+            max-width: 100%;
+            margin-top: 0;
+            padding-left: 0;
+            padding-right: 0;
         }
         :host([data-placement="filter"]) .se-wrap {
             margin-top: 0;

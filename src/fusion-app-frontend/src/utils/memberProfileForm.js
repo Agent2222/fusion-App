@@ -207,8 +207,10 @@ export function readLocalesFromDom(prev, active, val) {
     nb.links = readLinksFromContainer('#mpd-links');
     out[active] = nb;
     const srcPick = val('mpd_public_world_source');
-    if (srcPick === 'world' || srcPick === 'newWorld') {
-        out.publicWorldSource = srcPick;
+    if (srcPick === 'world') {
+        out.publicWorldSource = 'world';
+    } else {
+        delete out.publicWorldSource;
     }
     return normalizeLocalesWorldForStorage(/** @type {Record<string, unknown>} */ (out));
 }

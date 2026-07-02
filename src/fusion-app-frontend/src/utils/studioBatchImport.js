@@ -103,6 +103,12 @@ export function normalizeArtistImportRow(raw, codePool, opts = {}) {
         heroProfileImage: String(
             prof.heroProfileImage ?? prof.hero_profile_image ?? row.heroProfileImage ?? row.hero_profile_image ?? ''
         ),
+        heroProfileImageApproved: Boolean(
+            prof.heroProfileImageApproved ??
+                row.heroProfileImageApproved ??
+                prof.hero_profile_image_approved ??
+                row.hero_profile_image_approved,
+        ),
         featuredOrder: Math.max(0, Math.floor(Number(prof.featuredOrder ?? prof.featured_order ?? 0))),
         visibility: String(prof.visibility ?? 'public'),
         updatedAt: String(prof.updatedAt ?? prof.updated_at ?? now),
@@ -259,6 +265,10 @@ export function artistRecordToTestOverlayShape(rec) {
         image: p.image,
         heroProfileImage: String(
             /** @type {Record<string, unknown>} */ (p).heroProfileImage ?? p.hero_profile_image ?? ''
+        ),
+        heroProfileImageApproved: Boolean(
+            /** @type {Record<string, unknown>} */ (p).heroProfileImageApproved ??
+                /** @type {Record<string, unknown>} */ (rec).heroProfileImageApproved,
         ),
         quote: String(p.quote ?? ''),
         audioUrl: String(p.audioUrl ?? ''),

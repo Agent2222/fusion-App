@@ -134,8 +134,16 @@ persistent actor {
     updatedAt = "";
   };
 
+  /// Home page journal hero carousel (max 3 entry ids, manual order).
+  stable var homeJournalCarouselStable : Types.HomeJournalCarouselConfig = {
+    entryIds = [];
+    updatedAt = "";
+  };
+
   /// Card “Profile” headshot URLs — **append-only** stable slot; separate from `artistsStable` / `ArtistCore` for safe upgrades.
   stable var artistHeroProfileImageStable : [(Text, Text)] = [];
+  /// Artist ids with staff-approved headshots for public cards (parallel map; default not approved).
+  stable var artistHeroProfileImageApprovedIdsStable : [Text] = [];
 
   // In-memory hashmap for fast lookups/updates.
   transient var subscribersByEmail : _HashMap.HashMap<Text, Types.Subscriber> =
@@ -189,6 +197,13 @@ persistent actor {
   transient var artistHeroProfileImageById : _HashMap.HashMap<Text, Text> =
     _HashMap.HashMap<Text, Text>(
       artistHeroProfileImageStable.size(),
+      Text.equal,
+      Text.hash
+    );
+
+  transient var artistHeroProfileImageApprovedById : _HashMap.HashMap<Text, Bool> =
+    _HashMap.HashMap<Text, Bool>(
+      artistHeroProfileImageApprovedIdsStable.size(),
       Text.equal,
       Text.hash
     );
@@ -390,6 +405,10 @@ persistent actor {
 
   for (entry in artistHeroProfileImageStable.vals()) {
     artistHeroProfileImageById.put(entry.0, entry.1);
+  };
+
+  for (id in artistHeroProfileImageApprovedIdsStable.vals()) {
+    artistHeroProfileImageApprovedById.put(id, true);
   };
 
   for (entry in programsStable.vals()) {
@@ -831,6 +850,19 @@ persistent actor {
     let pairs = _Iter.toArray(artistFeaturedFeaturableById.entries());
     let keys = Array.map<(Text, Bool), Text>(pairs, func((k, _) : (Text, Bool)) : Text { k });
     Array.sort(keys, Text.compare);
+  };
+
+  private func approvedHeroProfileImageIdsSorted() : [Text] {
+    let pairs = _Iter.toArray(artistHeroProfileImageApprovedById.entries());
+    let keys = Array.map<(Text, Bool), Text>(pairs, func((k, _) : (Text, Bool)) : Text { k });
+    Array.sort(keys, Text.compare);
+  };
+
+  private func heroProfileImageApprovedForArtist(artistId : Text) : Bool {
+    switch (artistHeroProfileImageApprovedById.get(artistId)) {
+      case (?true) { true };
+      case _ { false };
+    };
   };
 
   private func manualFeaturedIdsAsArray() : [Text] {
@@ -1413,6 +1445,7 @@ persistent actor {
     superStaffPrincipalsStable := superStaffPrincipalsAsArray();
     accountContactStable := _Iter.toArray(accountContactByPrincipal.entries());
     artistHeroProfileImageStable := _Iter.toArray(artistHeroProfileImageById.entries());
+    artistHeroProfileImageApprovedIdsStable := approvedHeroProfileImageIdsSorted();
     emailCampaignsStable := _Iter.toArray(emailCampaignsById.entries());
     applicantEmailOutreachStable := _Iter.toArray(applicantEmailOutreachById.entries());
   };
@@ -1546,6 +1579,12 @@ persistent actor {
       artistHeroProfileImageById.put(entry.0, entry.1);
     };
     artistHeroProfileImageStable := [];
+
+    artistHeroProfileImageApprovedById := _HashMap.HashMap<Text, Bool>(0, Text.equal, Text.hash);
+    for (id in artistHeroProfileImageApprovedIdsStable.vals()) {
+      artistHeroProfileImageApprovedById.put(id, true);
+    };
+    artistHeroProfileImageApprovedIdsStable := [];
 
     programsById := _HashMap.HashMap<Text, Types.ProgramRecord>(0, Text.equal, Text.hash);
     for (entry in programsStable.vals()) {
@@ -1758,6 +1797,15 @@ persistent actor {
       artistHeroProfileImageById.put(entry.0, entry.1);
     };
 
+    artistHeroProfileImageApprovedById := _HashMap.HashMap<Text, Bool>(
+      artistHeroProfileImageApprovedIdsStable.size(),
+      Text.equal,
+      Text.hash
+    );
+    for (id in artistHeroProfileImageApprovedIdsStable.vals()) {
+      artistHeroProfileImageApprovedById.put(id, true);
+    };
+
     programsById := _HashMap.HashMap<Text, Types.ProgramRecord>(0, Text.equal, Text.hash);
     for (entry in programsStable.vals()) {
       programsById.put(entry.0, entry.1);
@@ -1878,6 +1926,7 @@ persistent actor {
       membershipStripePeriodEndStable = _Iter.toArray(membershipStripePeriodEndByPrincipal.entries());
       artistFilterCohortYearsStable = _Iter.toArray(artistFilterCohortYearsById.entries());
       artistHeroProfileImageStable = ?(_Iter.toArray(artistHeroProfileImageById.entries()));
+      artistHeroProfileImageApprovedIdsStable = ?approvedHeroProfileImageIdsSorted();
       artistsStable = _Iter.toArray(artistsById.entries());
       programsStable = _Iter.toArray(programsById.entries());
       journalsStable = _Iter.toArray(journalsById.entries());
@@ -1924,6 +1973,10 @@ persistent actor {
     membershipStripePeriodEndStable := snapshot.membershipStripePeriodEndStable;
     artistFilterCohortYearsStable := snapshot.artistFilterCohortYearsStable;
     artistHeroProfileImageStable := switch (snapshot.artistHeroProfileImageStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    artistHeroProfileImageApprovedIdsStable := switch (snapshot.artistHeroProfileImageApprovedIdsStable) {
       case null { [] };
       case (?rows) { rows };
     };
@@ -1985,6 +2038,13 @@ persistent actor {
 
   public shared query (msg) func getAccountForCaller() : async ?Types.UserAccount {
     mergeAccount(msg.caller)
+  };
+
+  public shared query (msg) func getMyAccountContactForCaller() : async ?Types.AccountContact {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      return null;
+    };
+    accountContactByPrincipal.get(msg.caller);
   };
 
   /// Billing / access for the logged-in principal (join gate + resubscribe).
@@ -2144,9 +2204,15 @@ persistent actor {
     return _Iter.toArray(joinInvitesByCode.entries());
   };
 
-  /// Admin: list trial windows keyed by principal for Studio Users.
+  /// Staff with Studio Users or Finance — Users visibility; admin always.
+  private func assertStudioAccountDirectoryVisible(caller : Principal) {
+    assertStaffOrAdmin(caller);
+    assertStudioFeatureVisibleEither(caller, "users", "financeUsers");
+  };
+
+  /// Admin: list trial windows keyed by principal for Studio Users / Finance membership.
   public shared query (msg) func adminListTrialMembershipWindows() : async [(Principal, Types.TrialMembershipWindow)] {
-    assertAdmin(msg.caller);
+    assertStudioAccountDirectoryVisible(msg.caller);
     _Iter.toArray(membershipTrialWindowByPrincipal.entries());
   };
 
@@ -2420,6 +2486,14 @@ persistent actor {
     };
   };
 
+  private func setHeroProfileImageApprovedForArtist(artistId : Text, approved : Bool) {
+    if (approved) {
+      artistHeroProfileImageApprovedById.put(artistId, true);
+    } else {
+      ignore artistHeroProfileImageApprovedById.remove(artistId);
+    };
+  };
+
   private func artistPublicFromCore(core : Types.ArtistCore, id : Text) : Types.Artist {
     let mrp = switch (mostRecentProgramByArtistId.get(id)) {
       case (?t) { t };
@@ -2433,11 +2507,13 @@ persistent actor {
       case null { "" };
       case (?t) { t };
     };
+    let heroApproved = heroProfileImageApprovedForArtist(id);
     {
       id = core.id;
       slug = core.slug;
       image = core.image;
       heroProfileImage = hero;
+      heroProfileImageApproved = heroApproved;
       featuredOrder = core.featuredOrder;
       visibility = core.visibility;
       updatedAt = core.updatedAt;
@@ -2555,7 +2631,6 @@ persistent actor {
     };
   };
 
-  /// Staff/admin: mark whether an artist may appear in random featured selection.
   public shared (msg) func staffSetArtistFeaturedFeaturable(artistId : Text, featurable : Bool) : async () {
     assertStaffOrAdmin(msg.caller);
     assertStudioFeatureEdit(msg.caller, "home");
@@ -2769,52 +2844,109 @@ persistent actor {
     };
   };
 
-  private func acceptedApplicantJsonForCaller(p : Principal) : Text {
+  private func trimContactEmail(email : Text) : Text {
+    Text.trim(email, #char ' ');
+  };
+
+  private func acceptedApplicantRecordsForCaller(p : Principal) : [Types.ApplicantRecord] {
     let aid = switch (accountLinkedArtistId(p)) {
-      case null { return "[]" };
+      case null { "" };
       case (?id) { id };
     };
     let prefix = aid # "|";
-    var first : Bool = true;
-    var out : Text = "[";
+    let callerEmail = trimContactEmail(accountContactEmailForPrincipal(p));
+    let buf = Buffer.Buffer<Types.ApplicantRecord>(4);
+    let seen = _HashMap.HashMap<Text, Bool>(0, Text.equal, Text.hash);
     for ((_, rec) in applicantsById.entries()) {
-      if (Text.startsWith(rec.id, #text prefix)) {
-        switch (rec.status) {
-          case (#accepted) {
-            if (not first) { out := out # "," };
-            first := false;
-            out := out
-              # "{\"applicationId\":" # jsonText(rec.id)
-              # ",\"programId\":" # jsonText(rec.programId)
-              # ",\"status\":" # jsonText(applicantStatusText(rec.status))
-              # ",\"email\":" # jsonText(rec.email)
-              # ",\"fullName\":" # jsonText(rec.fullName)
-              # ",\"createdAt\":" # jsonText(rec.createdAt)
-              # ",\"applicantCategory\":" # jsonText(applicantCategoryFromPayloadJson(rec.payloadJson))
-              # "}";
+      let include = switch (rec.status) {
+        case (#accepted) {
+          (aid.size() > 0 and Text.startsWith(rec.id, #text prefix))
+          or (callerEmail.size() > 0 and trimContactEmail(rec.email) == callerEmail);
+        };
+        case _ { false };
+      };
+      if (include) {
+        switch (seen.get(rec.id)) {
+          case (?_) {};
+          case null {
+            seen.put(rec.id, true);
+            buf.add(rec);
           };
-          case _ {};
         };
       };
+    };
+    Buffer.toArray(buf);
+  };
+
+  private func acceptedApplicantJsonForCaller(p : Principal) : Text {
+    let recs = acceptedApplicantRecordsForCaller(p);
+    var first : Bool = true;
+    var out : Text = "[";
+    for (rec in recs.vals()) {
+      if (not first) { out := out # "," };
+      first := false;
+      out := out
+        # "{\"applicationId\":" # jsonText(rec.id)
+        # ",\"programId\":" # jsonText(rec.programId)
+        # ",\"status\":" # jsonText(applicantStatusText(rec.status))
+        # ",\"email\":" # jsonText(rec.email)
+        # ",\"fullName\":" # jsonText(rec.fullName)
+        # ",\"createdAt\":" # jsonText(rec.createdAt)
+        # ",\"applicantCategory\":" # jsonText(applicantCategoryFromPayloadJson(rec.payloadJson))
+        # ",\"manualDepositSubmitted\":" # jsonBool(applicantRecordHasManualDepositSubmitted(rec.id))
+        # "}";
     };
     out # "]";
   };
 
   private func hasAcceptedApplicantForProgram(p : Principal, programId : Text) : Bool {
-    let aid = switch (accountLinkedArtistId(p)) {
-      case null { return false };
-      case (?id) { id };
-    };
-    let prefix = aid # "|";
-    for ((_, rec) in applicantsById.entries()) {
-      if (Text.startsWith(rec.id, #text prefix) and rec.programId == programId) {
-        switch (rec.status) {
-          case (#accepted) { return true };
-          case _ {};
-        };
+    for (rec in acceptedApplicantRecordsForCaller(p).vals()) {
+      if (rec.programId == programId) {
+        return true;
       };
     };
     false;
+  };
+
+  private func effectiveProgramPaymentSummary(s : Types.ProgramPaymentSummary) : Types.ProgramPaymentSummary {
+    if (applicantRecordHasManualDepositSubmitted(s.applicationId)) {
+      return { s with depositStatus = "paid" };
+    };
+    if (s.depositAmountCents > 0 and s.totalPaidCents >= s.depositAmountCents) {
+      if (s.totalDueCents > 0 and s.totalPaidCents >= s.totalDueCents) {
+        return { s with depositStatus = "paid_full" };
+      };
+      if (s.depositStatus != "paid" and s.depositStatus != "paid_full") {
+        return { s with depositStatus = "paid" };
+      };
+    };
+    s;
+  };
+
+  private func synthesizeManualDepositSummary(
+    p : Principal,
+    rec : Types.ApplicantRecord,
+    updatedAt : Text,
+  ) : Types.ProgramPaymentSummary {
+    let key = programPaymentKey(p, rec.programId);
+    let category = applicantCategoryFromPayloadJson(rec.payloadJson);
+    let totalDefault = memberProgramTotalDueCents(category, false);
+    let depositDefault : Nat = 100000;
+    let outstandingDefault = if (totalDefault > depositDefault) { totalDefault - depositDefault } else { 0 };
+    {
+      key = key;
+      principal = p;
+      programId = rec.programId;
+      applicationId = rec.id;
+      depositStatus = "paid";
+      totalDueCents = totalDefault;
+      depositAmountCents = depositDefault;
+      totalPaidCents = depositDefault;
+      outstandingCents = outstandingDefault;
+      refundedCents = 0;
+      activePlanId = null;
+      updatedAt = updatedAt;
+    };
   };
 
   private func programPaymentSummaryJson(s : Types.ProgramPaymentSummary) : Text {
@@ -2893,13 +3025,31 @@ persistent actor {
       return "{\"approvedPrograms\":[],\"summaries\":[],\"ledger\":[],\"plans\":[]}";
     };
     let principal = msg.caller;
+    let includedSummaryKeys = _HashMap.HashMap<Text, Bool>(0, Text.equal, Text.hash);
     var summaries : Text = "[";
     var firstSummary = true;
     for ((_, s) in programPaymentSummariesByKey.entries()) {
       if (Principal.equal(s.principal, principal)) {
+        includedSummaryKeys.put(s.key, true);
         if (not firstSummary) { summaries := summaries # "," };
         firstSummary := false;
-        summaries := summaries # programPaymentSummaryJson(s);
+        summaries := summaries # programPaymentSummaryJson(effectiveProgramPaymentSummary(s));
+      };
+    };
+    for (rec in acceptedApplicantRecordsForCaller(principal).vals()) {
+      if (applicantRecordHasManualDepositSubmitted(rec.id)) {
+        let key = programPaymentKey(principal, rec.programId);
+        switch (includedSummaryKeys.get(key)) {
+          case (?_) {};
+          case null {
+            includedSummaryKeys.put(key, true);
+            if (not firstSummary) { summaries := summaries # "," };
+            firstSummary := false;
+            summaries := summaries # programPaymentSummaryJson(
+              synthesizeManualDepositSummary(principal, rec, rec.createdAt),
+            );
+          };
+        };
       };
     };
     summaries := summaries # "]";
@@ -3011,8 +3161,7 @@ persistent actor {
     if (amountCents == 0 and feeCents == 0) {
       Debug.trap("amountCents or feeCents required");
     };
-    let artistId = applicantArtistId(applicantId);
-    let principal = switch (principalForArtistId(artistId)) {
+    let principal = switch (principalForApplicantId(applicantId)) {
       case null { Debug.trap("Linked member account required for manual ledger entry") };
       case (?p) { p };
     };
@@ -3282,7 +3431,11 @@ persistent actor {
     let nextPaid = priorPaid + paidDelta;
     let outstanding = natSubFloor(totalDueCents, nextPaid);
     let depositStatus =
-      if ((row.paymentType == "deposit" or row.paymentType == "full_payment") and paidDelta > 0) {
+      if (nextPaid >= totalDueCents and totalDueCents > 0) {
+        "paid_full"
+      } else if (nextPaid >= depositAmountCents and depositAmountCents > 0) {
+        "paid"
+      } else if ((row.paymentType == "deposit" or row.paymentType == "full_payment") and paidDelta > 0) {
         "paid"
       } else {
         switch (prior) {
@@ -3982,6 +4135,33 @@ persistent actor {
     _Iter.toArray(artistHeroProfileImageById.entries());
   };
 
+  /// Public: artist ids whose headshot is approved for card display.
+  public query func listArtistHeroProfileImageApprovedPublic() : async [Text] {
+    approvedHeroProfileImageIdsSorted();
+  };
+
+  /// Staff/admin: approve or revoke profile headshot for public cards (program confirmed strip, Profile toggle).
+  public shared (msg) func staffSetHeroProfileImageApproved(artistId : Text, approved : Bool) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "artists");
+    switch (artistsById.get(artistId)) {
+      case null { Debug.trap("Unknown artist id") };
+      case (?_) { setHeroProfileImageApprovedForArtist(artistId, approved) };
+    };
+  };
+
+  /// Staff/admin: approve profile headshots for every roster artist (bulk).
+  public shared (msg) func staffApproveAllHeroProfileImages() : async Nat {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "artists");
+    var n : Nat = 0;
+    for ((id, _) in artistsById.entries()) {
+      setHeroProfileImageApprovedForArtist(id, true);
+      n += 1;
+    };
+    n;
+  };
+
   public shared (msg) func deleteArtistById(artistId : Text) : async Bool {
     assertStaffOrAdmin(msg.caller);
     assertStudioFeatureEdit(msg.caller, "artists");
@@ -4006,6 +4186,7 @@ persistent actor {
         ignore mostRecentProgramByArtistId.remove(artistId);
         ignore artistFilterCohortYearsById.remove(artistId);
         ignore artistHeroProfileImageById.remove(artistId);
+        ignore artistHeroProfileImageApprovedById.remove(artistId);
         true;
       };
     };
@@ -4337,6 +4518,37 @@ persistent actor {
     );
   };
 
+  private let maxHomeJournalCarouselEntries : Nat = 3;
+
+  private func validateHomeJournalCarouselEntryIds(ids : [Text]) {
+    if (ids.size() > maxHomeJournalCarouselEntries) {
+      Debug.trap("At most three home carousel entries");
+    };
+    for (id in ids.vals()) {
+      switch (journalsById.get(id)) {
+        case null { Debug.trap("Home carousel entry id not found") };
+        case (?_) {};
+      };
+    };
+  };
+
+  public query func getHomeJournalCarouselPublic() : async Types.HomeJournalCarouselConfig {
+    homeJournalCarouselStable;
+  };
+
+  public shared query (msg) func adminGetHomeJournalCarousel() : async Types.HomeJournalCarouselConfig {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "journal");
+    homeJournalCarouselStable;
+  };
+
+  public shared (msg) func adminSetHomeJournalCarousel(cfg : Types.HomeJournalCarouselConfig) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "journal");
+    validateHomeJournalCarouselEntryIds(cfg.entryIds);
+    homeJournalCarouselStable := cfg;
+  };
+
   public query func getJournalEntry(entryId : Text) : async ?Types.JournalRecord {
     journalsById.get(entryId);
   };
@@ -4351,7 +4563,20 @@ persistent actor {
     assertAdmin(msg.caller);
     switch (journalsById.remove(entryId)) {
       case null { false };
-      case (?_) { true };
+      case (?_) {
+        let cfg = homeJournalCarouselStable;
+        let filtered = Array.filter<Text>(
+          cfg.entryIds,
+          func(id : Text) : Bool { id != entryId },
+        );
+        if (filtered.size() != cfg.entryIds.size()) {
+          homeJournalCarouselStable := {
+            entryIds = filtered;
+            updatedAt = cfg.updatedAt;
+          };
+        };
+        true;
+      };
     };
   };
 
@@ -4561,6 +4786,49 @@ persistent actor {
     null;
   };
 
+  private func applicantRecordOpt(applicantId : Text) : ?Types.ApplicantRecord {
+    switch (applicantsById.get(applicantId)) {
+      case (?rec) { ?rec };
+      case null { archivedApplicantsById.get(applicantId) };
+    };
+  };
+
+  private func principalForApplicantRecord(rec : Types.ApplicantRecord) : ?Principal {
+    let artistId = applicantArtistId(rec.id);
+    switch (principalForArtistId(artistId)) {
+      case (?p) { ?p };
+      case null {
+        let targetEmail = trimContactEmail(rec.email);
+        if (targetEmail.size() == 0) { return null };
+        for ((principal, contact) in accountContactByPrincipal.entries()) {
+          if (trimContactEmail(contact.email) == targetEmail) {
+            switch (accountsByPrincipal.get(principal)) {
+              case (?acc) {
+                switch (acc.linkedArtistId) {
+                  case (?linkedId) {
+                    if (linkedId == artistId or Text.startsWith(rec.id, #text (linkedId # "|"))) {
+                      return ?principal;
+                    };
+                  };
+                  case null {};
+                };
+              };
+              case null {};
+            };
+          };
+        };
+        null;
+      };
+    };
+  };
+
+  private func principalForApplicantId(applicantId : Text) : ?Principal {
+    switch (applicantRecordOpt(applicantId)) {
+      case null { null };
+      case (?rec) { principalForApplicantRecord(rec) };
+    };
+  };
+
   private func applicantArtistId(applicantId : Text) : Text {
     switch (Text.split(applicantId, #char('|')).next()) {
       case (?artistId) { artistId };
@@ -4608,8 +4876,7 @@ persistent actor {
     programId : Text,
     updatedAt : Text,
   ) {
-    let artistId = applicantArtistId(applicantId);
-    let principal = switch (principalForArtistId(artistId)) {
+    let principal = switch (principalForApplicantId(applicantId)) {
       case null { return };
       case (?p) { p };
     };
@@ -4669,8 +4936,7 @@ persistent actor {
     programId : Text,
     updatedAt : Text,
   ) {
-    let artistId = applicantArtistId(applicantId);
-    let principal = switch (principalForArtistId(artistId)) {
+    let principal = switch (principalForApplicantId(applicantId)) {
       case null { return };
       case (?p) { p };
     };
@@ -4871,9 +5137,9 @@ persistent actor {
     siteSettingsByKey.put(key, value);
   };
 
-  /// Admin-only: list all accounts (Studio Users tab).
+  /// Staff with Studio Users or Finance — Users visibility; admin always.
   public shared query (msg) func listAccounts() : async [(Principal, Types.UserAccount)] {
-    assertAdmin(msg.caller);
+    assertStudioAccountDirectoryVisible(msg.caller);
     Array.map<(Principal, Types.UserAccountCore), (Principal, Types.UserAccount)>(
       _Iter.toArray(accountsByPrincipal.entries()),
       func(entry : (Principal, Types.UserAccountCore)) : (Principal, Types.UserAccount) {
@@ -4886,9 +5152,9 @@ persistent actor {
     );
   };
 
-  /// Admin-only: name + email for Team tab (Join Fusion registration).
+  /// Name + email for Studio Users / Finance — Users (Team tab is admin-gated in the UI).
   public shared query (msg) func adminListAccountContacts() : async [(Principal, Types.AccountContact)] {
-    assertAdmin(msg.caller);
+    assertStudioAccountDirectoryVisible(msg.caller);
     _Iter.toArray(accountContactByPrincipal.entries());
   };
 

@@ -175,7 +175,7 @@ class QuoteRowComponent extends HTMLElement {
                 }
             </style>
             <blockquote class="quote-row" part="quote-row">
-                <p class="quote-text">"${escapeHtml(quote)}"</p>
+                <p class="quote-text">${escapeHtml(quote)}</p>
                 <footer class="quote-attribution">
                     <a href="${escapeHtml(href)}">${escapeHtml(attribution)}</a>
                 </footer>

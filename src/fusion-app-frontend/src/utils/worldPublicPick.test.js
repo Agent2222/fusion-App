@@ -30,9 +30,10 @@ describe('worldFieldHasContent', () => {
 });
 
 describe('getPublicWorldSourceFromLocales', () => {
-    it('defaults to world when no worldNew content', () => {
+    it('defaults to newWorld when no worldNew content', () => {
         expect(getPublicWorldSourceFromLocales({})).toBe(PUBLIC_WORLD_SOURCE_DEFAULT);
         expect(getPublicWorldSourceFromLocales(null)).toBe(PUBLIC_WORLD_SOURCE_DEFAULT);
+        expect(PUBLIC_WORLD_SOURCE_DEFAULT).toBe('newWorld');
     });
 
     it('defaults to newWorld when worldNew has content and preference unset', () => {
@@ -86,6 +87,10 @@ describe('pickPublicWorldField', () => {
             worldNew: { practice: 'B' },
         };
         expect(pickPublicWorldField(loc2, 'practice', 'world')).toBe('B');
+    });
+
+    it('prefers worldNew by default when both blocks have content', () => {
+        expect(pickPublicWorldField(loc, 'practice')).toBe('B');
     });
 
     it('falls back from polluted world to worldNew', () => {

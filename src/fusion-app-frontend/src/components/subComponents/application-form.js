@@ -19,15 +19,20 @@ import {
     createSubscription,
     FUSION_PENDING_APPLICATION_SUB_KEY,
     getIntegrationBaseUrl,
+    getStoredBillingEmailForPrincipal,
     linkSubscriptionToPrincipal,
     mapIntegrationUserMessage,
+    readPendingPaymentEmailLocal,
     setPendingPaymentEmailLocal,
     setStoredBillingEmailForPrincipal,
+    syncSubscriptionFromStripe,
+    syncSubscriptionFromStripeByEmail,
 } from '../../utils/integrationApi.js';
 import { getProfileSetupDraft } from '../../utils/profileSetupDraft.js';
 import { getStripePublishableKeyResolved } from '../../utils/studioServicesConfig.js';
 import posthog from 'posthog-js';
 import { metaTrack } from '../../utils/metaPixel.js';
+import { syncPosthogConversionPerson } from '../../utils/posthogConversionIdentity.js';
 
 const DEFAULT_PROGRAM_FORM_CTX = {
     applicationFeeLine: '',
@@ -1099,6 +1104,8 @@ class ApplicationFormComponent extends HTMLElement {
                 throw wrapped;
             }
             const email = String(root?.querySelector('#app-email')?.value ?? '').trim();
+            const firstName = String(root?.querySelector('#app-first-name')?.value ?? '').trim();
+            const lastName = String(root?.querySelector('#app-last-name')?.value ?? '').trim();
             const programId = this.getAttribute('data-program-id') || '';
             try {
                 const feeCents = this._programFormContext?.applicationFeeAmountCents;
@@ -1109,6 +1116,11 @@ class ApplicationFormComponent extends HTMLElement {
                     feeCents >= 50
                         ? feeCents / 100
                         : undefined;
+                syncPosthogConversionPerson({
+                    email,
+                    firstName,
+                    lastName,
+                });
                 posthog.capture('program_application_payment_completed', {
                     ...this._posthogApplicationBaseProps(),
                     payment_plan: this._paymentPlan || 'unknown',
@@ -1445,7 +1457,25 @@ class ApplicationFormComponent extends HTMLElement {
             if (!snap.authenticated) {
                 this._membershipGate = 'noAccount';
             } else {
-                const gate = await getMembershipAccessForCaller();
+                let gate = await getMembershipAccessForCaller();
+                if (gate === 'needsSubscription') {
+                    const pr = snap.principal.toText();
+                    try {
+                        await syncSubscriptionFromStripe(pr);
+                        const billingEmail = getStoredBillingEmailForPrincipal(pr);
+                        const pendingJoin = readPendingPaymentEmailLocal('join');
+                        const syncEmail =
+                            billingEmail ||
+                            pendingJoin?.email ||
+                            String(this.shadowRoot?.querySelector('#app-email')?.value ?? '').trim();
+                        if (syncEmail.includes('@')) {
+                            await syncSubscriptionFromStripeByEmail(syncEmail, pr);
+                        }
+                        gate = await getMembershipAccessForCaller();
+                    } catch {
+                        /* keep needsSubscription */
+                    }
+                }
                 this._membershipGate = gate;
                 if (gate === 'ok' || gate === 'exempt') {
                     const ens = await ensureMyLinkedArtistProfile();
@@ -1607,6 +1637,11 @@ class ApplicationFormComponent extends HTMLElement {
         this._setSubmittingState(true, L.submitting);
         try {
             await submitProgramApplication(programId, payload);
+            syncPosthogConversionPerson({
+                email: payload.email,
+                firstName: payload.firstName,
+                lastName: payload.lastName,
+            });
             posthog.capture('program_application_submitted', {
                 ...this._posthogApplicationBaseProps(),
                 ...(this._paymentPlan ? { payment_plan: this._paymentPlan } : {}),

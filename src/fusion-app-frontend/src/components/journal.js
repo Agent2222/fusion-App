@@ -3,6 +3,10 @@
  * and `context="journal"` (see `joinNetwork.js`). Spacing: `data-margin-top` / `data-margin-bottom`.
  */
 import { getArtists, getEventsList, getJournalEntries, getJournalLayoutPublic } from '../utils/database.js';
+import {
+    isJournalEntryPublished,
+    resolveJournalEntryByRef,
+} from '../utils/journalPublicVisibility.js';
 
 function escAttr(v) {
     return String(v ?? '')
@@ -18,6 +22,7 @@ export function render() {
             <main id="journalMain" class="main-cont">
                 <div id="journalMainContent" class="feed-container">
                     <div class="page-content nav-page-content journal-content">
+                        <app-info context="journal" active="true" topP="0px"></app-info>
                         <div id="journalDynamicRows"></div>
                         <app-join-network id="joinNetworkJournal" data-modal-type="membership" context="journal" active="true" data-margin-top="80px" data-margin-bottom="80px"></app-join-network>
                     </div>
@@ -28,12 +33,13 @@ export function render() {
 }
 
 function resolveJournalEntryAttr(refId, entries) {
+    const entry = resolveJournalEntryByRef(refId, entries);
+    if (!entry || !isJournalEntryPublished(entry)) return null;
     const asStr = String(refId ?? '').trim();
-    if (!asStr) return null;
     const byId = entries.find((j) => String(j?.id ?? '') === asStr);
-    if (byId) return { kind: 'id', value: asStr };
+    if (byId) return { kind: 'id', value: String(entry.id ?? asStr) };
     if (/^\d+$/.test(asStr)) return { kind: 'index', value: asStr };
-    return null;
+    return { kind: 'id', value: String(entry.id ?? asStr) };
 }
 
 /**

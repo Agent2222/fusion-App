@@ -4,17 +4,34 @@
  */
 
 import {
+    normalizeLocalesWorldForStorage,
     normalizeWorldBlockForStorage,
     worldTextToParagraphs,
 } from './worldNormalize.js';
 import { sanitizeLlmTextOutput } from './llmTextSanitize.js';
-import { worldFieldToTextarea } from './memberProfileForm.js';
+import { textareaToWorldArray, worldFieldToTextarea } from './memberProfileForm.js';
+import { worldFieldHasContent } from './worldPublicPick.js';
+import { STUDIO_WORLD_TO_NEW_PATHS } from './studioArtistForm.js';
 
 /** Max artists per batch run (Select all + staging cap). */
 export const STUDIO_WORLD_BATCH_MAX = 25;
 
 /** Trim source JSON so prompt+source stays under backend STUDIO_LLM_MAX_CHARS (~12k). */
 export const LLM_SOURCE_MAX_CHARS = 7000;
+
+/** Default style prompt when Translate to New World prompt field is empty (optional extra only). */
+export const DEFAULT_STUDIO_WORLD_STYLE_PROMPT =
+    'Rewrite in a concise, polished Kamauu-style voice suitable for a public art profile. Preserve meaning and facts.';
+
+/**
+ * Same JSON instruction as batch “Generate New World from bio”, with optional extra style guidance.
+ * @param {string} [extraStylePrompt]
+ */
+export function buildWorldLlmInstruction(extraStylePrompt = '') {
+    const extra = String(extraStylePrompt ?? '').trim();
+    if (!extra) return JSON_INSTRUCTION;
+    return `${JSON_INSTRUCTION}\n\nAdditional style guidance (apply without breaking JSON shape or field rules above): ${extra}`;
+}
 
 /**
  * @typedef {'fillEmpty' | 'overwrite'} WorldMergeMode
@@ -131,6 +148,116 @@ function extractJsonObjectLoose(s) {
     return s.slice(a, b + 1);
 }
 
+/**
+ * Escape raw line breaks inside JSON string literals (common LLM mistake).
+ * @param {string} input
+ */
+export function fixRawNewlinesInJsonStrings(input) {
+    let out = '';
+    let inString = false;
+    let escape = false;
+    const s = String(input ?? '');
+    for (let i = 0; i < s.length; i += 1) {
+        const c = s[i];
+        if (escape) {
+            out += c;
+            escape = false;
+            continue;
+        }
+        if (c === '\\' && inString) {
+            out += c;
+            escape = true;
+            continue;
+        }
+        if (c === '"') {
+            inString = !inString;
+            out += c;
+            continue;
+        }
+        if (inString && c === '\r') {
+            if (s[i + 1] === '\n') i += 1;
+            out += '\\n';
+            continue;
+        }
+        if (inString && c === '\n') {
+            out += '\\n';
+            continue;
+        }
+        out += c;
+    }
+    return out;
+}
+
+/**
+ * Normalize LLM world JSON to the Kamauu storage shape before validation.
+ * @param {unknown} w
+ * @returns {Record<string, unknown>}
+ */
+export function coerceParsedWorldShape(w) {
+    const base = w && typeof w === 'object' && !Array.isArray(w) ? /** @type {Record<string, unknown>} */ (w) : {};
+    /** @type {Record<string, unknown>} */
+    const out = { ...base };
+    out.practice = String(out.practice ?? '').trim();
+    out.quote = String(out.quote ?? '').trim();
+    out.perspective = worldTextToParagraphs(out.perspective);
+    out.constructing = worldTextToParagraphs(out.constructing);
+    out.vision = coerceVisionToFourLines(out.vision);
+    out.context = coerceContextToThreeLines(out.context);
+    return out;
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {string[]}
+ */
+function splitLooseLines(raw) {
+    const parts = worldTextToParagraphs(raw);
+    if (parts.length !== 1) return parts;
+    const one = parts[0];
+    if (/\n/.test(one)) {
+        return one
+            .split(/\n+/)
+            .map((line) => line.replace(/^[\s•\-–—*]+/, '').trim())
+            .filter(Boolean);
+    }
+    if (/[•|]/.test(one)) {
+        return one
+            .split(/[•|]/)
+            .map((line) => line.trim())
+            .filter(Boolean);
+    }
+    return parts;
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {string[]}
+ */
+function coerceVisionToFourLines(raw) {
+    let lines = splitLooseLines(raw);
+    while (lines.length < 4) lines.push('');
+    return lines.slice(0, 4).map((line) => String(line ?? '').trim());
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {string[]}
+ */
+function coerceContextToThreeLines(raw) {
+    let lines = splitLooseLines(raw);
+    while (lines.length < 3) lines.push('');
+    return lines.slice(0, 3).map((line) => String(line ?? '').trim());
+}
+
+/**
+ * @param {string} raw
+ * @returns {Record<string, unknown>}
+ */
+export function parseAndCoerceWorldJsonResponse(raw) {
+    const parsed = parseWorldJsonResponse(raw);
+    return coerceParsedWorldShape(parsed);
+}
+
 const WORLD_JSON_KEYS = ['practice', 'perspective', 'vision', 'constructing', 'context', 'quote'];
 
 /**
@@ -158,7 +285,7 @@ function parseKnownWorldFieldsLoose(raw) {
         const m = re.exec(s);
         if (m && m.index >= 0) hits.push({ key, index: m.index, valueStart: m.index + m[0].length });
     }
-    if (hits.length !== WORLD_JSON_KEYS.length) return null;
+    if (hits.length < 2) return null;
     hits.sort((a, b) => a.index - b.index);
     /** @type {Record<string, unknown>} */
     const out = {};
@@ -172,6 +299,11 @@ function parseKnownWorldFieldsLoose(raw) {
             .replace(/,\s*$/, '')
             .trim();
         out[cur.key] = parseLooseWorldValue(rawValue);
+    }
+    for (const key of WORLD_JSON_KEYS) {
+        if (!Object.prototype.hasOwnProperty.call(out, key)) {
+            out[key] = key === 'vision' || key === 'context' ? [] : '';
+        }
     }
     return out;
 }
@@ -235,6 +367,9 @@ export function parseWorldJsonResponse(raw) {
         variants.push(stripTrailingCommasFromJson(c));
         variants.push(quoteBareJsonKeys(c));
         variants.push(stripTrailingCommasFromJson(quoteBareJsonKeys(c)));
+        variants.push(fixRawNewlinesInJsonStrings(c));
+        variants.push(stripTrailingCommasFromJson(fixRawNewlinesInJsonStrings(c)));
+        variants.push(stripTrailingCommasFromJson(quoteBareJsonKeys(fixRawNewlinesInJsonStrings(c))));
     }
     /** @type {Error[]} */
     const errors = [];
@@ -261,14 +396,15 @@ export function parseWorldJsonResponse(raw) {
  * @param {Record<string, unknown>} w
  */
 export function validateWorldShape(w) {
+    const c = coerceParsedWorldShape(w);
     const need = ['practice', 'perspective', 'vision', 'constructing', 'context', 'quote'];
     for (const k of need) {
-        if (!(k in w)) throw new Error(`Missing key: ${k}`);
+        if (!(k in c)) throw new Error(`Missing key: ${k}`);
     }
-    if (typeof w.practice !== 'string') {
+    if (typeof c.practice !== 'string') {
         throw new Error('practice must be a string');
     }
-    const vis = w.vision;
+    const vis = c.vision;
     if (!Array.isArray(vis) || vis.length !== 4) {
         throw new Error('vision must be an array of exactly 4 strings');
     }
@@ -277,7 +413,7 @@ export function validateWorldShape(w) {
             throw new Error(`vision[${i}] must be a string`);
         }
     }
-    const ctx = w.context;
+    const ctx = c.context;
     if (!Array.isArray(ctx) || ctx.length !== 3) {
         throw new Error('context must be an array of exactly 3 strings');
     }
@@ -286,17 +422,27 @@ export function validateWorldShape(w) {
             throw new Error(`context[${i}] must be a string`);
         }
     }
-    if (typeof w.quote !== 'string') {
+    if (typeof c.quote !== 'string') {
         throw new Error('quote must be a string');
     }
-    const pers = w.perspective;
-    if (typeof pers !== 'string' && !(Array.isArray(pers) && pers.every((x) => typeof x === 'string'))) {
-        throw new Error('perspective must be a string or array of strings');
+    const pers = c.perspective;
+    if (!Array.isArray(pers) || !pers.every((x) => typeof x === 'string')) {
+        throw new Error('perspective must be an array of strings');
     }
-    const cons = w.constructing;
-    if (typeof cons !== 'string' && !(Array.isArray(cons) && cons.every((x) => typeof x === 'string'))) {
-        throw new Error('constructing must be a string or array of strings');
+    const cons = c.constructing;
+    if (!Array.isArray(cons) || !cons.every((x) => typeof x === 'string')) {
+        throw new Error('constructing must be an array of strings');
     }
+}
+
+/**
+ * Parse, coerce, validate, and normalize LLM world JSON.
+ * @param {string} raw
+ */
+function finalizeWorldLlmJson(raw) {
+    const coerced = coerceParsedWorldShape(parseWorldJsonResponse(raw));
+    validateWorldShape(coerced);
+    return normalizeWorldBlockForStorage(coerced);
 }
 
 /**
@@ -447,6 +593,33 @@ function compactStoryWorldFromEnLocale(loc) {
     return story;
 }
 
+/**
+ * Identity tab only — no Story & World, programs, events, or portfolio context.
+ * @param {Record<string, unknown>} loc
+ * @param {string} [profileQuote]
+ */
+export function buildIdentitySourcePayloadFromEnLocale(loc, profileQuote = '') {
+    if (!loc || typeof loc !== 'object') return {};
+    const o = /** @type {Record<string, unknown>} */ (loc);
+    const locLine = compactLocationFromLocale(loc);
+    const bio = String(o.bio ?? '').trim();
+    const bioLong = String(o.bioLong ?? '').trim();
+    const quote = String(profileQuote ?? '').trim();
+    const wordsFromArtist = compactWordsFromArtist(o.wordsFromArtist ?? o.words_from_artist);
+    return {
+        name: String(o.name ?? '').trim(),
+        firstName: String(o.firstName ?? '').trim(),
+        lastName: String(o.lastName ?? '').trim(),
+        discipline: String(o.discipline ?? '').trim(),
+        status: String(o.status ?? '').trim(),
+        bio,
+        bioLong: bioLong && bioLong !== bio ? bioLong : '',
+        location: locLine,
+        wordsFromArtist: wordsFromArtist || quote,
+        ...(quote && !wordsFromArtist ? { profileQuote: quote } : {}),
+    };
+}
+
 export function buildSourcePayloadFromEnLocale(loc) {
     if (!loc || typeof loc !== 'object') return {};
     const o = /** @type {Record<string, unknown>} */ (loc);
@@ -507,6 +680,51 @@ export function hasUsableWorldLlmSourceInput(artistRow) {
 }
 
 /**
+ * True when Identity tab fields have enough material for LLM generation.
+ * @param {object} artistRow
+ */
+export function hasUsableIdentityLlmSourceInput(artistRow) {
+    const loc =
+        artistRow?.locales && typeof artistRow.locales === 'object'
+            ? /** @type {Record<string, unknown>} */ (artistRow.locales).en
+            : null;
+    const quote = String(artistRow?.quote ?? '').trim();
+    const source = buildIdentitySourcePayloadFromEnLocale(
+        loc && typeof loc === 'object' ? /** @type {Record<string, unknown>} */ (loc) : {},
+        quote,
+    );
+    return ['discipline', 'bio', 'bioLong', 'location', 'wordsFromArtist'].some((key) =>
+        String(source[key] ?? '').trim(),
+    );
+}
+
+/**
+ * @param {object} artistRow
+ * @returns {string}
+ */
+export function buildTrimmedIdentityJsonForLlm(artistRow) {
+    const loc =
+        artistRow?.locales && typeof artistRow.locales === 'object'
+            ? /** @type {Record<string, unknown>} */ (artistRow.locales).en
+            : null;
+    const quote = String(artistRow?.quote ?? '').trim();
+    const base = buildIdentitySourcePayloadFromEnLocale(
+        loc && typeof loc === 'object' ? /** @type {Record<string, unknown>} */ (loc) : {},
+        quote,
+    );
+    const payload = {
+        ...base,
+        slug: String(artistRow?.slug ?? '').trim(),
+    };
+    let s = JSON.stringify(payload);
+    if (s.length > LLM_SOURCE_MAX_CHARS) {
+        const head = s.slice(0, LLM_SOURCE_MAX_CHARS - 40);
+        s = `${head}…[truncated:${payload.slug || 'artist'}]`;
+    }
+    return s;
+}
+
+/**
  * @param {object} artistRow — row from getArtistsForStudio (has locales)
  * @returns {string}
  */
@@ -541,24 +759,21 @@ export function buildTrimmedSourceJsonForLlm(artistRow) {
 /**
  * @param {(prompt: string, source: string, localeTag: string) => Promise<string>} reinterpret
  * @param {string} sourceJson
+ * @param {string} [instruction]
  * @returns {Promise<Record<string, unknown>>}
  */
-export async function generateEnglishWorldWithLlm(reinterpret, sourceJson) {
+export async function generateEnglishWorldWithLlm(reinterpret, sourceJson, instruction = JSON_INSTRUCTION) {
     /** @type {string | undefined} */
     let firstErr;
     try {
-        const raw = await reinterpret(JSON_INSTRUCTION, sourceJson, 'en');
-        const parsed = parseWorldJsonResponse(raw);
-        validateWorldShape(parsed);
-        return normalizeWorldBlockForStorage(parsed);
+        const raw = await reinterpret(instruction, sourceJson, 'en');
+        return finalizeWorldLlmJson(raw);
     } catch (e) {
         firstErr = e instanceof Error ? e.message : String(e);
     }
-    const retryPrompt = `${JSON_INSTRUCTION}${JSON_RETRY_SUFFIX}\n\nParse/validation error was: ${firstErr}`;
+    const retryPrompt = `${instruction}${JSON_RETRY_SUFFIX}\n\nParse/validation error was: ${firstErr}`;
     const raw2 = await reinterpret(retryPrompt, sourceJson, 'en');
-    const parsed2 = parseWorldJsonResponse(raw2);
-    validateWorldShape(parsed2);
-    return normalizeWorldBlockForStorage(parsed2);
+    return finalizeWorldLlmJson(raw2);
 }
 
 /**
@@ -634,6 +849,27 @@ export function parseLocalesFromArtistRow(artistRow) {
 }
 
 /**
+ * Apply merged world block to locales under `world` or `worldNew`.
+ * @param {Record<string, unknown>} locales
+ * @param {'en' | 'ja'} code
+ * @param {'world' | 'worldNew'} blockKey
+ * @param {Record<string, unknown>} worldBlock
+ * @param {WorldMergeMode} mode
+ */
+export function applyWorldBlockToLocales(locales, code, blockKey, worldBlock, mode) {
+    const next = JSON.parse(JSON.stringify(locales || { en: {}, ja: {} }));
+    if (!next[code] || typeof next[code] !== 'object') next[code] = {};
+    const block = /** @type {Record<string, unknown>} */ (next[code]);
+    const prev =
+        block[blockKey] && typeof block[blockKey] === 'object' && !Array.isArray(block[blockKey])
+            ? /** @type {Record<string, unknown>} */ (block[blockKey])
+            : {};
+    block[blockKey] = mergeWorldBlocks(prev, worldBlock, mode);
+    next[code] = block;
+    return next;
+}
+
+/**
  * Apply merged world to locales and return updated locales object.
  * @param {Record<string, unknown>} locales
  * @param {'en' | 'ja'} code
@@ -641,14 +877,209 @@ export function parseLocalesFromArtistRow(artistRow) {
  * @param {WorldMergeMode} mode
  */
 export function applyWorldToLocales(locales, code, worldBlock, mode) {
-    const next = JSON.parse(JSON.stringify(locales || { en: {}, ja: {} }));
-    if (!next[code] || typeof next[code] !== 'object') next[code] = {};
-    const block = /** @type {Record<string, unknown>} */ (next[code]);
-    const prevWorld =
-        block.world && typeof block.world === 'object' && !Array.isArray(block.world)
-            ? /** @type {Record<string, unknown>} */ (block.world)
-            : {};
-    block.world = mergeWorldBlocks(prevWorld, worldBlock, mode);
-    next[code] = block;
-    return next;
+    return applyWorldBlockToLocales(locales, code, 'world', worldBlock, mode);
+}
+
+/**
+ * @param {string} sourceJson
+ * @param {(prompt: string, source: string, localeTag: string) => Promise<string>} reinterpretFn
+ * @param {(s: string) => Promise<string>} translateEnToJa
+ * @param {string} [instruction]
+ */
+export async function generateEnglishAndJapaneseWorldFromSourceJson(
+    sourceJson,
+    reinterpretFn,
+    translateEnToJa,
+    instruction = JSON_INSTRUCTION,
+) {
+    const en = await generateEnglishWorldWithLlm(reinterpretFn, sourceJson, instruction);
+    const ja = await translateWorldEnToJa(translateEnToJa, en);
+    return { en, ja };
+}
+
+/**
+ * @param {Record<string, unknown>} locales
+ * @param {Record<string, unknown>} enBlock
+ * @param {Record<string, unknown>} jaBlock
+ * @param {WorldMergeMode} mergeMode
+ * @param {{ mergeWorldNew?: boolean; mergeWorld?: boolean }} [opts]
+ */
+export function applyGeneratedWorldBlocksToLocales(
+    locales,
+    enBlock,
+    jaBlock,
+    mergeMode,
+    opts = {},
+) {
+    const mergeWorldNew = opts.mergeWorldNew !== false;
+    const mergeWorld = opts.mergeWorld === true;
+    let next = JSON.parse(JSON.stringify(locales || { en: {}, ja: {} }));
+    if (mergeWorldNew) {
+        next = applyWorldBlockToLocales(next, 'en', 'worldNew', enBlock, mergeMode);
+        next = applyWorldBlockToLocales(next, 'ja', 'worldNew', jaBlock, mergeMode);
+    }
+    if (mergeWorld) {
+        next = applyWorldBlockToLocales(next, 'en', 'world', enBlock, mergeMode);
+        next = applyWorldBlockToLocales(next, 'ja', 'world', jaBlock, mergeMode);
+    }
+    if (worldFieldHasContent(enBlock.practice) || worldFieldHasContent(enBlock.context)) {
+        next.publicWorldSource = 'newWorld';
+    }
+    return normalizeLocalesWorldForStorage(next);
+}
+
+/**
+ * Generate Kamauu-style copy from Identity fields; fill empty `worldNew` and `world`.
+ * @param {object} artistRow
+ * @param {WorldMergeMode} mergeMode
+ * @param {(prompt: string, source: string, localeTag: string) => Promise<string>} reinterpretFn
+ * @param {(s: string) => Promise<string>} translateEnToJa
+ */
+export async function buildMergedLocalesWithGeneratedWorldFromIdentity(
+    artistRow,
+    mergeMode,
+    reinterpretFn,
+    translateEnToJa,
+) {
+    let locales = parseLocalesFromArtistRow(artistRow);
+    locales = normalizeLocalesWorldForStorage(locales);
+    if (!hasUsableIdentityLlmSourceInput(artistRow)) {
+        return locales;
+    }
+    const sourceJson = buildTrimmedIdentityJsonForLlm(artistRow);
+    const blocks = await generateEnglishAndJapaneseWorldFromSourceJson(
+        sourceJson,
+        reinterpretFn,
+        translateEnToJa,
+    );
+    return applyGeneratedWorldBlocksToLocales(locales, blocks.en, blocks.ja, mergeMode, {
+        mergeWorldNew: true,
+        mergeWorld: true,
+    });
+}
+
+/**
+ * Read English locale block from the Studio manage form (Identity + World tabs).
+ * @param {ParentNode} root
+ * @returns {Record<string, unknown>}
+ */
+export function readEnLocaleFromManageForm(root) {
+    /**
+     * @param {string} path
+     */
+    const readField = (path) => {
+        const el = root.querySelector(`[data-art-locale="en"][data-art-path="${path}"]`);
+        if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return '';
+        return String(el.value ?? '');
+    };
+    /**
+     * @param {string} path
+     */
+    const readParas = (path) => textareaToWorldArray(readField(path));
+    return {
+        name: readField('name'),
+        firstName: readField('firstName'),
+        lastName: readField('lastName'),
+        discipline: readField('discipline'),
+        status: readField('status'),
+        bio: readField('bio'),
+        bioLong: readField('bioLong'),
+        location: {
+            city: readField('location.city'),
+            state: readField('location.state'),
+            country: readField('location.country'),
+            display: readField('location.display'),
+        },
+        world: {
+            practice: readField('world.practice'),
+            perspective: readParas('world.perspective'),
+            vision: readParas('world.vision'),
+            constructing: readParas('world.constructing'),
+            context: readParas('world.context'),
+            quote: readField('world.quote'),
+        },
+    };
+}
+
+/**
+ * Build trimmed SOURCE_JSON for Translate to New World (same shape as batch bio job).
+ * @param {Record<string, unknown>} enLoc
+ * @returns {string}
+ */
+export function buildSourceJsonFromManageFormWorld(enLoc) {
+    const base = buildSourcePayloadFromEnLocale(enLoc);
+    let s = JSON.stringify(base);
+    if (s.length > LLM_SOURCE_MAX_CHARS) {
+        s = `${s.slice(0, LLM_SOURCE_MAX_CHARS - 40)}…[truncated:translate-world]`;
+    }
+    return s;
+}
+
+/**
+ * True when the manage form World tab has any English copy to send to the LLM.
+ * @param {ParentNode} root
+ */
+export function manageFormHasWorldSourceForLlm(root) {
+    const enLoc = readEnLocaleFromManageForm(root);
+    const story = compactStoryWorldFromEnLocale(enLoc);
+    return Object.values(story).some((value) => String(value ?? '').trim());
+}
+
+/**
+ * @param {Record<string, unknown>} block
+ */
+function countPopulatedWorldTextFields(block) {
+    let n = 0;
+    for (const key of ['practice', 'perspective', 'vision', 'constructing', 'context', 'quote']) {
+        if (worldFieldHasContent(block[key])) n += 1;
+    }
+    return n;
+}
+
+/**
+ * Write generated EN/JA worldNew blocks into the manage form.
+ * @param {ParentNode} root
+ * @param {Record<string, unknown>} enBlock
+ * @param {Record<string, unknown>} jaBlock
+ */
+export function patchManageFormWorldNewFields(root, enBlock, jaBlock) {
+    for (const loc of /** @type {const} */ (['en', 'ja'])) {
+        const block = loc === 'en' ? enBlock : jaBlock;
+        for (const { path } of STUDIO_WORLD_TO_NEW_PATHS) {
+            const targetPath = path.replace(/^world\./, 'worldNew.');
+            const fieldKey = targetPath.split('.').pop() || '';
+            const el = root.querySelector(
+                `[data-art-locale="${loc}"][data-art-path="${targetPath}"]`,
+            );
+            if (!(el instanceof HTMLTextAreaElement)) continue;
+            const kind = el.getAttribute('data-art-kind') || '';
+            const raw = block[fieldKey];
+            el.value =
+                kind === 'world-paras' ? worldFieldToTextarea(raw) : String(raw ?? '');
+        }
+    }
+}
+
+/**
+ * Reinterpret English World tab fields into Kamauu-style New World (same pipeline as batch).
+ * @param {ParentNode} root
+ * @param {{ prompt: string; reinterpret: (prompt: string, source: string, localeTag: string) => Promise<string>; translateEnToJa: (s: string) => Promise<string> }} opts
+ * @returns {Promise<number>} count of populated worldNew text fields
+ */
+export async function translateManageFormWorldToNewWorld(root, opts) {
+    if (!manageFormHasWorldSourceForLlm(root)) return 0;
+
+    const enLoc = readEnLocaleFromManageForm(root);
+    const sourceJson = buildSourceJsonFromManageFormWorld(enLoc);
+    const instruction = buildWorldLlmInstruction(opts.prompt);
+
+    const { en, ja } = await generateEnglishAndJapaneseWorldFromSourceJson(
+        sourceJson,
+        opts.reinterpret,
+        opts.translateEnToJa,
+        instruction,
+    );
+
+    patchManageFormWorldNewFields(root, en, ja);
+    return countPopulatedWorldTextFields(en);
 }

@@ -227,6 +227,26 @@ export function disciplineButtonIdToKey(buttonId) {
 }
 
 /**
+ * Cohort years stored on the artist roster — never hash-derived placeholders.
+ * @param {unknown} f
+ * @returns {number[]}
+ */
+export function explicitCohortYearsFromFilter(f) {
+    return cohortYearsFromFilterObject(f);
+}
+
+/**
+ * @param {object} artist
+ * @returns {number[]}
+ */
+export function explicitArtistCohortYears(artist) {
+    if (artist?.filter && typeof artist.filter === 'object') {
+        return explicitCohortYearsFromFilter(artist.filter);
+    }
+    return [];
+}
+
+/**
  * @param {unknown} f
  * @returns {number[]}
  */

@@ -30,10 +30,22 @@ import {
     sendEmailBatch,
 } from '../../utils/integrationApi.js';
 import { formatStudioDate } from '../../utils/studioDateFormat.js';
-import { EMAIL_CAMPAIGN_TEMPLATES, getEmailTemplateById, wrapEmailHtml } from '../../utils/emailCampaignTemplates.js';
+import { EMAIL_CAMPAIGN_TEMPLATES, getEmailTemplateById, renderEmailTemplateSelectHtml, wrapEmailHtml } from '../../utils/emailCampaignTemplates.js';
+import { extractEmailDraftForQuickDesign, isFusionEmailLayout, renderFusionEmailFromSlots } from '../../utils/emailFusionLayout.js';
+import {
+    buildQuickDesignContext,
+    buildTemplateDraftFromSource,
+    finalizeQuickDesignSlots,
+    listContentSourceOptions,
+    parseCampaignMeta,
+    parseEmailLayoutLlmJson,
+    loadEmailStudioContentCaches,
+    resolveContentSource,
+    serializeCampaignMeta,
+} from '../../utils/emailCampaignContentSources.js';
+import { openEmailMediaPickerModal, emailMediaInsertHtml } from './emailMediaPickerModal.js';
 import { Principal } from '@dfinity/principal';
 
-const AUTOSAVE_MS = 1500;
 const LLM_MAX = 12000;
 
 /**
@@ -88,7 +100,7 @@ function optText(t) {
  */
 function fullEmailHtml(html) {
     const inner = String(html || '').trim() || '<p></p>';
-    if (inner.includes('fusionart.world/email/') || inner.includes('font-family:system-ui')) {
+    if (isFusionEmailLayout(inner) || inner.includes('fusionart.world/email/')) {
         return inner;
     }
     return wrapEmailHtml(inner, { includeSignature: true });
@@ -305,25 +317,43 @@ export function renderEmailCampaignStudio() {
         </div>
       </div>
       <div id="studio-ec-panel-l-tpl" class="studio-ec__tpl-panel" hidden>
-        <p class="studio-ec__assist-hint">Apply a built-in layout (you can still edit the HTML in the center).</p>
+        <p class="studio-ec__assist-hint">Apply a branded Fusion layout. Optionally bind live content, then refine with Quick Design.</p>
         <label class="studio-field">
           <span>Template</span>
           <select class="studio-select" id="studio-ec-template">
-            <option value="">— None —</option>
-            ${Object.keys(EMAIL_CAMPAIGN_TEMPLATES)
-                .map(
-                    (k) =>
-                        `<option value="${esc(k)}">${esc(EMAIL_CAMPAIGN_TEMPLATES[k].name)}</option>`,
-                )
-                .join('')}
+            ${renderEmailTemplateSelectHtml()}
           </select>
         </label>
+        <div id="studio-ec-source-panel" class="studio-ec__source-panel" hidden>
+          <p class="studio-ec__kicker">Content source <span class="studio-muted">(optional)</span></p>
+          <label class="studio-field">
+            <span>Source type</span>
+            <select class="studio-select" id="studio-ec-source-type">
+              <option value="">— None —</option>
+              <option value="artist">Featured artist</option>
+              <option value="journal">Journal entry</option>
+              <option value="program">Program</option>
+            </select>
+          </label>
+          <label class="studio-field">
+            <span>Item</span>
+            <select class="studio-select" id="studio-ec-source-id" disabled>
+              <option value="">— Select type first —</option>
+            </select>
+          </label>
+          <button type="button" class="studio-btn-secondary studio-ec__apply-content" id="studio-ec-apply-content">Apply content</button>
+        </div>
+        <div class="studio-ec__tpl-actions">
+          <button type="button" class="studio-btn-secondary" id="studio-ec-apply-template">Apply template</button>
+          <button type="button" class="studio-btn-primary" id="studio-ec-quick-design">Quick Design</button>
+        </div>
+        <p class="studio-muted studio-ec__tpl-note">Quick Design uses the selected template styling and optional content source. Review before sending.</p>
       </div>
     </aside>
     <section class="studio-ec__col studio-ec__col--editor" aria-label="Message">
       <div class="studio-ec__eyebrow">Email</div>
       <h1 class="studio-ec__title">Message</h1>
-      <p class="studio-ec__lede" id="studio-ec-save-state" aria-live="polite"></p>
+      <p class="studio-ec__lede" id="studio-ec-save-state" aria-live="polite">Edit your message, then click Save draft.</p>
       <div class="studio-ec__row-fields">
         <label class="studio-field studio-field--row">
           <span class="studio-ec__lhead">Subject <em class="studio-ec__n" id="studio-ec-subject-n">0 / 998</em></span>
@@ -348,7 +378,10 @@ export function renderEmailCampaignStudio() {
               <button type="button" class="studio-ec__tbt" data-cmd="link" title="Link">Link</button>
               <button type="button" class="studio-ec__tbt" data-cmd="ul" title="List">List</button>
               <span class="studio-ec__tsep" aria-hidden="true"></span>
-              <button type="button" class="studio-ec__tbt" id="studio-ec-image" title="Image">Image</button>
+              <div class="studio-ec__image-split" role="group" aria-label="Insert image">
+                <button type="button" class="studio-ec__tbt" id="studio-ec-image" title="Insert image from library">Image…</button>
+                <button type="button" class="studio-ec__tbt studio-ec__tbt--mini" id="studio-ec-image-upload" title="Upload new image">↑</button>
+              </div>
               <span class="studio-ec__tsep" aria-hidden="true"></span>
               <button type="button" class="studio-ec__tbt" id="studio-ec-edit-html" title="Edit raw HTML">&lt;/&gt; HTML</button>
               <input type="file" id="studio-ec-image-file" accept="image/*" class="studio-sr-only" aria-hidden="true" />
@@ -461,6 +494,7 @@ export async function initEmailCampaignStudio(mainEl) {
     const editorWrap = root.querySelector('.studio-ec__editor-wrap');
     const aibarEl = root.querySelector('#studio-ec-selbar');
     const savedEl = root.querySelector('#studio-ec-save-state');
+    const saveDockBtn = root.querySelector('#studio-ec-dock-save');
     const msgEl = root.querySelector('#studio-ec-msg');
     const statusVal = root.querySelector('#studio-ec-status-val');
     const subjN = root.querySelector('#studio-ec-subject-n');
@@ -477,6 +511,9 @@ export async function initEmailCampaignStudio(mainEl) {
     const subjInp = root.querySelector('#studio-ec-subject');
     const prevInp = root.querySelector('#studio-ec-preview');
     const templateSel = root.querySelector('#studio-ec-template');
+    const sourcePanel = root.querySelector('#studio-ec-source-panel');
+    const sourceTypeSel = root.querySelector('#studio-ec-source-type');
+    const sourceIdSel = root.querySelector('#studio-ec-source-id');
     const audSel = root.querySelector('#studio-ec-audience');
     const segmentInp = root.querySelector('#studio-ec-segment');
     const segmentPreset = root.querySelector('#studio-ec-segment-preset');
@@ -489,10 +526,15 @@ export async function initEmailCampaignStudio(mainEl) {
     let current = null;
     /** @type {string | null} */
     let currentId = null;
-    let saveTimer = 0;
+    let isDirty = false;
+    let isApplyingRecord = false;
     /** @type {object[]} */
     let subscribers = [];
     let resendMeta = { from: null, segmentId: null };
+    /** @type {{ artists: object[], journals: object[], programs: object[], videos: object[], media: object[], images: object[] }} */
+    let contentCaches = { artists: [], journals: [], programs: [], videos: [], media: [], images: [] };
+    /** @type {{ templateId?: string, source?: { type: string, id: string } | null }} */
+    let campaignMeta = {};
 
     const setMsg = (kind, text) => {
         if (!(msgEl instanceof HTMLElement)) return;
@@ -511,8 +553,37 @@ export async function initEmailCampaignStudio(mainEl) {
         msgEl.textContent = text;
     };
 
-    const setSaved = (t) => {
-        if (savedEl) savedEl.textContent = t || '';
+    const syncSaveUi = (transient = '') => {
+        if (savedEl instanceof HTMLElement) {
+            if (transient) {
+                savedEl.textContent = transient;
+            } else {
+                savedEl.textContent = isDirty
+                    ? 'Unsaved changes — click Save draft when ready.'
+                    : 'Edit your message, then click Save draft.';
+            }
+        }
+        if (saveDockBtn instanceof HTMLButtonElement) {
+            saveDockBtn.disabled = !isDirty;
+        }
+    };
+
+    const markDirty = () => {
+        if (isApplyingRecord) return;
+        if (!isDirty) {
+            isDirty = true;
+            syncSaveUi();
+        }
+    };
+
+    const clearDirty = () => {
+        isDirty = false;
+        syncSaveUi();
+    };
+
+    const confirmDiscardUnsaved = () => {
+        if (!isDirty) return true;
+        return window.confirm('You have unsaved changes. Discard them and continue?');
     };
 
     const updateCharCounts = () => {
@@ -535,7 +606,7 @@ export async function initEmailCampaignStudio(mainEl) {
         if (hint) {
             if (!hasId) {
                 hint.textContent =
-                    'Save a draft at least once to delete. To clear the editor without saving, use “New” in the list.';
+                    'Save draft at least once to delete. To clear the editor without saving, use “New” in the list.';
                 hint.hidden = false;
             } else if (live && !teamNavAllowed) {
                 hint.textContent = 'On-chain, only a canister admin can delete campaigns. Use Campaign history to review IDs.';
@@ -786,6 +857,89 @@ export async function initEmailCampaignStudio(mainEl) {
         if (subjInp instanceof HTMLInputElement) subjInp.value = t.defaultSubject;
         if (prevInp instanceof HTMLInputElement) prevInp.value = t.defaultPreview;
         if (bodyEl instanceof HTMLElement) bodyEl.innerHTML = t.bodyHtml;
+        campaignMeta = { ...campaignMeta, templateId: tplId };
+        updateSourcePanelVisibility();
+        updateCharCounts();
+    };
+
+    const getCurrentSourceRef = () => {
+        const type = sourceTypeSel instanceof HTMLSelectElement ? sourceTypeSel.value : '';
+        const id = sourceIdSel instanceof HTMLSelectElement ? sourceIdSel.value : '';
+        if (!type || !id) return null;
+        return { type: /** @type {'artist'|'journal'|'program'} */ (type), id };
+    };
+
+    const updateSourcePanelVisibility = () => {
+        const tplId = templateSel instanceof HTMLSelectElement ? templateSel.value : '';
+        const tpl = getEmailTemplateById(tplId);
+        const types = tpl?.contentSourceTypes || [];
+        const show = types.length > 0;
+        if (sourcePanel instanceof HTMLElement) sourcePanel.hidden = !show;
+        if (sourceTypeSel instanceof HTMLSelectElement) {
+            [...sourceTypeSel.options].forEach((opt) => {
+                if (!opt.value) return;
+                opt.hidden = !types.includes(/** @type {any} */ (opt.value));
+            });
+            if (sourceTypeSel.value && !types.includes(/** @type {any} */ (sourceTypeSel.value))) {
+                sourceTypeSel.value = '';
+            }
+        }
+        populateSourceIdSelect();
+    };
+
+    const populateSourceIdSelect = () => {
+        if (!(sourceIdSel instanceof HTMLSelectElement)) return;
+        const type = sourceTypeSel instanceof HTMLSelectElement ? sourceTypeSel.value : '';
+        if (!type) {
+            sourceIdSel.innerHTML = '<option value="">— Select type first —</option>';
+            sourceIdSel.disabled = true;
+            return;
+        }
+        const rows =
+            type === 'artist'
+                ? contentCaches.artists
+                : type === 'journal'
+                  ? contentCaches.journals
+                  : contentCaches.programs;
+        const options = listContentSourceOptions(/** @type {any} */ (type), rows);
+        sourceIdSel.innerHTML =
+            '<option value="">— Select —</option>' +
+            options
+                .map((o) => `<option value="${esc(o.id)}">${esc(o.label)}</option>`)
+                .join('');
+        sourceIdSel.disabled = options.length === 0;
+        const savedId = campaignMeta?.source?.type === type ? campaignMeta.source.id : '';
+        if (savedId && [...sourceIdSel.options].some((o) => o.value === savedId)) {
+            sourceIdSel.value = savedId;
+        }
+    };
+
+    const applyContentSourceToForm = (force = false) => {
+        const tplId = templateSel instanceof HTMLSelectElement ? templateSel.value : '';
+        const source = getCurrentSourceRef();
+        if (!tplId || !source) {
+            setMsg('error', 'Select a template and content item first.');
+            return;
+        }
+        if (!force && bodyEl instanceof HTMLElement) {
+            const text = bodyEl.innerText.replace(/\s+/g, ' ').trim();
+            if (text.length > 40) {
+                const ok = window.confirm('Replace subject, preview, and body with content from the selected source?');
+                if (!ok) return;
+            }
+        }
+        const draft = buildTemplateDraftFromSource(tplId, source, contentCaches);
+        if (!draft) {
+            setMsg('error', 'Could not resolve content for that item.');
+            return;
+        }
+        if (subjInp instanceof HTMLInputElement) subjInp.value = draft.subject;
+        if (prevInp instanceof HTMLInputElement) prevInp.value = draft.previewText;
+        if (bodyEl instanceof HTMLElement) bodyEl.innerHTML = draft.bodyHtml;
+        campaignMeta = { templateId: tplId, source };
+        updateCharCounts();
+        markDirty();
+        setMsg('ok', 'Content applied.');
     };
 
     const readFormToRecord = () => {
@@ -797,6 +951,11 @@ export async function initEmailCampaignStudio(mainEl) {
         const tid = templateSel instanceof HTMLSelectElement && templateSel.value
             ? templateSel.value
             : unwrapOpt(/** @type {any} */(base).templateId) || '';
+        const humanNotes = notesTa instanceof HTMLTextAreaElement ? notesTa.value : '';
+        const meta = {
+            templateId: tid || campaignMeta.templateId || '',
+            source: getCurrentSourceRef() || campaignMeta.source || null,
+        };
         return toUpsertRecord(
             {
                 ...base,
@@ -807,62 +966,69 @@ export async function initEmailCampaignStudio(mainEl) {
                 htmlBody,
                 templateId: tid ? [tid] : [],
                 audience: aud,
-                internalNotes: (notesTa instanceof HTMLTextAreaElement ? notesTa.value : (/** @type {any} */(base).internalNotes)) || '',
+                internalNotes: serializeCampaignMeta(meta, humanNotes),
             },
             { id: currentId || String((/** @type {any} */(base).id) || '') },
         );
     };
 
     const applyRecordToForm = (rec) => {
-        current = rec;
-        currentId = String(rec?.id || '') || null;
-        if (titleInp instanceof HTMLInputElement) titleInp.value = unwrapOpt(rec.title) || '';
-        if (subjInp instanceof HTMLInputElement) subjInp.value = String(rec.subject || '');
-        if (prevInp instanceof HTMLInputElement) prevInp.value = String(rec.previewText || '');
-        if (notesTa instanceof HTMLTextAreaElement) notesTa.value = String(rec.internalNotes || '');
-        if (bodyEl instanceof HTMLElement) {
-            const hb = String(rec.htmlBody || '').trim();
-            bodyEl.innerHTML = hb || '<p><br></p>';
+        isApplyingRecord = true;
+        try {
+            current = rec;
+            currentId = String(rec?.id || '') || null;
+            if (titleInp instanceof HTMLInputElement) titleInp.value = unwrapOpt(rec.title) || '';
+            if (subjInp instanceof HTMLInputElement) subjInp.value = String(rec.subject || '');
+            if (prevInp instanceof HTMLInputElement) prevInp.value = String(rec.previewText || '');
+            const parsedNotes = parseCampaignMeta(String(rec.internalNotes || ''));
+            campaignMeta = parsedNotes.meta || {};
+            if (notesTa instanceof HTMLTextAreaElement) notesTa.value = parsedNotes.humanNotes;
+            if (bodyEl instanceof HTMLElement) {
+                const hb = String(rec.htmlBody || '').trim();
+                bodyEl.innerHTML = hb || '<p><br></p>';
+            }
+            if (templateSel instanceof HTMLSelectElement) {
+                const tid = unwrapOpt(rec.templateId) || campaignMeta.templateId || '';
+                templateSel.value = getEmailTemplateById(tid) ? tid : '';
+            }
+            if (sourceTypeSel instanceof HTMLSelectElement && campaignMeta?.source?.type) {
+                sourceTypeSel.value = campaignMeta.source.type;
+            }
+            updateSourcePanelVisibility();
+            if (sourceIdSel instanceof HTMLSelectElement && campaignMeta?.source?.id) {
+                sourceIdSel.value = campaignMeta.source.id;
+            }
+            if (audSel instanceof HTMLSelectElement) {
+                audSel.value = audienceToValue(rec.audience);
+            }
+            if (statusVal) {
+                statusVal.textContent = statusKey(rec.status);
+            }
+            updateCharCounts();
+            updateRecipientEst();
+            syncDeleteButtonState();
+        } finally {
+            isApplyingRecord = false;
+            clearDirty();
         }
-        if (templateSel instanceof HTMLSelectElement) {
-            const tid = unwrapOpt(rec.templateId) || '';
-            templateSel.value = EMAIL_CAMPAIGN_TEMPLATES[tid] ? tid : '';
-        }
-        if (audSel instanceof HTMLSelectElement) {
-            audSel.value = audienceToValue(rec.audience);
-        }
-        if (statusVal) {
-            statusVal.textContent = statusKey(rec.status);
-        }
-        updateCharCounts();
-        updateRecipientEst();
-        syncDeleteButtonState();
     };
 
     const saveNow = async () => {
-        setSaved('Saving…');
+        syncSaveUi('Saving…');
+        if (saveDockBtn instanceof HTMLButtonElement) saveDockBtn.disabled = true;
         try {
             const rec = readFormToRecord();
             const id = await upsertEmailCampaign(rec);
             currentId = id;
-            const fresh = await getEmailCampaign(id);
-            if (fresh) applyRecordToForm(fresh);
-            setSaved('All changes saved');
-            setTimeout(() => setSaved(''), 2500);
+            current = { ...rec, id };
+            clearDirty();
+            syncSaveUi('Draft saved');
+            window.setTimeout(() => syncSaveUi(), 2500);
             await refreshList();
         } catch (e) {
-            setSaved('');
+            syncSaveUi();
             setMsg('error', e instanceof Error ? e.message : String(e));
         }
-    };
-
-    const scheduleSave = () => {
-        if (saveTimer) window.clearTimeout(saveTimer);
-        setSaved('Unsaved changes…');
-        saveTimer = window.setTimeout(() => {
-            saveTimer = 0;
-            void saveNow();
-        }, AUTOSAVE_MS);
     };
 
     const refreshList = async () => {
@@ -901,6 +1067,7 @@ export async function initEmailCampaignStudio(mainEl) {
         e.preventDefault();
         const id = btn.getAttribute('data-id');
         if (!id) return;
+        if (!confirmDiscardUnsaved()) return;
         try {
             const rec = await getEmailCampaign(id);
             if (rec) {
@@ -919,27 +1086,124 @@ export async function initEmailCampaignStudio(mainEl) {
         void onCampaignListClick(e);
     });
 
-    bodyEl?.addEventListener('input', () => scheduleSave());
+    bodyEl?.addEventListener('input', () => markDirty());
     [titleInp, subjInp, prevInp, notesTa, audSel, templateSel].forEach((el) => {
         el?.addEventListener('input', () => {
             updateCharCounts();
-            scheduleSave();
+            markDirty();
         });
         el?.addEventListener('change', () => {
             updateCharCounts();
             if (el === audSel) updateRecipientEst();
-            scheduleSave();
+            markDirty();
         });
     });
 
     templateSel?.addEventListener('change', () => {
-        if (templateSel instanceof HTMLSelectElement && templateSel.value) {
-            applyTemplate(templateSel.value);
-            scheduleSave();
+        updateSourcePanelVisibility();
+        markDirty();
+    });
+
+    sourceTypeSel?.addEventListener('change', () => {
+        populateSourceIdSelect();
+        campaignMeta = { ...campaignMeta, source: null };
+        markDirty();
+    });
+
+    sourceIdSel?.addEventListener('change', () => {
+        const source = getCurrentSourceRef();
+        if (source) campaignMeta = { ...campaignMeta, source };
+        markDirty();
+    });
+
+    root.querySelector('#studio-ec-apply-template')?.addEventListener('click', () => {
+        const tplId = templateSel instanceof HTMLSelectElement ? templateSel.value : '';
+        if (!tplId) {
+            setMsg('error', 'Select a template first.');
+            return;
+        }
+        applyTemplate(tplId);
+        markDirty();
+        setMsg('ok', 'Template applied.');
+    });
+
+    root.querySelector('#studio-ec-apply-content')?.addEventListener('click', () => {
+        applyContentSourceToForm(false);
+    });
+
+    root.querySelector('#studio-ec-quick-design')?.addEventListener('click', async () => {
+        const tplId = templateSel instanceof HTMLSelectElement ? templateSel.value : '';
+        if (!tplId) {
+            setMsg('error', 'Select a template before Quick Design.');
+            return;
+        }
+        const idea = (assistPrompt instanceof HTMLTextAreaElement ? assistPrompt.value : '').trim();
+        const source = getCurrentSourceRef();
+        const tone = toneEl instanceof HTMLSelectElement ? toneEl.value : 'Elevated';
+        const len = lengthEl instanceof HTMLSelectElement ? lengthEl.value : 'Standard';
+        const editorHtml = bodyEl instanceof HTMLElement ? bodyEl.innerHTML : '';
+        const editorSubject = subjInp instanceof HTMLInputElement ? subjInp.value.trim() : '';
+        const editorPreview = prevInp instanceof HTMLInputElement ? prevInp.value.trim() : '';
+        const editorDraft = extractEmailDraftForQuickDesign(editorHtml);
+        const context = buildQuickDesignContext(tplId, source, idea, contentCaches, {
+            subject: editorSubject,
+            previewText: editorPreview,
+            isBranded: editorDraft.isBranded,
+            layoutSlots: editorDraft.layoutSlots,
+            rawBodyHtml: editorDraft.rawBodyHtml,
+        });
+        const prompt = `You write marketing email copy for FUSION art platform. ${tone} tone. ${len} length. Reformat existingDraft into branded layout slots using styleGuide (canvas #faf3f4, black text, #c12525 CTA applied by the app shell). Reply with ONE JSON object only (no markdown). Keys: "subject" (string), "previewText" (string, max 160 chars), "layout" (object with optional string fields: eyebrow, pillLabel, headlineHtml, bodyHtml, footnote, and cta object with label and href). Use <br> inside headlineHtml for line breaks. bodyHtml: <p> paragraphs only — no h1, tables, logo, or CTA button. Black text; links use black underline. Do NOT include hero image URLs. JSON:`;
+        const src = JSON.stringify(context);
+        if (prompt.length + src.length > LLM_MAX) {
+            setMsg('error', 'Prompt too long. Shorten the compose description.');
+            return;
+        }
+        setMsg('info', 'Quick Design generating…');
+        try {
+            const raw = await studioReinterpretWithPrompt(prompt, src, 'en');
+            const parsed = parseEmailLayoutLlmJson(raw.trim());
+            if (!parsed?.layout) {
+                setMsg('error', 'Could not parse Quick Design JSON. Try again.');
+                return;
+            }
+            const sourceSlots = source
+                ? resolveContentSource(source, contentCaches.artists, contentCaches.journals, contentCaches.programs)
+                : null;
+            const editorSlots = {
+                ...(editorDraft.layoutSlots || {}),
+                bodyHtml: editorDraft.rawBodyHtml,
+                subject: editorSubject,
+                previewText: editorPreview,
+            };
+            const merged = finalizeQuickDesignSlots(
+                tplId,
+                {
+                    eyebrow: parsed.layout.eyebrow,
+                    pillLabel: parsed.layout.pillLabel,
+                    headlineHtml: parsed.layout.headlineHtml,
+                    bodyHtml: parsed.layout.bodyHtml,
+                    footnote: parsed.layout.footnote,
+                    cta: parsed.layout.cta,
+                    subject: parsed.subject,
+                    previewText: parsed.previewText,
+                },
+                { sourceSlots, editorSlots },
+            );
+            if (subjInp instanceof HTMLInputElement && merged.subject) subjInp.value = merged.subject;
+            if (prevInp instanceof HTMLInputElement && merged.previewText) {
+                prevInp.value = String(merged.previewText).slice(0, 200);
+            }
+            if (bodyEl instanceof HTMLElement) bodyEl.innerHTML = renderFusionEmailFromSlots(merged);
+            campaignMeta = { templateId: tplId, source };
+            setMsg('ok', 'Quick Design applied. Review before sending.');
+            markDirty();
+        } catch (e) {
+            setMsg('error', e instanceof Error ? e.message : String(e));
         }
     });
 
     root.querySelector('#studio-ec-new')?.addEventListener('click', () => {
+        if (!confirmDiscardUnsaved()) return;
         const empty = toUpsertRecord(
             {
                 id: '',
@@ -994,7 +1258,7 @@ export async function initEmailCampaignStudio(mainEl) {
                 const v = ta.value.trim();
                 bodyEl.innerHTML = v || '<p><br></p>';
                 updateCharCounts();
-                scheduleSave();
+                markDirty();
             }
             close();
         });
@@ -1056,7 +1320,7 @@ export async function initEmailCampaignStudio(mainEl) {
                 bodyEl.innerHTML = String(json.htmlBody);
             }
             setMsg('ok', 'Draft inserted. Review before sending.');
-            void saveNow();
+            markDirty();
         } catch (e) {
             setMsg('error', e instanceof Error ? e.message : String(e));
         }
@@ -1089,7 +1353,7 @@ export async function initEmailCampaignStudio(mainEl) {
             r.deleteContents();
             r.insertNode(document.createTextNode(out.trim()));
             setMsg('ok', 'Replaced selection.');
-            scheduleSave();
+            markDirty();
         } catch (e) {
             setMsg('error', e instanceof Error ? e.message : String(e));
         }
@@ -1109,7 +1373,7 @@ export async function initEmailCampaignStudio(mainEl) {
             r.deleteContents();
             r.insertNode(document.createTextNode(String(out).trim()));
             setMsg('ok', 'Replaced with Japanese.');
-            scheduleSave();
+            markDirty();
         } catch (e) {
             setMsg('error', e instanceof Error ? e.message : String(e));
         }
@@ -1126,7 +1390,7 @@ export async function initEmailCampaignStudio(mainEl) {
                 setMsg('error', 'Select a phrase or sentence to expand or shorten.');
             } else {
                 setMsg('ok', mode === 'expand' ? 'Selection expanded.' : 'Selection shortened.');
-                scheduleSave();
+                markDirty();
             }
         };
     };
@@ -1161,12 +1425,37 @@ export async function initEmailCampaignStudio(mainEl) {
                     /* no-op */
                 }
             }
-            scheduleSave();
+            markDirty();
+        });
+    });
+
+    const insertImageHtmlAtCursor = (html) => {
+        if (!(bodyEl instanceof HTMLElement)) return;
+        const sel = window.getSelection();
+        const tpl = document.createElement('template');
+        tpl.innerHTML = html;
+        const node = tpl.content.firstChild;
+        if (!node) return;
+        if (sel && sel.rangeCount && bodyEl.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+            sel.getRangeAt(0).insertNode(node);
+        } else {
+            bodyEl.appendChild(node);
+        }
+        markDirty();
+    };
+
+    root.querySelector('#studio-ec-image')?.addEventListener('click', () => {
+        void openEmailMediaPickerModal({
+            media: contentCaches.media,
+            onSelect: ({ url, alt, placement, posterUrl }) => {
+                insertImageHtmlAtCursor(emailMediaInsertHtml({ url, alt, placement, posterUrl }));
+                setMsg('ok', 'Media inserted.');
+            },
         });
     });
 
     const fileInp = root.querySelector('#studio-ec-image-file');
-    root.querySelector('#studio-ec-image')?.addEventListener('click', () => {
+    root.querySelector('#studio-ec-image-upload')?.addEventListener('click', () => {
         if (fileInp instanceof HTMLInputElement) fileInp.click();
     });
     fileInp?.addEventListener('change', async () => {
@@ -1191,7 +1480,7 @@ export async function initEmailCampaignStudio(mainEl) {
                 bodyEl.appendChild(img);
             }
             setMsg('ok', 'Image inserted.');
-            scheduleSave();
+            markDirty();
         } catch (e) {
             setMsg('error', e instanceof Error ? e.message : String(e));
         } finally {
@@ -1237,7 +1526,7 @@ export async function initEmailCampaignStudio(mainEl) {
             setMsg('error', 'Sending requires Live data, Integration API, and Resend.');
             return;
         }
-        if (!currentId) {
+        if (!currentId || isDirty) {
             await saveNow();
         }
         if (!currentId) {
@@ -1382,6 +1671,7 @@ export async function initEmailCampaignStudio(mainEl) {
             b.addEventListener('click', async () => {
                 const id = b.getAttribute('data-id');
                 if (!id) return;
+                if (!confirmDiscardUnsaved()) return;
                 const r = await getEmailCampaign(id);
                 if (r) applyRecordToForm(r);
                 close();
@@ -1391,6 +1681,7 @@ export async function initEmailCampaignStudio(mainEl) {
             b.addEventListener('click', async () => {
                 const id = b.getAttribute('data-id');
                 if (!id) return;
+                if (!confirmDiscardUnsaved()) return;
                 const nid = await duplicateEmailCampaign(id);
                 const r = await getEmailCampaign(nid);
                 if (r) applyRecordToForm(r);
@@ -1524,8 +1815,14 @@ export async function initEmailCampaignStudio(mainEl) {
     setLeftSubtab('compose');
     updateCharCounts();
     syncDeleteButtonState();
+    syncSaveUi();
 
     await loadMeta();
+    try {
+        contentCaches = await loadEmailStudioContentCaches();
+    } catch {
+        contentCaches = { artists: [], journals: [], programs: [], videos: [], media: [], images: [] };
+    }
     await loadSubscribers();
     await loadResendSegmentPresets();
     if (segmentInp instanceof HTMLInputElement && !segmentInp.value.trim() && resendMeta.segmentId) {

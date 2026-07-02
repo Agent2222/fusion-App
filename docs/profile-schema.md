@@ -23,7 +23,7 @@ See inventory in the product plan. Fields include `name`, optional `firstName` /
 
 ### Public profile: `world` vs `worldNew`
 
-On `/profile/:slug`, each section (**practice**, **perspective**, **vision**, **constructing**, **context**, **quote**, and **introGallery**) resolves copy as: use **`world.<field>`** when it has content; otherwise fall back to **`worldNew.<field>`** for that same key. Placeholders (question-style prompts) apply only when **both** are empty for the active locale. This lets curated `world` win while still surfacing `worldNew` when `world` is sparse.
+On `/profile/:slug`, each section (**practice**, **perspective**, **vision**, **constructing**, **context**, **quote**, and **introGallery**) resolves copy via `publicWorldSource` on `locales` (see `src/fusion-app-frontend/src/utils/worldPublicPick.js`). **New World (`worldNew`) is the default** when usable generated copy exists; artists may opt in to Story & World (`world`) in member profile settings (`publicWorldSource: "world"`). Per field, the preferred block is tried first; if that field is empty, the other block is used. Placeholders apply only when **both** are empty for the active locale.
 
 ### Studio: LLM batch job (“Generate world from bio (batch)”)
 

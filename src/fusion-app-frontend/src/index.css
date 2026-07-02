@@ -1088,6 +1088,20 @@ body {
   padding-bottom: 400px;
   padding-top: 145px;
   overflow: visible;
+  background-color: var(--bg, var(--c3, #fff));
+  position: relative;
+  z-index: 2;
+}
+
+.journal-entry-content .journal-entry-detail {
+  max-width: 720px;
+  margin: 0 auto;
+  opacity: 1;
+  transition: opacity 0.28s ease;
+}
+
+.journal-entry-content .journal-entry-detail.is-pending {
+  opacity: 0;
 }
 
 .journal-entry-back {
@@ -1107,17 +1121,13 @@ body {
   opacity: 0.75;
 }
 
-.journal-entry-content .journal-entry-detail {
-  max-width: 720px;
-  margin: 0 auto;
-}
-
 .journal-entry-hero {
   width: 100%;
   aspect-ratio: 16 / 9;
   overflow: hidden;
   background: var(--c3);
   margin-bottom: 1.5rem;
+  position: relative;
 }
 
 .journal-entry-hero img {
@@ -1140,7 +1150,27 @@ body {
   letter-spacing: 0.02em;
   line-height: 1.45;
   color: var(--c2);
-  white-space: pre-wrap;
+}
+
+.journal-entry-description p {
+  margin: 0 0 1rem;
+}
+
+.journal-entry-description p:last-child {
+  margin-bottom: 0;
+}
+
+.journal-entry-description img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 1rem 0;
+}
+
+.journal-entry-description a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.12em;
 }
 
 .journal-entry-not-found {
@@ -1563,6 +1593,23 @@ html[data-fusion-sound-placement="filter"] .fusion-sound-env-host {
 html[data-fusion-sound-placement="default"] .fusion-sound-env-host {
   left: 1rem;
   right: auto;
+}
+
+html[data-fusion-sound-mobile-menu="true"] .fusion-sound-env-host {
+  position: static;
+  top: auto;
+  left: auto !important;
+  right: auto !important;
+  width: 100%;
+  max-width: 100%;
+  z-index: auto;
+  transition: none;
+}
+
+@media (max-width: 1024px) {
+  body > .fusion-sound-env-host:not(.fusion-sound-env-host--mobile-menu) {
+    display: none !important;
+  }
 }
 
 #filterToggle.active {
@@ -2969,6 +3016,12 @@ html[data-theme='dark'] .join-fusion-page__err {
   /* margin-bottom: clamp(0.75rem, 2vw, 1.5rem); */
 }
 
+.program-view-content app-residency-alumni-table {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+}
+
 /* .program-view-content app-program-fade-gallery:not([hidden]) {
   margin-top: clamp(1.5rem, 4vw, 2.75rem);
 } */
@@ -3329,6 +3382,51 @@ html[data-theme='dark'] .join-fusion-page__err {
   }
 }
 
+@media (max-width: 1024px) {
+  .journal-entry-page {
+    padding-top: clamp(5rem, 14vw, 8.5rem);
+  }
+
+  .journal-entry-content .journal-entry-detail {
+    max-width: none;
+    width: 100%;
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  .journal-entry-back {
+    padding-left: clamp(0.75rem, 4vw, 2rem);
+    padding-right: clamp(0.75rem, 4vw, 2rem);
+  }
+
+  .journal-entry-hero {
+    width: 100vw;
+    max-width: none;
+    margin-left: calc(50% - 50vw);
+    margin-right: calc(50% - 50vw);
+    margin-bottom: 1.25rem;
+    aspect-ratio: 5 / 4;
+    min-height: min(52vh, 520px);
+    height: auto;
+  }
+
+  .journal-entry-hero img {
+    width: 100%;
+    height: 100%;
+    min-height: 100%;
+    max-width: none;
+    max-height: none;
+    object-fit: cover;
+  }
+
+  .journal-entry-body {
+    padding-left: clamp(0.75rem, 4vw, 2rem);
+    padding-right: clamp(0.75rem, 4vw, 2rem);
+    box-sizing: border-box;
+    max-width: none;
+  }
+}
+
 @media (max-width: 768px) {
   #filterContent {
     grid-template-columns: 1fr;
@@ -3367,35 +3465,11 @@ html[data-theme='dark'] .join-fusion-page__err {
     font-size: clamp(1.04rem, 1.2vw, 1.45rem);
   }
 
-  .journal-entry-content .journal-entry-detail {
-    max-width: none;
+  .journal-entry-description img {
     width: 100%;
-    margin-left: 0;
-    margin-right: 0;
-  }
-
-  .journal-entry-hero {
-    width: 100vw;
-    max-width: none;
-    aspect-ratio: unset;
-    margin-left: calc(50% - 50vw);
-    margin-right: calc(50% - 50vw);
-  }
-
-  .journal-entry-hero img {
-    width: 100%;
+    max-width: 100%;
     height: auto;
-    max-width: none;
-    max-height: none;
-    min-height: 42vh;
-    object-fit: cover;
-  }
-
-  .journal-entry-body {
-    padding-left: 10%;
-    padding-right: 10%;
-    box-sizing: border-box;
-    max-width: none;
+    margin: 1.25rem 0;
   }
 
   

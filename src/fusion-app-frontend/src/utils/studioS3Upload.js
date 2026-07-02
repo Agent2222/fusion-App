@@ -71,15 +71,21 @@ function slugPathPart(s) {
 }
 
 /**
- * @param {File} file
+ * @param {File | Blob} file
  * @returns {string}
  */
 function fileExtFromUpload(file) {
     const name = String(file?.name || '').trim();
     const dot = name.lastIndexOf('.');
     if (dot > 0 && dot < name.length - 1) {
-        return `.${slugPathPart(name.slice(dot + 1)).replace(/\./g, '') || 'bin'}`;
+        const ext = slugPathPart(name.slice(dot + 1)).replace(/\./g, '');
+        if (ext) return `.${ext}`;
     }
+    const mime = normalizeImageMime(file);
+    if (mime === 'image/jpeg') return '.jpg';
+    if (mime === 'image/png') return '.png';
+    if (mime === 'image/webp') return '.webp';
+    if (mime === 'image/gif') return '.gif';
     return '.bin';
 }
 

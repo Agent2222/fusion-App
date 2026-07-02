@@ -1,11 +1,19 @@
 /**
  * Central place to update document title, meta description, canonical, Open Graph, Twitter, and JSON-LD.
- * Keep static defaults in index.html aligned with the home route (see plan: link unfurl without JS).
+ * Keep static defaults in index.html aligned with DEFAULT_SITE_DESCRIPTION and DEFAULT_OG_IMAGE_URL.
  */
 
 import { getPublicSiteOrigin } from "../config.js";
 
 const DESC_MAX = 158;
+
+/** Default share / search preview image (homepage + routes without a page image). */
+export const DEFAULT_OG_IMAGE_URL =
+  "https://cdn.fusionart.world/uploads/platform-assets/program_hero-1.jpg";
+
+/** Homepage meta description — keep index.html meta tags aligned. */
+export const DEFAULT_SITE_DESCRIPTION =
+  "Fusion is an exclusive art platform running curated artist residency programs in Japan, from Kaga and Ishikawa to Tokyo and beyond, for artists, gallerists, and art enthusiasts worldwide.";
 
 /** @param {string} s */
 function clipDescription(s) {
@@ -76,8 +84,6 @@ function setJsonLdScript(id, data) {
   document.head.appendChild(script);
 }
 
-const DEFAULT_OG_IMAGE_PATH = "/og-default.png";
-
 /**
  * @param {string} path
  */
@@ -107,6 +113,7 @@ function normalizeCanonicalPath(path) {
  *   breadcrumbItems?: Array<{ name: string, path: string }>,
  *   articleJsonLd?: Record<string, unknown> | null,
  *   homeOrganizationJsonLd?: boolean,
+ *   personJsonLd?: { name: string, url: string, image?: string, jobTitle?: string, description?: string } | null,
  * }} opts
  */
 export function applyDocumentSeo(opts) {
@@ -153,14 +160,14 @@ export function applyDocumentSeo(opts) {
   const imagePath =
     opts.imageUrl != null && String(opts.imageUrl).trim()
       ? String(opts.imageUrl).trim()
-      : `${origin}${DEFAULT_OG_IMAGE_PATH}`;
+      : DEFAULT_OG_IMAGE_URL;
   const absImage = imagePath.startsWith("http")
     ? imagePath
     : `${origin}${imagePath.startsWith("/") ? imagePath : `/${imagePath}`}`;
 
   upsertOg("og:image").setAttribute("content", absImage);
-  const w = opts.imageWidth ?? 1200;
-  const h = opts.imageHeight ?? 630;
+  const w = opts.imageWidth ?? 1920;
+  const h = opts.imageHeight ?? 1080;
   upsertOg("og:image:width").setAttribute("content", String(w));
   upsertOg("og:image:height").setAttribute("content", String(h));
 
@@ -189,6 +196,21 @@ export function applyDocumentSeo(opts) {
     setJsonLdScript("fusion-seo-article", opts.articleJsonLd);
   }
 
+  removeJsonLdScript("fusion-seo-person");
+  if (opts.personJsonLd && typeof opts.personJsonLd === "object") {
+    const p = opts.personJsonLd;
+    const person = {
+      "@context": "https://schema.org",
+      "@type": "Person",
+      name: String(p.name || "").trim() || "Artist",
+      url: String(p.url || normalizedCanonical).trim(),
+    };
+    if (p.image) person.image = String(p.image).trim();
+    if (p.jobTitle) person.jobTitle = String(p.jobTitle).trim();
+    if (p.description) person.description = clipDescription(String(p.description));
+    setJsonLdScript("fusion-seo-person", person);
+  }
+
   removeJsonLdScript("fusion-seo-organization");
   removeJsonLdScript("fusion-seo-website");
   if (opts.homeOrganizationJsonLd) {
@@ -197,9 +219,9 @@ export function applyDocumentSeo(opts) {
       "@type": "Organization",
       name: "Fusion",
       url: `${origin}/`,
-      logo: `${origin}/favicon.ico`,
-      description:
-        "Fusion is a premium art platform connecting artists with Japan artist residency programs, editions, and editorial context.",
+      logo: DEFAULT_OG_IMAGE_URL,
+      image: DEFAULT_OG_IMAGE_URL,
+      description: DEFAULT_SITE_DESCRIPTION,
       sameAs: ["https://www.youtube.com/@fusionartworld"],
     });
     setJsonLdScript("fusion-seo-website", {

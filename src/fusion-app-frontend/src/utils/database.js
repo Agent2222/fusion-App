@@ -43,18 +43,18 @@ import {
 } from './studioLegacyProfileUrls.js';
 import { normalizeLocalesWorldForStorage } from './worldNormalize.js';
 import { sanitizeLlmTextOutput } from './llmTextSanitize.js';
-import { worldFieldHasContent } from './worldPublicPick.js';
 import {
+    applyGeneratedWorldBlocksToLocales,
     buildTrimmedSourceJsonForLlm,
-    generateEnglishWorldWithLlm,
+    generateEnglishAndJapaneseWorldFromSourceJson,
     hasUsableWorldLlmSourceInput,
-    mergeWorldBlocks,
     parseLocalesFromArtistRow,
     translateWorldEnToJa,
 } from './studioArtistWorldLlm.js';
 import { sendEmail } from './integrationApi.js';
 import { getApplicationStaffNotificationEmails } from './studioServicesConfig.js';
 import { distributeUploadedAssetUrls, toCloudFrontAssetUrl } from './assetDistribution.js';
+import { filterPublishedJournalEntries, resolveHomeJournalCarouselEntries, sortJournalEntriesNewestFirst } from './journalPublicVisibility.js';
 
 export { hasUsableWorldLlmSourceInput };
 
@@ -821,6 +821,90 @@ async function fetchArtistHeroProfileMap(actor) {
     return m;
 }
 
+/** Studio session cache so bulk/single approve reflects in UI before refetch. */
+const studioHeroProfileApprovedKnown = new Set();
+
+/**
+ * @param {string} id
+ * @param {boolean} approved
+ */
+function noteStudioHeroProfileApproved(id, approved) {
+    const sid = String(id || '').trim();
+    if (!sid) return;
+    if (approved) studioHeroProfileApprovedKnown.add(sid);
+    else studioHeroProfileApprovedKnown.delete(sid);
+}
+
+/**
+ * @param {Map<string, boolean>} m
+ */
+function mergeStudioHeroProfileApprovedKnown(m) {
+    for (const id of studioHeroProfileApprovedKnown) {
+        m.set(id, true);
+    }
+    return m;
+}
+
+/**
+ * @param {import('@dfinity/agent').ActorSubclass} actor
+ * @returns {Promise<Map<string, boolean>>}
+ */
+async function fetchArtistHeroProfileApprovedMap(actor) {
+    const m = new Map();
+    if (!actor) return mergeStudioHeroProfileApprovedKnown(m);
+    try {
+        if (typeof actor.listArtistHeroProfileImageApprovedPublic === 'function') {
+            const ids = await actor.listArtistHeroProfileImageApprovedPublic();
+            if (Array.isArray(ids)) {
+                for (const id of ids) {
+                    const sid = String(id ?? '').trim();
+                    if (sid) m.set(sid, true);
+                }
+            }
+            return mergeStudioHeroProfileApprovedKnown(m);
+        }
+    } catch {
+        /* older canister */
+    }
+    try {
+        if (typeof actor.listArtists === 'function') {
+            const rows = await actor.listArtists();
+            if (Array.isArray(rows)) {
+                for (const r of rows) {
+                    const id = String(r?.id ?? '').trim();
+                    if (!id) continue;
+                    if (Boolean(r?.heroProfileImageApproved ?? r?.hero_profile_image_approved)) {
+                        m.set(id, true);
+                    }
+                }
+            }
+        }
+    } catch {
+        /* ignore */
+    }
+    return mergeStudioHeroProfileApprovedKnown(m);
+}
+
+/**
+ * @param {object} base
+ * @param {string} id
+ * @param {Map<string, boolean> | undefined} approvedByArtistId
+ */
+function mergeHeroProfileImageApproved(base, id, approvedByArtistId) {
+    if (!id) return base;
+    const fromBase = Boolean(
+        /** @type {Record<string, unknown>} */ (base).heroProfileImageApproved ??
+            /** @type {Record<string, unknown>} */ (base).hero_profile_image_approved,
+    );
+    if (approvedByArtistId instanceof Map && approvedByArtistId.size > 0) {
+        return { ...base, heroProfileImageApproved: approvedByArtistId.has(id) };
+    }
+    if (studioHeroProfileApprovedKnown.has(id)) {
+        return { ...base, heroProfileImageApproved: true };
+    }
+    return { ...base, heroProfileImageApproved: fromBase };
+}
+
 /**
  * Map canister `Artist` into frontend roster shape (aligned with testData artists).
  * @param {Record<string, unknown>} a
@@ -843,6 +927,7 @@ function mapCanisterArtistRow(a, cohortByArtistId, mediaByArtistId) {
             if (o == null || o === undefined) return '';
             return toCloudFrontAssetUrl(o);
         })(),
+        heroProfileImageApproved: Boolean(a.hero_profile_image_approved ?? a.heroProfileImageApproved),
         quote: String(media?.quote ?? ''),
         audioUrl: toCloudFrontAssetUrl(media?.audioUrl),
         audioTitle: String(media?.audioTitle ?? ''),
@@ -915,6 +1000,10 @@ function normalizeArtistDefaults(a) {
             /** @type {Record<string, unknown>} */ (a).heroProfileImage ??
                 /** @type {Record<string, unknown>} */ (a).hero_profile_image,
         ),
+        heroProfileImageApproved: Boolean(
+            /** @type {Record<string, unknown>} */ (a).heroProfileImageApproved ??
+                /** @type {Record<string, unknown>} */ (a).hero_profile_image_approved,
+        ),
     };
 }
 
@@ -922,9 +1011,10 @@ function normalizeArtistDefaults(a) {
  * Merge `ArtistRecord` from canister into testData-like artist (adds `locales` from JSON).
  * @param {Record<string, unknown>} rec
  * @param {Map<string, number[]>} [cohortByArtistId]
- * @param {Map<string, string>} [heroByArtistId] — from `listArtistHeroProfileImagePublic` (not on `ArtistCore`)
+ * @param {Map<string, string>} [heroByArtistId]
+ * @param {Map<string, boolean>} [approvedByArtistId]
  */
-function artistFromRecord(rec, cohortByArtistId, mediaByArtistId, heroByArtistId) {
+function artistFromRecord(rec, cohortByArtistId, mediaByArtistId, heroByArtistId, approvedByArtistId) {
     if (!rec || typeof rec !== 'object') return null;
     const prof = rec.profile;
     if (!prof || typeof prof !== 'object') return null;
@@ -949,7 +1039,7 @@ function artistFromRecord(rec, cohortByArtistId, mediaByArtistId, heroByArtistId
             /* ignore invalid JSON */
         }
     }
-    return out;
+    return mergeHeroProfileImageApproved(out, id, approvedByArtistId);
 }
 
 /**
@@ -1152,6 +1242,85 @@ export async function applyFeaturedFlagsFromStudioSaveLive(id, flags) {
 }
 
 /**
+ * Live: persist profile-image approval (staff). Test: writes to artists overlay.
+ * @param {string} id
+ * @param {boolean} approved
+ */
+export async function applyHeroProfileImageApprovedFromStudioSaveLive(id, approved) {
+    const sid = String(id || '').trim();
+    if (!sid) return;
+    if (getDataSource() === 'test') {
+        const overlay = readStudioLs(LS_ARTISTS_OVERLAY) || {};
+        const base = overlay[sid] && typeof overlay[sid] === 'object' ? overlay[sid] : {};
+        overlay[sid] = normalizeArtistDefaults({
+            ...base,
+            heroProfileImageApproved: Boolean(approved),
+        });
+        writeStudioLs(LS_ARTISTS_OVERLAY, overlay);
+        noteStudioHeroProfileApproved(sid, Boolean(approved));
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.staffSetHeroProfileImageApproved !== 'function') {
+        noteStudioHeroProfileApproved(sid, Boolean(approved));
+        return;
+    }
+    await actor.staffSetHeroProfileImageApproved(sid, Boolean(approved));
+    noteStudioHeroProfileApproved(sid, Boolean(approved));
+}
+
+/**
+ * Staff: approve profile headshots for every roster artist.
+ * @returns {Promise<number>}
+ */
+export async function approveAllHeroProfileImagesStudio() {
+    const artists = await getArtistsForStudio();
+    if (getDataSource() === 'test') {
+        const overlay = readStudioLs(LS_ARTISTS_OVERLAY) || {};
+        let n = 0;
+        for (const a of artists) {
+            const id = String(a?.id ?? '').trim();
+            if (!id) continue;
+            const base = overlay[id] && typeof overlay[id] === 'object' ? overlay[id] : a;
+            overlay[id] = normalizeArtistDefaults({
+                ...base,
+                heroProfileImageApproved: true,
+            });
+            n += 1;
+        }
+        writeStudioLs(LS_ARTISTS_OVERLAY, overlay);
+        for (const a of artists) {
+            noteStudioHeroProfileApproved(String(a?.id ?? ''), true);
+        }
+        return n;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.staffApproveAllHeroProfileImages === 'function') {
+        const n = natToNumber(await actor.staffApproveAllHeroProfileImages());
+        for (const a of artists) {
+            noteStudioHeroProfileApproved(String(a?.id ?? ''), true);
+        }
+        return n;
+    }
+    if (typeof actor.staffSetHeroProfileImageApproved !== 'function') {
+        throw new Error(
+            'staffApproveAllHeroProfileImages missing — deploy backend and run dfx generate.',
+        );
+    }
+    let n = 0;
+    for (const a of artists) {
+        const id = String(a?.id ?? '').trim();
+        if (!id) continue;
+        await actor.staffSetHeroProfileImageApproved(id, true);
+        n += 1;
+    }
+    for (const a of artists) {
+        noteStudioHeroProfileApproved(String(a?.id ?? ''), true);
+    }
+    return n;
+}
+
+/**
  * @param {string} id
  * @param {boolean} wantFeatured
  * @returns {Promise<{ ok: boolean, reason?: string }>}
@@ -1252,16 +1421,17 @@ async function getLivePublicArtists() {
         if (typeof actor.listArtistRecordsPublic === 'function') {
             const metaForMerge = await fetchFeaturedMergeMetaLive();
             _lastFeaturedMergeMeta = metaForMerge;
-            const [rows, cohortMap, mediaMap, heroMap] = await Promise.all([
+            const [rows, cohortMap, mediaMap, heroMap, approvedMap] = await Promise.all([
                 actor.listArtistRecordsPublic(),
                 fetchArtistCohortMap(actor),
                 fetchArtistMediaMap(actor),
                 fetchArtistHeroProfileMap(actor),
+                fetchArtistHeroProfileApprovedMap(actor),
             ]);
             if (!Array.isArray(rows)) return [];
             const out = [];
             for (const r of rows) {
-                const a = artistFromRecord(r, cohortMap, mediaMap, heroMap);
+                const a = artistFromRecord(r, cohortMap, mediaMap, heroMap, approvedMap);
                 if (a) out.push(a);
             }
             await mergeMostRecentProgramsFromCanister(actor, out);
@@ -1308,8 +1478,9 @@ export async function getCommunityArtistsPublic() {
  * Map full canister `ArtistRecord` (Studio) to roster row with `imported` + `accessCode`.
  * @param {Record<string, unknown>} rec
  * @param {Map<string, string>} [heroByArtistId]
+ * @param {Map<string, boolean>} [approvedByArtistId]
  */
-function mapStudioArtistFromFullRecord(rec, cohortByArtistId, mediaByArtistId, heroByArtistId) {
+function mapStudioArtistFromFullRecord(rec, cohortByArtistId, mediaByArtistId, heroByArtistId, approvedByArtistId) {
     const prof = rec.profile;
     if (!prof || typeof prof !== 'object') {
         return { id: '', slug: '', imported: false, accessCode: '' };
@@ -1336,12 +1507,16 @@ function mapStudioArtistFromFullRecord(rec, cohortByArtistId, mediaByArtistId, h
             /* ignore invalid JSON */
         }
     }
-    return {
-        ...base,
-        imported: Boolean(rec.imported),
-        accessCode: String(rec.access_code ?? rec.accessCode ?? ''),
-        ...(locales ? { locales } : {}),
-    };
+    return mergeHeroProfileImageApproved(
+        {
+            ...base,
+            imported: Boolean(rec.imported),
+            accessCode: String(rec.access_code ?? rec.accessCode ?? ''),
+            ...(locales ? { locales } : {}),
+        },
+        bid,
+        approvedByArtistId,
+    );
 }
 
 /**
@@ -1357,16 +1532,17 @@ export async function getArtistsForStudio() {
         if (typeof actor.listArtistRecordsForStudio === 'function') {
             const metaForMerge = await fetchFeaturedMergeMetaLive();
             _lastFeaturedMergeMeta = metaForMerge;
-            const [rows, cohortMap, mediaMap, heroMap] = await Promise.all([
+            const [rows, cohortMap, mediaMap, heroMap, approvedMap] = await Promise.all([
                 actor.listArtistRecordsForStudio(),
                 fetchArtistCohortMap(actor),
                 fetchArtistMediaMap(actor),
                 fetchArtistHeroProfileMap(actor),
+                fetchArtistHeroProfileApprovedMap(actor),
             ]);
             if (!Array.isArray(rows)) return [];
             const mapped = rows.map((r) =>
                 mergeArtistFeaturedExtension(
-                    mapStudioArtistFromFullRecord(r, cohortMap, mediaMap, heroMap),
+                    mapStudioArtistFromFullRecord(r, cohortMap, mediaMap, heroMap, approvedMap),
                     metaForMerge
                 )
             );
@@ -1392,15 +1568,15 @@ export async function loadArtistForStudioEdit(slug, tableRow = null) {
     const s = String(slug || '').trim();
     if (!s) return null;
     if (getDataSource() === 'test') {
-        const all = await getArtists();
+        const all = await getArtistsForStudio();
         const found = all.find((a) => String(a?.slug || '').toLowerCase() === s.toLowerCase());
         return found
             ? mergeArtistFeaturedExtension(normalizeArtistDefaults({ ...found }), readArtistFeaturedMeta())
             : null;
     }
+    const tr = tableRow && typeof tableRow === 'object' ? tableRow : {};
     const fromCanister = await getArtistBySlug(s);
     if (!fromCanister) return null;
-    const tr = tableRow && typeof tableRow === 'object' ? tableRow : {};
     const meta = await fetchFeaturedMergeMetaLive();
     return mergeArtistFeaturedExtension(
         normalizeArtistDefaults({
@@ -1410,6 +1586,9 @@ export async function loadArtistForStudioEdit(slug, tableRow = null) {
             contactEmail: String(
                 tr.contactEmail ?? tr.contact_email ?? fromCanister.contactEmail ?? '',
             ).trim(),
+            heroProfileImageApproved: Boolean(
+                tr.heroProfileImageApproved ?? fromCanister.heroProfileImageApproved,
+            ),
         }),
         meta
     );
@@ -1704,12 +1883,13 @@ export async function getArtistBySlug(slug) {
             const recOpt = await actor.getArtistRecordBySlug(slug);
             const rec = unwrapOpt(recOpt);
             if (rec) {
-                const [cohortMap, mediaMap, heroMap] = await Promise.all([
+                const [cohortMap, mediaMap, heroMap, approvedMap] = await Promise.all([
                     fetchArtistCohortMap(actor),
                     fetchArtistMediaMap(actor),
                     fetchArtistHeroProfileMap(actor),
+                    fetchArtistHeroProfileApprovedMap(actor),
                 ]);
-                const merged = artistFromRecord(rec, cohortMap, mediaMap, heroMap);
+                const merged = artistFromRecord(rec, cohortMap, mediaMap, heroMap, approvedMap);
                 if (merged) {
                     if (typeof actor.getArtistBySlug === 'function') {
                         const profOpt = await actor.getArtistBySlug(slug);
@@ -1719,6 +1899,11 @@ export async function getArtistBySlug(slug) {
                             merged.mostRecentProgram = String(
                                 po.most_recent_program ?? po.mostRecentProgram ?? merged.mostRecentProgram ?? '',
                             );
+                            if (po.heroProfileImageApproved != null || po.hero_profile_image_approved != null) {
+                                merged.heroProfileImageApproved = Boolean(
+                                    po.heroProfileImageApproved ?? po.hero_profile_image_approved,
+                                );
+                            }
                         }
                     }
                     return mergeArtistFeaturedExtension(merged, meta);
@@ -1728,7 +1913,16 @@ export async function getArtistBySlug(slug) {
         if (typeof actor.getArtistBySlug === 'function') {
             const profOpt = await actor.getArtistBySlug(slug);
             const p = unwrapOpt(profOpt);
-            if (p) return mergeArtistFeaturedExtension(mapCanisterArtistRow(p), meta);
+            if (p) {
+                const approvedMap = await fetchArtistHeroProfileApprovedMap(actor);
+                const row = mapCanisterArtistRow(p);
+                const withApproval = mergeHeroProfileImageApproved(
+                    row,
+                    String(row.id ?? ''),
+                    approvedMap,
+                );
+                return mergeArtistFeaturedExtension(withApproval, meta);
+            }
         }
     } catch {
         /* actor / network */
@@ -2336,6 +2530,39 @@ export async function setMyAccountContactForCaller(contact) {
         email: String(contact.email || ''),
     });
     return true;
+}
+
+/**
+ * Signed-in user's directory contact (name + email). Null when unset or on older declarations.
+ * @returns {Promise<{ firstName: string, lastName: string, email: string } | null>}
+ */
+export async function getMyAccountContactForCaller() {
+    if (getDataSource() === 'test') {
+        const { getProfileSetupDraft } = await import('./profileSetupDraft.js');
+        const draft = getProfileSetupDraft();
+        const email = String(draft.email || '').trim();
+        if (!email.includes('@')) return null;
+        const parts = String(draft.fullName || '').trim().split(/\s+/).filter(Boolean);
+        return {
+            firstName: parts[0] || '',
+            lastName: parts.slice(1).join(' '),
+            email,
+        };
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.getMyAccountContactForCaller !== 'function') return null;
+    const raw = await actor.getMyAccountContactForCaller();
+    const row = Array.isArray(raw) ? (raw.length ? raw[0] : null) : raw;
+    if (!row || typeof row !== 'object') return null;
+    const o = /** @type {Record<string, unknown>} */ (row);
+    const email = String(o.email ?? '').trim();
+    if (!email.includes('@')) return null;
+    return {
+        firstName: String(o.firstName ?? o.first_name ?? '').trim(),
+        lastName: String(o.lastName ?? o.last_name ?? '').trim(),
+        email,
+    };
 }
 
 /**
@@ -4456,7 +4683,7 @@ export async function getDashboardMetrics() {
             subscriberCount: subCount,
             artistCount: artists.length,
             programCount: programsEn.length,
-            journalCount: journals.length,
+            journalCount: filterPublishedJournalEntries(journals).length,
             editionCount: editions.length,
             applicantCount: appCount,
         };
@@ -4490,7 +4717,7 @@ export async function getDashboardMetrics() {
         }
         if (typeof actor.listJournalEntries === 'function') {
             const j = await actor.listJournalEntries();
-            journalCount = Array.isArray(j) ? j.length : 0;
+            journalCount = filterPublishedJournalEntries(Array.isArray(j) ? j : []).length;
         }
         if (typeof actor.listEditions === 'function') {
             const e = await actor.listEditions();
@@ -4582,12 +4809,95 @@ export async function getProgramHero() {
  * `testData.journals` wrapper for journal hero on home.
  * @returns {Promise<object>}
  */
-export async function getJournalsHeroBlock() {
+const LS_HOME_JOURNAL_CAROUSEL = 'fusion-home-journal-carousel';
+
+/** @returns {Promise<{ entryIds: string[], updatedAt: string }>} */
+export async function getHomeJournalCarouselPublic() {
     if (getDataSource() === 'test') {
-        return /** @type {object} */ (distributeUploadedAssetUrls(testData.journals || { journals: [] }));
+        const cur = readStudioLs(LS_HOME_JOURNAL_CAROUSEL);
+        if (cur && typeof cur === 'object' && !Array.isArray(cur)) {
+            const o = /** @type {Record<string, unknown>} */ (cur);
+            return {
+                entryIds: Array.isArray(o.entryIds) ? o.entryIds.map(String).filter(Boolean) : [],
+                updatedAt: String(o.updatedAt ?? ''),
+            };
+        }
+        return { entryIds: [], updatedAt: '' };
     }
-    const entries = await getJournalEntries();
-    return { order: 6, journals: entries };
+    try {
+        const actor = await getFusionBackendActor();
+        if (!actor || typeof actor.getHomeJournalCarouselPublic !== 'function') {
+            return { entryIds: [], updatedAt: '' };
+        }
+        const cfg = await actor.getHomeJournalCarouselPublic();
+        return {
+            entryIds: Array.isArray(cfg?.entryIds) ? cfg.entryIds.map(String).filter(Boolean) : [],
+            updatedAt: String(cfg?.updatedAt ?? ''),
+        };
+    } catch {
+        return { entryIds: [], updatedAt: '' };
+    }
+}
+
+/** @returns {Promise<{ entryIds: string[], updatedAt: string }>} */
+export async function getHomeJournalCarouselStudio() {
+    if (getDataSource() === 'test') {
+        return getHomeJournalCarouselPublic();
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminGetHomeJournalCarousel !== 'function') {
+        return getHomeJournalCarouselPublic();
+    }
+    const cfg = await actor.adminGetHomeJournalCarousel();
+    return {
+        entryIds: Array.isArray(cfg?.entryIds) ? cfg.entryIds.map(String).filter(Boolean) : [],
+        updatedAt: String(cfg?.updatedAt ?? ''),
+    };
+}
+
+/**
+ * @param {{ entryIds: string[] }} cfg
+ */
+export async function setHomeJournalCarouselStudio(cfg) {
+    const entryIds = (Array.isArray(cfg?.entryIds) ? cfg.entryIds : [])
+        .map((id) => String(id ?? '').trim())
+        .filter(Boolean)
+        .slice(0, 3);
+    const payload = { entryIds, updatedAt: new Date().toISOString() };
+    if (getDataSource() === 'test') {
+        writeStudioLs(LS_HOME_JOURNAL_CAROUSEL, payload);
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('fusion-home-journal-carousel-changed'));
+        }
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminSetHomeJournalCarousel !== 'function') {
+        throw new Error('adminSetHomeJournalCarousel unavailable — run dfx generate fusion-app-backend.');
+    }
+    await actor.adminSetHomeJournalCarousel(payload);
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('fusion-home-journal-carousel-changed'));
+    }
+}
+
+export async function getJournalsHeroBlock() {
+    const carouselCfg = await getHomeJournalCarouselPublic();
+    if (getDataSource() === 'test') {
+        const block = /** @type {object} */ (distributeUploadedAssetUrls(testData.journals || { journals: [] }));
+        const published = filterPublishedJournalEntries(
+            Array.isArray(block.journals) ? block.journals : []
+        );
+        const manual = resolveHomeJournalCarouselEntries(carouselCfg.entryIds, published);
+        const journals = (
+            manual.length ? manual : sortJournalEntriesNewestFirst(published)
+        ).slice(0, 3);
+        return { ...block, journals };
+    }
+    const published = filterPublishedJournalEntries(await getJournalEntries());
+    const manual = resolveHomeJournalCarouselEntries(carouselCfg.entryIds, published);
+    const journals = (manual.length ? manual : sortJournalEntriesNewestFirst(published)).slice(0, 3);
+    return { order: 6, journals };
 }
 
 /**
@@ -4919,34 +5229,15 @@ export async function buildMergedLocalesWithGeneratedWorld(
         return locales;
     }
     const sourceJson = buildTrimmedSourceJsonForLlm(artistRow);
-    const worldGen = await generateEnglishWorldWithLlm(reinterpretFn, sourceJson);
-    const prevEn =
-        locales.en &&
-        typeof locales.en === 'object' &&
-        locales.en.worldNew &&
-        typeof locales.en.worldNew === 'object' &&
-        !Array.isArray(locales.en.worldNew)
-            ? /** @type {Record<string, unknown>} */ (locales.en.worldNew)
-            : {};
-    const prevJa =
-        locales.ja &&
-        typeof locales.ja === 'object' &&
-        locales.ja.worldNew &&
-        typeof locales.ja.worldNew === 'object' &&
-        !Array.isArray(locales.ja.worldNew)
-            ? /** @type {Record<string, unknown>} */ (locales.ja.worldNew)
-            : {};
-    const enWorldNew = mergeWorldBlocks(prevEn, worldGen, mergeMode);
-    const wJa = await translateWorldEnToJa(translateEnToJa, enWorldNew);
-    const jaWorldNew = mergeWorldBlocks(prevJa, wJa, mergeMode);
-    if (!locales.en || typeof locales.en !== 'object') locales.en = {};
-    if (!locales.ja || typeof locales.ja !== 'object') locales.ja = {};
-    locales.en = { ...locales.en, worldNew: enWorldNew };
-    locales.ja = { ...locales.ja, worldNew: jaWorldNew };
-    if (worldFieldHasContent(enWorldNew.practice) || worldFieldHasContent(enWorldNew.context)) {
-        locales.publicWorldSource = 'newWorld';
-    }
-    return normalizeLocalesWorldForStorage(locales);
+    const blocks = await generateEnglishAndJapaneseWorldFromSourceJson(
+        sourceJson,
+        reinterpretFn,
+        translateEnToJa,
+    );
+    return applyGeneratedWorldBlocksToLocales(locales, blocks.en, blocks.ja, mergeMode, {
+        mergeWorldNew: true,
+        mergeWorld: false,
+    });
 }
 
 /**
@@ -5856,6 +6147,8 @@ function normalizeAccountDateText(raw) {
  *   updatedAt: string,
  *   stripeSubscriptionStatus?: string,
  *   stripeCurrentPeriodEnd?: string,
+ *   stripeCustomerId?: string,
+ *   stripeSubscriptionId?: string,
  *   membershipExemptManual?: boolean,
  *   trialStartedAtSec?: string,
  *   trialEndsAtSec?: string,
@@ -5929,6 +6222,8 @@ export async function getAccountsForStudio() {
             updatedAt: normalizeAccountDateText(a.updated_at ?? a.updatedAt ?? ''),
             stripeSubscriptionStatus: unwrapOpt(a.stripeSubscriptionStatus ?? a.stripe_subscription_status),
             stripeCurrentPeriodEnd: unwrapOpt(a.stripeCurrentPeriodEnd ?? a.stripe_current_period_end),
+            stripeCustomerId: unwrapOpt(a.stripeCustomerId ?? a.stripe_customer_id),
+            stripeSubscriptionId: unwrapOpt(a.stripeSubscriptionId ?? a.stripe_subscription_id),
             membershipExemptManual: Boolean(a.membershipExemptManual ?? a.membership_exempt_manual),
             trialStartedAtSec: trialByPrincipal.get(pStr)?.startedAtSec
                 ? String(trialByPrincipal.get(pStr)?.startedAtSec)

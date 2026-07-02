@@ -33,13 +33,35 @@ let pendingLocalVideoFile = null;
 
 /**
  * @param {Record<string, unknown> | null} rec
- * @param {{ canEdit?: boolean, onSave: (rec: Record<string, unknown>) => Promise<void>, onDelete?: () => Promise<void> }} opts
+ * @param {{
+ *   canEdit?: boolean,
+ *   onSave: (rec: Record<string, unknown>) => Promise<void>,
+ *   onDelete?: () => Promise<void>,
+ *   featured?: { videoIds: string[], heroVideoId: string | null },
+ *   onFeaturedChange?: (cfg: { featuredVideoIds: string[], heroVideoId: string | null }) => Promise<void>,
+ *   otherVideos?: Array<Record<string, unknown>>,
+ * }} opts
  */
 export async function openVideoEditorModal(rec, opts) {
     const isNew = !rec?.id;
     const initialTab = isNew ? 'media' : 'overview';
     const draft = normalizeCommunityVideoRecord(rec || { id: `vid_${Date.now()}` });
     const locales = parseVideoLocales(draft.localesJson);
+    const featuredIds = Array.isArray(opts.featured?.videoIds) ? opts.featured.videoIds.map(String) : [];
+    const isFeatured = featuredIds.includes(String(draft.id));
+    const isHero = String(opts.featured?.heroVideoId || '') === String(draft.id);
+    const featuredAtCapacity = featuredIds.length >= 6 && !isFeatured;
+    const copyKeys = ['line', 'kicker', 'headline', 'body', 'ctaJoinLabel', 'ctaWatchLabel'];
+    const otherVideos = (Array.isArray(opts.otherVideos) ? opts.otherVideos : []).filter(
+        (v) => String(v?.id ?? '') !== String(draft.id),
+    );
+    const copyFromOptions = otherVideos
+        .map((v) => {
+            const loc = parseVideoLocales(v.localesJson);
+            const title = String(loc.headlineEn || loc.headlineJa || v.slug || v.id || 'Video');
+            return `<option value="${esc(String(v.id))}">${esc(title)}</option>`;
+        })
+        .join('');
     pendingLocalVideoFile = null;
     captureStudioVideoEvent('studio_video_modal_opened', { video_id: draft.id, is_new: isNew });
 
@@ -65,6 +87,7 @@ export async function openVideoEditorModal(rec, opts) {
                 <div class="studio-video-editor-poster" style="${draft.posterUrl ? `background-image:url(${esc(draft.posterUrl)})` : ''}"></div>
                 <div class="studio-video-editor-pills">
                     <span>${draft.visible ? 'Visible' : 'Hidden'}</span>
+                    <span>${isFeatured ? 'Featured' : 'Not featured'}${isHero ? ' ★' : ''}</span>
                     <span>${draft.previewVideoUrl ? 'Preview ✓' : 'Preview —'}</span>
                     <span>${draft.fullVideoKey ? 'Full ✓' : 'Full —'}</span>
                 </div>
@@ -80,12 +103,21 @@ export async function openVideoEditorModal(rec, opts) {
                 </div>
                 <div class="studio-video-panel studio-tabs__panel${initialTab === 'overview' ? ' is-active' : ''}" data-panel="overview"${initialTab !== 'overview' ? ' hidden' : ''}>
                     ${isNew ? '<p class="studio-modal-hint">Use the <strong>Media</strong> tab to upload preview and full videos, then add copy and timestamps before saving.</p>' : ''}
-                    <label class="studio-field"><span>Visible on site</span><input type="checkbox" id="sv-visible" ${draft.visible ? 'checked' : ''} /></label>
+                    <label class="studio-field studio-field--inline">
+                        <input type="checkbox" id="sv-visible" ${draft.visible ? 'checked' : ''} ${opts.canEdit ? '' : 'disabled'} />
+                        <span>Visible on site</span>
+                    </label>
+                    <label class="studio-field studio-field--inline">
+                        <input type="checkbox" id="sv-featured" ${isFeatured ? 'checked' : ''} ${!opts.canEdit || (featuredAtCapacity && !isFeatured) ? 'disabled' : ''} />
+                        <span>Featured on Community &amp; /videos</span>
+                    </label>
+                    ${featuredAtCapacity ? '<p class="studio-muted studio-video-featured-hint">Featured list is full (6 max). Remove one from the featured row above, then edit this video again.</p>' : '<p class="studio-muted studio-video-featured-hint">Featured videos appear in the Community hero row and /videos page.</p>'}
                     <label class="studio-field"><span>Published (ISO)</span><input class="studio-input" id="sv-published" value="${esc(draft.publishedAt)}" /></label>
                     <label class="studio-field"><span>Sort order</span><input class="studio-input" id="sv-sort" type="number" value="${esc(draft.sortOrder)}" /></label>
                     <label class="studio-field"><span>Slug</span><input class="studio-input" id="sv-slug" value="${esc(draft.slug)}" /></label>
                 </div>
-                <div class="studio-video-panel studio-tabs__panel${initialTab === 'media' ? ' is-active' : ''}" data-panel="media"${initialTab !== 'media' ? ' hidden' : ''}>
+                <div class="studio-video-panel studio-tabs__panel studio-video-panel--media${initialTab === 'media' ? ' is-active' : ''}" data-panel="media"${initialTab !== 'media' ? ' hidden' : ''}>
+                    <div class="studio-video-panel-scroll">
                     <p class="studio-modal-hint">Upload preview (public) and full (members-only) videos. URLs are filled in automatically after upload.</p>
                     <h4 class="studio-subheading">Preview video (public)</h4>
                     <label class="studio-field studio-field--full">
@@ -124,9 +156,20 @@ export async function openVideoEditorModal(rec, opts) {
                         </label>
                     </div>
                     ${videoFrameCaptureShellHtml(String(draft.id))}
+                    </div>
                 </div>
                 <div class="studio-video-panel studio-tabs__panel" data-panel="copy" hidden>
-                    ${['line', 'kicker', 'headline', 'body', 'ctaJoinLabel', 'ctaWatchLabel']
+                    <div class="studio-video-copy-from">
+                        <label class="studio-field studio-video-copy-from__field">
+                            <span>Copy from another video</span>
+                            <select class="studio-select" id="sv-copy-from"${otherVideos.length ? '' : ' disabled'}>
+                                <option value="">Select a video…</option>
+                                ${copyFromOptions}
+                            </select>
+                        </label>
+                        <button type="button" class="studio-btn-ghost" id="sv-copy-from-btn"${otherVideos.length ? '' : ' disabled'}>Copy copy</button>
+                    </div>
+                    ${copyKeys
                         .map(
                             (key) => `
                     <label class="studio-field"><span>${key} EN</span><input class="studio-input" id="sv-${key}-en" value="${esc(locales[`${key}En`])}" /></label>
@@ -316,11 +359,57 @@ export async function openVideoEditorModal(rec, opts) {
         input.value = '';
     });
 
+    root.querySelector('#sv-copy-from-btn')?.addEventListener('click', () => {
+        const select = root.querySelector('#sv-copy-from');
+        const sourceId = select instanceof HTMLSelectElement ? select.value.trim() : '';
+        if (!sourceId) {
+            showMsg('Select a video to copy from.', 'warn');
+            return;
+        }
+        const source = otherVideos.find((v) => String(v?.id) === sourceId);
+        if (!source) {
+            showMsg('Source video not found.', 'warn');
+            return;
+        }
+        const sourceLocales = parseVideoLocales(source.localesJson);
+        for (const key of copyKeys) {
+            const en = root.querySelector(`#sv-${key}-en`);
+            const ja = root.querySelector(`#sv-${key}-ja`);
+            if (en instanceof HTMLInputElement) en.value = String(sourceLocales[`${key}En`] ?? '');
+            if (ja instanceof HTMLInputElement) ja.value = String(sourceLocales[`${key}Ja`] ?? '');
+        }
+        const title = String(sourceLocales.headlineEn || sourceLocales.headlineJa || source.slug || 'video');
+        showMsg(`Copied copy from “${title}”.`);
+        captureStudioVideoEvent('studio_video_copy_from', { video_id: draft.id, source_id: sourceId });
+    });
+
+    const syncFeaturedFromModal = async (videoId) => {
+        if (!opts.onFeaturedChange) return;
+        const featuredEl = root.querySelector('#sv-featured');
+        const wantFeatured = featuredEl instanceof HTMLInputElement ? featuredEl.checked : isFeatured;
+        let ids = [...featuredIds];
+        let heroId = opts.featured?.heroVideoId ? String(opts.featured.heroVideoId) : null;
+        const wasFeatured = ids.includes(videoId);
+        if (wantFeatured && !wasFeatured) {
+            if (ids.length >= 6) {
+                showMsg('Featured list is full (6 max). Save the video, then remove one from the featured row.', 'warn');
+                return;
+            }
+            ids.push(videoId);
+            if (!heroId) heroId = videoId;
+        } else if (!wantFeatured && wasFeatured) {
+            ids = ids.filter((id) => id !== videoId);
+            if (heroId === videoId) heroId = ids[0] || null;
+        }
+        await opts.onFeaturedChange({ featuredVideoIds: ids, heroVideoId: heroId });
+    };
+
     root.querySelector('#sv-save')?.addEventListener('click', async () => {
         if (!opts.canEdit) return;
         try {
             const next = collect();
             await opts.onSave(next);
+            await syncFeaturedFromModal(String(next.id));
             captureStudioVideoEvent('studio_video_saved', { video_id: next.id });
             close();
             teardownFrame();

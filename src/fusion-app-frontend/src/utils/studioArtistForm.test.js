@@ -31,11 +31,17 @@ describe('studioArtistForm', () => {
         expect(html).toContain('id="studio-art-panel-new-world"');
         expect(html).toContain('id="studio-art-audio-display-for-artist"');
         expect(html).toContain('Translate to New World');
+        expect(html).toContain('id="studio-art-new-world-from-base"');
+        expect(html).toContain('New World from base');
         expect(html).toContain('name="art-contact-email"');
         expect(html).toContain('name="art-visibility"');
         expect(html).toContain('value="public"');
         expect(html).toContain('id="studio-art-access-code"');
         expect(html).toContain('name="art-accessCode"');
+        expect(html).toContain('id="studio-art-public-world-source"');
+        expect(html).toContain('data-studio-world-source="newWorld"');
+        expect(html).toContain('id="studio-art-hero-profile-image-approved"');
+        expect(html).toContain('Profile image approved');
     });
 
     it('normalizeArtistImportRow accepts flat collect-shaped payload', () => {

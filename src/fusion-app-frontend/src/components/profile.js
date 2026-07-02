@@ -5,7 +5,6 @@ import {
   artistResidencyCardYear,
   yearFromProgramSlug,
 } from "../utils/artistSlug.js";
-import { getPublicSiteOrigin } from "../config.js";
 import { getAllProgramsBlock, getArtistBySlug } from "../utils/database.js";
 import {
   filterProgramIdsForAlumniBanner,
@@ -13,6 +12,7 @@ import {
   resolveProgramCardFromBlock,
 } from "../utils/programAlumniEligibility.js";
 import { applyDocumentSeo } from "../utils/documentSeo.js";
+import { buildArtistProfileSeo } from "../utils/artistProfileSeo.js";
 import { SEO_MEDIA_DEFAULT, withSeoImageAlt } from "../utils/mediaAltSeo.js";
 import { worldTextParts } from "../utils/worldNormalize.js";
 import {
@@ -56,8 +56,9 @@ function populateArtistLinks(container, links) {
 /**
  * @param {HTMLElement | null} container
  * @param {unknown} introGallery
+ * @param {string} [displayName]
  */
-async function populateIntroGallery(container, introGallery) {
+async function populateIntroGallery(container, introGallery, displayName = "") {
   if (!container) return;
   container.replaceChildren();
   container.classList.remove("profile-images-container--empty");
@@ -76,7 +77,10 @@ async function populateIntroGallery(container, introGallery) {
       wrap.className = "profile-intro-gallery-img-wrap";
       const img = document.createElement("img");
       img.src = src;
-      img.alt = withSeoImageAlt(String(slot.alt ?? ""));
+      const slotAlt = String(slot.alt ?? "").trim();
+      const primaryAlt =
+        slotAlt || (displayName.trim() ? `${displayName.trim()} artwork` : "");
+      img.alt = withSeoImageAlt(primaryAlt);
       img.loading = "eager";
       img.decoding = "async";
       wrap.appendChild(img);
@@ -496,27 +500,24 @@ export default function initProfile() {
         contextContentEl.appendChild(p);
       }
     }
-    const profileTitle = `${displayName || "Artist"} · Fusion`;
-    document.title = profileTitle;
-    const metaDesc =
-      practiceStr ||
-      `${displayName || "Artist"} — artist on Fusion’s Japan artist residency and programs platform.`;
-    let imgOg = String(artist.image || "").trim();
-    if (imgOg && !/^https?:\/\//i.test(imgOg)) {
-      const origin = getPublicSiteOrigin();
-      imgOg = `${origin}${imgOg.startsWith("/") ? imgOg : `/${imgOg}`}`;
-    }
-    const profilePath = `/profile/${encodeURIComponent(slug)}`;
+    const profileSeo = buildArtistProfileSeo({
+      loc: /** @type {Record<string, unknown>} */ (loc),
+      displayName,
+      slug,
+      heroImageUrl: artist.image,
+      practiceStr,
+    });
     applyDocumentSeo({
-      title: profileTitle,
-      description: metaDesc,
-      path: profilePath,
-      imageUrl: imgOg || undefined,
+      title: profileSeo.title,
+      description: profileSeo.description,
+      path: profileSeo.canonicalPath,
+      imageUrl: profileSeo.ogImageUrl,
       breadcrumbItems: [
         { name: "Home", path: "/" },
         { name: "Artists", path: "/artists" },
-        { name: displayName || "Artist", path: profilePath },
+        { name: displayName || "Artist", path: profileSeo.canonicalPath },
       ],
+      personJsonLd: profileSeo.personJsonLd,
     });
     posthog.capture("artist_profile_viewed", { artist_slug: slug });
 
@@ -588,6 +589,7 @@ export default function initProfile() {
     void populateIntroGallery(
       imagesContainer,
       /** @type {unknown} */ (pickWorld("introGallery")),
+      displayName,
     );
 
     const programsBlock = await getAllProgramsBlock();

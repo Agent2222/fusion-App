@@ -14,6 +14,10 @@ import { getProfileSetupDraft } from './profileSetupDraft.js';
 import { clearAdminPerspective } from './adminPerspective.js';
 import { accountIsStudioTeamRole } from './authHeader.js';
 import posthog from 'posthog-js';
+import {
+    identifyPosthogAfterInternetIdentityLogin,
+    identifyPosthogOnSessionRestore,
+} from './posthogConversionIdentity.js';
 
 function currentAuthDebugConfig(identityProvider, derivationOrigin) {
     return {
@@ -111,6 +115,10 @@ export async function getIdentityIfAuthenticated() {
 
 export async function initIcAuth() {
     await getAuthClientSingleton();
+    const snap = await getAuthSnapshot();
+    if (snap.authenticated) {
+        identifyPosthogOnSessionRestore(snap.principal.toText());
+    }
     await dispatchFusionAuthChange();
 }
 
@@ -158,7 +166,7 @@ export async function loginInternetIdentity() {
     if (snapAfterLogin.authenticated) {
         console.log('[Fusion] Logged in — principal:', snapAfterLogin.principal.toText());
         const principalText = snapAfterLogin.principal.toText();
-        posthog.identify(principalText);
+        identifyPosthogAfterInternetIdentityLogin(principalText);
         posthog.capture('sign_in_succeeded', { auth_method: 'internet_identity' });
     }
     await dispatchFusionAuthChange();
@@ -212,6 +220,20 @@ export async function runPostLoginPipeline() {
         }
     }
     if (acc == null) {
+        try {
+            const { readPendingMembershipPayload } = await import('./integrationApi.js');
+            const pending = readPendingMembershipPayload();
+            if (pending?.paymentCompleted && pending.fusionPendingId) {
+                window.dispatchEvent(
+                    new CustomEvent('fusion-open-join-network', {
+                        detail: { resumePendingLink: true },
+                    })
+                );
+                return;
+            }
+        } catch {
+            /* ignore */
+        }
         window.dispatchEvent(
             new CustomEvent('fusion-open-join-network', {
                 detail: { logoutIfDismissedWithoutAccount: true },
@@ -228,7 +250,12 @@ export async function runPostLoginPipeline() {
     try {
         const { principal } = await getAuthSnapshot();
         const pText = principal.toText();
-        const { syncSubscriptionFromStripe } = await import('./integrationApi.js');
+        const {
+            syncSubscriptionFromStripe,
+            syncSubscriptionFromStripeByEmail,
+            getStoredBillingEmailForPrincipal,
+            readPendingPaymentEmailLocal,
+        } = await import('./integrationApi.js');
         const syncResult = await syncSubscriptionFromStripe(pText);
         if (
             DEV_MODE &&
@@ -238,6 +265,12 @@ export async function runPostLoginPipeline() {
             syncResult.reason
         ) {
             console.warn('[Fusion] post-login sync-subscription:', syncResult.reason);
+        }
+        const billingEmail = getStoredBillingEmailForPrincipal(pText);
+        const pendingJoin = readPendingPaymentEmailLocal('join');
+        const syncEmail = billingEmail || pendingJoin?.email || '';
+        if (syncEmail.includes('@')) {
+            await syncSubscriptionFromStripeByEmail(syncEmail, pText);
         }
         const { ensureMyLinkedArtistProfile } = await import('./database.js');
         await ensureMyLinkedArtistProfile();
@@ -264,7 +297,25 @@ export async function runPostLoginPipeline() {
     if (!linkedArtistId) {
         try {
             const { getMembershipAccessForCaller } = await import('./database.js');
-            const gate = await getMembershipAccessForCaller();
+            let gate = await getMembershipAccessForCaller();
+            if (gate === 'needsSubscription') {
+                const { principal } = await getAuthSnapshot();
+                const pr = principal.toText();
+                const {
+                    syncSubscriptionFromStripe,
+                    syncSubscriptionFromStripeByEmail,
+                    getStoredBillingEmailForPrincipal,
+                    readPendingPaymentEmailLocal,
+                } = await import('./integrationApi.js');
+                await syncSubscriptionFromStripe(pr);
+                const billingEmail = getStoredBillingEmailForPrincipal(pr);
+                const pendingJoin = readPendingPaymentEmailLocal('join');
+                const syncEmail = billingEmail || pendingJoin?.email || '';
+                if (syncEmail.includes('@')) {
+                    await syncSubscriptionFromStripeByEmail(syncEmail, pr);
+                }
+                gate = await getMembershipAccessForCaller();
+            }
             if (gate === 'needsSubscription') {
                 window.dispatchEvent(
                     new CustomEvent('fusion-open-join-network', {
@@ -291,7 +342,29 @@ export async function runPostLoginPipeline() {
 
     try {
         const { getMembershipAccessForCaller } = await import('./database.js');
-        const gate = await getMembershipAccessForCaller();
+        let gate = await getMembershipAccessForCaller();
+        if (gate === 'needsSubscription') {
+            try {
+                const { principal } = await getAuthSnapshot();
+                const pr = principal.toText();
+                const {
+                    syncSubscriptionFromStripe,
+                    syncSubscriptionFromStripeByEmail,
+                    getStoredBillingEmailForPrincipal,
+                    readPendingPaymentEmailLocal,
+                } = await import('./integrationApi.js');
+                await syncSubscriptionFromStripe(pr);
+                const billingEmail = getStoredBillingEmailForPrincipal(pr);
+                const pendingJoin = readPendingPaymentEmailLocal('join');
+                const syncEmail = billingEmail || pendingJoin?.email || '';
+                if (syncEmail.includes('@')) {
+                    await syncSubscriptionFromStripeByEmail(syncEmail, pr);
+                }
+                gate = await getMembershipAccessForCaller();
+            } catch {
+                /* ignore */
+            }
+        }
         if (gate === 'needsSubscription') {
             window.dispatchEvent(
                 new CustomEvent('fusion-open-join-network', {

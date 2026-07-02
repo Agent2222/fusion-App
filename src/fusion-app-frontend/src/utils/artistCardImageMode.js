@@ -16,18 +16,44 @@ export function getArtistCardArtworkUrl(artist) {
 }
 
 /**
- * Profile/headshot URL for “Profile” mode; falls back to artwork URL when unset.
  * @param {unknown} artist
+ * @returns {boolean}
+ */
+export function isArtistHeroProfileImageApproved(artist) {
+    if (!artist || typeof artist !== 'object') return false;
+    const o = /** @type {Record<string, unknown>} */ (artist);
+    return Boolean(o.heroProfileImageApproved ?? o.hero_profile_image_approved);
+}
+
+/**
+ * Profile/headshot URL for “Profile” mode.
+ * @param {unknown} artist
+ * @param {{ fallbackToArtwork?: boolean }} [opts]
  * @returns {string}
  */
-export function getArtistCardProfileUrl(artist) {
+export function getArtistCardProfileUrl(artist, opts = {}) {
     if (!artist || typeof artist !== 'object') {
         return '';
     }
+    const fallbackToArtwork = opts.fallbackToArtwork !== false;
     const o = /** @type {Record<string, unknown>} */ (artist);
     const p = String(o.heroProfileImage ?? o.hero_profile_image ?? '').trim();
-    const art = getArtistCardArtworkUrl(artist);
-    return p || art;
+    if (p) return p;
+    return fallbackToArtwork ? getArtistCardArtworkUrl(artist) : '';
+}
+
+/**
+ * Public card image honoring staff profile-image approval.
+ * Approved: profile URL (falls back to artwork when headshot URL is empty).
+ * Not approved: artwork URL.
+ * @param {unknown} artist
+ * @returns {string}
+ */
+export function resolveArtistPublicCardImageUrl(artist) {
+    if (!isArtistHeroProfileImageApproved(artist)) {
+        return getArtistCardArtworkUrl(artist);
+    }
+    return getArtistCardProfileUrl(artist);
 }
 
 /**
@@ -49,9 +75,10 @@ export function getArtistCardImageMode() {
  * @returns {string}
  */
 export function getArtistCardImageUrlForCurrentMode(artist) {
-    return getArtistCardImageMode() === 'profile'
-        ? getArtistCardProfileUrl(artist)
-        : getArtistCardArtworkUrl(artist);
+    if (getArtistCardImageMode() === 'profile') {
+        return resolveArtistPublicCardImageUrl(artist);
+    }
+    return getArtistCardArtworkUrl(artist);
 }
 
 /**

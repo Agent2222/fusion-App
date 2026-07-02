@@ -1,6 +1,9 @@
 /** Routes where sound aligns below the sticky feed-filter bar (right side). */
 export const FILTER_SOUND_ROUTES = ['/artists', '/gallery-access', '/editions'];
 
+/** Match `header.js` mobile drawer breakpoint. */
+export const MOBILE_SOUND_NAV_MAX_PX = 1024;
+
 /** Closed filter toggle band — matches `#filterSystem` default height in index.css. */
 const FILTER_COLLAPSED_HEIGHT_PX = 70;
 
@@ -116,6 +119,53 @@ function ensureHostOnBody(host) {
 }
 
 /**
+ * @returns {boolean}
+ */
+function isMobileSoundLayout() {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
+    return window.matchMedia(`(max-width: ${MOBILE_SOUND_NAV_MAX_PX}px)`).matches;
+}
+
+/**
+ * @returns {HTMLElement | null}
+ */
+function getMobileSoundSlot() {
+    const header = document.getElementById('header');
+    const slot = header?.shadowRoot?.querySelector('#headerSoundEnvSlot');
+    return slot instanceof HTMLElement ? slot : null;
+}
+
+/**
+ * Desktop: fixed host on `body`. Mobile: host inside header drawer slot.
+ *
+ * @param {HTMLElement} host
+ */
+function syncSoundEnvironmentMobileHost(host) {
+    const mobile = isMobileSoundLayout();
+    const slot = getMobileSoundSlot();
+    const sound = document.getElementById('siteSoundEnv');
+
+    if (mobile && slot) {
+        if (host.parentElement !== slot) {
+            slot.appendChild(host);
+        }
+        host.classList.add('fusion-sound-env-host--mobile-menu');
+        document.documentElement.dataset.fusionSoundMobileMenu = 'true';
+        if (sound instanceof HTMLElement) {
+            sound.dataset.mobileMenu = 'true';
+        }
+        return;
+    }
+
+    ensureHostOnBody(host);
+    host.classList.remove('fusion-sound-env-host--mobile-menu');
+    delete document.documentElement.dataset.fusionSoundMobileMenu;
+    if (sound instanceof HTMLElement) {
+        delete sound.dataset.mobileMenu;
+    }
+}
+
+/**
  * Filter routes: fixed below header chrome + full filter system (closed or open).
  *
  * @returns {number}
@@ -156,7 +206,7 @@ export function syncSoundEnvironmentPosition(pathname) {
     const host = getSoundHost();
     if (!host) return;
 
-    ensureHostOnBody(host);
+    syncSoundEnvironmentMobileHost(host);
 
     const path = normalizePath(pathname ?? window.location?.pathname ?? '/');
     const placement = isFilterSoundRoute(path) ? 'filter' : 'default';
@@ -164,8 +214,12 @@ export function syncSoundEnvironmentPosition(pathname) {
     delete document.documentElement.dataset.fusionSoundMount;
     document.documentElement.dataset.fusionSoundPlacement = placement;
 
-    const top = computeTopPx(placement);
-    document.documentElement.style.setProperty('--fusion-sound-env-top', `${top}px`);
+    if (document.documentElement.dataset.fusionSoundMobileMenu === 'true') {
+        document.documentElement.style.removeProperty('--fusion-sound-env-top');
+    } else {
+        const top = computeTopPx(placement);
+        document.documentElement.style.setProperty('--fusion-sound-env-top', `${top}px`);
+    }
 
     const sound = document.getElementById('siteSoundEnv');
     if (sound instanceof HTMLElement) {

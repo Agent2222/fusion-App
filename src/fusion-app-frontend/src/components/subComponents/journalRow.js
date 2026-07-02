@@ -4,6 +4,8 @@
  */
 import { getJournalEntries, subscribeDataSource } from '../../utils/database.js';
 import { isJournalListingPage } from '../../utils/journalListingPage.js';
+import { isJournalEntryPublished } from '../../utils/journalPublicVisibility.js';
+import { resolveJournalEntryLink } from '../../utils/journalEntryModalHelpers.js';
 import { navigate } from '../../router.js';
 import { mergeLocaleDeep, firstNonEmptyString } from '../../utils/localeFallback.js';
 import { escapeHtml, previewPlainText } from '../../utils/textPreview.js';
@@ -146,7 +148,7 @@ class JournalRowComponent extends HTMLElement {
         const entry = this._resolveEntry();
         const locale = typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
 
-        if (!entry) {
+        if (!entry || !isJournalEntryPublished(entry)) {
             if (isJournalListingPage()) {
                 this.style.display = 'none';
                 this.shadow.innerHTML = `<style>:host { display: none !important; }</style>`;
@@ -172,8 +174,8 @@ class JournalRowComponent extends HTMLElement {
                 ? /** @type {Record<string, unknown>} */ (mergeLocaleDeep(enE, jaE))
                 : /** @type {Record<string, unknown>} */ (enE);
         const journalImage = firstNonEmptyString(entry.imageSrc, jaE?.imageSrc, enE?.imageSrc);
-        const journalLink = entry.link || '#';
         const journalTitle = loc?.title ?? '';
+        const journalLink = resolveJournalEntryLink(entry.link, journalTitle, entry.id) || '#';
         const journalDescription = previewPlainText(loc?.description ?? '', 250);
         const ctaLabel = loc?.cta ?? 'Read Entry';
         const imageAlt = loc?.imageAlt ?? journalTitle;

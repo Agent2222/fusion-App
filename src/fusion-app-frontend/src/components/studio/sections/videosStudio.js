@@ -263,6 +263,18 @@ export async function initVideosSection(mainEl) {
     const openEditor = (rec) => {
         void openVideoEditorModal(rec, {
             canEdit,
+            featured: { videoIds: draftFeaturedIds, heroVideoId: draftHeroId },
+            otherVideos: allVideos,
+            onFeaturedChange: canEdit
+                ? async (cfg) => {
+                      await setCommunityFeaturedVideosStudio(cfg);
+                      featuredCfg = cfg;
+                      draftFeaturedIds = [...cfg.featuredVideoIds];
+                      draftHeroId = cfg.heroVideoId ? String(cfg.heroVideoId) : null;
+                      renderFeaturedRail();
+                      renderTable();
+                  }
+                : undefined,
             onSave: async (next) => {
                 await upsertCommunityVideoStudio(next);
                 await reload();
@@ -289,6 +301,18 @@ export async function initVideosSection(mainEl) {
     mainEl.querySelector('#studio-videos-add')?.addEventListener('click', () => {
         void openVideoEditorModal(null, {
             canEdit,
+            featured: { videoIds: draftFeaturedIds, heroVideoId: draftHeroId },
+            otherVideos: allVideos,
+            onFeaturedChange: canEdit
+                ? async (cfg) => {
+                      await setCommunityFeaturedVideosStudio(cfg);
+                      featuredCfg = cfg;
+                      draftFeaturedIds = [...cfg.featuredVideoIds];
+                      draftHeroId = cfg.heroVideoId ? String(cfg.heroVideoId) : null;
+                      renderFeaturedRail();
+                      renderTable();
+                  }
+                : undefined,
             onSave: async (next) => {
                 await upsertCommunityVideoStudio(next);
                 await reload();

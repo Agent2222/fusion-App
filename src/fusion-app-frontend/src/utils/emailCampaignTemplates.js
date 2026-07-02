@@ -2,7 +2,18 @@
  * Built-in HTML templates for Studio → Email (client-side; optional templateId on save).
  * Motoko may store templateId for audit only.
  */
-import { DEFAULT_SIGNATURE_HTML } from './emailHtml.js';
+import {
+    defaultProgramUpdateLayoutSlots,
+    fusionEmailLayout,
+    fusionEmailLink,
+    fusionEmailParagraph,
+    FUSION_EMAIL_STYLES,
+    renderFusionEmailFromSlots,
+} from './emailFusionLayout.js';
+
+/**
+ * @typedef {'artist' | 'journal' | 'program'} EmailContentSourceType
+ */
 
 /**
  * @typedef {{
@@ -13,6 +24,9 @@ import { DEFAULT_SIGNATURE_HTML } from './emailHtml.js';
  *   bodyHtml: string,
  *   notes?: string,
  *   requiresRosterPlaceholders?: boolean,
+ *   contentSourceTypes?: EmailContentSourceType[],
+ *   defaultEyebrow?: string,
+ *   templateGroup?: 'updates' | 'spotlights' | 'campaigns',
  * }} EmailTemplateDef
  */
 
@@ -32,10 +46,7 @@ function escapeHtmlForEmail(s) {
 }
 
 /** Keep full display name in first-name greetings for specific artist names. */
-const GREETING_FULL_NAME_EXACT = new Set([
-    'el jngl',
-    'lady pluuto',
-]);
+const GREETING_FULL_NAME_EXACT = new Set(['el jngl', 'lady pluuto']);
 
 /**
  * @param {string} rawName
@@ -69,12 +80,19 @@ export function interpolateRosterBlastTemplate(html, vars) {
 const LOGO_URL = 'https://fusionart.world/email/Fusion-X-logo-02.png';
 
 /**
+ * Legacy wrapper for freeform inner HTML (Generate draft, plain conversions).
  * @param {string} innerHtml
  * @param {{ includeSignature?: boolean }} [opts]
  * @returns {string}
  */
 export function wrapEmailHtml(innerHtml, opts = {}) {
-    const sig = opts.includeSignature !== false ? DEFAULT_SIGNATURE_HTML : '';
+    const sig =
+        opts.includeSignature !== false
+            ? `<p style="margin:0 0 14px;font-size:15px;line-height:1.45">— Fusion Team</p>
+<p style="margin:0 0 16px"><img src="https://fusionart.world/email/Fusion-Logo-Sig-1.png" alt="Fusion" width="120" height="auto" style="display:block;max-width:100%;height:auto;border:0" /></p>
+<p style="margin:0 0 10px"><a href="https://www.fusionart.world" style="color:#111;text-decoration:underline">Fusion Art World</a></p>
+<p style="margin:0;font-size:14px;line-height:1.5;color:#3f3f3f">IG: @fusion_intl | TT: @fusion_intl | YT: @fusionartworld</p>`
+            : '';
     return `<div style="font-family:system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;padding:40px 28px 44px;background:#fff;color:#111;line-height:1.5">
 <div style="text-align:center;margin:0 0 36px;padding:0 0 8px">
 <img src="${LOGO_URL}" alt="Fusion" width="220" height="auto" style="display:inline-block;max-width:100%;height:auto;border:0" />
@@ -92,155 +110,232 @@ ${sig}
 </div>`;
 }
 
+const generalSlots = defaultProgramUpdateLayoutSlots();
+
 /** @type {Record<string, EmailTemplateDef>} */
 export const EMAIL_CAMPAIGN_TEMPLATES = {
     tpl_general: {
         id: 'tpl_general',
         name: 'General',
+        templateGroup: 'updates',
+        defaultEyebrow: 'Program Update',
         defaultSubject: 'Kaga City, Ishikawa — Artist Residency (Fall 2026)',
         defaultPreview: 'Applications are open for the next FUSION Artist Residency in Japan.',
-        bodyHtml: `<div style="font-family:'momochidori-variable','Momochidori','Helvetica Neue',Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;background:#faf3f4;color:#000000;padding:40px 24px;line-height:1.5">
-
-  <!-- Header -->
-  <div style="padding-bottom:22px;margin-bottom:26px;display:flex;justify-content:space-between;align-items:center;">
-
-    <img src="https://fusionart.world/email/Fusion-X-logo-02.png" alt="Fusion" width="160" style="display:block;height:auto;border:0">
-
-    <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;font-weight:600;">
-      Program Update
-    </div>
-
-  </div>
-
-  <!-- Hero Image (Centered - email safe) -->
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 28px;">
-    <tbody><tr>
-      <td align="center">
-        <img src="https://fusionart-bucket.s3.us-east-2.amazonaws.com/uploads/platform-assets/program_hero-1.jpg" alt="Kaga City, Ishikawa" width="552" style="display:block;width:100%;max-width:552px;height:auto;border:0;margin:0 auto;">
-      </td>
-    </tr>
-  </tbody></table>
-
-  <!-- Main Content -->
-  <div style="border-top:1px solid #000000;border-bottom:1px solid #000000;padding:32px 0;">
-
-    <div style="display:inline-block;background:#000000;color:#ffffff;padding:6px 12px;font-size:11px;font-weight:700;margin-bottom:18px;letter-spacing:0.06em;">
-      JAPAN ARTIST RESIDENCY
-    </div>
-
-    <h1 style="margin:0 0 20px;font-size:44px;line-height:0.95;font-weight:900;letter-spacing:-0.04em;">
-      Kaga City,<br>
-      Ishikawa<br>
-      Fall 2026
-    </h1>
-
-    <p style="font-size:16px;line-height:1.6;margin:0 0 16px;">
-      Applications are now open for the next FUSION Artist Residency in Japan.
-    </p>
-
-    <p style="font-size:15px;line-height:1.6;margin:0 0 20px;">
-      A program shaped around place, process, and exchange, moving from the cultural energy of Japan to the quiet, craft-rich landscape of Kaga City.
-    </p>
-
-    <p style="font-size:15px;line-height:1.6;margin:0 0 28px;">
-      Join an evolving platform connecting artists, curators, collectors, and galleries through residency, dialogue, and visibility.
-    </p>
-
-    <!-- CTA -->
-    <a href="https://fusionart.world/program/kaga-ishikawa" style="display:inline-block;background:#c12525;color:#ffffff;text-decoration:none;padding:14px 20px;font-size:12px;font-weight:800;letter-spacing:0.08em;">
-      APPLY / LEARN MORE
-    </a>
-
-    <p style="font-size:12px;margin:26px 0 0;">
-      Space is limited. Early applications encouraged.
-    </p>
-
-  </div>
-
-  <!-- Footer -->
-  <div style="margin-top:30px;padding-top:22px;">
-
-    <p style="margin:0 0 12px;font-size:13px;">
-      — Fusion Team
-    </p>
-
-    <img src="https://fusionart.world/email/Fusion-Logo-Sig-1.png" alt="Fusion" width="110" style="display:block;margin-bottom:16px;border:0">
-
-    <p style="margin:0 0 8px;font-size:13px;">
-      <a href="https://www.fusionart.world" style="color:#000000;text-decoration:none;border-bottom:1px solid #000000;">
-        fusionart.world
-      </a>
-    </p>
-
-    <p style="margin:0;font-size:12px;color:#4a4a4a;letter-spacing:0.05em;">
-      IG: @fusion_intl &nbsp;/&nbsp; TT: @fusion_intl &nbsp;/&nbsp; YT: @fusionartworld
-    </p>
-
-  </div>
-
-</div>`,
-        notes: 'Full-width branded layout (Momochidori); edit copy and links per campaign.',
+        bodyHtml: renderFusionEmailFromSlots(generalSlots),
+        notes: 'Full-width branded layout; edit copy and links per campaign.',
+    },
+    tpl_program_update: {
+        id: 'tpl_program_update',
+        name: 'Program Update',
+        templateGroup: 'updates',
+        defaultEyebrow: 'Program Update',
+        contentSourceTypes: ['program'],
+        defaultSubject: 'Program update from Fusion',
+        defaultPreview: 'News and details about an upcoming Fusion residency program.',
+        bodyHtml: renderFusionEmailFromSlots({
+            ...generalSlots,
+            eyebrow: 'Program Update',
+            headlineHtml: 'Program<br>Update',
+            bodyHtml: [
+                fusionEmailParagraph(
+                    'Select a program under Content source to pull hero image, dates, and apply link — or edit this copy manually.',
+                    'lead',
+                ),
+                fusionEmailParagraph(
+                    'Share what is new, who should apply, and one clear next step for readers.',
+                    'last',
+                ),
+            ].join('\n'),
+            cta: { label: 'VIEW PROGRAM', href: 'https://www.fusionart.world/programs' },
+        }),
+        notes: 'Bind a program card to auto-fill hero, title, and CTA.',
+    },
+    tpl_featured_artist: {
+        id: 'tpl_featured_artist',
+        name: 'Featured Artist',
+        templateGroup: 'spotlights',
+        defaultEyebrow: 'Artist Spotlight',
+        contentSourceTypes: ['artist'],
+        defaultSubject: 'Artist spotlight',
+        defaultPreview: 'A conversation with a Fusion artist — read the story.',
+        bodyHtml: renderFusionEmailFromSlots({
+            eyebrow: 'Artist Spotlight',
+            pillLabel: 'FUSION ARTIST',
+            headlineHtml: 'Artist<br>Spotlight',
+            bodyHtml: [
+                fusionEmailParagraph('“A short pull quote or highlight about the work.”', 'quote'),
+                fusionEmailParagraph(
+                    'Intro paragraph: context for readers and a clear reason to visit the full profile.',
+                    'last',
+                ),
+            ].join('\n'),
+            cta: { label: 'VIEW PROFILE', href: 'https://www.fusionart.world/artists' },
+        }),
+        notes: 'Bind a roster artist to pull image, name, bio, and profile link.',
+    },
+    tpl_journal_entry: {
+        id: 'tpl_journal_entry',
+        name: 'Journal Entry',
+        templateGroup: 'spotlights',
+        defaultEyebrow: 'Journal',
+        contentSourceTypes: ['journal'],
+        defaultSubject: 'From the Fusion journal',
+        defaultPreview: 'A new story from the Fusion journal.',
+        bodyHtml: renderFusionEmailFromSlots({
+            eyebrow: 'Journal',
+            pillLabel: 'FUSION JOURNAL',
+            headlineHtml: 'Journal<br>Entry',
+            bodyHtml: [
+                fusionEmailParagraph(
+                    'Lead with the heart of the piece — what happened, who was involved, and why it matters to the Fusion community.',
+                    'lead',
+                ),
+                fusionEmailParagraph(
+                    'Add a short invitation to read the full entry on fusionart.world.',
+                    'last',
+                ),
+            ].join('\n'),
+            cta: { label: 'READ ENTRY', href: 'https://www.fusionart.world/journal' },
+        }),
+        notes: 'Bind a journal entry to pull image, title, and link.',
     },
     tpl_open_call: {
         id: 'tpl_open_call',
         name: 'Open Call Launch',
+        templateGroup: 'campaigns',
+        defaultEyebrow: 'Open Call',
         defaultSubject: 'Residency open call',
         defaultPreview: 'Apply for the next Fusion residency — limited places.',
-        bodyHtml: wrapEmailHtml(`<h1 style="font-size:22px;margin:0 0 12px">Residency Open Call</h1>
-<p style="font-size:15px;line-height:1.55;margin:0 0 16px">We are inviting artists to apply for the upcoming program. Share your practice and what you would explore during the residency.</p>
-<ul style="font-size:15px;line-height:1.4;margin:0 0 20px;padding-left:1.2em">
+        bodyHtml: fusionEmailLayout({
+            eyebrow: 'Open Call',
+            pillLabel: 'RESIDENCY',
+            headlineHtml: 'Residency<br>Open Call',
+            bodyHtml: [
+                fusionEmailParagraph(
+                    'We are inviting artists to apply for the upcoming program. Share your practice and what you would explore during the residency.',
+                    'lead',
+                ),
+                `<ul style="${FUSION_EMAIL_STYLES.bodyList}">
 <li>Key dates in your local timezone</li>
 <li>What we provide</li>
 <li>How to apply</li>
-</ul>
-<p style="text-align:center;margin:0"><a href="https://www.fusionart.world" style="display:inline-block;padding:12px 28px;background:#000;color:#fff;text-decoration:none;border-radius:4px;font-weight:600">Apply now</a></p>`),
-        notes: 'Add hero image via toolbar if needed',
+</ul>`,
+            ].join('\n'),
+            cta: { label: 'APPLY NOW', href: 'https://www.fusionart.world' },
+        }),
+        notes: 'Add hero image via toolbar if needed.',
     },
     tpl_open_call_roster: {
         id: 'tpl_open_call_roster',
-        name: 'The new Fusion is here',
+        name: 'The new Fusion is here (Send blast)',
+        templateGroup: 'campaigns',
+        defaultEyebrow: 'Platform Update',
         defaultSubject: 'The new Fusion is here! Your access is inside! :)',
         defaultPreview: 'The platform is live. Your profile, the network, and what is next — including Kaga.',
-        bodyHtml: wrapEmailHtml(`<h1 style="font-size:24px;margin:0 0 14px;line-height:1.15;font-weight:800;letter-spacing:-0.02em">The new Fusion is here.</h1>
-<p style="font-size:14px;line-height:1.5;margin:0 0 18px;color:#333;font-weight:600;letter-spacing:0.06em;text-transform:uppercase">Your new global footprint— live now</p>
-<p style="font-size:15px;line-height:1.55;margin:0 0 16px">Hi {{ARTIST_FIRST_NAME}},</p>
-<p style="font-size:15px;line-height:1.55;margin:0 0 16px">We are thrilled to say: the <strong>new Fusion platform</strong> is live! Your space for profile, programs, and the community we are building together. This is the next chapter in Fusion's evolution: a place where the interconnections between <strong>artists, curators, collectors, and galleries</strong> can grow in private and present in public, and where we believe that exchange will help shape the future of the art world.</p>
-<p style="font-size:15px;line-height:1.55;margin:0 0 16px">The platform is in <strong>steady development.</strong> You may notice a few kinks along the way, and it will keep evolving over time. <strong>Access is free for all Fusion veterans</strong>, and you can expect it to deepen and refine for impact and strategic positioning in the coming months.</p>
-<p style="font-size:15px;line-height:1.55;margin:0 0 16px">Below is your personal <strong>access code</strong>. Enter it when you join Fusion as an artist to link your roster profile (single use - once it is redeemed, it clears on our side).</p>
-<p style="font-size:20px;line-height:1.4;margin:0 0 18px;font-weight:700;letter-spacing:0.12em">{{ACCESS_CODE}}</p>
-<p style="font-size:15px;line-height:1.55;margin:0 0 16px">Additionally, we'll be introducing guest passes to extend guest access to artists, curators or collectors you think would benefit from the platform.</p>
-<p style="font-size:15px;line-height:1.55;margin:0 0 16px">We also have a <strong>new program coming up in Kaga</strong>. If you are interested, you are welcome to <strong>reach out to us directly</strong> for an expedited process, and <strong>first return residency artists are eligible for a discount</strong>.</p>
-<p style="font-size:14px;line-height:1.5;margin:0 0 20px;color:#444">If anything feels off while you explore, please email us at <a href="mailto:info@fusionart.world" style="color:#111;text-decoration:underline">info@fusionart.world</a> — we read every message and want to hear from you.</p>
-<p style="text-align:center;margin:0"><a href="https://www.fusionart.world" style="display:inline-block;padding:12px 28px;background:#000;color:#fff;text-decoration:none;border-radius:4px;font-weight:600">See the new Fusion</a></p>`),
+        bodyHtml: fusionEmailLayout({
+            eyebrow: 'Platform Update',
+            pillLabel: 'PLATFORM UPDATE',
+            headlineHtml: 'The new<br>Fusion is<br>here.',
+            bodyHtml: [
+                fusionEmailParagraph(
+                    '<span style="font-weight:600;letter-spacing:0.06em;text-transform:uppercase;">Your new global footprint — live now</span>',
+                    'lead',
+                ),
+                fusionEmailParagraph('Hi {{ARTIST_FIRST_NAME}},'),
+                fusionEmailParagraph(
+                    'We are thrilled to say: the <strong>new Fusion platform</strong> is live! Your space for profile, programs, and the community we are building together. This is the next chapter in Fusion\'s evolution: a place where the interconnections between <strong>artists, curators, collectors, and galleries</strong> can grow in private and present in public, and where we believe that exchange will help shape the future of the art world.',
+                ),
+                fusionEmailParagraph(
+                    'The platform is in <strong>steady development.</strong> You may notice a few kinks along the way, and it will keep evolving over time. <strong>Access is free for all Fusion veterans</strong>, and you can expect it to deepen and refine for impact and strategic positioning in the coming months.',
+                ),
+                fusionEmailParagraph(
+                    'Below is your personal <strong>access code</strong>. Enter it when you join Fusion as an artist to link your roster profile (single use - once it is redeemed, it clears on our side).',
+                ),
+                '<p style="font-size:20px;line-height:1.4;margin:0 0 20px;font-weight:700;letter-spacing:0.12em;color:#000000;">{{ACCESS_CODE}}</p>',
+                fusionEmailParagraph(
+                    'Additionally, we\'ll be introducing guest passes to extend guest access to artists, curators or collectors you think would benefit from the platform.',
+                ),
+                fusionEmailParagraph(
+                    'We also have a <strong>new program coming up in Kaga</strong>. If you are interested, you are welcome to <strong>reach out to us directly</strong> for an expedited process, and <strong>first return residency artists are eligible for a discount</strong>.',
+                ),
+                fusionEmailParagraph(
+                    `If anything feels off while you explore, please email us at ${fusionEmailLink('mailto:info@fusionart.world', 'info@fusionart.world')} — we read every message and want to hear from you.`,
+                    'last',
+                ),
+            ].join('\n'),
+            cta: { label: 'SEE THE NEW FUSION', href: 'https://www.fusionart.world' },
+        }),
         notes: 'Send blast: platform launch invite; per-artist name + code; Kaga + support',
         requiresRosterPlaceholders: true,
     },
     tpl_reminder: {
         id: 'tpl_reminder',
         name: 'Reminder (last chance)',
+        templateGroup: 'campaigns',
+        defaultEyebrow: 'Reminder',
         defaultSubject: 'Last chance to apply',
         defaultPreview: 'Final days — don’t miss the deadline.',
-        bodyHtml: wrapEmailHtml(`<h1 style="font-size:20px;margin:0 0 10px">Reminder: closing soon</h1>
-<p style="font-size:15px;line-height:1.55;margin:0 0 16px">This is a short note to remind you that applications close soon. If you have questions, simply reply to this email.</p>
-<p style="text-align:center;margin:0"><a href="https://www.fusionart.world" style="display:inline-block;padding:12px 28px;background:#000;color:#fff;text-decoration:none;border-radius:4px;font-weight:600">View details</a></p>`),
-    },
-    tpl_artist_feature: {
-        id: 'tpl_artist_feature',
-        name: 'Artist Feature',
-        defaultSubject: 'Artist spotlight',
-        defaultPreview: 'A conversation with a Fusion artist — read the story.',
-        bodyHtml: wrapEmailHtml(`<h1 style="font-size:22px;margin:0 0 12px">Artist spotlight</h1>
-<!-- s3-image -->
-<p style="font-size:15px;line-height:1.55;margin:0 0 12px">“A short pull quote or highlight about the work.”</p>
-<p style="font-size:15px;line-height:1.55;margin:0 0 20px">Intro paragraph: context for readers and a clear reason to visit the full profile.</p>
-<p style="text-align:center;margin:0"><a href="https://www.fusionart.world" style="display:inline-block;padding:12px 28px;background:#000;color:#fff;text-decoration:none;border-radius:4px;font-weight:600">View profile</a></p>`),
+        bodyHtml: fusionEmailLayout({
+            eyebrow: 'Reminder',
+            pillLabel: 'DEADLINE',
+            headlineHtml: 'Closing<br>Soon',
+            bodyHtml: fusionEmailParagraph(
+                'This is a short note to remind you that applications close soon. If you have questions, simply reply to this email.',
+                'last',
+            ),
+            cta: { label: 'VIEW DETAILS', href: 'https://www.fusionart.world' },
+        }),
     },
 };
+
+/** @deprecated Use tpl_featured_artist */
+EMAIL_CAMPAIGN_TEMPLATES.tpl_artist_feature = {
+    ...EMAIL_CAMPAIGN_TEMPLATES.tpl_featured_artist,
+    id: 'tpl_artist_feature',
+    name: 'Artist Feature (legacy)',
+};
+
+/** Group labels for template select UI. */
+export const EMAIL_TEMPLATE_GROUPS = [
+    { key: 'updates', label: 'Updates' },
+    { key: 'spotlights', label: 'Spotlights' },
+    { key: 'campaigns', label: 'Campaigns' },
+];
 
 /**
  * @param {string} id
  * @returns {EmailTemplateDef | undefined}
  */
 export function getEmailTemplateById(id) {
+    if (id === 'tpl_artist_feature') return EMAIL_CAMPAIGN_TEMPLATES.tpl_featured_artist;
     return EMAIL_CAMPAIGN_TEMPLATES[id];
+}
+
+/**
+ * @returns {string}
+ */
+export function renderEmailTemplateSelectHtml() {
+    const esc = (s) =>
+        String(s ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/"/g, '&quot;');
+    const byGroup = /** @type {Record<string, EmailTemplateDef[]>} */ ({});
+    for (const tpl of Object.values(EMAIL_CAMPAIGN_TEMPLATES)) {
+        if (tpl.id === 'tpl_artist_feature') continue;
+        const g = tpl.templateGroup || 'campaigns';
+        if (!byGroup[g]) byGroup[g] = [];
+        byGroup[g].push(tpl);
+    }
+    let html = '<option value="">— None —</option>';
+    for (const { key, label } of EMAIL_TEMPLATE_GROUPS) {
+        const items = byGroup[key];
+        if (!items?.length) continue;
+        html += `<optgroup label="${esc(label)}">`;
+        for (const t of items) {
+            html += `<option value="${esc(t.id)}">${esc(t.name)}</option>`;
+        }
+        html += '</optgroup>';
+    }
+    return html;
 }

@@ -7,8 +7,8 @@ import { worldTextToParagraphs } from './worldNormalize.js';
 
 /** @typedef {'newWorld' | 'world'} PublicWorldSource */
 
-/** Fallback when no worldNew content and no explicit preference. */
-export const PUBLIC_WORLD_SOURCE_DEFAULT = /** @type {const} */ ('world');
+/** Fallback when no explicit preference (pickPublicWorldField still falls back to `world` per field). */
+export const PUBLIC_WORLD_SOURCE_DEFAULT = /** @type {const} */ ('newWorld');
 
 const WORLD_NEW_TEXT_KEYS = ['practice', 'perspective', 'vision', 'constructing', 'context', 'quote'];
 

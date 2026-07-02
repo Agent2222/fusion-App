@@ -1,6 +1,8 @@
 import { getPublicSiteOrigin } from '../config.js';
 import { getJournalEntries, subscribeDataSource } from '../utils/database.js';
 import { applyDocumentSeo } from '../utils/documentSeo.js';
+import { journalBodyPlainText, normalizeJournalBodyHtml } from '../utils/journalBodyHtml.js';
+import { isJournalEntryPublished } from '../utils/journalPublicVisibility.js';
 import { SEO_MEDIA_DEFAULT, withSeoImageAlt } from '../utils/mediaAltSeo.js';
 import { firstNonEmptyString, mergeLocaleDeep } from '../utils/localeFallback.js';
 
@@ -63,9 +65,9 @@ export function generateJournalEntryContent() {
                         <nav class="journal-entry-back" aria-label="Journal">
                             <a href="/journal" class="journal-entry-back-link">← Journal</a>
                         </nav>
-                        <article class="journal-entry-detail" id="journalEntryDetail" hidden>
+                        <article class="journal-entry-detail is-pending" id="journalEntryDetail">
                             <div class="journal-entry-hero">
-                                <img id="journalEntryImage" src="" alt="${SEO_MEDIA_DEFAULT}" width="960" height="540" />
+                                <img id="journalEntryImage" src="" alt="${SEO_MEDIA_DEFAULT}" decoding="async" />
                             </div>
                             <div class="journal-entry-body">
                                 <h1 id="journalEntryTitle" class="journal-entry-title"></h1>
@@ -83,40 +85,96 @@ export function generateJournalEntryContent() {
     `;
 }
 
-function applyJournalEntry(entry) {
-    const locale = typeof window.getLocale === 'function' ? window.getLocale() : 'en';
+/** @type {string} */
+let _renderedEntryKey = '';
+/** @type {string} */
+let _renderedBodyHtml = '';
+/** @type {string} */
+let _renderedLocale = '';
+/** @type {string | null} */
+let _activePathKey = null;
+/** @type {Record<string, unknown> | null} */
+let _cachedEntry = null;
+/** @type {((ev: Event) => void) | null} */
+let _localeListener = null;
+/** @type {(() => void) | null} */
+let _unsubJournalEntry = null;
+
+/**
+ * @param {Record<string, unknown>} entry
+ * @param {'en' | 'ja'} locale
+ */
+function journalEntryLocaleSlice(entry, locale) {
     const enE = entry.en && typeof entry.en === 'object' ? entry.en : {};
     const jaE = entry.ja && typeof entry.ja === 'object' ? entry.ja : {};
-    const loc =
-        locale === 'ja'
-            ? /** @type {Record<string, unknown>} */ (mergeLocaleDeep(enE, jaE))
-            : /** @type {Record<string, unknown>} */ (enE);
-    const title = loc?.title || '';
+    return locale === 'ja'
+        ? /** @type {Record<string, unknown>} */ (mergeLocaleDeep(enE, jaE))
+        : /** @type {Record<string, unknown>} */ (enE);
+}
+
+/**
+ * @param {HTMLElement | null} el
+ * @param {boolean} on
+ */
+function setVisible(el, on) {
+    if (!el) return;
+    if (on) el.removeAttribute('hidden');
+    else el.setAttribute('hidden', '');
+}
+
+/**
+ * @param {Record<string, unknown>} entry
+ */
+function applyJournalEntry(entry) {
+    const locale = typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
+    const enE = entry.en && typeof entry.en === 'object' ? entry.en : {};
+    const jaE = entry.ja && typeof entry.ja === 'object' ? entry.ja : {};
+    const loc = journalEntryLocaleSlice(entry, locale);
+    const title = String(loc?.title ?? '').trim();
     const description = loc?.description ?? '';
     const imageAlt = loc?.imageAlt ?? title;
+    const entryKey = String(entry.id ?? '');
 
+    const article = document.getElementById('journalEntryDetail');
     const imgEl = document.getElementById('journalEntryImage');
     const titleEl = document.getElementById('journalEntryTitle');
     const descEl = document.getElementById('journalEntryDescription');
 
-    if (imgEl) {
-        imgEl.src = firstNonEmptyString(entry.imageSrc, jaE?.imageSrc, enE?.imageSrc);
-        imgEl.alt = withSeoImageAlt(imageAlt);
+    const nextImg = firstNonEmptyString(entry.imageSrc, jaE?.imageSrc, enE?.imageSrc);
+    if (imgEl instanceof HTMLImageElement && nextImg && imgEl.getAttribute('src') !== nextImg) {
+        imgEl.src = nextImg;
+    }
+    if (imgEl instanceof HTMLImageElement) {
+        const nextAlt = withSeoImageAlt(imageAlt);
+        if (imgEl.alt !== nextAlt) imgEl.alt = nextAlt;
     }
     if (titleEl) titleEl.textContent = title;
-    if (descEl) {
-        descEl.textContent = description;
+
+    const nextBody = normalizeJournalBodyHtml(String(description));
+    const bodyNeedsUpdate =
+        nextBody !== _renderedBodyHtml ||
+        entryKey !== _renderedEntryKey ||
+        locale !== _renderedLocale ||
+        (descEl instanceof HTMLElement && descEl.innerHTML !== nextBody);
+    if (descEl instanceof HTMLElement && bodyNeedsUpdate) {
+        descEl.innerHTML = nextBody;
+        _renderedBodyHtml = nextBody;
     }
-    const pageTitle = `${title || "Journal"} · Fusion`;
-    document.title = pageTitle;
+
+    if (article instanceof HTMLElement) article.classList.remove('is-pending');
+    _renderedEntryKey = entryKey;
+    _renderedLocale = locale;
+
+    const pageTitle = `${title || 'Journal'} · Fusion`;
+    if (document.title !== pageTitle) document.title = pageTitle;
     const pagePath = window.location.pathname;
     const descText =
-        String(description || "").trim() ||
-        "Editorial entry from Fusion’s art platform and Japan artist residency network.";
-    let imageSrcForOg = firstNonEmptyString(entry.imageSrc, jaE?.imageSrc, enE?.imageSrc);
+        journalBodyPlainText(description) ||
+        'Editorial entry from Fusion’s art platform and Japan artist residency network.';
+    let imageSrcForOg = nextImg;
     if (imageSrcForOg && !/^https?:\/\//i.test(imageSrcForOg)) {
         const origin = getPublicSiteOrigin();
-        imageSrcForOg = `${origin}${imageSrcForOg.startsWith("/") ? imageSrcForOg : `/${imageSrcForOg}`}`;
+        imageSrcForOg = `${origin}${imageSrcForOg.startsWith('/') ? imageSrcForOg : `/${imageSrcForOg}`}`;
     }
     const raw = /** @type {Record<string, unknown>} */ (entry);
     const datePublished =
@@ -126,16 +184,16 @@ function applyJournalEntry(entry) {
               ? String(raw.publishedAt)
               : raw.date != null
                 ? String(raw.date)
-                : "";
+                : '';
     /** @type {Record<string, unknown>} */
     const articleLd = {
-        "@context": "https://schema.org",
-        "@type": "Article",
-        headline: title || "Journal",
+        '@context': 'https://schema.org',
+        '@type': 'Article',
+        headline: title || 'Journal',
         description: descText.slice(0, 2000),
         publisher: {
-            "@type": "Organization",
-            name: "Fusion",
+            '@type': 'Organization',
+            name: 'Fusion',
             url: `${getPublicSiteOrigin()}/`,
         },
     };
@@ -146,27 +204,39 @@ function applyJournalEntry(entry) {
         title: pageTitle,
         description: descText,
         path: pagePath,
-        ogType: "article",
+        ogType: 'article',
         imageUrl: imageSrcForOg || undefined,
         breadcrumbItems: [
-            { name: "Home", path: "/" },
-            { name: "Journal", path: "/journal" },
-            { name: String(title || "Entry").slice(0, 96), path: pagePath },
+            { name: 'Home', path: '/' },
+            { name: 'Journal', path: '/journal' },
+            { name: String(title || 'Entry').slice(0, 96), path: pagePath },
         ],
         articleJsonLd: articleLd,
     });
 }
 
-/** @type {(() => void) | null} */
-let _unsubJournalEntry = null;
+function resetJournalEntryRenderCache() {
+    _renderedEntryKey = '';
+    _renderedBodyHtml = '';
+    _renderedLocale = '';
+}
 
 export default function initJournalEntry() {
     if (_unsubJournalEntry) {
         _unsubJournalEntry();
         _unsubJournalEntry = null;
     }
+    if (_localeListener) {
+        window.removeEventListener('fusion-localechange', _localeListener);
+        _localeListener = null;
+    }
 
     const pathKey = journalEntryKeyFromPathname();
+    const currentLocale = typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
+    if (pathKey !== _activePathKey || currentLocale !== _renderedLocale) {
+        _activePathKey = pathKey;
+        resetJournalEntryRenderCache();
+    }
 
     const run = async () => {
         const list = await getJournalEntries();
@@ -175,28 +245,42 @@ export default function initJournalEntry() {
         const article = document.getElementById('journalEntryDetail');
         const notFound = document.getElementById('journalEntryNotFound');
 
-        const show = (el, on) => {
-            if (!el) return;
-            if (on) el.removeAttribute('hidden');
-            else el.setAttribute('hidden', '');
-        };
-
-        if (pathKey == null || !entry) {
-            show(article, false);
-            show(notFound, true);
+        if (pathKey == null || !entry || !isJournalEntryPublished(entry)) {
+            _cachedEntry = null;
+            setVisible(article, false);
+            setVisible(notFound, true);
+            if (article instanceof HTMLElement) article.classList.add('is-pending');
+            resetJournalEntryRenderCache();
             applyDocumentSeo({
-                title: "Journal entry not found · Fusion",
-                description: "This journal entry is not available on Fusion.",
+                title: 'Journal entry not found · Fusion',
+                description: 'This journal entry is not available on Fusion.',
                 path: window.location.pathname,
-                robots: "noindex, nofollow",
+                robots: 'noindex, nofollow',
             });
             return;
         }
 
-        show(article, true);
-        show(notFound, false);
+        _cachedEntry = /** @type {Record<string, unknown>} */ (entry);
+        const entryKey = String(entry.id ?? '');
+        const isSameEntry = entryKey && entryKey === _renderedEntryKey;
+
+        setVisible(article, true);
+        setVisible(notFound, false);
+        if (!isSameEntry && article instanceof HTMLElement) {
+            article.classList.add('is-pending');
+        }
         applyJournalEntry(entry);
     };
+
+    _localeListener = () => {
+        resetJournalEntryRenderCache();
+        if (_cachedEntry) {
+            applyJournalEntry(_cachedEntry);
+            return;
+        }
+        void run();
+    };
+    window.addEventListener('fusion-localechange', _localeListener);
 
     void run();
     _unsubJournalEntry = subscribeDataSource(() => {

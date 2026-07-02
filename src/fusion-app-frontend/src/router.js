@@ -1,5 +1,5 @@
 import { DEV_MODE } from './config.js';
-import { applyDocumentSeo } from './utils/documentSeo.js';
+import { applyDocumentSeo, DEFAULT_SITE_DESCRIPTION } from './utils/documentSeo.js';
 import {
     FUSION_PROGRAM_APPLICATION_LEAVE_CONFIRM,
     fusionNavPathnameOnly,
@@ -20,6 +20,14 @@ import DarkSymbolLogo from './assets/Fusion-X-SymbolLogo.png';
 import LightSymbolLogo from './assets/Fusion-X-SymbolLogo-2.png';
 
 let headerAndFooterActive = false;
+
+/** @param {string} path */
+function syncLoadscreenCirclesForPath(path) {
+    const ls = document.querySelector('app-loadscreen');
+    if (ls && typeof ls.syncDynamicCirclesForPath === 'function') {
+        ls.syncDynamicCirclesForPath(path);
+    }
+}
 
 /** @param {string} path */
 function robotsForPath(path) {
@@ -79,8 +87,7 @@ const routes = {
     '/': {
         loader: () => import('./components/home.js'),
         title: 'Fusion | Japan Artist Residency & Art Platform',
-        description:
-            'Fusion connects artists with curated Japan artist residency programs, editions, and editorial context. A premium art platform for place-based practice.',
+        description: DEFAULT_SITE_DESCRIPTION,
         contentGenerator: 'generateHomeContent',
         isFullPage: true // Home page renders full page structure
     },
@@ -557,6 +564,7 @@ class Router {
 
                 this.onRouteChange(path, route);
                 syncSoundEnvironmentPosition(path);
+                syncLoadscreenCirclesForPath(path);
                 this.syncHeaderLogosForPath(path);
             } else {
             // Load component module (static loader so bundlers can include it)
@@ -713,6 +721,7 @@ class Router {
             this.onRouteChange(path, route);
 
             syncSoundEnvironmentPosition(path);
+            syncLoadscreenCirclesForPath(path);
 
             this.syncHeaderLogosForPath(path);
             }

@@ -15,6 +15,11 @@ import {
 } from '../../utils/artistCardImageMode.js';
 import { getCurrentProgramSeason } from '../../utils/database.js';
 import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
+import {
+    ARTISTS_FEED_PENDING_WRAPPER_STYLES,
+    PH_LOADER_BASE_STYLES,
+    programHeroLoaderHtml,
+} from '../../utils/programHeroLoader.js';
 
 /** 20 cards per page, 5 columns × 4 rows */
 const PAGE_SIZE = 20;
@@ -88,6 +93,8 @@ class ArtistsFeedElement extends HTMLElement {
         this.pool = [];
         this.currentPage = 0;
         this._shellReady = false;
+        /** Until first `setArtists` / `updatePage` completes */
+        this._feedPending = true;
         /** @type {number} */
         this._pageUpdateSeq = 0;
         /** @type {(() => void) | null} */
@@ -113,7 +120,19 @@ class ArtistsFeedElement extends HTMLElement {
         this.ensureShell();
         if (this.pool.length) {
             void this.updatePage();
+        } else if (this._feedPending) {
+            this._showGridLoader();
         }
+    }
+
+    _showGridLoader() {
+        const grid = this.gridEl;
+        if (!grid) return;
+        grid.classList.add('feed-grid--loading');
+        grid.innerHTML = programHeroLoaderHtml({
+            wrapperClass: 'artists-feed-pending-loader',
+            ariaLabel: 'Loading artists',
+        });
     }
 
     disconnectedCallback() {
@@ -132,6 +151,9 @@ class ArtistsFeedElement extends HTMLElement {
                 :host {
                     display: block;
                 }
+
+                ${PH_LOADER_BASE_STYLES}
+                ${ARTISTS_FEED_PENDING_WRAPPER_STYLES}
 
                 .artists-feed {
                     width: 100%;
@@ -418,6 +440,15 @@ class ArtistsFeedElement extends HTMLElement {
         const start = this.currentPage * PAGE_SIZE;
         const slice = this.pool.slice(start, start + PAGE_SIZE);
 
+        const grid = this.gridEl;
+        const keepExistingCards =
+            grid &&
+            grid.children.length > 0 &&
+            !grid.classList.contains('feed-grid--loading');
+        if (!keepExistingCards) {
+            this._showGridLoader();
+        }
+
         let currentSeason = '';
         try {
             currentSeason = (await getCurrentProgramSeason()).trim();
@@ -427,8 +458,9 @@ class ArtistsFeedElement extends HTMLElement {
         /* A newer updatePage or setArtists may have run while awaiting — skip stale paint. */
         if (seq !== this._pageUpdateSeq) return;
 
-        const grid = this.gridEl;
+        this._feedPending = false;
         /* Clear only after season resolves so the previous page’s cards stay visible during the gap (avoids footer jump on mobile). */
+        grid.classList.remove('feed-grid--loading');
         grid.innerHTML = '';
 
         const useSeasonCompare = currentSeason !== '';

@@ -670,6 +670,8 @@
 }
 
 .settings-profile-page .member-profile-dashboard__hero-preview-wrap .member-profile-dashboard__hero-preview {
+  position: relative;
+  z-index: 1;
   width: 100%;
   height: 100%;
   max-width: none;
@@ -738,11 +740,13 @@
 
 .settings-profile-page .mpd-media-upload-surface.has-preview .mpd-media-overlay {
   opacity: 0;
+  pointer-events: none;
 }
 
 .settings-profile-page .mpd-media-upload-surface:hover .mpd-media-overlay,
 .settings-profile-page .mpd-media-upload-surface:focus-within .mpd-media-overlay {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .settings-profile-page .mpd-media-overlay__filled {
@@ -836,6 +840,8 @@
 }
 
 .settings-profile-page .mpd-profile-card-upload__image .member-profile-dashboard__hero-preview {
+  position: relative;
+  z-index: 1;
   width: 100%;
   height: 100%;
   max-width: none;
@@ -958,6 +964,8 @@
 }
 
 .settings-profile-page .member-profile-dashboard__intro-thumb {
+  position: relative;
+  z-index: 1;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -2002,6 +2010,13 @@
 
 .mpd-save-choice-modal__body p {
   margin: 0;
+}
+
+.mpd-save-choice-modal__note {
+  margin: 0 0 0.75rem;
+  font-size: clamp(0.82rem, 1.25vw, 0.94rem);
+  line-height: 1.45;
+  color: var(--c2, #000);
 }
 
 .mpd-save-choice-modal__actions {

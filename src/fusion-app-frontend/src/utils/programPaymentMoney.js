@@ -1,5 +1,6 @@
 /** Shared program residency payment amounts (USD cents) and display helpers. */
 
+import { parseProgramStartDate } from './programAlumniEligibility.js';
 import {
     applicantDisplayNamesFromPayload,
     getApplicantCategory,
@@ -135,6 +136,35 @@ export function computeMemberProgramTotalDueCents({ category, ownFlight }) {
     return Math.max(0, base - categoryDiscount - flightCredit);
 }
 
+/**
+ * Monthly installment options available before the program start month.
+ * Counts calendar months from the current month up to (but not including) the start month.
+ *
+ * @param {string} startDateText
+ * @param {string} [yearText]
+ * @param {Date} [now]
+ * @returns {number}
+ */
+export function countPaymentPlanMonthsUntilStart(startDateText, yearText = '', now = new Date()) {
+    const start = parseProgramStartDate(String(startDateText || ''), String(yearText || ''));
+    if (!start || Number.isNaN(start.getTime())) return 0;
+
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+    const startDay = new Date(start);
+    startDay.setHours(0, 0, 0, 0);
+    if (startDay.getTime() <= today.getTime()) return 0;
+
+    let count = 0;
+    const cursor = new Date(today.getFullYear(), today.getMonth(), 1);
+    const startMonth = new Date(startDay.getFullYear(), startDay.getMonth(), 1);
+    while (cursor.getTime() < startMonth.getTime()) {
+        count += 1;
+        cursor.setMonth(cursor.getMonth() + 1);
+    }
+    return count;
+}
+
 const LEDGER_PAYMENT_TYPES = new Set(['deposit', 'full_payment', 'manual', 'staff_manual']);
 const LEDGER_SUCCEEDED = new Set(['succeeded', 'paid']);
 
@@ -222,6 +252,26 @@ export function ledgerHasDepositPayment(ledger, depositAmountCents) {
         }
     }
     return false;
+}
+
+/**
+ * Member dashboard: deposit secured (manual staff flag, summary, or ledger).
+ * @param {object | null | undefined} approval
+ * @param {object | null | undefined} summary
+ * @param {object[] | null | undefined} ledger
+ * @param {number} [depositAmountCents]
+ */
+export function isMemberProgramDepositPaid(approval, summary, ledger, depositAmountCents = 0) {
+    if (approval?.manualDepositSubmitted === true) return true;
+    const depositStatus = String(summary?.depositStatus || '');
+    if (depositStatus === 'paid' || depositStatus === 'paid_full') return true;
+    const deposit =
+        normalizeCents(depositAmountCents) ||
+        normalizeCents(summary?.depositAmountCents) ||
+        PROGRAM_DEFAULT_DEPOSIT_CENTS;
+    if (ledgerHasDepositPayment(ledger, deposit)) return true;
+    const totalPaid = normalizeCents(summary?.totalPaidCents);
+    return totalPaid >= deposit && deposit > 0;
 }
 
 /**

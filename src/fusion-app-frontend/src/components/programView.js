@@ -2,10 +2,13 @@ import placeholderImg from "../assets/dev/program_hero-1.jpg";
 import { findArtistForConfirmedListLabel } from "../utils/artistSlug.js";
 import {
   findProgramPairByPathname,
+  getAllProgramsBlock,
   getApplicationPaymentGlobal,
   getArtists,
+  getCurrentProgramSeason,
   getMyArtistRecord,
 } from "../utils/database.js";
+import { buildResidencyAlumniEntries } from "../utils/residencyAlumniEntries.js";
 import { getAuthSnapshot } from "../utils/icAuth.js";
 import posthog from "posthog-js";
 import {
@@ -118,6 +121,9 @@ const PROGRAM_VIEW_HERO_LIGHTBOX_DEFAULT =
  */
 let programViewResolvedLightboxSrc = PROGRAM_VIEW_HERO_LIGHTBOX_DEFAULT;
 
+/** Label for program hero / lightbox video (set in applyProgramToDom). */
+let programViewHeroVideoLabel = "Program hero";
+
 /** @type {HTMLElement | null} */
 let programHeroVideoOverlayEl = null;
 let programHeroOverlayEscapeInstalled = false;
@@ -138,7 +144,7 @@ function ensureProgramHeroVideoOverlay() {
   root.hidden = true;
   root.setAttribute("role", "dialog");
   root.setAttribute("aria-modal", "true");
-  root.setAttribute("aria-label", "Program video");
+  root.setAttribute("aria-label", withSeoVideoLabel("Program video"));
 
   root.innerHTML = `
     <div class="program-hero-video-overlay__backdrop" tabindex="-1" aria-hidden="true"></div>
@@ -188,6 +194,10 @@ function openProgramHeroVideoOverlay() {
     video.src = url;
     video.load();
     video.muted = false;
+    const vLabel = withSeoVideoLabel(programViewHeroVideoLabel);
+    root.setAttribute("aria-label", vLabel);
+    video.setAttribute("aria-label", vLabel);
+    video.setAttribute("title", vLabel);
   }
   root.hidden = false;
   document.body.style.overflow = "hidden";
@@ -519,6 +529,7 @@ export function generateProgramViewContent() {
                         <div class="shoutHeadline">
                             This is not for every artist.<br><br>It is for those willing to work<br>within unfamiliar environments,<br>alongside others,<br> in close proximity to place and process.
                         </div>
+                        <app-residency-alumni-table id="programAlumniTable" hidden></app-residency-alumni-table>
                         <div id="programIntroCTA3" class="program-intro-cta program-close-cta" role="button" tabindex="0" style="justify-self: center; margin-bottom: 15rem;">Sign up & apply</div>
                         <div id="programDetailNotFound" class="program-detail-not-found" hidden>
                             <p>We could not find that program.</p>
@@ -600,6 +611,9 @@ async function applyProgramToDom(programPair) {
 
   const heroUrl = current?.heroMediaSrc || current?.imageSrc || "";
   const heroAlt = current?.imageAlt || titleText || "Program";
+  programViewHeroVideoLabel = String(
+    programPage?.headline || heroAlt || titleText || "Program hero",
+  ).trim();
   const stillForVideo = String(current?.imageSrc || "").trim();
   setProgramHeroMedia(hero, heroUrl, heroAlt, stillForVideo);
 
@@ -829,7 +843,7 @@ async function applyProgramToDom(programPair) {
       const found = label ? findArtistForConfirmedListLabel(label, pool) : null;
       if (found) return found;
       return {
-        image: placeholderImg,
+        image: "",
         slug: "",
         __confirmedPlaceholder: true,
         locales: {
@@ -844,6 +858,20 @@ async function applyProgramToDom(programPair) {
       totalSlots,
       artists: resolved,
     });
+  }
+
+  const alumniTable = document.getElementById("programAlumniTable");
+  if (alumniTable && typeof alumniTable.setAlumni === "function") {
+    try {
+      const allBlock = await getAllProgramsBlock();
+      const enPrograms = allBlock?.programs?.en || [];
+      const currentSeason = await getCurrentProgramSeason();
+      alumniTable.setAlumni(
+        buildResidencyAlumniEntries(enPrograms, artistPool || [], currentSeason),
+      );
+    } catch {
+      alumniTable.hidden = true;
+    }
   }
 
   const pageTitle = `${titleText || "Program"} · Fusion`;

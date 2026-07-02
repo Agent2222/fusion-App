@@ -36,6 +36,8 @@ import {
     getContentBundleForStudio,
     getEditions,
     getJournalEntries,
+    getHomeJournalCarouselStudio,
+    setHomeJournalCarouselStudio,
     getJournalEntryForStudio,
     getProgramRecordForStudio,
     getPrograms,
@@ -49,6 +51,8 @@ import {
     setCurrentProgramSeason,
     setArtistMostRecentProgram,
     applyFeaturedFlagsFromStudioSaveLive,
+    applyHeroProfileImageApprovedFromStudioSaveLive,
+    approveAllHeroProfileImagesStudio,
     setManualFeaturedForArtistStudio,
     setFeaturableForArtistStudio,
     setRandomFeaturedModeStudio,
@@ -77,7 +81,6 @@ import {
     deleteApplicantStudio,
     studioReinterpretWithPrompt,
     upsertEditionStudio,
-    upsertJournalStudio,
     upsertProgramStudio,
     normalizeProgramVisibility,
     upsertSubscriberRow,
@@ -90,7 +93,8 @@ import {
     generateAndUpsertArtistWorldFromBio,
 } from '../../utils/database.js';
 import { renderTeamSection, initTeamSection } from './teamSection.js';
-import { STUDIO_WORLD_BATCH_MAX } from '../../utils/studioArtistWorldLlm.js';
+import { STUDIO_WORLD_BATCH_MAX, buildMergedLocalesWithGeneratedWorldFromIdentity, hasUsableIdentityLlmSourceInput, translateManageFormWorldToNewWorld } from '../../utils/studioArtistWorldLlm.js';
+import { setStudioArtistManageBusy } from '../../utils/studioArtistManageBusy.js';
 import { parseSubscriberCsv } from '../../utils/csvParse.js';
 import {
     editorTextToObjectLocale,
@@ -98,7 +102,6 @@ import {
 } from '../../utils/studioLocaleEdit.js';
 import {
     applicantPayloadToPlainNotes,
-    applyJournalPlainLocales,
     APPLICANT_CATEGORY_OPTIONS,
     applicantCategoryPillHtml,
     buildApplicantApplicationSectionHtml,
@@ -108,7 +111,6 @@ import {
     getApplicantIsTester,
     getApplicantManualDepositSubmitted,
     hasSavedApplicantCategory,
-    journalLocalesToPlain,
     mergeApplicantStaffFields,
     parseApplicantPayload,
     plainNotesToApplicantPayload,
@@ -123,6 +125,8 @@ import { openSendBlastModal } from './sendBlastModal.js';
 import { openIndividualEmailModal } from './individualEmailModal.js';
 import { openApplicantEmailModal as openApplicantEmailComposer } from './applicantEmailModal.js';
 import { initEmailCampaignStudio, renderEmailCampaignStudio } from './emailCampaignStudio.js';
+import { openJournalEntryModal } from './journalEntryModal.js';
+import { resolveJournalEntryLink } from '../../utils/journalEntryModalHelpers.js';
 import { formatStudioDate, formatStudioDateWithTitle } from '../../utils/studioDateFormat.js';
 import {
     createPaymentIntent,
@@ -161,10 +165,12 @@ import {
     renderProgramLocaleFormHtml,
 } from '../../utils/studioProgramLocaleForm.js';
 import {
-    STUDIO_WORLD_TO_NEW_PATHS,
+    artistRowForLlmFromManageForm,
     collectArtistRecordFromForm,
     initArtistManageTabs,
+    patchManageFormWorldFields,
     renderArtistManageModalHtml,
+    syncStudioPublicWorldSource,
 } from '../../utils/studioArtistForm.js';
 import {
     collectAccessCodesFromArtists,
@@ -203,6 +209,13 @@ import {
     getArtistProfileReadiness,
     probeArtistProfileImages,
 } from '../../utils/artistProfileReadiness.js';
+import {
+    filterPublishedJournalEntries,
+    journalEntryOnLayout,
+    journalEntryOnPageState,
+    journalEntryStatus,
+    journalLayoutRowVisibility,
+} from '../../utils/journalPublicVisibility.js';
 
 /**
  * Grouped sidebar model (excludes `#dashboard` and admin-only `team` / `permissions`).
@@ -588,6 +601,7 @@ function renderArtists() {
                         </label>
                         <button type="button" class="studio-btn-secondary" id="studio-artists-gen-invite">Generate artist join invite</button>
                         <button type="button" class="studio-btn-ghost" id="studio-artists-sync-hero">Sync Profile Images</button>
+                        <button type="button" class="studio-btn-ghost" id="studio-artists-approve-all-profile-images">Approve all profile images</button>
                         <button type="button" class="studio-btn-ghost" id="studio-artists-sync-gallery">Sync Gallery</button>
                         <button type="button" class="studio-btn-ghost" id="studio-artists-migrate-firebase-gallery">Migrate Firebase Gallery</button>
                     </div>
@@ -824,25 +838,169 @@ function renderGalleryAccess() {
     `;
 }
 
+function journalStudioStatusPill(status) {
+    const s = journalEntryStatus({ entryStatus: status });
+    /** @type {Record<string, [string, string]>} */
+    const map = {
+        draft: ['studio-journal-status--draft', 'Draft'],
+        published: ['studio-journal-status--published', 'Published'],
+        archived: ['studio-journal-status--archived', 'Archived'],
+    };
+    const [cls, label] = map[s] || map.draft;
+    return `<span class="studio-journal-status ${cls}">${escapeHtml(label)}</span>`;
+}
+
+function journalStudioOnPageChip(state) {
+    /** @type {Record<string, [string, string]>} */
+    const map = {
+        yes: ['studio-journal-chip--live', 'Yes'],
+        no: ['studio-journal-chip--neutral', 'No'],
+        hidden: ['studio-journal-chip--hidden', 'Hidden'],
+        broken: ['studio-journal-chip--broken', 'Broken ref'],
+    };
+    const [cls, label] = map[state] || map.no;
+    return `<span class="studio-journal-chip ${cls}">${escapeHtml(label)}</span>`;
+}
+
+function journalStudioVisibilityChip(vis) {
+    /** @type {Record<string, [string, string]>} */
+    const map = {
+        live: ['studio-journal-chip--live', 'Live'],
+        hidden: ['studio-journal-chip--hidden', 'Hidden'],
+        broken: ['studio-journal-chip--broken', 'Broken ref'],
+    };
+    const [cls, label] = map[vis] || map.live;
+    return `<span class="studio-journal-chip ${cls}">${escapeHtml(label)}</span>`;
+}
+
+/**
+ * @param {Record<string, unknown>} entry
+ */
+function journalEntryPublicPath(entry) {
+    const title = String(entry?.en?.title ?? entry?.en?.name ?? '').trim();
+    const link = resolveJournalEntryLink(entry?.link, title, entry?.id);
+    if (link.startsWith('/')) return link;
+    if (/^https?:\/\//i.test(link)) return link;
+    const id = String(entry?.id ?? '').trim();
+    return id ? `/journal/entry/${encodeURIComponent(id)}` : '/journal';
+}
+
 function renderJournal() {
     return `
-        <div class="studio-section-stack studio-category-page">
+        <div class="studio-section-stack studio-category-page studio-journal-page">
             ${studioPageHeaderHtml({
                 title: 'Journal',
-                subtitle: '/journal page layout — add rows, order, and featured; journal home list still in the section below',
-                countId: 'studio-journal-header-count',
-                countLabel: 'rows',
+                subtitle: 'Manage journal entries and curate what appears on /journal',
+                countId: 'studio-journal-entries-count',
+                countLabel: 'entries',
             })}
-            ${studioFilterBarHtml({
-                searchId: 'studio-journal-search',
-                searchPlaceholder: 'Search title, id, link…',
-            })}
-            <details class="studio-embed-block" open>
-                <summary class="studio-subheading">Journal home list &amp; journal page copy</summary>
-                <p class="studio-muted">Order and entries on the home journal block plus the <strong>/journal</strong> page headline from <code>site-info</code>.</p>
+            <section class="studio-journal-section" aria-labelledby="studio-journal-entries-heading">
+                <h3 id="studio-journal-entries-heading" class="studio-subheading">Journal entries</h3>
+                <p class="studio-muted studio-journal-lede">All CMS journal records. Only <strong>published</strong> entries appear on the public site.</p>
+                ${studioDataTabsHtml({
+                    ariaLabel: 'Entry status',
+                    tabs: [
+                        { id: 'studio-journal-tab-all', label: 'All', value: 'all', active: true },
+                        { id: 'studio-journal-tab-draft', label: 'Draft', value: 'draft' },
+                        { id: 'studio-journal-tab-published', label: 'Published', value: 'published' },
+                        { id: 'studio-journal-tab-archived', label: 'Archived', value: 'archived' },
+                    ],
+                })}
+                ${studioFilterBarHtml({
+                    searchId: 'studio-journal-entries-search',
+                    searchPlaceholder: 'Search title, id, link…',
+                })}
+                <div class="studio-subscribers-toolbar studio-journal-toolbar">
+                    <button type="button" class="studio-btn-primary" id="studio-journal-new-entry">+ New journal entry</button>
+                </div>
+                <div class="studio-table-wrap studio-table-wrap--sticky-head">
+                    <table class="studio-table studio-table--dense">
+                        <thead>
+                            <tr>
+                                <th>Title</th>
+                                <th>Status</th>
+                                <th>On /journal</th>
+                                <th>URL</th>
+                                <th>Updated</th>
+                                <th class="studio-td-actions">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="studio-journal-entries-tbody"><tr><td colspan="6">Loading…</td></tr></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="studio-journal-section" aria-labelledby="studio-journal-home-carousel-heading">
+                <div class="studio-journal-section__head">
+                    <div>
+                        <h3 id="studio-journal-home-carousel-heading" class="studio-subheading">Home carousel</h3>
+                        <p class="studio-muted studio-journal-lede">Choose up to <strong>3 published</strong> entries for the homepage journal hero. Slide 1 is the first pagination dot (left). Leave all slots empty to use automatic newest-first order.</p>
+                    </div>
+                </div>
+                <div class="studio-journal-home-carousel">
+                    <label class="studio-field">
+                        <span>Slide 1</span>
+                        <select id="studio-journal-home-slot-0" class="studio-select"><option value="">— Automatic —</option></select>
+                    </label>
+                    <label class="studio-field">
+                        <span>Slide 2</span>
+                        <select id="studio-journal-home-slot-1" class="studio-select"><option value="">— None —</option></select>
+                    </label>
+                    <label class="studio-field">
+                        <span>Slide 3</span>
+                        <select id="studio-journal-home-slot-2" class="studio-select"><option value="">— None —</option></select>
+                    </label>
+                </div>
+                <div class="studio-subscribers-toolbar studio-journal-toolbar" style="flex-wrap:wrap;gap:0.5rem;align-items:center">
+                    <button type="button" class="studio-btn-primary" id="studio-journal-home-carousel-save">Save carousel</button>
+                    <button type="button" class="studio-btn-ghost" id="studio-journal-home-carousel-clear">Use automatic order</button>
+                </div>
+                <p id="studio-journal-home-carousel-msg" class="studio-banner studio-banner--info" style="display:none" role="status"></p>
+            </section>
+
+            <section class="studio-journal-section" aria-labelledby="studio-journal-layout-heading">
+                <div class="studio-journal-section__head">
+                    <div>
+                        <h3 id="studio-journal-layout-heading" class="studio-subheading">/journal page layout</h3>
+                        <p class="studio-muted studio-journal-lede">Controls what visitors see on <a href="/journal" target="_blank" rel="noopener noreferrer">/journal</a> — only <strong>published</strong> entries with valid refs appear.</p>
+                    </div>
+                    <p class="studio-journal-layout-stat" aria-live="polite"><span id="studio-journal-header-count">—</span> rows</p>
+                </div>
+                <p id="studio-journal-layout-unsaved" class="studio-banner studio-banner--warn" style="display:none" role="status">You have unsaved layout changes.</p>
+                ${studioFilterBarHtml({
+                    searchId: 'studio-journal-search',
+                    searchPlaceholder: 'Search layout rows…',
+                })}
+                <div class="studio-subscribers-toolbar studio-journal-toolbar" style="flex-wrap:wrap;gap:0.5rem;align-items:center">
+                    <button type="button" class="studio-btn-primary" id="studio-journal-add">+ Add layout row</button>
+                    <button type="button" class="studio-btn-primary" id="studio-journal-save-layout">Save layout</button>
+                    <a href="/journal" target="_blank" rel="noopener noreferrer" class="studio-btn-ghost">Preview /journal</a>
+                    <button type="button" class="studio-btn-ghost" id="studio-journal-refresh">Refresh</button>
+                </div>
+                <div id="studio-journal-banner" class="studio-banner studio-banner--info" style="display:none"></div>
+                <div class="studio-table-wrap studio-table-wrap--sticky-head">
+                    <table class="studio-table studio-table--dense">
+                        <thead>
+                            <tr>
+                                <th>Order</th>
+                                <th>Feature</th>
+                                <th>Type</th>
+                                <th>Visibility</th>
+                                <th>Ref / details</th>
+                                <th class="studio-td-actions">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="studio-journal-tbody"><tr><td colspan="6">Loading…</td></tr></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <details class="studio-embed-block studio-journal-settings">
+                <summary class="studio-subheading">Home &amp; page settings</summary>
+                <p id="studio-journal-settings-note" class="studio-muted"></p>
                 <div class="studio-toolbar-actions" style="margin:0.5rem 0;flex-wrap:wrap;gap:0.5rem">
-                    <button type="button" class="studio-btn-primary" id="studio-journal-edit-block">Edit journal home list</button>
-                    <button type="button" class="studio-btn-ghost" id="studio-journal-edit-siteinfo">Edit journal page headline</button>
+                    <button type="button" class="studio-btn-primary" id="studio-journal-edit-block">Edit test mode home list</button>
+                    <button type="button" class="studio-btn-ghost" id="studio-journal-edit-siteinfo">Edit /journal page headline</button>
                 </div>
                 <div id="studio-journal-embed-editor" class="studio-content-editor" style="display:none;margin-top:12px">
                     <h3 class="studio-subheading" id="studio-journal-embed-title">Edit</h3>
@@ -855,26 +1013,6 @@ function renderJournal() {
                     <p id="studio-journal-embed-msg" class="studio-banner studio-banner--info" style="display:none"></p>
                 </div>
             </details>
-            <div class="studio-subscribers-toolbar" style="flex-wrap:wrap;gap:0.5rem;align-items:center">
-                <button type="button" class="studio-btn-primary" id="studio-journal-add">ADD COMPOSER ROW</button>
-                <button type="button" class="studio-btn-primary" id="studio-journal-save-layout">Save layout</button>
-                <button type="button" class="studio-btn-ghost" id="studio-journal-refresh">Refresh</button>
-            </div>
-            <div id="studio-journal-banner" class="studio-banner studio-banner--info" style="display:none"></div>
-            <div class="studio-table-wrap studio-table-wrap--sticky-head">
-                <table class="studio-table studio-table--dense">
-                    <thead>
-                        <tr>
-                            <th>Order</th>
-                            <th>Feature</th>
-                            <th>Type</th>
-                            <th>Ref / details</th>
-                            <th class="studio-td-actions">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="studio-journal-tbody"><tr><td colspan="5">Loading…</td></tr></tbody>
-                </table>
-            </div>
         </div>
     `;
 }
@@ -1700,6 +1838,30 @@ function openStudioArtistManageFromRow(tableRow, afterSave, hostEl, listSurface 
         initArtistManageTabs(root);
         void initArtistProgramsTab(root, full);
         initAssetPreviews();
+        syncStudioPublicWorldSource(
+            root,
+            full.locales && typeof full.locales === 'object'
+                ? /** @type {Record<string, unknown>} */ (full.locales)
+                : {},
+        );
+
+        root.addEventListener('click', (e) => {
+            const worldSourceBtn = e.target?.closest?.('[data-studio-world-source]');
+            if (!worldSourceBtn || !root.contains(worldSourceBtn)) return;
+            e.preventDefault();
+            const source = worldSourceBtn.getAttribute('data-studio-world-source');
+            if (source !== 'world' && source !== 'newWorld') return;
+            try {
+                const row = artistRowForLlmFromManageForm(root, full);
+                const loc =
+                    row.locales && typeof row.locales === 'object'
+                        ? /** @type {Record<string, unknown>} */ (row.locales)
+                        : {};
+                syncStudioPublicWorldSource(root, loc, source);
+            } catch {
+                syncStudioPublicWorldSource(root, {}, source);
+            }
+        });
 
         root.querySelector('#studio-art-gen-access-code')?.addEventListener('click', async () => {
             if (getDataSource() !== 'live') {
@@ -1719,41 +1881,78 @@ function openStudioArtistManageFromRow(tableRow, afterSave, hostEl, listSurface 
             }
         });
 
-        root.querySelector('#studio-art-translate-to-new-world')?.addEventListener('click', async () => {
-            const promptEl = root.querySelector('#studio-art-new-world-prompt');
-            const promptText = promptEl instanceof HTMLTextAreaElement ? promptEl.value.trim() : '';
-            if (!promptText) {
-                alert('Add a prompt first.');
+        root.querySelector('#studio-art-new-world-from-base')?.addEventListener('click', async () => {
+            if (getDataSource() !== 'live') {
+                alert('New World from base requires Live data source (IC LLM on the backend canister).');
                 return;
             }
-            const btn = root.querySelector('#studio-art-translate-to-new-world');
+            const btn = root.querySelector('#studio-art-new-world-from-base');
+            const row = artistRowForLlmFromManageForm(root, full);
+            if (!hasUsableIdentityLlmSourceInput(row)) {
+                alert(
+                    'Add bio, discipline, location, or quote on the Identity tab first, then try again.',
+                );
+                return;
+            }
             if (btn instanceof HTMLButtonElement) btn.disabled = true;
+            setStudioArtistManageBusy(root, true, 'Generating New World from Identity…');
             try {
-                for (const { path } of STUDIO_WORLD_TO_NEW_PATHS) {
-                    const targetPath = path.replace(/^world\./, 'worldNew.');
-                    for (const loc of ['en', 'ja']) {
-                        const srcEl = root.querySelector(
-                            `[data-art-locale="${loc}"][data-art-path="${path}"]`
-                        );
-                        const raw =
-                            srcEl && 'value' in srcEl
-                                ? String(/** @type {HTMLInputElement} */ (srcEl).value ?? '').trim()
-                                : '';
-                        if (!raw) continue;
-                        const out = await studioReinterpretWithPrompt(promptText, raw, loc);
-                        const dest = root.querySelector(
-                            `[data-art-locale="${loc}"][data-art-path="${targetPath}"]`
-                        );
-                        if (dest instanceof HTMLTextAreaElement) {
-                            dest.value = out.trim();
-                        }
-                    }
-                }
-                alert('New World fields updated. Open the New World tab to review, then save the artist.');
+                const locales = await buildMergedLocalesWithGeneratedWorldFromIdentity(
+                    row,
+                    'fillEmpty',
+                    studioReinterpretWithPrompt,
+                    studioTranslateEnToJa,
+                );
+                patchManageFormWorldFields(root, locales);
+                syncStudioPublicWorldSource(root, locales);
+                const newWorldTab = root.querySelector('#studio-art-tab-new-world');
+                if (newWorldTab instanceof HTMLButtonElement) newWorldTab.click();
+                alert(
+                    'New World generated from Identity. Review World and New World tabs, then Save changes.',
+                );
             } catch (e) {
                 alert(e instanceof Error ? e.message : String(e));
             } finally {
+                setStudioArtistManageBusy(root, false);
                 if (btn instanceof HTMLButtonElement) btn.disabled = false;
+            }
+        });
+
+        root.querySelector('#studio-art-translate-to-new-world')?.addEventListener('click', async () => {
+            if (getDataSource() !== 'live') {
+                alert('Translate to New World requires Live data source (IC LLM on the backend canister).');
+                return;
+            }
+            const promptEl = root.querySelector('#studio-art-new-world-prompt');
+            const promptText = promptEl instanceof HTMLTextAreaElement ? promptEl.value.trim() : '';
+            const btn = root.querySelector('#studio-art-translate-to-new-world');
+            setStudioArtistManageBusy(root, true, 'Generating New World…');
+            try {
+                const fieldsUpdated = await translateManageFormWorldToNewWorld(root, {
+                    prompt: promptText,
+                    reinterpret: studioReinterpretWithPrompt,
+                    translateEnToJa: studioTranslateEnToJa,
+                });
+                if (fieldsUpdated === 0) {
+                    alert(
+                        'No World copy to translate. Fill Story & World fields on the World tab, or use New World from base to generate from Identity.',
+                    );
+                    return;
+                }
+                syncStudioPublicWorldSource(
+                    root,
+                    { en: { worldNew: { practice: 'generated' } } },
+                    'newWorld',
+                );
+                const newWorldTab = root.querySelector('#studio-art-tab-new-world');
+                if (newWorldTab instanceof HTMLButtonElement) newWorldTab.click();
+                alert(
+                    'New World generated (Kamauu-style). Open the New World tab to review, then save the artist.',
+                );
+            } catch (e) {
+                alert(e instanceof Error ? e.message : String(e));
+            } finally {
+                setStudioArtistManageBusy(root, false);
             }
         });
 
@@ -1852,6 +2051,7 @@ function openStudioArtistManageFromRow(tableRow, afterSave, hostEl, listSurface 
 
         root.querySelector('#studio-art-manage-form')?.addEventListener('submit', async (ev) => {
             ev.preventDefault();
+            setStudioArtistManageBusy(root, true, 'Saving artist…');
             try {
                 const raw = collectArtistRecordFromForm(root, full);
                 const flags = raw._featuredFlags;
@@ -1861,6 +2061,10 @@ function openStudioArtistManageFromRow(tableRow, afterSave, hostEl, listSurface 
                         featured: Boolean(flags?.featured),
                         featurable: Boolean(flags?.featurable),
                     });
+                    await applyHeroProfileImageApprovedFromStudioSaveLive(
+                        String(full.id),
+                        Boolean(raw.heroProfileImageApproved),
+                    );
                 } catch (err) {
                     alert(err instanceof Error ? err.message : String(err));
                     return;
@@ -1877,6 +2081,8 @@ function openStudioArtistManageFromRow(tableRow, afterSave, hostEl, listSurface 
                 await afterSave();
             } catch (e) {
                 alert(e instanceof Error ? e.message : String(e));
+            } finally {
+                setStudioArtistManageBusy(root, false);
             }
         });
 
@@ -3006,7 +3212,7 @@ async function initSubscribers(mainEl) {
     await loadRows();
 }
 
-const APPLICANTS_PAGE_SIZE = 10;
+const APPLICANTS_PAGE_SIZE = 50;
 
 async function initApplicants(mainEl) {
     const tbody = mainEl.querySelector('#studio-applicants-tbody');
@@ -3991,6 +4197,30 @@ ${urlHelp}
 
     mainEl.querySelector('#studio-artists-sync-hero')?.addEventListener('click', () => {
         openLegacySyncConfirm('hero');
+    });
+    mainEl.querySelector('#studio-artists-approve-all-profile-images')?.addEventListener('click', async () => {
+        if (
+            !confirm(
+                'Approve profile images for every artist in the roster?\n\nCards and program pages will show headshots when approved (Profile toggle on /artists feed, or on program confirmed strips). Artists without a headshot URL still show artwork until one is set in Manage.',
+            )
+        ) {
+            return;
+        }
+        if (!banner) return;
+        banner.className = 'studio-banner studio-banner--info';
+        banner.textContent = 'Approving profile images…';
+        try {
+            const n = await approveAllHeroProfileImagesStudio();
+            banner.className = 'studio-banner studio-banner--ok';
+            banner.textContent =
+                n > 0
+                    ? `Approved profile images for ${n} artist(s).`
+                    : 'No artists in roster.';
+            await load();
+        } catch (e) {
+            banner.className = 'studio-banner studio-banner--error';
+            banner.textContent = e instanceof Error ? e.message : String(e);
+        }
     });
     mainEl.querySelector('#studio-artists-sync-gallery')?.addEventListener('click', () => {
         openLegacySyncConfirm('gallery');
@@ -5181,15 +5411,86 @@ async function initSound(mainEl) {
 
 async function initJournal(mainEl) {
     const tbody = mainEl.querySelector('#studio-journal-tbody');
+    const entriesTbody = mainEl.querySelector('#studio-journal-entries-tbody');
     const banner = mainEl.querySelector('#studio-journal-banner');
     const searchInput = mainEl.querySelector('#studio-journal-search');
+    const entriesSearchInput = mainEl.querySelector('#studio-journal-entries-search');
     const countEl = mainEl.querySelector('#studio-journal-header-count');
+    const entriesCountEl = mainEl.querySelector('#studio-journal-entries-count');
+    const layoutUnsavedEl = mainEl.querySelector('#studio-journal-layout-unsaved');
+    const settingsNoteEl = mainEl.querySelector('#studio-journal-settings-note');
 
     const show = (kind, text) => {
         if (!banner) return;
         banner.style.display = text ? 'block' : 'none';
         banner.className = `studio-banner studio-banner--${kind}`;
         banner.textContent = text;
+    };
+
+    if (settingsNoteEl) {
+        const live = getDataSource() === 'live';
+        settingsNoteEl.innerHTML = live
+            ? 'Use <strong>Home carousel</strong> above to choose homepage slides. The test-mode home list editor below does not affect the live site.'
+            : 'Use <strong>Home carousel</strong> above for homepage slides. The <strong>/journal</strong> page headline comes from <code>site-info</code> → journal.';
+        const blockBtn = mainEl.querySelector('#studio-journal-edit-block');
+        if (blockBtn instanceof HTMLButtonElement) {
+            blockBtn.disabled = live;
+            if (live) blockBtn.title = 'Test mode home list only — not used on the live site';
+        }
+    }
+
+    const carouselMsg = mainEl.querySelector('#studio-journal-home-carousel-msg');
+    const carouselSlotEls = [0, 1, 2].map((i) => mainEl.querySelector(`#studio-journal-home-slot-${i}`));
+    const journalPerm = studioFeatureAccess('journal');
+    const canEditCarousel = journalPerm.canEdit;
+    /** @type {string[]} */
+    let carouselEntryIds = [];
+
+    const showCarouselMsg = (kind, text) => {
+        if (!(carouselMsg instanceof HTMLElement)) return;
+        carouselMsg.style.display = text ? 'block' : 'none';
+        carouselMsg.className = `studio-banner studio-banner--${kind}`;
+        carouselMsg.textContent = text;
+    };
+
+    const publishedEntriesForCarousel = () =>
+        filterPublishedJournalEntries(Array.isArray(allEntries) ? allEntries : []);
+
+    const buildCarouselEntryOptions = (selectedId) => {
+        const opts = publishedEntriesForCarousel()
+            .map((entry) => {
+                const id = String(entry?.id ?? '');
+                const title = String(entry?.en?.title ?? entry?.en?.name ?? (id || 'Untitled'));
+                return `<option value="${escapeHtml(id)}" ${id === selectedId ? 'selected' : ''}>${escapeHtml(title)}</option>`;
+            })
+            .join('');
+        return `<option value="">—</option>${opts}`;
+    };
+
+    const renderHomeCarouselSlots = () => {
+        carouselSlotEls.forEach((sel, i) => {
+            if (!(sel instanceof HTMLSelectElement)) return;
+            const selected = String(carouselEntryIds[i] ?? '');
+            sel.innerHTML = buildCarouselEntryOptions(selected);
+            sel.value = selected;
+            sel.disabled = !canEditCarousel;
+        });
+        const saveBtn = mainEl.querySelector('#studio-journal-home-carousel-save');
+        const clearBtn = mainEl.querySelector('#studio-journal-home-carousel-clear');
+        if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = !canEditCarousel;
+        if (clearBtn instanceof HTMLButtonElement) clearBtn.disabled = !canEditCarousel;
+    };
+
+    const readCarouselSlotsFromDom = () => {
+        /** @type {string[]} */
+        const ids = [];
+        for (const sel of carouselSlotEls) {
+            if (!(sel instanceof HTMLSelectElement)) continue;
+            const id = sel.value.trim();
+            if (!id) continue;
+            if (!ids.includes(id)) ids.push(id);
+        }
+        return ids.slice(0, 3);
     };
 
     const normalizeLayoutRowsForSave = (rows) =>
@@ -5212,6 +5513,28 @@ async function initJournal(mainEl) {
     let eventsList = [];
     /** @type {Array<Record<string, unknown>>} */
     let artists = [];
+    /** @type {'all' | 'draft' | 'published' | 'archived'} */
+    let entryStatusFilter = 'all';
+    let savedLayoutJson = '';
+
+    const snapshotLayoutJson = () =>
+        JSON.stringify(
+            normalizeLayoutRowsForSave(
+                layoutRows.map((r) => /** @type {Record<string, unknown>} */ (r))
+            )
+        );
+
+    const syncLayoutUnsavedBanner = () => {
+        if (!(layoutUnsavedEl instanceof HTMLElement)) return;
+        readRowsFromTableDom();
+        const dirty = snapshotLayoutJson() !== savedLayoutJson;
+        layoutUnsavedEl.style.display = dirty ? 'block' : 'none';
+    };
+
+    const markLayoutSaved = () => {
+        savedLayoutJson = snapshotLayoutJson();
+        if (layoutUnsavedEl instanceof HTMLElement) layoutUnsavedEl.style.display = 'none';
+    };
 
     const nextSortOrder = () => {
         const n = layoutRows.length;
@@ -5260,8 +5583,68 @@ async function initJournal(mainEl) {
             layoutRows.map((r) => /** @type {Record<string, unknown>} */ (r))
         );
         await adminSetJournalLayoutStudio(rows);
+        markLayoutSaved();
         show('ok', 'Layout saved.');
         await load();
+    }
+
+    async function addEntryToLayout(entry) {
+        const id = String(entry?.id ?? '').trim();
+        if (!id) return;
+        const { onLayout } = journalEntryOnLayout(id, layoutRows);
+        if (onLayout) {
+            show('info', 'Entry is already on the /journal layout.');
+            return;
+        }
+        if (journalEntryStatus(entry) === 'draft') {
+            if (
+                !confirm(
+                    'This entry is still a draft. Add to the layout anyway? Visitors will not see it until you publish.'
+                )
+            ) {
+                return;
+            }
+        }
+        readRowsFromTableDom();
+        layoutRows.push({
+            rowType: 'journal-entry',
+            refId: id,
+            sortOrder: nextSortOrder(),
+            featured: false,
+        });
+        try {
+            await saveLayoutFromState();
+        } catch (e) {
+            show('error', e instanceof Error ? e.message : String(e));
+        }
+    }
+
+    async function deleteEntryById(id) {
+        if (!confirm(`Delete journal entry ${id}? This cannot be undone.`)) return;
+        readRowsFromTableDom();
+        const beforeLen = layoutRows.length;
+        layoutRows = layoutRows.filter(
+            (r) =>
+                !(
+                    String(r?.rowType || '')
+                        .trim()
+                        .toLowerCase() === 'journal-entry' && String(r?.refId ?? '') === id
+                )
+        );
+        try {
+            await deleteJournalStudio(id);
+            if (layoutRows.length !== beforeLen) {
+                await adminSetJournalLayoutStudio(
+                    normalizeLayoutRowsForSave(
+                        layoutRows.map((r) => /** @type {Record<string, unknown>} */ (r))
+                    )
+                );
+            }
+            show('ok', 'Journal entry deleted.');
+            await load();
+        } catch (e) {
+            show('error', e instanceof Error ? e.message : String(e));
+        }
     }
 
     const openEventPickModal = (onPicked) => {
@@ -5365,11 +5748,11 @@ async function initJournal(mainEl) {
               <button type="button" class="studio-btn-ghost" id="jc-qu">Quote row</button>
               <button type="button" class="studio-btn-ghost" id="jc-au">Audio row</button>
             </div>`,
-            { title: 'Composer' }
+            { title: 'Add layout row' }
         );
         root.querySelector('#jc-je')?.addEventListener('click', () => {
             close();
-            openJournalModal(null, () => {}, {
+            openJournalEntryModal(null, () => {}, {
                 afterJournalSave: (savedId) => {
                     if (!savedId) return;
                     layoutRows.push({
@@ -5409,16 +5792,26 @@ async function initJournal(mainEl) {
     };
 
     async function load() {
-        if (!tbody) return;
-        tbody.innerHTML = '<tr><td colspan="5">Loading…</td></tr>';
-        [layoutRows, allEntries, eventsList, artists] = await Promise.all([
+        if (tbody) tbody.innerHTML = '<tr><td colspan="6">Loading…</td></tr>';
+        if (entriesTbody) entriesTbody.innerHTML = '<tr><td colspan="6">Loading…</td></tr>';
+        const [layout, entries, events, roster, carouselCfg] = await Promise.all([
             adminGetJournalLayoutStudio().catch(() => []),
             getJournalEntries().catch(() => []),
             getEventsList().catch(() => []),
             getArtists().catch(() => []),
+            getHomeJournalCarouselStudio().catch(() => ({ entryIds: [], updatedAt: '' })),
         ]);
-        layoutRows = (Array.isArray(layoutRows) ? layoutRows : []).map((r) => ({ ...r }));
-        applyJournalFilter();
+        layoutRows = (Array.isArray(layout) ? layout : []).map((r) => ({ ...r }));
+        allEntries = entries;
+        eventsList = events;
+        artists = roster;
+        carouselEntryIds = Array.isArray(carouselCfg?.entryIds)
+            ? carouselCfg.entryIds.map(String).filter(Boolean)
+            : [];
+        markLayoutSaved();
+        applyEntriesFilter();
+        applyLayoutFilter();
+        renderHomeCarouselSlots();
     }
 
     function readRowsFromTableDom() {
@@ -5443,7 +5836,93 @@ async function initJournal(mainEl) {
         });
     }
 
-    function applyJournalFilter() {
+    function applyEntriesFilter() {
+        if (!entriesTbody) return;
+        const q = (entriesSearchInput instanceof HTMLInputElement ? entriesSearchInput.value : '')
+            .trim()
+            .toLowerCase();
+        const list = (Array.isArray(allEntries) ? allEntries : []).filter((entry) => {
+            const status = journalEntryStatus(entry);
+            if (entryStatusFilter !== 'all' && status !== entryStatusFilter) return false;
+            if (!q) return true;
+            const title = String(entry?.en?.title ?? entry?.en?.name ?? '');
+            const id = String(entry?.id ?? '');
+            const link = String(entry?.link ?? '');
+            return `${title} ${id} ${link} ${status}`.toLowerCase().includes(q);
+        });
+        if (entriesCountEl) entriesCountEl.textContent = String(allEntries.length);
+        if (!list.length) {
+            entriesTbody.innerHTML = `<tr><td colspan="6">${
+                allEntries.length
+                    ? 'No entries match this filter.'
+                    : 'No journal entries yet. Use <strong>+ New journal entry</strong> to create one.'
+            }</td></tr>`;
+            return;
+        }
+        const origin = getPublicSiteOrigin();
+        entriesTbody.innerHTML = list
+            .map((entry) => {
+                const id = String(entry?.id ?? '');
+                const title = String(entry?.en?.title ?? entry?.en?.name ?? (id || 'Untitled'));
+                const status = journalEntryStatus(entry);
+                const onPage = journalEntryOnPageState(id, layoutRows, allEntries);
+                const path = journalEntryPublicPath(/** @type {Record<string, unknown>} */ (entry));
+                const previewUrl = path.startsWith('http') ? path : `${origin}${path.startsWith('/') ? path : `/${path}`}`;
+                const updated = formatStudioDate(entry?.updatedAt);
+                return `<tr data-je-id="${escapeHtml(id)}">
+                <td>${escapeHtml(title)}</td>
+                <td>${journalStudioStatusPill(status)}</td>
+                <td>${journalStudioOnPageChip(onPage)}</td>
+                <td>
+                  <code class="studio-code-inline">${escapeHtml(path)}</code>
+                  <button type="button" class="studio-btn-ghost studio-je-copy" data-path="${escapeHtml(path)}" title="Copy URL">Copy</button>
+                </td>
+                <td>${escapeHtml(updated || '—')}</td>
+                <td class="studio-td-actions">
+                  <button type="button" class="studio-btn-ghost studio-je-edit-entry" data-id="${escapeHtml(id)}">Edit</button>
+                  <button type="button" class="studio-btn-ghost studio-je-add-page" data-id="${escapeHtml(id)}">Add to page</button>
+                  <a href="${escapeHtml(previewUrl)}" target="_blank" rel="noopener noreferrer" class="studio-btn-ghost">Preview</a>
+                  <button type="button" class="studio-btn-ghost studio-je-delete" data-id="${escapeHtml(id)}">Delete</button>
+                </td>
+            </tr>`;
+            })
+            .join('');
+
+        entriesTbody.querySelectorAll('.studio-je-edit-entry').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+                const id = btn.getAttribute('data-id');
+                const row = await getJournalEntryForStudio(id || '');
+                openJournalEntryModal(row, load, {});
+            });
+        });
+        entriesTbody.querySelectorAll('.studio-je-add-page').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+                const id = btn.getAttribute('data-id');
+                const entry = allEntries.find((e) => String(e?.id ?? '') === String(id ?? ''));
+                if (entry) await addEntryToLayout(entry);
+            });
+        });
+        entriesTbody.querySelectorAll('.studio-je-delete').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+                const id = btn.getAttribute('data-id');
+                if (id) await deleteEntryById(id);
+            });
+        });
+        entriesTbody.querySelectorAll('.studio-je-copy').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+                const path = btn.getAttribute('data-path') || '';
+                const full = path.startsWith('http') ? path : `${origin}${path.startsWith('/') ? path : `/${path}`}`;
+                try {
+                    await navigator.clipboard.writeText(full);
+                    show('ok', 'URL copied.');
+                } catch {
+                    show('error', 'Could not copy URL.');
+                }
+            });
+        });
+    }
+
+    function applyLayoutFilter() {
         if (!tbody) return;
         const q = (searchInput instanceof HTMLInputElement ? searchInput.value : '').trim().toLowerCase();
         const displayRows = (Array.isArray(layoutRows) ? layoutRows : []).map((r, i) => ({ r, i })).filter(({ r }) => {
@@ -5463,7 +5942,7 @@ async function initJournal(mainEl) {
         });
         if (countEl) countEl.textContent = String(q ? displayRows.length : layoutRows.length);
         if (!displayRows.length) {
-            tbody.innerHTML = `<tr><td colspan="5">${layoutRows.length ? 'No layout rows match search.' : 'No layout rows. Use Add composer row.'}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="6">${layoutRows.length ? 'No layout rows match search.' : 'No layout rows. Use + Add layout row.'}</td></tr>`;
             return;
         }
         tbody.innerHTML = displayRows
@@ -5471,6 +5950,12 @@ async function initJournal(mainEl) {
                 const t = String(r?.rowType || 'journal-entry');
                 const so = Math.floor(Number(r?.sortOrder ?? 0));
                 const fe = Boolean(r?.featured);
+                const visChip =
+                    t === 'journal-entry'
+                        ? journalStudioVisibilityChip(
+                              journalLayoutRowVisibility(r, allEntries)
+                          )
+                        : '<span class="studio-muted">—</span>';
                 const typeOpts = ['journal-entry', 'event', 'quote', 'audio']
                     .map(
                         (x) =>
@@ -5484,6 +5969,7 @@ async function initJournal(mainEl) {
                 <td><input type="number" class="studio-input" style="width:4rem" data-jl-order value="${so}" min="0" step="1" /></td>
                 <td><input type="checkbox" data-jl-featured ${fe ? 'checked' : ''} /></td>
                 <td><label class="studio-field"><span class="studio-muted">Type</span><select class="studio-select" data-jl-type>${typeOpts}</select></label></td>
+                <td>${visChip}</td>
                 <td>
                   <div class="studio-modal-fields-row" style="flex-wrap:wrap;gap:6px;align-items:flex-end">
                     ${needRef ? `<label class="studio-field"><span class="studio-muted">Ref</span><input class="studio-input" data-jl-ref value="${escapeHtml(String(r?.refId || ''))}" style="min-width:8rem" placeholder="id or index" /></label>` : ''}
@@ -5508,7 +5994,7 @@ async function initJournal(mainEl) {
                   <button type="button" class="studio-btn-ghost studio-jl-rm" data-idx="${i}">Remove</button>
               ${
                   t === 'journal-entry' && r?.refId
-                      ? `<button type="button" class="studio-btn-ghost studio-je-view" data-id="${escapeHtml(String(r.refId))}">Preview</button>
+                      ? `<a href="${escapeHtml(`${getPublicSiteOrigin()}${journalEntryPublicPath(allEntries.find((e) => String(e?.id ?? '') === String(r.refId)) || { id: r.refId })}`)}" target="_blank" rel="noopener noreferrer" class="studio-btn-ghost">Preview</a>
                   <button type="button" class="studio-btn-ghost studio-je-edit" data-id="${escapeHtml(String(r.refId))}">Edit entry</button>`
                       : ''
               }
@@ -5542,6 +6028,10 @@ async function initJournal(mainEl) {
                 }
             });
         });
+        tbody.querySelectorAll('[data-jl-type], [data-jl-mode], [data-jl-order], [data-jl-ref], [data-jl-featured], [data-jl-artist]').forEach((el) => {
+            const evt = el.matches('[data-jl-featured]') ? 'change' : 'input';
+            el.addEventListener(evt, () => syncLayoutUnsavedBanner());
+        });
         tbody.querySelectorAll('[data-jl-type], [data-jl-mode]').forEach((el) => {
             el.addEventListener('change', (ev) => {
                 const tr = ev.target && /** @type {Element} */ (ev.target).closest('tr[data-jl-idx]');
@@ -5562,180 +6052,23 @@ async function initJournal(mainEl) {
                     aEl.disabled = !(typ === 'quote' || typ === 'audio') || m !== 'manual';
                     aEl.innerHTML = buildArtistOptions(typ, aEl.value);
                 }
-            });
-        });
-        tbody.querySelectorAll('.studio-je-view').forEach((btn) => {
-            btn.addEventListener('click', async () => {
-                const id = btn.getAttribute('data-id');
-                const row = await getJournalEntryForStudio(id || '');
-                if (!row) return;
-                let o = { en: {}, ja: {} };
-                try {
-                    o = row.localesJson
-                        ? JSON.parse(String(row.localesJson))
-                        : { en: row.en || {}, ja: row.ja || {} };
-                } catch {
-                    /* keep */
-                }
-                const plain = journalLocalesToPlain(
-                    /** @type {Record<string, unknown>} */ (o.en),
-                    /** @type {Record<string, unknown>} */ (o.ja)
-                );
-                openStudioModal(
-                    `<div class="studio-modal-form">
-                      <p class="studio-muted">Internal reference: <code class="studio-code-inline">${escapeHtml(shortRefLabel(id || ''))}</code></p>
-                      <div class="studio-locale-split">
-                        <label class="studio-field studio-field--stack"><span class="studio-locale-label">English title</span>
-                          <input type="text" id="studio-je-view-title-en" class="studio-input" readonly value="${escapeHtml(plain.titleEn)}" />
-                        </label>
-                        <label class="studio-field studio-field--stack"><span class="studio-locale-label">日本語 title</span>
-                          <input type="text" id="studio-je-view-title-ja" class="studio-input" readonly value="${escapeHtml(plain.titleJa)}" />
-                        </label>
-                      </div>
-                      <label class="studio-field studio-field--stack"><span>English body</span>
-                        <textarea id="studio-je-view-body-en" class="studio-textarea" readonly rows="10" spellcheck="false">${escapeHtml(plain.bodyEn)}</textarea>
-                      </label>
-                      <label class="studio-field studio-field--stack"><span>日本語 body</span>
-                        <textarea id="studio-je-view-body-ja" class="studio-textarea" readonly rows="10" spellcheck="false">${escapeHtml(plain.bodyJa)}</textarea>
-                      </label>
-                    </div>`,
-                    { title: `Journal — ${escapeHtml(plain.titleEn || 'Entry')}`, wide: true }
-                );
+                syncLayoutUnsavedBanner();
             });
         });
         tbody.querySelectorAll('.studio-je-edit').forEach((btn) => {
             btn.addEventListener('click', async () => {
                 const id = btn.getAttribute('data-id');
                 const row = await getJournalEntryForStudio(id || '');
-                openJournalModal(row, load, {});
+                openJournalEntryModal(row, load, {});
             });
         });
     }
 
-    const openJournalModal = (existing, onDone, opts = {}) => {
-        const j = existing || {
-            id: `j_${Date.now()}`,
-            link: '',
-            imageSrc: '',
-            entryStatus: 'draft',
-            en: {},
-            ja: {},
-        };
-        /** @type {Record<string, unknown>} */
-        let prevEn = {};
-        /** @type {Record<string, unknown>} */
-        let prevJa = {};
-        try {
-            const o = j.localesJson
-                ? JSON.parse(String(j.localesJson))
-                : { en: j.en || {}, ja: j.ja || {} };
-            prevEn = o.en && typeof o.en === 'object' && !Array.isArray(o.en) ? o.en : {};
-            prevJa = o.ja && typeof o.ja === 'object' && !Array.isArray(o.ja) ? o.ja : {};
-        } catch {
-            /* keep */
-        }
-        const plain = journalLocalesToPlain(prevEn, prevJa);
-        const jeSlug = 'journals-block';
-        const linkKind = getFieldKind(jeSlug, 'link');
-        const imgKind = getFieldKind(jeSlug, 'imageSrc');
-        const body = `
-          <form id="studio-je-form" class="studio-modal-form studio-modal-form--journal">
-            <p class="studio-muted">Internal reference: <code class="studio-code-inline">${escapeHtml(shortRefLabel(String(j.id)))}</code></p>
-            <div class="studio-modal-fields-row">
-            <label class="studio-field studio-field--full"><span>Entry ID</span><input name="id" required class="studio-input" value="${escapeHtml(String(j.id))}" ${existing ? 'readonly' : ''} /></label>
-            <label class="studio-field"><span>Public page link <span class="studio-field-kind-badge studio-field-kind-badge--${linkKind}">${escapeHtml(getFieldKindBadgeLabel(linkKind))}</span></span><input name="link" class="studio-input" value="${escapeHtml(String(j.link || ''))}" placeholder="/journal/entry/your-slug-or-id" /></label>
-            <p class="studio-muted studio-modal-hint">Use the same path the site will open — e.g. <code class="studio-code-inline">/journal/entry/fusion-is-growing</code>. The last segment must match this URL (Entry ID can stay the internal <code class="studio-code-inline">j_…</code> value).</p>
-            <label class="studio-field"><span>Cover image <span class="studio-field-kind-badge studio-field-kind-badge--${imgKind}">${escapeHtml(getFieldKindBadgeLabel(imgKind))}</span></span><input name="imageSrc" id="studio-je-img" class="studio-input" value="${escapeHtml(String(j.imageSrc || ''))}" placeholder="Asset path or URL" /></label>
-            <label class="studio-file-label studio-btn-ghost">
-                <input type="file" id="studio-je-img-file" accept="image/*,video/*" class="studio-file-input" />
-                Upload to storage
-            </label>
-            <label class="studio-field"><span>Publication status</span>
-              <select name="entryStatus" class="studio-select">
-                ${['draft', 'published', 'archived']
-                    .map(
-                        (s) =>
-                            `<option value="${s}" ${String(j.entryStatus) === s ? 'selected' : ''}>${escapeHtml(s)}</option>`
-                    )
-                    .join('')}
-              </select>
-            </label>
-            </div>
-            <div class="studio-prog-col-headers" aria-hidden="true">
-              <span class="studio-prog-grid-label"></span>
-              <span class="studio-prog-col-title">English</span>
-              <span class="studio-prog-col-title">日本語</span>
-            </div>
-            <div class="studio-prog-grid-row">
-              <span class="studio-prog-grid-label">Title</span>
-              <input type="text" id="studio-je-title-en" class="studio-input studio-prog-grid-input" value="${escapeHtml(plain.titleEn)}" spellcheck="true" />
-              <input type="text" id="studio-je-title-ja" class="studio-input studio-prog-grid-input" value="${escapeHtml(plain.titleJa)}" spellcheck="true" />
-            </div>
-            <div class="studio-prog-grid-row studio-prog-grid-row--textarea">
-              <span class="studio-prog-grid-label">Body</span>
-              <textarea id="studio-je-body-en" class="studio-textarea studio-prog-grid-input" rows="10" spellcheck="true">${escapeHtml(plain.bodyEn)}</textarea>
-              <textarea id="studio-je-body-ja" class="studio-textarea studio-prog-grid-input" rows="10" spellcheck="true">${escapeHtml(plain.bodyJa)}</textarea>
-            </div>
-            <div class="studio-modal-actions">
-              <button type="submit" class="studio-btn-primary">Save journal entry</button>
-            </div>
-          </form>`;
-        const { close, root } = openStudioModal(body, {
-            title: existing ? 'Edit journal entry' : 'Add journal entry',
-            wide: true,
-        });
-        root.querySelector('#studio-je-img-file')?.addEventListener('change', async (ev) => {
-            const t = ev.target;
-            const f = t && 'files' in t ? t.files?.[0] : null;
-            if (!f) return;
-            try {
-                await uploadBlobToS3(f, root.querySelector('#studio-je-img'), {
-                    area: 'studio/journal',
-                    entityType: 'journal',
-                    entityId: String(j.id || ''),
-                    fieldKey: 'image',
-                });
-            } catch (err) {
-                alert(err instanceof Error ? err.message : String(err));
-            }
-            t.value = '';
-        });
-        root.querySelector('#studio-je-form')?.addEventListener('submit', async (ev) => {
-            ev.preventDefault();
-            const fd = new FormData(ev.target);
-            const titleEn = root.querySelector('#studio-je-title-en')?.value ?? '';
-            const titleJa = root.querySelector('#studio-je-title-ja')?.value ?? '';
-            const bodyEn = root.querySelector('#studio-je-body-en')?.value ?? '';
-            const bodyJa = root.querySelector('#studio-je-body-ja')?.value ?? '';
-            const { en, ja } = applyJournalPlainLocales(prevEn, prevJa, {
-                titleEn,
-                titleJa,
-                bodyEn,
-                bodyJa,
-            });
-            const localesJson = JSON.stringify({ en, ja });
-            try {
-                await upsertJournalStudio({
-                    id: String(fd.get('id') || ''),
-                    link: String(fd.get('link') || ''),
-                    imageSrc: String(fd.get('imageSrc') || ''),
-                    entryStatus: String(fd.get('entryStatus') || 'draft'),
-                    localesJson,
-                });
-                const savedId = String(fd.get('id') || '');
-                close();
-                if (opts && typeof opts.afterJournalSave === 'function') {
-                    opts.afterJournalSave(savedId);
-                }
-                onDone();
-            } catch (err) {
-                alert(err instanceof Error ? err.message : String(err));
-            }
-        });
-    };
-
     mainEl.querySelector('#studio-journal-add')?.addEventListener('click', () => {
         openComposeMenuModal();
+    });
+    mainEl.querySelector('#studio-journal-new-entry')?.addEventListener('click', () => {
+        openJournalEntryModal(null, load, {});
     });
     mainEl.querySelector('#studio-journal-save-layout')?.addEventListener('click', async () => {
         readRowsFromTableDom();
@@ -5746,7 +6079,65 @@ async function initJournal(mainEl) {
         }
     });
     mainEl.querySelector('#studio-journal-refresh')?.addEventListener('click', () => load());
-    mainEl.querySelector('#studio-journal-search')?.addEventListener('input', () => applyJournalFilter());
+    mainEl.querySelector('#studio-journal-home-carousel-save')?.addEventListener('click', async () => {
+        const entryIds = readCarouselSlotsFromDom();
+        const saveBtn = mainEl.querySelector('#studio-journal-home-carousel-save');
+        if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = true;
+        showCarouselMsg('info', 'Saving…');
+        try {
+            await setHomeJournalCarouselStudio({ entryIds });
+            carouselEntryIds = entryIds;
+            renderHomeCarouselSlots();
+            showCarouselMsg(
+                'ok',
+                entryIds.length
+                    ? 'Home carousel saved. Refresh the homepage to preview.'
+                    : 'Using automatic newest-first order.'
+            );
+        } catch (e) {
+            showCarouselMsg('error', e instanceof Error ? e.message : String(e));
+        } finally {
+            if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = !canEditCarousel;
+        }
+    });
+    mainEl.querySelector('#studio-journal-home-carousel-clear')?.addEventListener('click', async () => {
+        carouselSlotEls.forEach((sel) => {
+            if (sel instanceof HTMLSelectElement) sel.value = '';
+        });
+        const clearBtn = mainEl.querySelector('#studio-journal-home-carousel-clear');
+        if (clearBtn instanceof HTMLButtonElement) clearBtn.disabled = true;
+        showCarouselMsg('info', 'Saving…');
+        try {
+            await setHomeJournalCarouselStudio({ entryIds: [] });
+            carouselEntryIds = [];
+            renderHomeCarouselSlots();
+            showCarouselMsg('ok', 'Automatic newest-first order restored.');
+        } catch (e) {
+            showCarouselMsg('error', e instanceof Error ? e.message : String(e));
+        } finally {
+            if (clearBtn instanceof HTMLButtonElement) clearBtn.disabled = !canEditCarousel;
+        }
+    });
+    mainEl.querySelector('#studio-journal-search')?.addEventListener('input', () => applyLayoutFilter());
+    mainEl.querySelector('#studio-journal-entries-search')?.addEventListener('input', () =>
+        applyEntriesFilter()
+    );
+    const entryTabsRoot = mainEl.querySelector('#studio-journal-tab-all')?.closest('.studio-data-tabs');
+    entryTabsRoot?.querySelectorAll('.studio-data-tabs__tab').forEach((tab) => {
+        tab.addEventListener('click', () => {
+            const val = tab.getAttribute('data-tab-value');
+            if (val === 'all' || val === 'draft' || val === 'published' || val === 'archived') {
+                entryStatusFilter = val;
+                entryTabsRoot.querySelectorAll('.studio-data-tabs__tab').forEach((t) => {
+                    const on = t.getAttribute('data-tab-value') === val;
+                    t.classList.toggle('is-active', on);
+                    t.setAttribute('aria-selected', on ? 'true' : 'false');
+                    t.setAttribute('tabindex', on ? '0' : '-1');
+                });
+                applyEntriesFilter();
+            }
+        });
+    });
 
     wireStudioEntityContentEmbed(mainEl, {
         embedEditor: '#studio-journal-embed-editor',
@@ -5760,8 +6151,8 @@ async function initJournal(mainEl) {
         btnSiteInfo: '#studio-journal-edit-siteinfo',
         slugBlock: 'journals-block',
         siteInfoChapter: 'journal',
-        titleBlock: 'Edit: Journal home list',
-        titleSiteInfo: 'Edit: Journal page headline (site-info)',
+        titleBlock: 'Edit: Test mode home list (journals-block)',
+        titleSiteInfo: 'Edit: /journal page headline (site-info)',
         uploadArea: 'studio/journal-content',
     });
 

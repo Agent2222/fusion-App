@@ -5,6 +5,7 @@ import { fileURLToPath, URL } from 'url';
 import environment from 'vite-plugin-environment';
 import { VitePWA } from 'vite-plugin-pwa';
 import dotenv from 'dotenv';
+import { DEFAULT_SITE_DESCRIPTION } from './src/utils/documentSeo.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '../..');
@@ -89,8 +90,7 @@ export default defineConfig(({ mode }) => {
                     id: 'https://fusionart.world/',
                     name: 'Fusion - Japan artist residencies and art platform',
                     short_name: 'Fusion',
-                    description:
-                        'Fusion connects artists with curated Japan residencies, editions, and editorial context.',
+                    description: DEFAULT_SITE_DESCRIPTION,
                     start_url: '/',
                     scope: '/',
                     display: 'standalone',

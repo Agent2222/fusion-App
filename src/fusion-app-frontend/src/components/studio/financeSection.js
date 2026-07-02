@@ -52,6 +52,8 @@ import {
 } from '../../utils/studioShellState.js';
 import { studioIconHref } from '../../utils/studioIconRegistry.js';
 import { getStripePublishableKeyResolved } from '../../utils/studioServicesConfig.js';
+import { fetchMembershipRevenueSummary } from '../../utils/integrationApi.js';
+import { formatMembershipRevenueStatHtml } from '../../utils/membershipRevenueMoney.js';
 import { openStudioModal } from '../../utils/studioModal.js';
 import { openApplicantEmailModal } from './applicantEmailModal.js';
 
@@ -211,6 +213,7 @@ export function renderFinance() {
                     </div>
                 </div>
                 <div class="mpd-program-tab-panel" id="studio-finance-panel-users" role="tabpanel" aria-labelledby="studio-finance-tab-users" data-finance-panel="users" hidden>
+                    <div id="studio-finance-users-revenue-stat" aria-live="polite"></div>
                     <div id="studio-finance-users-summary"></div>
                     <section class="member-profile-dashboard__card" style="margin-top:0.75rem">
                         <div class="mpd-payments-section-head">
@@ -530,6 +533,7 @@ export async function initFinance(mainEl) {
     const workspaceEl = mainEl.querySelector('#studio-finance-workspace');
     const overviewSections = mainEl.querySelector('#studio-finance-overview-sections');
     const usersSummary = mainEl.querySelector('#studio-finance-users-summary');
+    const usersRevenueStat = mainEl.querySelector('#studio-finance-users-revenue-stat');
     const usersTbody = mainEl.querySelector('#studio-finance-users-tbody');
     const membershipFilter = mainEl.querySelector('#studio-finance-users-membership');
     const usersSearch = mainEl.querySelector('#studio-finance-users-search');
@@ -585,6 +589,8 @@ export async function initFinance(mainEl) {
     const programsCanEdit = studioFinanceCategoryAccess('Programs').canEdit;
     /** @type {Map<string, { firstName: string, lastName: string, fullName: string, email: string }>} */
     let contactByPrincipal = new Map();
+    /** @type {Record<string, unknown>} */
+    let membershipRevenue = { ok: false };
 
     const loadChipState = () => {
         const defaults = FINANCE_DOMAINS.filter((d) => d.chip && domainTabVisible(d)).map((d) => d.chip);
@@ -676,6 +682,7 @@ export async function initFinance(mainEl) {
                 <div class="studio-finance-category-block" data-finance-category-block="Users">
                     <h3>Users — membership</h3>
                     <p class="studio-muted">Fusion / Join subscription status on the canister.</p>
+                    ${formatMembershipRevenueStatHtml(membershipRevenue, escapeHtml, { compact: true })}
                     <div class="mpd-payments-overview-grid">
                         ${metricCard('Active', m.active, 'Active or trialing')}
                         ${metricCard('Past due', m.pastDue, 'Needs billing attention')}
@@ -696,6 +703,11 @@ export async function initFinance(mainEl) {
             parts.length > 0
                 ? parts.join('')
                 : '<p class="studio-muted">Turn on at least one category above to see overview metrics.</p>';
+    };
+
+    const renderUsersRevenueStat = () => {
+        if (!usersRevenueStat) return;
+        usersRevenueStat.innerHTML = formatMembershipRevenueStatHtml(membershipRevenue, escapeHtml);
     };
 
     const renderUsersSummary = () => {
@@ -1259,18 +1271,65 @@ export async function initFinance(mainEl) {
     membershipFilter?.addEventListener('change', renderUsersTable);
     usersSearch?.addEventListener('input', renderUsersTable);
 
-    try {
-        const programsVisible = studioFinanceCategoryAccess('Programs').visible;
-        const [accounts, programs, applicants, paymentsBundle] = await Promise.all([
-            getAccountsForStudio(),
-            programsVisible ? getPrograms() : Promise.resolve([]),
-            programsVisible ? getApplicants() : Promise.resolve([]),
-            programsVisible
-                ? getStaffProgramPaymentsFinanceStudio()
-                : Promise.resolve({ summaries: [], ledger: [], plans: [] }),
-        ]);
-        allAccounts = accounts;
-        if (programsVisible) {
+    const programsVisible = studioFinanceCategoryAccess('Programs').visible;
+    const usersVisible = studioFinanceCategoryAccess('Users').visible;
+    /** @type {string[]} */
+    const loadWarnings = [];
+
+    if (usersVisible) {
+        try {
+            allAccounts = await getAccountsForStudio();
+            const contacts = await adminListAccountContactsForStudio().catch(() => []);
+            contactByPrincipal = new Map(
+                (Array.isArray(contacts) ? contacts : []).map((row) => {
+                    const p =
+                        row && row[0] && typeof row[0] === 'object' && typeof row[0].toText === 'function'
+                            ? row[0].toText()
+                            : String(row?.[0] || '');
+                    const c = row?.[1] || {};
+                    const firstName = String(c.firstName || '').trim();
+                    const lastName = String(c.lastName || '').trim();
+                    const email = String(c.email || '').trim();
+                    const fullName = String(`${firstName} ${lastName}`).trim();
+                    return [p, { firstName, lastName, fullName, email }];
+                }),
+            );
+            try {
+                membershipRevenue = await fetchMembershipRevenueSummary();
+                if (!membershipRevenue.ok) {
+                    const reason =
+                        typeof membershipRevenue.reason === 'string'
+                            ? membershipRevenue.reason
+                            : typeof membershipRevenue.error === 'string'
+                              ? membershipRevenue.error
+                              : 'Membership revenue unavailable';
+                    loadWarnings.push(reason);
+                }
+            } catch (revenueErr) {
+                membershipRevenue = { ok: false };
+                loadWarnings.push(
+                    revenueErr instanceof Error ? revenueErr.message : String(revenueErr),
+                );
+            }
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            allAccounts = [];
+            contactByPrincipal = new Map();
+            loadWarnings.push(
+                /Unauthorized|admin only|not visible/i.test(msg)
+                    ? 'Membership accounts could not be loaded. Enable Finance — Users (view) for this role, then refresh. If permissions are already set, redeploy fusion-app-backend so listAccounts respects staff access.'
+                    : msg,
+            );
+        }
+    }
+
+    if (programsVisible) {
+        try {
+            const [programs, applicants, paymentsBundle] = await Promise.all([
+                getPrograms(),
+                getApplicants(),
+                getStaffProgramPaymentsFinanceStudio(),
+            ]);
             allPrograms = Array.isArray(programs) ? programs : [];
             allApplicants = Array.isArray(applicants) ? applicants : [];
             paymentIndex = buildProgramPaymentIndex(paymentsBundle);
@@ -1287,36 +1346,23 @@ export async function initFinance(mainEl) {
                 applicantsByProgramId.get(programId).push(applicant);
             }
             selectedProgramId = loadSelectedProgramId();
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            allPrograms = [];
+            allApplicants = [];
+            applicantsByProgramId = new Map();
+            loadWarnings.push(msg);
         }
-        const contacts = await adminListAccountContactsForStudio().catch(() => []);
-        contactByPrincipal = new Map(
-            (Array.isArray(contacts) ? contacts : []).map((row) => {
-                const p =
-                    row && row[0] && typeof row[0] === 'object' && typeof row[0].toText === 'function'
-                        ? row[0].toText()
-                        : String(row?.[0] || '');
-                const c = row?.[1] || {};
-                const firstName = String(c.firstName || '').trim();
-                const lastName = String(c.lastName || '').trim();
-                const email = String(c.email || '').trim();
-                const fullName = String(`${firstName} ${lastName}`).trim();
-                return [p, { firstName, lastName, fullName, email }];
-            }),
-        );
-        setStatus('');
-    } catch (e) {
-        setStatus(e instanceof Error ? e.message : String(e));
-        allAccounts = [];
-        allPrograms = [];
-        allApplicants = [];
-        applicantsByProgramId = new Map();
     }
+
+    setStatus(loadWarnings.length ? loadWarnings.join(' ') : '');
 
     setLoadingVisible(false);
     if (workspaceEl) workspaceEl.hidden = false;
 
     syncChipButtons();
     renderOverview();
+    renderUsersRevenueStat();
     renderUsersSummary();
     renderUsersTable();
     if (studioFinanceCategoryAccess('Programs').visible) {

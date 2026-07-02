@@ -34,6 +34,9 @@ export function render() {
     `;
 }
 
+/** @type {((ev: Event) => void) | null} */
+let _homeCarouselListener = null;
+
 /** Studio → Content saves fire this; refresh blocks that read CMS or legacy site JSON. */
 /** @param {Event} ev */
 function onFusionContentPagesChanged(ev) {
@@ -137,6 +140,15 @@ export default function initHome() {
         void loadHomeBlocks();
     };
     window.addEventListener('fusion-artist-featured-meta-change', _homeFeaturedMetaListener);
+
+    if (_homeCarouselListener) {
+        window.removeEventListener('fusion-home-journal-carousel-changed', _homeCarouselListener);
+    }
+    _homeCarouselListener = () => {
+        _homeBlocksCache = null;
+        void loadHomeBlocks();
+    };
+    window.addEventListener('fusion-home-journal-carousel-changed', _homeCarouselListener);
 
     const homeButton = document.getElementById('homeButton');
     if (homeButton) {

@@ -268,18 +268,28 @@ export function savePendingMembershipPayload(p) {
 export function readPendingMembershipPayload() {
     try {
         const raw = sessionStorage.getItem(FUSION_PENDING_MEMBERSHIP_PAYLOAD_KEY);
-        if (!raw) return null;
-        const o = JSON.parse(raw);
-        if (!o || typeof o.fusionPendingId !== 'string' || !o.fusionPendingId.trim()) return null;
-        return {
-            fusionPendingId: o.fusionPendingId.trim(),
-            email: typeof o.email === 'string' ? o.email : '',
-            subscriptionId: o.subscriptionId ? String(o.subscriptionId).trim() : null,
-            paymentCompleted: Boolean(o.paymentCompleted),
-        };
+        if (raw) {
+            const o = JSON.parse(raw);
+            if (o && typeof o.fusionPendingId === 'string' && o.fusionPendingId.trim()) {
+                return {
+                    fusionPendingId: o.fusionPendingId.trim(),
+                    email: typeof o.email === 'string' ? o.email : '',
+                    subscriptionId: o.subscriptionId ? String(o.subscriptionId).trim() : null,
+                    paymentCompleted: Boolean(o.paymentCompleted),
+                };
+            }
+        }
     } catch {
-        return null;
+        /* fall through to localStorage */
     }
+    const ls = readPendingPaymentEmailLocal('join');
+    if (!ls?.fusionPendingId) return null;
+    return {
+        fusionPendingId: ls.fusionPendingId.trim(),
+        email: ls.email,
+        subscriptionId: ls.subscriptionId ? String(ls.subscriptionId).trim() : null,
+        paymentCompleted: true,
+    };
 }
 
 export function clearPendingMembershipPayload() {
@@ -292,7 +302,18 @@ export function clearPendingMembershipPayload() {
 
 /** Call after card payment succeeds, before the link-account stage. */
 export function markPendingMembershipPaymentCompleted() {
-    const cur = readPendingMembershipPayload();
+    let cur = readPendingMembershipPayload();
+    if (!cur) {
+        const ls = readPendingPaymentEmailLocal('join');
+        if (ls?.fusionPendingId) {
+            cur = {
+                fusionPendingId: ls.fusionPendingId.trim(),
+                email: ls.email,
+                subscriptionId: ls.subscriptionId ? String(ls.subscriptionId).trim() : null,
+                paymentCompleted: true,
+            };
+        }
+    }
     if (!cur) return;
     savePendingMembershipPayload({ ...cur, paymentCompleted: true });
 }
@@ -582,6 +603,32 @@ export async function fetchMemberBillingSummary(principalText) {
             return { ok: false, reason: raw };
         }
         return await res.json();
+    } catch (e) {
+        return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+    }
+}
+
+/**
+ * Studio Finance: aggregate active/trialing membership subscription revenue from Stripe.
+ * @returns {Promise<Record<string, unknown>>}
+ */
+export async function fetchMembershipRevenueSummary() {
+    const base = getIntegrationBaseUrl();
+    if (!base) {
+        return { ok: false, reason: 'no_integration_url' };
+    }
+    try {
+        const res = await fetch(`${base}/stripe/membership-revenue-summary`, {
+            method: 'POST',
+            headers: integrationHeadersJson(),
+            body: JSON.stringify({}),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            const raw = typeof data.error === 'string' ? data.error : `HTTP ${res.status}`;
+            return { ok: false, reason: raw };
+        }
+        return data;
     } catch (e) {
         return { ok: false, reason: e instanceof Error ? e.message : String(e) };
     }

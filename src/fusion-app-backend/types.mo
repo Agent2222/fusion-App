@@ -122,6 +122,8 @@ module {
         slug : Text;
         image : Text;
         heroProfileImage : Text;
+        /// Staff-approved headshot for public cards; when false, UI uses artwork (`image`) instead.
+        heroProfileImageApproved : Bool;
         featuredOrder : Nat;
         visibility : Text;
         updatedAt : Text;
@@ -369,6 +371,12 @@ module {
         updatedAt : Text;
     };
 
+    /// Up to three journal entry ids for the home page carousel (slide order = array order).
+    public type HomeJournalCarouselConfig = {
+        entryIds : [Text];
+        updatedAt : Text;
+    };
+
     public type ApplicantStatus = {
         #pending;
         #reviewing;
@@ -580,6 +588,8 @@ module {
         artistFilterCohortYearsStable : [(Text, [Nat])];
         /// Optional: per-artist headshot for card “Profile” view (v1 exports before 2026 omit; parallel map for stable safety).
         artistHeroProfileImageStable : ?[(Text, Text)];
+        /// Artist ids whose headshot is approved for public card display (parallel map; default not approved).
+        artistHeroProfileImageApprovedIdsStable : ?[Text];
         artistsStable : [(Text, ArtistRecord)];
         programsStable : [(Text, ProgramRecord)];
         journalsStable : [(Text, JournalRecord)];

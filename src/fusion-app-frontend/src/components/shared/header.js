@@ -1011,6 +1011,7 @@ class HeaderComponent extends HTMLElement {
         if (firstLink && typeof firstLink.focus === 'function') {
             requestAnimationFrame(() => firstLink.focus());
         }
+        queueMicrotask(() => syncSoundEnvironmentPosition());
 
         let logo = this.shadowRoot.querySelector("#Logo");
         this.shadowRoot.querySelector("header").style.paddingTop = "8.5%";
@@ -1930,6 +1931,27 @@ class HeaderComponent extends HTMLElement {
                         align-items: stretch;
                     }
 
+                    .header-sound-env-slot {
+                        width: 100%;
+                        margin-top: auto;
+                        padding-top: 1.25rem;
+                        border-top: 1px solid color-mix(in srgb, var(--c2) 18%, transparent);
+                    }
+
+                    .header-sound-env-slot:empty {
+                        display: none;
+                    }
+
+                    .header-sound-env-slot .fusion-sound-env-host {
+                        position: static;
+                        top: auto;
+                        left: auto;
+                        right: auto;
+                        width: 100%;
+                        max-width: 100%;
+                        z-index: auto;
+                    }
+
                     #headerCtas #headerLangBtn {
                         grid-column: 2;
                         justify-self: end;
@@ -2033,6 +2055,7 @@ class HeaderComponent extends HTMLElement {
                         <div id="headerAuthPair" class="header-auth-pair"></div>
                         <button type="button" id="headerLangBtn" class="headerLangBtn" aria-label="Language: English. Click to switch to Japanese.">${en ? 'EN' : 'JP'}</button>
                     </div>
+                    <div id="headerSoundEnvSlot" class="header-sound-env-slot" aria-label="${en ? 'Sound environment' : 'サウンド環境'}"></div>
                 </div>
             </header>
             <div class="header-sound-row">
