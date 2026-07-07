@@ -2,7 +2,7 @@
  * Verify PayPal capture and write to Motoko canister (mirrors Stripe recordVerifiedProgramPayment).
  */
 import { Principal } from '@dfinity/principal';
-import { getIntegrationActor } from '../../canisterActor.js';
+import { getIntegrationActor } from '../canisterActor.js';
 import { parsePayPalCustomId, safePayPalMetaValue } from './providers/paypalProvider.js';
 
 /**
@@ -169,6 +169,6 @@ export async function recordVerifiedPayPalOrder(order, deps = {}) {
  * @param {object} subscription PayPal subscription object
  */
 export async function pushPayPalSubscriptionToCanister(subscription) {
-    const { pushPayPalSubscriptionToCanister: push } = await import('../../canisterActor.js');
+    const { pushPayPalSubscriptionToCanister: push } = await import('../canisterActor.js');
     return push(subscription);
 }

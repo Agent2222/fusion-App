@@ -304,7 +304,7 @@ export function registerPaymentRoutes(app, opts) {
                 return res.status(400).json({ error: 'subscriptionId required' });
             }
             await cancelPayPalSubscriptionAtPeriodEnd(subscriptionId);
-            const actor = await import('../../canisterActor.js').then((m) => m.getIntegrationActor());
+            const actor = await import('../canisterActor.js').then((m) => m.getIntegrationActor());
             if (actor && planId) {
                 const now = new Date().toISOString();
                 await actor.integrationCancelProgramPaymentPlan(planId, 'cancelled', now);
