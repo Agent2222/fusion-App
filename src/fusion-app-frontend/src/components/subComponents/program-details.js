@@ -15,12 +15,12 @@ class ProgramDetailsComponent extends HTMLElement {
         super();
         this._costPlanDisclosureUid = 0;
         this.shadow = this.attachShadow({ mode: 'open' });
-        /** @type {null | { programId?: string, applicationsOpen?: boolean, headline: string, keyDates: Array<{ date?: string, description?: string }>, locations?: string[], facilities?: string[], costText: string, totalProgramFeeLine?: string, applicationFeeLine?: string, useStructuredCost?: boolean, depositLine?: string, remainingBalanceLine?: string, maxPlanMonths?: number, japanResidencyNotice?: string, availableSlots?: number | null, totalSlots?: number | null, residences?: Array<{ name?: string, href?: string }>, included?: string[], notIncluded?: string[], platform?: string, additionalInfo?: object | null, sidebarRunDates?: { start?: string, end?: string } | null }} */
+        /** @type {null | { programId?: string, applicationsOpen?: boolean, headline: string, keyDates: Array<{ date?: string, description?: string, sectionTitle?: string }>, locations?: string[], facilities?: string[], costText: string, totalProgramFeeLine?: string, applicationFeeLine?: string, useStructuredCost?: boolean, depositLine?: string, remainingBalanceLine?: string, maxPlanMonths?: number, japanResidencyNotice?: string, availableSlots?: number | null, totalSlots?: number | null, residences?: Array<{ name?: string, href?: string }>, included?: string[], notIncluded?: string[], platform?: string, additionalInfo?: object | null, sidebarRunDates?: { start?: string, end?: string } | null }} */
         this._data = null;
     }
 
     /**
-     * @param {{ programId?: string, applicationsOpen?: boolean, headline: string, keyDates: Array<{ date?: string, description?: string }>, locations?: string[], facilities?: string[], costText: string, totalProgramFeeLine?: string, applicationFeeLine?: string, useStructuredCost?: boolean, depositLine?: string, remainingBalanceLine?: string, maxPlanMonths?: number, japanResidencyNotice?: string, availableSlots?: number | null, totalSlots?: number | null, residences?: Array<{ name?: string, href?: string }>, included?: string[], notIncluded?: string[], platform?: string, additionalInfo?: { applicationFee?: string, aboutProgram?: string, faq?: object[], programNotes?: object[], refundPolicy?: object[] } | null, sidebarRunDates?: { start?: string, end?: string } | null }} payload
+     * @param {{ programId?: string, applicationsOpen?: boolean, headline: string, keyDates: Array<{ date?: string, description?: string, sectionTitle?: string }>, locations?: string[], facilities?: string[], costText: string, totalProgramFeeLine?: string, applicationFeeLine?: string, useStructuredCost?: boolean, depositLine?: string, remainingBalanceLine?: string, maxPlanMonths?: number, japanResidencyNotice?: string, availableSlots?: number | null, totalSlots?: number | null, residences?: Array<{ name?: string, href?: string }>, included?: string[], notIncluded?: string[], platform?: string, additionalInfo?: { applicationFee?: string, aboutProgram?: string, faq?: object[], programNotes?: object[], refundPolicy?: object[] } | null, sidebarRunDates?: { start?: string, end?: string } | null }} payload
      */
     setProgramDetails(payload) {
         this._data = payload;
@@ -151,7 +151,16 @@ class ProgramDetailsComponent extends HTMLElement {
                 Boolean((remainingBalanceLine && String(remainingBalanceLine).trim())) ||
                 (typeof maxPlanMonths === 'number' && maxPlanMonths > 1) ||
                 hasJapanLine);
-        const hasDates = Array.isArray(keyDates) && keyDates.some((d) => (d?.date || d?.description || '').trim());
+        const hasDates =
+            Array.isArray(keyDates) &&
+            keyDates.some((d) => {
+                if (!d || typeof d !== 'object') return false;
+                return Boolean(
+                    String(d.sectionTitle || '').trim() ||
+                        String(d.date || '').trim() ||
+                        String(d.description || '').trim(),
+                );
+            });
         const resList = Array.isArray(residences) ? residences : [];
         const hasResidence = resList.some((r) => {
             if (!r || typeof r !== 'object') return false;
@@ -206,6 +215,135 @@ class ProgramDetailsComponent extends HTMLElement {
     _hasContent() {
         if (!this._data) return false;
         return this._hasMainDetails() || this._hasAdditionalInfo();
+    }
+
+    _appendTimelineDescription(parent, desc) {
+        const lines = String(desc || '').split('\n');
+        /** @type {string[]} */
+        let bulletRun = [];
+        const flushBullets = () => {
+            if (!bulletRun.length) return;
+            const ul = document.createElement('ul');
+            ul.className = 'timeline-desc-list';
+            bulletRun.forEach((text) => {
+                const li = document.createElement('li');
+                li.textContent = text;
+                ul.appendChild(li);
+            });
+            parent.appendChild(ul);
+            bulletRun = [];
+        };
+        for (const raw of lines) {
+            const line = raw.trim();
+            if (!line) continue;
+            const bulletMatch = line.match(/^[-•*]\s+(.*)$/);
+            if (bulletMatch) {
+                bulletRun.push(bulletMatch[1]);
+            } else {
+                flushBullets();
+                const p = document.createElement('p');
+                p.className = 'timeline-desc';
+                p.textContent = line;
+                parent.appendChild(p);
+            }
+        }
+        flushBullets();
+    }
+
+    _createTimelineDateItem(dateStr, desc) {
+        const li = document.createElement('li');
+        li.className = 'timeline-item';
+        const dot = document.createElement('span');
+        dot.className = 'timeline-dot';
+        dot.setAttribute('aria-hidden', 'true');
+        const textWrap = document.createElement('div');
+        textWrap.className = 'timeline-text';
+        if (dateStr) {
+            const dateRow = document.createElement('div');
+            dateRow.className = 'timeline-date-row';
+            const ds = document.createElement('span');
+            ds.className = 'timeline-date';
+            ds.textContent = dateStr;
+            dateRow.appendChild(ds);
+            textWrap.appendChild(dateRow);
+        }
+        if (desc) {
+            this._appendTimelineDescription(textWrap, desc);
+        }
+        li.appendChild(dot);
+        li.appendChild(textWrap);
+        return li;
+    }
+
+    _populateTimeline(timelineBlocksEl, keyDates) {
+        if (!timelineBlocksEl) return;
+        timelineBlocksEl.innerHTML = '';
+        const dates = Array.isArray(keyDates) ? keyDates : [];
+        const hasSections = dates.some((d) => String(d?.sectionTitle || '').trim());
+
+        if (!hasSections) {
+            const ul = document.createElement('ul');
+            ul.className = 'timeline';
+            ul.setAttribute('role', 'list');
+            dates.forEach((d) => {
+                const dateStr = (d?.date || '').trim();
+                const desc = (d?.description || '').trim();
+                if (!dateStr && !desc) return;
+                ul.appendChild(this._createTimelineDateItem(dateStr, desc));
+            });
+            if (ul.children.length) timelineBlocksEl.appendChild(ul);
+            timelineBlocksEl.hidden = timelineBlocksEl.children.length === 0;
+            return;
+        }
+
+        /** @type {{ title: string, items: Array<{ dateStr: string, desc: string }> }} */
+        let current = { title: '', items: [] };
+        /** @type {Array<{ title: string, items: Array<{ dateStr: string, desc: string }> }>} */
+        const blocks = [];
+        const pushCurrent = () => {
+            if (!current.title && !current.items.length) return;
+            blocks.push(current);
+        };
+
+        dates.forEach((d) => {
+            const sectionTitle = String(d?.sectionTitle || '').trim();
+            if (sectionTitle) {
+                pushCurrent();
+                current = { title: sectionTitle, items: [] };
+                return;
+            }
+            const dateStr = (d?.date || '').trim();
+            const desc = (d?.description || '').trim();
+            if (!dateStr && !desc) return;
+            current.items.push({ dateStr, desc });
+        });
+        pushCurrent();
+
+        blocks.forEach((block) => {
+            const section = document.createElement('section');
+            section.className = 'timeline-block';
+
+            if (block.title) {
+                const heading = document.createElement('h3');
+                heading.className = 'timeline-block-title';
+                heading.textContent = block.title;
+                section.appendChild(heading);
+            }
+
+            if (block.items.length) {
+                const ul = document.createElement('ul');
+                ul.className = 'timeline';
+                ul.setAttribute('role', 'list');
+                block.items.forEach(({ dateStr, desc }) => {
+                    ul.appendChild(this._createTimelineDateItem(dateStr, desc));
+                });
+                section.appendChild(ul);
+            }
+
+            timelineBlocksEl.appendChild(section);
+        });
+
+        timelineBlocksEl.hidden = timelineBlocksEl.children.length === 0;
     }
 
     _appendTextBlocks(parent, text) {
@@ -325,7 +463,7 @@ class ProgramDetailsComponent extends HTMLElement {
         const titleEl = root.querySelector('.details-title');
         const headerRow = root.querySelector('.header-row');
         const columnsEl = root.querySelector('.columns');
-        const timelineEl = root.querySelector('.timeline');
+        const timelineBlocksEl = root.querySelector('.timeline-blocks');
         const sidebarEl = root.querySelector('.sidebar');
         const beginBtn = root.querySelector('.begin-application');
         const additionalSection = root.querySelector('.additional-info');
@@ -377,41 +515,7 @@ class ProgramDetailsComponent extends HTMLElement {
         if (headerRow) headerRow.hidden = !(hasMain && head);
         if (columnsEl) columnsEl.hidden = !hasMain;
 
-        if (timelineEl) {
-            timelineEl.innerHTML = '';
-            const dates = Array.isArray(keyDates) ? keyDates : [];
-            dates.forEach((d) => {
-                const dateStr = (d?.date || '').trim();
-                const desc = (d?.description || '').trim();
-                if (!dateStr && !desc) return;
-                const li = document.createElement('li');
-                li.className = 'timeline-item';
-                const dot = document.createElement('span');
-                dot.className = 'timeline-dot';
-                dot.setAttribute('aria-hidden', 'true');
-                const textWrap = document.createElement('div');
-                textWrap.className = 'timeline-text';
-                if (dateStr) {
-                    const dateRow = document.createElement('div');
-                    dateRow.className = 'timeline-date-row';
-                    const ds = document.createElement('span');
-                    ds.className = 'timeline-date';
-                    ds.textContent = dateStr;
-                    dateRow.appendChild(ds);
-                    textWrap.appendChild(dateRow);
-                }
-                if (desc) {
-                    const dd = document.createElement('p');
-                    dd.className = 'timeline-desc';
-                    dd.textContent = desc;
-                    textWrap.appendChild(dd);
-                }
-                li.appendChild(dot);
-                li.appendChild(textWrap);
-                timelineEl.appendChild(li);
-            });
-            timelineEl.hidden = timelineEl.children.length === 0;
-        }
+        this._populateTimeline(timelineBlocksEl, keyDates);
 
         if (sidebarEl) {
             const loc = Array.isArray(locations)
@@ -1060,6 +1164,27 @@ class ProgramDetailsComponent extends HTMLElement {
                     gap: 1.75rem;
                 }
 
+                .timeline-blocks {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 2rem;
+                }
+
+                .timeline-block {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 1.1rem;
+                }
+
+                .timeline-block-title {
+                    margin: 0;
+                    font-size: clamp(1.05rem, 1.6vw, 1.35rem);
+                    font-variation-settings: var(--fv-emphasis);
+                    color: var(--c2);
+                    letter-spacing: 0.02em;
+                    line-height: 1.3;
+                }
+
                 .timeline {
                     list-style: none;
                     margin: 0;
@@ -1108,6 +1233,20 @@ class ProgramDetailsComponent extends HTMLElement {
                 p.timeline-desc {
                     margin: 0;
                     font-variation-settings: var(--fv-body-wide);
+                }
+
+                .timeline-desc-list {
+                    margin: 0.15rem 0 0;
+                    padding-left: 1.15rem;
+                    font-size: clamp(0.9rem, 1.2vw, 1.05rem);
+                    color: var(--c2);
+                    line-height: 1.45;
+                    letter-spacing: 0.02em;
+                    font-variation-settings: var(--fv-body-wide);
+                }
+
+                .timeline-desc-list li {
+                    margin: 0.2rem 0;
                 }
 
                 .begin-application {
@@ -1560,7 +1699,7 @@ class ProgramDetailsComponent extends HTMLElement {
                 </div>
                 <div class="columns">
                     <div class="timeline-col">
-                        <ul class="timeline" role="list"></ul>
+                        <div class="timeline-blocks"></div>
                         <button type="button" class="begin-application"></button>
                     </div>
                     <aside class="sidebar" aria-label="Program information"></aside>

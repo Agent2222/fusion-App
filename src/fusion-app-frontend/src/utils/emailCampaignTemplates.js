@@ -12,7 +12,7 @@ import {
 } from './emailFusionLayout.js';
 
 /**
- * @typedef {'artist' | 'journal' | 'program'} EmailContentSourceType
+ * @typedef {'artist' | 'journal' | 'program' | 'video'} EmailContentSourceType
  */
 
 /**
@@ -172,6 +172,32 @@ export const EMAIL_CAMPAIGN_TEMPLATES = {
             cta: { label: 'VIEW PROFILE', href: 'https://www.fusionart.world/artists' },
         }),
         notes: 'Bind a roster artist to pull image, name, bio, and profile link.',
+    },
+    tpl_featured_video: {
+        id: 'tpl_featured_video',
+        name: 'Featured Video',
+        templateGroup: 'spotlights',
+        defaultEyebrow: 'Fusion Video',
+        contentSourceTypes: ['video'],
+        defaultSubject: 'New video on Fusion',
+        defaultPreview: 'Studio visit and conversation — watch now on Fusion.',
+        bodyHtml: renderFusionEmailFromSlots({
+            eyebrow: 'Fusion Video',
+            pillLabel: 'FUSION VIDEO',
+            headlineHtml: 'Featured<br>Video',
+            bodyHtml: [
+                fusionEmailParagraph(
+                    'Lead with what this studio visit or conversation covers — and why it matters to the Fusion community.',
+                    'lead',
+                ),
+                fusionEmailParagraph(
+                    'Invite readers to watch the full video on fusionart.world.',
+                    'last',
+                ),
+            ].join('\n'),
+            cta: { label: 'WATCH NOW', href: 'https://www.fusionart.world/videos' },
+        }),
+        notes: 'Bind a community video to pull poster, title, description, and watch link.',
     },
     tpl_journal_entry: {
         id: 'tpl_journal_entry',

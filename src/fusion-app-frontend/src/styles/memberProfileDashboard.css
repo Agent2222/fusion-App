@@ -2889,6 +2889,10 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.settings-profile-page .mpd-payments-action-grid--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .settings-profile-page .mpd-payment-choice-program {
   overflow: hidden;
   min-height: 19rem;

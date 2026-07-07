@@ -77,6 +77,7 @@ import {
   isMemberProgramDepositPaid,
   countPaymentPlanMonthsUntilStart,
 } from "../utils/programPaymentMoney.js";
+import { canStartProgramPaymentPlan } from "../utils/paymentProvider.js";
 import { normalizeApplicantCategory } from "../utils/studioPlainForms.js";
 import { studioIconHref } from "../utils/studioIconRegistry.js";
 import { formatStudioDate } from "../utils/studioDateFormat.js";
@@ -2031,9 +2032,13 @@ function renderMpdPaymentsWorkspace() {
   }
   const item = items.find((x) => x.programId === mpdSelectedPaymentProgramId) || items[0];
   const canCharge = item.depositCents > 0 && item.totalDueCents > 0;
+  const planStartEnabled = canStartProgramPaymentPlan();
+  const showPlanCard = Boolean(item.activePlan) || planStartEnabled;
   const planButton = item.activePlan
     ? `<button type="button" class="studio-btn-primary" data-mpd-payment-action="cancel-plan">Cancel plan</button>`
-    : `<button type="button" class="studio-btn-primary" data-mpd-payment-action="start-plan" ${item.outstandingCents <= 0 ? "disabled" : ""}>Start payment plan</button>`;
+    : planStartEnabled
+      ? `<button type="button" class="studio-btn-primary" data-mpd-payment-action="start-plan" ${item.outstandingCents <= 0 ? "disabled" : ""}>Start payment plan</button>`
+      : "";
   const prePaymentHtml = !item.depositPaid
     ? `<div class="mpd-payment-choice-grid">
         <article class="mpd-payment-choice-program">
@@ -2068,7 +2073,7 @@ function renderMpdPaymentsWorkspace() {
       </div>`
     : "";
   const postPaymentHtml = item.depositPaid
-    ? `<div class="mpd-payments-action-grid">
+    ? `<div class="mpd-payments-action-grid${showPlanCard ? "" : " mpd-payments-action-grid--single"}">
         <article class="mpd-payments-action-card mpd-payments-action-card--manual">
           ${mpdInlineIconHtml(manualPaymentIconUrl, "mpd-payments-action-card__icon mpd-payments-action-card__icon--manual")}
           <div class="mpd-payments-action-card__copy">
@@ -2077,14 +2082,18 @@ function renderMpdPaymentsWorkspace() {
           </div>
           <button type="button" class="studio-btn-primary" data-mpd-payment-action="manual" ${item.outstandingCents <= 0 ? "disabled" : ""}>Make a payment</button>
         </article>
-        <article class="mpd-payments-action-card mpd-payments-action-card--plan">
+        ${
+          showPlanCard
+            ? `<article class="mpd-payments-action-card mpd-payments-action-card--plan">
           ${mpdInlineIconHtml(paymentPlanIconUrl, "mpd-payments-action-card__icon mpd-payments-action-card__icon--plan")}
           <div class="mpd-payments-action-card__copy">
             <h4>${item.activePlan ? "Payment plan active" : "Start a payment plan"}</h4>
             <p class="studio-muted">${item.activePlan ? "Cancel future installments if your plans change." : "Split the remaining balance into equal monthly payments."}</p>
           </div>
           ${planButton}
-        </article>
+        </article>`
+            : ""
+        }
       </div>
       <div class="mpd-payments-overview-grid">
         <div class="mpd-payments-overview-card mpd-payments-overview-card--paid">
@@ -2132,7 +2141,7 @@ function renderMpdPaymentsWorkspace() {
           ${
             item.activePlan
               ? `<div class="mpd-upcoming-payment-card"><strong>${escapeHtmlMpd(item.title)}</strong><span>${mpdUsd(item.activePlan.installmentAmountCents)} monthly</span><small>${escapeHtmlMpd(item.activePlan.installmentCount || "")} installments · ${escapeHtmlMpd(item.activePlan.status || "active")}</small></div>`
-              : `<div class="mpd-payments-empty"><h4>No upcoming payments.</h4><p class="studio-muted">Start a payment plan to schedule installments.</p></div>`
+              : `<div class="mpd-payments-empty"><h4>No upcoming payments.</h4><p class="studio-muted">${planStartEnabled ? "Start a payment plan to schedule installments." : "Use manual payments to pay toward your balance."}</p></div>`
           }
         </section>
       </div>`
@@ -2259,23 +2268,19 @@ async function openMpdStripePaymentModal(item, paymentType, amountCents) {
       <p class="studio-muted">${escapeHtmlMpd(item.title)} · ${mpdUsd(amountCents)}</p>
       <div id="mpdProgramStripeMount" class="mpd-program-stripe-mount">${mpdPaymentLoadingHtml()}</div>
       <p id="mpdProgramPaymentError" class="mpd-membership-inline-error" hidden></p>
-      <div class="mpd-program-payment-modal__actions">
-        <button type="button" class="studio-btn-primary" id="mpdProgramPaymentSubmit" disabled>Pay ${mpdUsd(amountCents)}</button>
-      </div>
     </div>`,
   );
   const errEl = modal.querySelector("#mpdProgramPaymentError");
-  const submit = /** @type {HTMLButtonElement | null} */ (modal.querySelector("#mpdProgramPaymentSubmit"));
   const mount = modal.querySelector("#mpdProgramStripeMount");
   try {
-    const [{ loadStripe }, svc, cfg] = await Promise.all([
-      import("@stripe/stripe-js"),
+    const [svc, cfg, checkout] = await Promise.all([
       import("../utils/integrationApi.js"),
       import("../utils/studioServicesConfig.js"),
+      import("../utils/paymentCheckout.js"),
     ]);
-    const pk = cfg.getStripePublishableKeyResolved();
-    if (!pk) throw new Error("Configure Stripe publishable key in Studio → Services.");
-    const intent = await svc.createProgramPaymentIntent({
+    const clientId = cfg.getPayPalClientIdResolved();
+    if (!clientId) throw new Error("Configure PayPal client ID in Studio → Services.");
+    const intent = await svc.createPayPalOneTimePayment({
       principal: snap.principal.toText(),
       programId: item.programId,
       applicationId: item.applicationId,
@@ -2288,41 +2293,24 @@ async function openMpdStripePaymentModal(item, paymentType, amountCents) {
       ownFlight: item.ownFlight,
       flightCreditCents: item.flightCreditCents,
     });
-    const stripe = await loadStripe(pk);
-    if (!stripe) throw new Error("Stripe failed to load.");
-    const elements = stripe.elements({ clientSecret: intent.clientSecret, appearance: { theme: "stripe" } });
-    const paymentElement = elements.create("payment");
     if (mount) {
       mount.textContent = "";
-      paymentElement.mount(mount);
+      await checkout.mountPayPalOrderButtons(mount, {
+        clientId,
+        orderId: intent.orderId,
+        onApproved: async (orderId) => {
+          await svc.confirmPayPalOneTimePayment(orderId);
+          closeMpdPaymentModal();
+          await hydrateProgramPaymentsPanel(mpdLastProgramsForPayments);
+        },
+        onError: (e) => {
+          if (errEl instanceof HTMLElement) {
+            errEl.hidden = false;
+            errEl.textContent = e instanceof Error ? e.message : String(e);
+          }
+        },
+      });
     }
-    if (submit) submit.disabled = false;
-    submit?.addEventListener("click", async () => {
-      if (submit) {
-        submit.disabled = true;
-        submit.textContent = "Processing…";
-      }
-      try {
-        const result = await stripe.confirmPayment({
-          elements,
-          redirect: "if_required",
-          confirmParams: { return_url: window.location.href },
-        });
-        if (result.error) throw new Error(result.error.message || "Payment failed.");
-        await svc.confirmProgramPaymentRecorded(intent.paymentIntentId);
-        closeMpdPaymentModal();
-        await hydrateProgramPaymentsPanel(mpdLastProgramsForPayments);
-      } catch (e) {
-        if (errEl instanceof HTMLElement) {
-          errEl.hidden = false;
-          errEl.textContent = e instanceof Error ? e.message : String(e);
-        }
-        if (submit) {
-          submit.disabled = false;
-          submit.textContent = `Pay ${mpdUsd(amountCents)}`;
-        }
-      }
-    });
   } catch (e) {
     if (errEl instanceof HTMLElement) {
       errEl.hidden = false;
@@ -2389,6 +2377,10 @@ function mpdPaymentPlanOptions(item) {
 
 function openMpdPaymentPlanModal(item) {
   if (!item) return;
+  if (!canStartProgramPaymentPlan()) {
+    window.alert("Payment plans are temporarily unavailable. Use Make a manual payment toward your balance.");
+    return;
+  }
   const options = mpdPaymentPlanOptions(item);
   const modal = openMpdPaymentModalShell(
     "Start a payment plan",
@@ -2434,54 +2426,42 @@ function openMpdPaymentPlanModal(item) {
       mount.innerHTML = mpdPaymentLoadingHtml("Loading payment plan");
     }
     try {
-      const [{ loadStripe }, svc, cfg] = await Promise.all([
-        import("@stripe/stripe-js"),
+      const [svc, cfg, checkout] = await Promise.all([
         import("../utils/integrationApi.js"),
         import("../utils/studioServicesConfig.js"),
+        import("../utils/paymentCheckout.js"),
       ]);
-      const pk = cfg.getStripePublishableKeyResolved();
-      if (!pk) throw new Error("Configure Stripe publishable key in Studio → Services.");
-      const plan = await svc.createProgramPaymentPlan({
+      const clientId = cfg.getPayPalClientIdResolved();
+      if (!clientId) throw new Error("Configure PayPal client ID in Studio → Services.");
+      const planId = `plan-${item.programId}-${Date.now()}`;
+      const plan = await svc.createPayPalProgramPaymentPlan({
         principal: snap.principal.toText(),
         email: item.email,
         programId: item.programId,
         applicationId: item.applicationId,
+        planId,
         installmentCount: opt.count,
         installmentAmountCents: opt.amountCents,
         totalDueCents: item.totalDueCents,
         depositAmountCents: item.depositCents,
-        ownFlight: item.ownFlight,
-        flightCreditCents: item.flightCreditCents,
         planStartAt: new Date().toISOString(),
         planEndAt: item.startText || "",
       });
-      const stripe = await loadStripe(pk);
-      if (!stripe) throw new Error("Stripe failed to load.");
-      const elements = stripe.elements({ clientSecret: plan.clientSecret, appearance: { theme: "stripe" } });
-      const paymentElement = elements.create("payment");
-      if (mount) {
+      if (mount && plan.approveUrl) {
         mount.hidden = false;
         mount.textContent = "";
-        paymentElement.mount(mount);
+        checkout.mountPayPalSubscriptionApproval(mount, {
+          approveUrl: plan.approveUrl,
+          label: "Approve payment plan in PayPal",
+        });
       }
       if (btn) {
         btn.disabled = false;
-        btn.textContent = "Confirm first payment";
+        btn.textContent = "Close after approving in PayPal";
       }
       btn?.addEventListener(
         "click",
         async () => {
-          if (btn) {
-            btn.disabled = true;
-            btn.textContent = "Processing…";
-          }
-          const result = await stripe.confirmPayment({
-            elements,
-            redirect: "if_required",
-            confirmParams: { return_url: window.location.href },
-          });
-          if (result.error) throw new Error(result.error.message || "Payment failed.");
-          await svc.confirmProgramPaymentRecorded(plan.paymentIntentId);
           closeMpdPaymentModal();
           await hydrateProgramPaymentsPanel(mpdLastProgramsForPayments);
         },
@@ -2504,11 +2484,20 @@ async function cancelMpdProgramPaymentPlan(item) {
   if (!item?.activePlan) return;
   if (!window.confirm("Cancel this payment plan? Future scheduled installments will stop.")) return;
   try {
-    const { cancelProgramPaymentPlan } = await import("../utils/integrationApi.js");
-    await cancelProgramPaymentPlan({
-      planId: String(item.activePlan.id || ""),
-      subscriptionId: String(item.activePlan.stripeSubscriptionId || ""),
-    });
+    const svc = await import("../utils/integrationApi.js");
+    const provider = String(item.activePlan.paymentProvider || "stripe").toLowerCase();
+    const paypalSubId = String(item.activePlan.paypalSubscriptionId || "").trim();
+    if (provider === "paypal" || paypalSubId) {
+      await svc.cancelPayPalProgramPaymentPlan({
+        planId: String(item.activePlan.id || ""),
+        subscriptionId: paypalSubId,
+      });
+    } else {
+      await svc.cancelProgramPaymentPlan({
+        planId: String(item.activePlan.id || ""),
+        subscriptionId: String(item.activePlan.stripeSubscriptionId || ""),
+      });
+    }
     await hydrateProgramPaymentsPanel(mpdLastProgramsForPayments);
   } catch (e) {
     window.alert(e instanceof Error ? e.message : String(e));
@@ -3779,9 +3768,16 @@ export default function initSettingsProfile() {
   /**
    * @param {string} key
    * @param {{ operation: string; detail: string; message?: string; pendingMessage?: string }} config
+   * @param {{ allowConcurrent?: boolean }} [opts]
    */
-  const beginMpdOperation = (key, config) => {
-    if (activeMpdOperations.get(key) || reportActiveMpdOperation()) return false;
+  const beginMpdOperation = (key, config, opts = {}) => {
+    if (activeMpdOperations.get(key)) return false;
+    const profileSaveOnly =
+      key === "new-world-generation" &&
+      activeMpdOperations.size === 1 &&
+      activeMpdOperations.has("profile-save");
+    const allowConcurrent = opts.allowConcurrent === true || profileSaveOnly;
+    if (!allowConcurrent && reportActiveMpdOperation()) return false;
     const op = {
       operation: config.operation,
       detail: config.detail,
@@ -5598,8 +5594,18 @@ export default function initSettingsProfile() {
         return;
       }
       try {
-        const { syncSubscriptionFromStripe } = await import("../utils/integrationApi.js");
-        await syncSubscriptionFromStripe(snap.principal.toText());
+        const integrationApi = await import("../utils/integrationApi.js");
+        const acc = await getAccountForCaller();
+        const paypalSubId = String(acc?.paypalSubscriptionId || "").trim();
+        const paymentProvider = String(acc?.paymentProvider || "").toLowerCase();
+        if (paypalSubId || paymentProvider === "paypal") {
+          await integrationApi.syncPayPalSubscription({
+            principal: snap.principal.toText(),
+            subscriptionId: paypalSubId,
+          });
+        } else {
+          await integrationApi.syncSubscriptionFromStripe(snap.principal.toText());
+        }
         await ensureMyLinkedArtistProfile();
         posthog.capture("membership_subscription_sync_succeeded", {
           context: "settings_profile",
@@ -5691,10 +5697,22 @@ export default function initSettingsProfile() {
       return;
     }
     try {
-      const { cancelSubscriptionAtPeriodEnd, syncSubscriptionFromStripe } =
+      const { cancelSubscriptionAtPeriodEnd, cancelPayPalSubscriptionAtPeriodEnd, syncSubscriptionFromStripe, syncPayPalSubscription } =
         await import("../utils/integrationApi.js");
-      await cancelSubscriptionAtPeriodEnd(snap.principal.toText());
-      await syncSubscriptionFromStripe(snap.principal.toText());
+      const acc = await getAccountForCaller();
+      const paypalSubId = String(acc?.paypalSubscriptionId || "").trim();
+      const paymentProvider = String(acc?.paymentProvider || "").toLowerCase();
+      if (paypalSubId || paymentProvider === "paypal") {
+        if (!paypalSubId) throw new Error("No PayPal subscription linked.");
+        await cancelPayPalSubscriptionAtPeriodEnd(paypalSubId);
+        await syncPayPalSubscription({
+          principal: snap.principal.toText(),
+          subscriptionId: paypalSubId,
+        });
+      } else {
+        await cancelSubscriptionAtPeriodEnd(snap.principal.toText());
+        await syncSubscriptionFromStripe(snap.principal.toText());
+      }
       posthog.capture("membership_cancel_scheduled", {
         context: "settings_profile",
       });

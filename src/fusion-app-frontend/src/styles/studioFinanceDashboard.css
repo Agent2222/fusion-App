@@ -675,6 +675,12 @@
   border: 1px solid #c7d2fe;
 }
 
+.studio-finance-ledger-badge--paypal {
+  color: #003087;
+  background: #e8f4fc;
+  border: 1px solid #9fd4f6;
+}
+
 .studio-finance-ledger-badge--staff {
   color: #92400e;
   background: #fffbeb;

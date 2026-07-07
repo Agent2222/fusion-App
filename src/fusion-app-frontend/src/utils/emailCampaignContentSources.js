@@ -6,11 +6,12 @@ import { getArtistsForStudio, getJournalEntries, getPrograms, listCommunityVideo
 import { getEmailTemplateById } from './emailCampaignTemplates.js';
 import { renderFusionEmailFromSlots, fusionEmailParagraph, FUSION_EMAIL_STYLES, normalizeFusionEmailBodyHtml, isEmailVideoUrl } from './emailFusionLayout.js';
 import { toCloudFrontAssetUrl } from './assetDistribution.js';
+import { normalizeCommunityVideoRecord, parseVideoLocales } from './videoPageModel.js';
 
 const META_PREFIX = 'FUSION_EC_META=';
 
 /**
- * @typedef {{ type: 'artist' | 'journal' | 'program', id: string }} EmailContentSourceRef
+ * @typedef {{ type: 'artist' | 'journal' | 'program' | 'video', id: string }} EmailContentSourceRef
  */
 
 /**
@@ -144,6 +145,71 @@ export function resolveFeaturedArtistSource(artist) {
 }
 
 /**
+ * @param {object} video
+ * @returns {string}
+ */
+export function videoEmailDisplayTitle(video) {
+    const r = normalizeCommunityVideoRecord(video);
+    const locales = parseVideoLocales(r.localesJson);
+    return (
+        String(locales.headlineEn ?? locales.lineEn ?? r.overlayTitle ?? r.slug ?? 'Video').trim() || 'Video'
+    );
+}
+
+/**
+ * @param {object} video
+ * @returns {EmailLayoutSlots}
+ */
+export function resolveVideoSource(video) {
+    const r = normalizeCommunityVideoRecord(video);
+    const locales = parseVideoLocales(r.localesJson);
+    const title = videoEmailDisplayTitle(r);
+    const kicker = String(locales.kickerEn ?? '').trim();
+    const line = String(locales.lineEn ?? '').trim();
+    const body = String(locales.bodyEn ?? '').trim();
+    const guests = String(r.overlayGuests ?? '').trim();
+    const duration = String(r.overlayDuration ?? '').trim();
+    const heroPick = pickEmailHeroMedia([
+        r.posterUrl,
+        r.imageUrl,
+        r.previewVideoUrl,
+        r.legacyVideoUrl,
+    ]);
+    const href = 'https://www.fusionart.world/videos';
+    /** @type {string[]} */
+    const bodyParts = [];
+    if (body) {
+        bodyParts.push(
+            fusionEmailParagraph(`${body.slice(0, 520)}${body.length > 520 ? '…' : ''}`, 'lead'),
+        );
+    } else if (line) {
+        bodyParts.push(fusionEmailParagraph(line, 'lead'));
+    }
+    if (guests) {
+        const guestLine = duration ? `Featuring ${guests} · ${duration}` : `Featuring ${guests}`;
+        bodyParts.push(fusionEmailParagraph(guestLine, bodyParts.length ? 'last' : 'lead'));
+    }
+    if (!bodyParts.length) {
+        bodyParts.push(fusionEmailParagraph('Watch the latest studio visit and conversation on Fusion.', 'lead'));
+    }
+    if (bodyParts.length === 1) {
+        bodyParts.push(fusionEmailParagraph('Watch the full video on fusionart.world.', 'last'));
+    }
+    return {
+        eyebrow: kicker || 'Fusion Video',
+        heroImageUrl: heroPick.heroImageUrl,
+        heroPosterUrl: heroPick.heroPosterUrl,
+        heroAlt: title,
+        pillLabel: kicker ? kicker.toUpperCase() : 'FUSION VIDEO',
+        headlineHtml: title.replace(/\s+/g, '<br>'),
+        bodyHtml: bodyParts.join('\n'),
+        cta: { label: 'WATCH NOW', href },
+        subject: title,
+        previewText: line || body.slice(0, 160) || `New video on Fusion: ${title}.`,
+    };
+}
+
+/**
  * @param {object} entry
  * @returns {EmailLayoutSlots}
  */
@@ -235,9 +301,10 @@ export function resolveProgramSource(program) {
  * @param {object[]} [artistRows]
  * @param {object[]} [journalRows]
  * @param {object[]} [programRows]
+ * @param {object[]} [videoRows]
  * @returns {EmailLayoutSlots | null}
  */
-export function resolveContentSource(ref, artistRows = [], journalRows = [], programRows = []) {
+export function resolveContentSource(ref, artistRows = [], journalRows = [], programRows = [], videoRows = []) {
     const type = ref?.type;
     const id = String(ref?.id ?? '').trim();
     if (!type || !id) return null;
@@ -255,11 +322,15 @@ export function resolveContentSource(ref, artistRows = [], journalRows = [], pro
         const row = programRows.find((p) => String(p?.id ?? '') === id);
         return row ? resolveProgramSource(row) : null;
     }
+    if (type === 'video') {
+        const row = videoRows.find((v) => String(normalizeCommunityVideoRecord(v).id) === id);
+        return row ? resolveVideoSource(row) : null;
+    }
     return null;
 }
 
 /**
- * @param {'artist' | 'journal' | 'program'} type
+ * @param {'artist' | 'journal' | 'program' | 'video'} type
  * @param {object[]} rows
  * @returns {Array<{ id: string, label: string, thumb: string }>}
  */
@@ -297,6 +368,20 @@ export function listContentSourceOptions(type, rows) {
             })
             .filter((o) => o.id);
     }
+    if (type === 'video') {
+        return rows
+            .map((v) => {
+                const r = normalizeCommunityVideoRecord(v);
+                const title = videoEmailDisplayTitle(r);
+                const hidden = r.visible === false ? ' (hidden)' : '';
+                return {
+                    id: String(r.id),
+                    label: `${title}${hidden}`,
+                    thumb: normUrl(r.posterUrl) || normUrl(r.imageUrl) || '',
+                };
+            })
+            .filter((o) => o.id);
+    }
     return [];
 }
 
@@ -327,6 +412,7 @@ export function buildTemplateDraftFromSource(templateId, source, caches = {}) {
         caches.artists || [],
         caches.journals || [],
         caches.programs || [],
+        caches.videos || [],
     );
     if (!slots) return null;
     return buildTemplateDraftFromSlots(templateId, slots);
@@ -446,6 +532,7 @@ export function buildQuickDesignContext(templateId, source, userPrompt, caches =
             caches.artists || [],
             caches.journals || [],
             caches.programs || [],
+            caches.videos || [],
         );
     }
     const subject = String(editorDraft.subject ?? '').trim();

@@ -30,10 +30,10 @@ import {
 import {
   clearPendingMembershipPayload,
   clearPendingPaymentEmailLocal,
-  createSubscription,
+  createPayPalSubscription,
   FUSION_PENDING_MEMBERSHIP_LINK_KEY,
   getIntegrationBaseUrl,
-  linkSubscriptionToPrincipal,
+  linkPayPalSubscriptionToPrincipal,
   mapIntegrationUserMessage,
   markPendingMembershipPaymentCompleted,
   readPendingMembershipPayload,
@@ -41,8 +41,10 @@ import {
   savePendingMembershipPayload,
   sendEmail,
   setStoredBillingEmailForPrincipal,
+  syncPayPalSubscription,
 } from "../../utils/integrationApi.js";
-import { getStripePublishableKeyResolved } from "../../utils/studioServicesConfig.js";
+import { mountPayPalSubscriptionApproval } from "../../utils/paymentCheckout.js";
+import { getPayPalClientIdResolved } from "../../utils/studioServicesConfig.js";
 import { saveProfileSetupDraft } from "../../utils/profileSetupDraft.js";
 
 /** Persisted while the join dialog is on the exempt (access-code) path so refresh keeps the digits. */
@@ -1450,7 +1452,7 @@ class JoinNetworkComponent extends HTMLElement {
         firstName: this._formFirstName,
         lastName: this._formLastName,
       });
-      await linkSubscriptionToPrincipal({
+      await linkPayPalSubscriptionToPrincipal({
         fusionPendingId: this._fusionPendingId,
         email,
         principal,
@@ -1880,14 +1882,14 @@ class JoinNetworkComponent extends HTMLElement {
     }
     if (devSkip) devSkip.style.display = "none";
 
-    const pk = getStripePublishableKeyResolved();
+    const clientId = getPayPalClientIdResolved();
     const base = getIntegrationBaseUrl();
-    if (!pk || !base) {
+    if (!clientId || !base) {
       setHintBusy(false);
       if (hint) {
         hint.textContent = !base
           ? "Configure Integration API URL in Studio → Services (or VITE_INTEGRATION_API_URL)."
-          : "Configure Stripe publishable key in Studio → Services (or VITE_STRIPE_PUBLISHABLE_KEY).";
+          : "Configure PayPal client ID in Studio → Services (or VITE_PAYPAL_CLIENT_ID).";
       }
       if (devSkip) devSkip.style.display = DEV_MODE ? "block" : "none";
       if (payBtn) payBtn.disabled = !DEV_MODE;
@@ -1946,9 +1948,8 @@ class JoinNetworkComponent extends HTMLElement {
         subscriptionTier = "bimonthly";
       }
 
-      const [{ loadStripe }, subRes] = await Promise.all([
-        import("@stripe/stripe-js"),
-        createSubscription({
+      const [subRes] = await Promise.all([
+        createPayPalSubscription({
           email: emailForSub,
           payFirst: this._joinMode !== "resubscribe",
           ...(this._joinMode === "resubscribe" && principalOpt
@@ -1964,7 +1965,7 @@ class JoinNetworkComponent extends HTMLElement {
           },
         }),
       ]);
-      const clientSecret = subRes.clientSecret;
+      const approveUrl = subRes.approveUrl;
       if (subRes.fusionPendingId) {
         this._fusionPendingId = subRes.fusionPendingId;
         this._fusionSubscriptionId = subRes.subscriptionId || null;
@@ -1974,46 +1975,28 @@ class JoinNetworkComponent extends HTMLElement {
           subscriptionId: subRes.subscriptionId || null,
           paymentCompleted: false,
         });
+      } else if (subRes.subscriptionId) {
+        this._fusionSubscriptionId = subRes.subscriptionId;
       }
+      this._paypalApproveUrl = approveUrl;
       if (myGen !== this._stripePrepareGen || this._stage !== "payment") return;
 
       if (hint) {
-        hint.textContent = "Loading secure card form…";
+        hint.textContent = "Loading PayPal checkout…";
         setHintBusy(true);
       }
-      const stripe = await loadStripe(pk);
-      if (!stripe) throw new Error("Stripe failed to load");
-      if (myGen !== this._stripePrepareGen || this._stage !== "payment") return;
-
-      const elements = stripe.elements({
-        clientSecret,
-        appearance: { theme: "stripe" },
-      });
-      const paymentElement = elements.create("payment");
       const mountEl = this._getStripeMountLightEl();
-
-      // Let the payment panel paint (not `display:none`) before mounting — Stripe requires a visible mount.
-      await new Promise((r) => requestAnimationFrame(r));
       await new Promise((r) => requestAnimationFrame(r));
       if (myGen !== this._stripePrepareGen || this._stage !== "payment") return;
-
-      // Listeners first, then mount — avoids missing a fast `ready` event.
-      const readyPromise = this._whenPaymentElementReady(paymentElement);
-      paymentElement.mount(mountEl);
-      this._stripe = stripe;
-      this._stripeElements = elements;
-      this._stripePaymentElement = paymentElement;
-
-      await readyPromise;
-      if (myGen !== this._stripePrepareGen || this._stage !== "payment") {
-        this._teardownStripePayment();
-        return;
-      }
-
+      if (!approveUrl) throw new Error("PayPal approval URL missing");
+      mountPayPalSubscriptionApproval(mountEl, {
+        approveUrl,
+        label: "Continue with PayPal",
+      });
       this._stripePaymentReady = true;
       this._stripePrepareKey = this._computeStripePrepareKeySync();
       setHintBusy(false);
-      if (hint) hint.textContent = "";
+      if (hint) hint.textContent = "Approve your subscription in PayPal, then click Secure Access.";
       if (payBtn) payBtn.disabled = false;
       try {
         posthog.capture("membership_payment_elements_ready", {
@@ -2022,6 +2005,7 @@ class JoinNetworkComponent extends HTMLElement {
             this.getAttribute("data-modal-type") ||
             "membership",
           join_mode: this._joinMode || "full",
+          payment_provider: "paypal",
           ads_conversion: "AddPaymentInfo",
         });
         metaTrack("AddPaymentInfo", {
@@ -2034,7 +2018,7 @@ class JoinNetworkComponent extends HTMLElement {
     } catch (e) {
       if (myGen !== this._stripePrepareGen) return;
       this._teardownStripePayment();
-      if (DEV_MODE) console.error("[JoinNetwork] Stripe init", e);
+      if (DEV_MODE) console.error("[JoinNetwork] PayPal init", e);
       setHintBusy(false);
       if (hint) {
         const raw = e instanceof Error ? e.message : "";
@@ -3283,11 +3267,11 @@ class JoinNetworkComponent extends HTMLElement {
       }
       if (this._joinNetworkSubmitting) return;
 
-      if (this._stripe && this._stripeElements) {
-        if (!this._stripePaymentReady) {
+      if (this._stripePaymentReady) {
+        if (!this._fusionSubscriptionId) {
           if (errEl) {
             errEl.textContent =
-              "Payment form is still loading. Wait until the card fields appear, then try again.";
+              "Complete PayPal approval first (Continue with PayPal), then try again.";
           }
           return;
         }
@@ -3303,25 +3287,16 @@ class JoinNetworkComponent extends HTMLElement {
           payBtn.textContent = procLabel;
         }
         try {
-          const { error } = await this._stripe.confirmPayment({
-            elements: this._stripeElements,
-            confirmParams: {
-              return_url: window.location.href,
-            },
-            redirect: "if_required",
-          });
-          if (error) {
-            posthog.capture("membership_payment_failed", {
-              modal_type:
-                this._modalType ||
-                this.getAttribute("data-modal-type") ||
-                "membership",
-              join_mode: this._joinMode || "full",
-              stripe_error_type: error.type || undefined,
-              stripe_error_code: error.code || undefined,
+          const emailForSub = this._getEmailForSubscription();
+          const { getIdentityIfAuthenticated } =
+            await import("../../utils/icAuth.js");
+          const identity = await getIdentityIfAuthenticated();
+          const principalText = identity?.getPrincipal().toText();
+          if (this._joinMode === "resubscribe" && principalText) {
+            await syncPayPalSubscription({
+              principal: principalText,
+              subscriptionId: this._fusionSubscriptionId,
             });
-            if (errEl) errEl.textContent = error.message || "Payment failed.";
-            return;
           }
           const purchaseValue = this._paymentAmountCents / 100;
           const pageContext = String(

@@ -44,6 +44,7 @@ export function findApplicationDeadlineDateFromKeyDates(keyDates) {
     if (!Array.isArray(keyDates)) return '';
     for (const row of keyDates) {
         if (!row || typeof row !== 'object') continue;
+        if (String(/** @type {Record<string, unknown>} */ (row).sectionTitle ?? '').trim()) continue;
         const desc = String(/** @type {Record<string, unknown>} */ (row).description ?? '').trim();
         if (/application\s+deadline/i.test(desc)) {
             return String(/** @type {Record<string, unknown>} */ (row).date ?? '').trim();

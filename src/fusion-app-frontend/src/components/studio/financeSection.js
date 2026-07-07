@@ -950,7 +950,9 @@ export async function initFinance(mainEl) {
                           const badge =
                               src === 'staff'
                                   ? '<span class="studio-finance-ledger-badge studio-finance-ledger-badge--staff">Staff</span>'
-                                  : '<span class="studio-finance-ledger-badge studio-finance-ledger-badge--stripe">Stripe</span>';
+                                  : src === 'paypal'
+                                    ? '<span class="studio-finance-ledger-badge studio-finance-ledger-badge--paypal">PayPal</span>'
+                                    : '<span class="studio-finance-ledger-badge studio-finance-ledger-badge--stripe">Stripe</span>';
                           const date = String(entry.createdAt || '').slice(0, 10) || '—';
                           const note = String(entry.staffNote || '').trim();
                           const amountCell = isPayments

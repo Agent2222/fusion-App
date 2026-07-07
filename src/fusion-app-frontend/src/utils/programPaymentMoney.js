@@ -184,11 +184,15 @@ export function isLedgerPaymentRow(row) {
 
 /**
  * @param {unknown} row
- * @returns {'stripe' | 'staff'}
+ * @returns {'stripe' | 'paypal' | 'staff'}
  */
 export function ledgerRowSource(row) {
     const type = String(row?.paymentType || '');
-    return type === 'staff_manual' || type === 'staff_fee' || type === 'staff_travel' ? 'staff' : 'stripe';
+    if (type === 'staff_manual' || type === 'staff_fee' || type === 'staff_travel') return 'staff';
+    const provider = String(row?.paymentProvider || '').toLowerCase();
+    if (provider === 'paypal') return 'paypal';
+    if (provider === 'staff') return 'staff';
+    return 'stripe';
 }
 
 /**

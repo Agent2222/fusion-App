@@ -172,12 +172,15 @@ module {
         updatedAt : Text;
     };
 
-    /// Stripe subscription + manual exemption (stored in `membershipByPrincipal` stable map).
+    /// Stripe / PayPal subscription + manual exemption (stored in `membershipByPrincipal` stable map).
     /// Renewal end date is stored separately (`membershipStripePeriodEndStable` in the actor) so this record stays compatible with older canisters.
     public type MembershipFields = {
         stripeCustomerId : ?Text;
         stripeSubscriptionId : ?Text;
         stripeSubscriptionStatus : ?Text;
+        paypalSubscriptionId : ?Text;
+        paypalSubscriptionStatus : ?Text;
+        paymentProvider : ?Text;
         membershipExemptManual : Bool;
     };
 
@@ -192,6 +195,9 @@ module {
         stripeCustomerId : ?Text;
         stripeSubscriptionId : ?Text;
         stripeSubscriptionStatus : ?Text;
+        paypalSubscriptionId : ?Text;
+        paypalSubscriptionStatus : ?Text;
+        paymentProvider : ?Text;
         stripeCurrentPeriodEnd : ?Text;
         membershipExemptManual : Bool;
         trialStartedAtSec : ?Nat;
@@ -434,7 +440,26 @@ module {
         updatedAt : Text;
     };
 
-    /// Immutable-ish ledger row recorded by the integration API after Stripe verification.
+    /// Ledger row shape before provider-agnostic fields (stable upgrade migration only).
+    public type ProgramPaymentLedgerRowV1 = {
+        id : Text;
+        principal : Principal;
+        programId : Text;
+        applicationId : Text;
+        paymentType : Text;
+        amountCents : Nat;
+        currency : Text;
+        stripePaymentIntentId : Text;
+        stripeChargeId : Text;
+        stripeReceiptUrl : Text;
+        status : Text;
+        createdAt : Text;
+        dueAt : ?Text;
+        feeCents : Nat;
+        staffNote : Text;
+    };
+
+    /// Immutable-ish ledger row recorded by the integration API after payment verification.
     public type ProgramPaymentLedgerRow = {
         id : Text;
         principal : Principal;
@@ -451,6 +476,10 @@ module {
         dueAt : ?Text;
         feeCents : Nat;
         staffNote : Text;
+        paymentProvider : Text;
+        externalPaymentId : Text;
+        externalChargeId : Text;
+        externalReceiptUrl : Text;
     };
 
     /// Legacy ledger row (pre feeCents/staffNote) — stable upgrade migration only.
@@ -471,7 +500,7 @@ module {
     };
 
     public func programPaymentLedgerFromV0(row : ProgramPaymentLedgerRowV0) : ProgramPaymentLedgerRow {
-        {
+        programPaymentLedgerFromV1({
             id = row.id;
             principal = row.principal;
             programId = row.programId;
@@ -487,11 +516,35 @@ module {
             dueAt = row.dueAt;
             feeCents = 0;
             staffNote = "";
+        });
+    };
+
+    public func programPaymentLedgerFromV1(row : ProgramPaymentLedgerRowV1) : ProgramPaymentLedgerRow {
+        {
+            id = row.id;
+            principal = row.principal;
+            programId = row.programId;
+            applicationId = row.applicationId;
+            paymentType = row.paymentType;
+            amountCents = row.amountCents;
+            currency = row.currency;
+            stripePaymentIntentId = row.stripePaymentIntentId;
+            stripeChargeId = row.stripeChargeId;
+            stripeReceiptUrl = row.stripeReceiptUrl;
+            status = row.status;
+            createdAt = row.createdAt;
+            dueAt = row.dueAt;
+            feeCents = row.feeCents;
+            staffNote = row.staffNote;
+            paymentProvider = "stripe";
+            externalPaymentId = row.stripePaymentIntentId;
+            externalChargeId = row.stripeChargeId;
+            externalReceiptUrl = row.stripeReceiptUrl;
         };
     };
 
-    /// Active or historical Stripe-backed program payment plan.
-    public type ProgramPaymentPlan = {
+    /// Program payment plan shape before PayPal fields (stable upgrade migration only).
+    public type ProgramPaymentPlanV1 = {
         id : Text;
         principal : Principal;
         programId : Text;
@@ -506,6 +559,47 @@ module {
         endAt : Text;
         createdAt : Text;
         updatedAt : Text;
+    };
+
+    /// Active or historical program payment plan (Stripe legacy or PayPal).
+    public type ProgramPaymentPlan = {
+        id : Text;
+        principal : Principal;
+        programId : Text;
+        applicationId : Text;
+        stripeSubscriptionId : Text;
+        stripeScheduleId : Text;
+        paypalSubscriptionId : ?Text;
+        paymentProvider : Text;
+        installmentCount : Nat;
+        installmentAmountCents : Nat;
+        currency : Text;
+        status : Text;
+        startAt : Text;
+        endAt : Text;
+        createdAt : Text;
+        updatedAt : Text;
+    };
+
+    public func programPaymentPlanFromV1(row : ProgramPaymentPlanV1) : ProgramPaymentPlan {
+        {
+            id = row.id;
+            principal = row.principal;
+            programId = row.programId;
+            applicationId = row.applicationId;
+            stripeSubscriptionId = row.stripeSubscriptionId;
+            stripeScheduleId = row.stripeScheduleId;
+            paypalSubscriptionId = null;
+            paymentProvider = "stripe";
+            installmentCount = row.installmentCount;
+            installmentAmountCents = row.installmentAmountCents;
+            currency = row.currency;
+            status = row.status;
+            startAt = row.startAt;
+            endAt = row.endAt;
+            createdAt = row.createdAt;
+            updatedAt = row.updatedAt;
+        };
     };
 
     // --- Profile plan: explicit names for JSON blobs (full locale trees stay in `ArtistRecord.localesJson`) ---

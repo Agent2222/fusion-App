@@ -828,6 +828,189 @@ export async function fetchProgramPaymentReceipts(paymentIntentIds) {
     return res.json();
 }
 
+// ——— PayPal (primary — all new checkouts) ———
+
+/**
+ * @returns {Promise<{ provider: string, paypalClientId: string, mode: string, configured?: boolean }>}
+ */
+export async function fetchPaymentConfig() {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const res = await fetch(`${base}/payments/config`, { method: 'GET' });
+    if (!res.ok) throw new Error(`Payment config HTTP ${res.status}`);
+    return res.json();
+}
+
+/**
+ * @param {object} body
+ * @returns {Promise<{ orderId: string, provider?: string }>}
+ */
+export async function createPayPalOneTimePayment(body) {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const res = await fetch(`${base}/payments/one-time`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(mapIntegrationUserMessage(err.error || `PayPal one-time HTTP ${res.status}`, res.status));
+    }
+    return res.json();
+}
+
+/**
+ * @param {string} orderId
+ */
+export async function confirmPayPalOneTimePayment(orderId) {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const res = await fetch(`${base}/payments/one-time/confirm`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify({ orderId }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(mapIntegrationUserMessage(err.error || `PayPal confirm HTTP ${res.status}`, res.status));
+    }
+    return res.json();
+}
+
+/**
+ * @param {{ principal?: string, email: string, metadata?: Record<string, string>, payFirst?: boolean, subscriptionTier?: 'bimonthly' | 'annual' }} opts
+ */
+export async function createPayPalSubscription(opts) {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const body = {
+        email: opts.email.trim(),
+        metadata: opts.metadata || {},
+        payFirst: opts.payFirst === true,
+        subscriptionTier: opts.subscriptionTier,
+        principal: opts.principal,
+    };
+    const res = await fetch(`${base}/payments/subscription`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(mapIntegrationUserMessage(err.error || `PayPal subscription HTTP ${res.status}`, res.status));
+    }
+    return res.json();
+}
+
+/**
+ * @param {{ fusionPendingId: string, email: string, principal: string, subscriptionId: string }} opts
+ */
+export async function linkPayPalSubscriptionToPrincipal(opts) {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const res = await fetch(`${base}/payments/subscription/link`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify(opts),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(mapIntegrationUserMessage(err.error || `PayPal link HTTP ${res.status}`, res.status));
+    }
+    return res.json();
+}
+
+/**
+ * @param {{ principal: string, subscriptionId: string }} opts
+ */
+export async function syncPayPalSubscription(opts) {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const res = await fetch(`${base}/payments/subscription/sync`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify(opts),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(mapIntegrationUserMessage(err.error || `PayPal sync HTTP ${res.status}`, res.status));
+    }
+    return res.json();
+}
+
+/**
+ * @param {string} subscriptionId
+ */
+export async function cancelPayPalSubscriptionAtPeriodEnd(subscriptionId) {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const res = await fetch(`${base}/payments/subscription/cancel`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify({ subscriptionId }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(mapIntegrationUserMessage(err.error || `PayPal cancel HTTP ${res.status}`, res.status));
+    }
+    return res.json();
+}
+
+/**
+ * @param {object} body
+ */
+export async function createPayPalProgramPaymentPlan(body) {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const res = await fetch(`${base}/payments/plan`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(mapIntegrationUserMessage(err.error || `PayPal plan HTTP ${res.status}`, res.status));
+    }
+    return res.json();
+}
+
+/**
+ * @param {{ subscriptionId: string, planId?: string }} opts
+ */
+export async function cancelPayPalProgramPaymentPlan(opts) {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const res = await fetch(`${base}/payments/plan/cancel`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify(opts),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(mapIntegrationUserMessage(err.error || `PayPal plan cancel HTTP ${res.status}`, res.status));
+    }
+    return res.json();
+}
+
+/**
+ * @param {string[]} orderIds
+ */
+export async function fetchPayPalPaymentReceipts(orderIds) {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const res = await fetch(`${base}/payments/receipts`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify({ orderIds }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(mapIntegrationUserMessage(err.error || `PayPal receipts HTTP ${res.status}`, res.status));
+    }
+    return res.json();
+}
+
 /**
  * @param {{ to: string, subject: string, html?: string, text?: string, replyTo?: string, from?: string }} opts
  */

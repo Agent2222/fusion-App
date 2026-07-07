@@ -9,6 +9,8 @@ export const LS_INTEGRATION_API_KEY = 'fusion-studio-integration-api-bearer';
 export const LS_STRIPE_MODE = 'fusion-studio-stripe-mode';
 export const LS_STRIPE_PK_TEST = 'fusion-studio-stripe-pk-test';
 export const LS_STRIPE_PK_LIVE = 'fusion-studio-stripe-pk-live';
+export const LS_PAYPAL_CLIENT_ID_TEST = 'fusion-studio-paypal-client-id-test';
+export const LS_PAYPAL_CLIENT_ID_LIVE = 'fusion-studio-paypal-client-id-live';
 export const LS_RESEND_TEST_TO = 'fusion-studio-resend-test-to';
 /** Optional Resend From override for Studio test email (must be allowed in Resend) */
 export const LS_RESEND_FROM_OVERRIDE = 'fusion-studio-resend-from-override';
@@ -98,6 +100,25 @@ export function getStripePublishableKeyResolved() {
 }
 
 /**
+ * Resolved PayPal client id: Studio override for mode, else Vite env.
+ * @returns {string}
+ */
+export function getPayPalClientIdResolved() {
+    const mode = getStripeMode();
+    try {
+        const test = localStorage.getItem(LS_PAYPAL_CLIENT_ID_TEST)?.trim() || '';
+        const live = localStorage.getItem(LS_PAYPAL_CLIENT_ID_LIVE)?.trim() || '';
+        const pick = mode === 'live' ? live || test : test || live;
+        if (pick) return pick;
+    } catch {
+        /* ignore */
+    }
+    const env =
+        typeof import.meta !== 'undefined' && import.meta.env?.VITE_PAYPAL_CLIENT_ID;
+    return typeof env === 'string' ? env.trim() : '';
+}
+
+/**
  * Build a `.env` fragment for the integration server (secrets are not stored).
  * @param {string} skTest
  * @param {string} skLive
@@ -118,6 +139,12 @@ export function buildServerEnvSnippet(skTest, skLive, extra = {}) {
     lines.push(
         '# STRIPE_PRICE_ID=price_...',
         '# STRIPE_WEBHOOK_SECRET=whsec_...',
+        '# PAYPAL_CLIENT_ID=...',
+        '# PAYPAL_CLIENT_SECRET=...',
+        '# PAYPAL_MODE=sandbox',
+        '# PAYPAL_PLAN_BIMONTHLY_ID=...',
+        '# PAYPAL_PLAN_ANNUAL_ID=...',
+        '# PAYPAL_PLAN_INSTALLMENT_ID=...',
         '# FUSION_BACKEND_CANISTER_ID=...',
         '# INTEGRATION_IC_IDENTITY_PEM=  # paste full PEM from: dfx identity export <name>',
         '# (optional legacy) INTEGRATION_IC_IDENTITY_JSON=["hex","hex"]',

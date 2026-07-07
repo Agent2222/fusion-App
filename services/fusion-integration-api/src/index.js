@@ -12,6 +12,9 @@ import { Resend } from 'resend';
 import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { presignPutObjectUrl } from './storagePresign.js';
+import { registerPaymentRoutes } from './payments/routes.js';
+import { isPayPalConfigured, getPayPalClientId, getPayPalMode } from './payments/paypalClient.js';
+import { handlePayPalWebhookEvent } from './webhooks/paypal.js';
 import { getIntegrationActor, pushSubscriptionToCanister } from './canisterActor.js';
 import {
     getActiveStorage,
@@ -174,6 +177,36 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
     }
 });
 
+app.post('/webhooks/paypal', express.raw({ type: 'application/json' }), async (req, res) => {
+    try {
+        if (!isPayPalConfigured()) {
+            return res.status(503).json({ error: 'PayPal webhook not configured' });
+        }
+        let event;
+        try {
+            event = JSON.parse(req.body.toString('utf8'));
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return res.status(400).json({ error: `Webhook JSON: ${msg}` });
+        }
+        try {
+            await handlePayPalWebhookEvent(event, {
+                sendProgramPaymentConfirmationEmails,
+                markProgramPaymentEmailsSent,
+                cancelPlatformSubscriptionImmediately,
+                addConfirmedArtistToProgram,
+            });
+        } catch (e) {
+            console.error('[paypal webhook] handler', e);
+            return res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+        }
+        return res.json({ received: true });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return res.status(500).json({ error: msg });
+    }
+});
+
 app.use(express.json({ limit: '512kb' }));
 
 /**
@@ -323,6 +356,9 @@ app.get('/health', (_req, res) => {
     res.json({
         ok: true,
         stripe: stripeSecret ? 'configured' : 'missing',
+        paypal: isPayPalConfigured() ? 'configured' : 'missing',
+        paypalClientId: getPayPalClientId() ? 'configured' : 'missing',
+        paypalMode: getPayPalMode(),
         stripeWebhook: stripeWebhookSecret ? 'configured' : 'optional',
         stripePrice: process.env.STRIPE_PRICE_ID ? 'configured' : 'missing',
         stripeAnnualPrice: process.env.STRIPE_ANNUAL_PRICE_ID ? 'configured' : 'missing',
@@ -727,6 +763,10 @@ async function recordVerifiedProgramPayment(paymentIntent) {
         dueAt: [],
         feeCents: BigInt(feeCents),
         staffNote: '',
+        paymentProvider: 'stripe',
+        externalPaymentId: paymentIntent.id,
+        externalChargeId: chargeId,
+        externalReceiptUrl: receiptUrl,
     };
     await actor.integrationRecordProgramPayment(
         row,
@@ -787,6 +827,8 @@ async function recordVerifiedProgramPayment(paymentIntent) {
                 applicationId,
                 stripeSubscriptionId: safeStripeMetaValue(meta.stripeSubscriptionId, 120),
                 stripeScheduleId: safeStripeMetaValue(meta.stripeScheduleId, 120),
+                paypalSubscriptionId: [],
+                paymentProvider: 'stripe',
                 installmentCount: BigInt(Math.max(0, Math.round(Number(meta.installmentCount || 0)))),
                 installmentAmountCents: BigInt(Math.max(0, Math.round(Number(meta.installmentAmountCents || 0)))),
                 currency: safeStripeMetaValue(paymentIntent.currency || 'usd', 20).toLowerCase(),
@@ -2654,6 +2696,16 @@ app.post('/storage/private-video/multipart/abort', requireApiKey, async (req, re
         const msg = e instanceof Error ? e.message : String(e);
         return res.status(500).json({ error: msg });
     }
+});
+
+registerPaymentRoutes(app, {
+    requireApiKey,
+    programPaymentDeps: {
+        sendProgramPaymentConfirmationEmails,
+        markProgramPaymentEmailsSent,
+        cancelPlatformSubscriptionImmediately,
+        addConfirmedArtistToProgram,
+    },
 });
 
 app.use((_req, res) => {

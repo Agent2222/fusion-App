@@ -331,6 +331,7 @@ export function renderEmailCampaignStudio() {
             <select class="studio-select" id="studio-ec-source-type">
               <option value="">— None —</option>
               <option value="artist">Featured artist</option>
+              <option value="video">Community video</option>
               <option value="journal">Journal entry</option>
               <option value="program">Program</option>
             </select>
@@ -866,7 +867,7 @@ export async function initEmailCampaignStudio(mainEl) {
         const type = sourceTypeSel instanceof HTMLSelectElement ? sourceTypeSel.value : '';
         const id = sourceIdSel instanceof HTMLSelectElement ? sourceIdSel.value : '';
         if (!type || !id) return null;
-        return { type: /** @type {'artist'|'journal'|'program'} */ (type), id };
+        return { type: /** @type {'artist'|'journal'|'program'|'video'} */ (type), id };
     };
 
     const updateSourcePanelVisibility = () => {
@@ -898,9 +899,11 @@ export async function initEmailCampaignStudio(mainEl) {
         const rows =
             type === 'artist'
                 ? contentCaches.artists
-                : type === 'journal'
-                  ? contentCaches.journals
-                  : contentCaches.programs;
+                : type === 'video'
+                  ? contentCaches.videos
+                  : type === 'journal'
+                    ? contentCaches.journals
+                    : contentCaches.programs;
         const options = listContentSourceOptions(/** @type {any} */ (type), rows);
         sourceIdSel.innerHTML =
             '<option value="">— Select —</option>' +
@@ -1167,7 +1170,13 @@ export async function initEmailCampaignStudio(mainEl) {
                 return;
             }
             const sourceSlots = source
-                ? resolveContentSource(source, contentCaches.artists, contentCaches.journals, contentCaches.programs)
+                ? resolveContentSource(
+                      source,
+                      contentCaches.artists,
+                      contentCaches.journals,
+                      contentCaches.programs,
+                      contentCaches.videos,
+                  )
                 : null;
             const editorSlots = {
                 ...(editorDraft.layoutSlots || {}),

@@ -15,21 +15,24 @@ import { getAuthSnapshot } from '../../utils/icAuth.js';
 import { emptyApplicationPaymentOptions } from '../../utils/programApplicationFormContext.js';
 import {
     clearPendingPaymentEmailLocal,
-    createPaymentIntent,
-    createSubscription,
+    confirmPayPalOneTimePayment,
+    createPayPalOneTimePayment,
+    createPayPalSubscription,
     FUSION_PENDING_APPLICATION_SUB_KEY,
     getIntegrationBaseUrl,
     getStoredBillingEmailForPrincipal,
-    linkSubscriptionToPrincipal,
+    linkPayPalSubscriptionToPrincipal,
     mapIntegrationUserMessage,
     readPendingPaymentEmailLocal,
     setPendingPaymentEmailLocal,
     setStoredBillingEmailForPrincipal,
+    syncPayPalSubscription,
     syncSubscriptionFromStripe,
     syncSubscriptionFromStripeByEmail,
 } from '../../utils/integrationApi.js';
+import { mountPayPalOrderButtons, mountPayPalSubscriptionApproval } from '../../utils/paymentCheckout.js';
 import { getProfileSetupDraft } from '../../utils/profileSetupDraft.js';
-import { getStripePublishableKeyResolved } from '../../utils/studioServicesConfig.js';
+import { getPayPalClientIdResolved } from '../../utils/studioServicesConfig.js';
 import posthog from 'posthog-js';
 import { metaTrack } from '../../utils/metaPixel.js';
 import { syncPosthogConversionPerson } from '../../utils/posthogConversionIdentity.js';
@@ -886,15 +889,18 @@ class ApplicationFormComponent extends HTMLElement {
         }
 
         const programId = this.getAttribute('data-program-id') || '';
-        const pk = getStripePublishableKeyResolved();
+        const clientId = getPayPalClientIdResolved();
         const base = getIntegrationBaseUrl();
-        if (!pk || !base) {
+        if (!clientId || !base) {
             setHint(L.paymentConfigureServices, false);
             if (payBtn) payBtn.disabled = true;
             return;
         }
 
-        let clientSecret = '';
+        /** @type {string} */
+        let orderId = '';
+        /** @type {string} */
+        let approveUrl = '';
         if (this._paymentPlan === 'one_time') {
             const centsRaw = this._programFormContext.applicationFeeAmountCents;
             const amountCents =
@@ -910,13 +916,16 @@ class ApplicationFormComponent extends HTMLElement {
             setHint(L.paymentPreparing, true);
             if (myGen !== this._stripePrepareGen) return;
             try {
-                const piRes = await createPaymentIntent(amountCents, 'usd', {
-                    programId,
-                    purpose: 'program_application',
-                    payment_plan: 'one_time',
+                const piRes = await createPayPalOneTimePayment({
+                    amountCents,
+                    metadata: {
+                        programId,
+                        purpose: 'program_application',
+                        payment_plan: 'one_time',
+                    },
                 });
                 if (myGen !== this._stripePrepareGen) return;
-                clientSecret = piRes.clientSecret;
+                orderId = piRes.orderId;
             } catch (e) {
                 if (myGen !== this._stripePrepareGen) return;
                 this._teardownStripePayment();
@@ -939,7 +948,7 @@ class ApplicationFormComponent extends HTMLElement {
             setHint(L.paymentPreparing, true);
             if (myGen !== this._stripePrepareGen) return;
             try {
-                const subRes = await createSubscription({
+                const subRes = await createPayPalSubscription({
                     email,
                     payFirst: true,
                     subscriptionTier: this._paymentPlan === 'annual' ? 'annual' : 'bimonthly',
@@ -950,7 +959,7 @@ class ApplicationFormComponent extends HTMLElement {
                     },
                 });
                 if (myGen !== this._stripePrepareGen) return;
-                clientSecret = subRes.clientSecret;
+                approveUrl = subRes.approveUrl || '';
                 this._fusionPendingId = subRes.fusionPendingId || null;
                 this._fusionSubscriptionId = subRes.subscriptionId || null;
                 setPendingPaymentEmailLocal({
@@ -982,32 +991,26 @@ class ApplicationFormComponent extends HTMLElement {
         setHint(L.paymentLoadingForm, true);
         if (myGen !== this._stripePrepareGen) return;
         try {
-            const { loadStripe } = await import('@stripe/stripe-js');
-            const stripe = await loadStripe(pk);
-            if (!stripe) throw new Error('Stripe failed to load');
-            if (myGen !== this._stripePrepareGen) return;
-
-            const elements = stripe.elements({
-                clientSecret,
-                appearance: { theme: 'stripe' },
-            });
-            const paymentElement = elements.create('payment');
             const mountEl = this._ensureStripeSlotEl();
             await new Promise((r) => requestAnimationFrame(r));
             if (myGen !== this._stripePrepareGen) return;
-
-            const readyPromise = this._whenPaymentElementReady(paymentElement);
-            paymentElement.mount(mountEl);
-            this._stripe = stripe;
-            this._stripeElements = elements;
-            this._stripePaymentElement = paymentElement;
-
-            await readyPromise;
-            if (myGen !== this._stripePrepareGen) {
-                this._teardownStripePayment();
-                return;
+            if (this._paymentPlan === 'one_time' && orderId) {
+                await mountPayPalOrderButtons(mountEl, {
+                    clientId,
+                    orderId,
+                    onApproved: async (oid) => {
+                        await confirmPayPalOneTimePayment(oid);
+                    },
+                    onError: (err) => {
+                        console.warn('[application-form] PayPal order error', err);
+                    },
+                });
+            } else if (approveUrl) {
+                mountPayPalSubscriptionApproval(mountEl, { approveUrl });
+            } else {
+                throw new Error('PayPal checkout could not be prepared');
             }
-
+            this._paypalOrderId = orderId;
             this._stripePaymentReady = true;
             this._stripePrepareKey = prepareKey;
             setHint('', false);
@@ -1076,7 +1079,7 @@ class ApplicationFormComponent extends HTMLElement {
             }
             return;
         }
-        if (!this._stripe || !this._stripeElements || !this._stripePaymentReady) {
+        if (!this._stripePaymentReady) {
             if (statusEl) {
                 statusEl.textContent = L.paymentStillLoading;
                 statusEl.classList.add('is-error');
@@ -1089,19 +1092,16 @@ class ApplicationFormComponent extends HTMLElement {
             statusEl.classList.remove('is-error', 'is-success');
         }
         try {
-            const { error } = await this._stripe.confirmPayment({
-                elements: this._stripeElements,
-                confirmParams: {
-                    return_url: typeof window !== 'undefined' ? window.location.href : '',
-                },
-                redirect: 'if_required',
-            });
-            if (error) {
-                const wrapped = new Error(error.message || L.paymentFailed);
-                /** @type {{ stripeError?: import('@stripe/stripe-js').StripeError }} */
-                const w = /** @type {any} */ (wrapped);
-                w.stripeError = error;
-                throw wrapped;
+            if (this._paymentPlan === 'one_time' && this._paypalOrderId) {
+                await confirmPayPalOneTimePayment(this._paypalOrderId);
+            } else if (this._fusionSubscriptionId) {
+                const snap = await getAuthSnapshot();
+                if (snap.authenticated) {
+                    await syncPayPalSubscription({
+                        principal: snap.principal.toText(),
+                        subscriptionId: this._fusionSubscriptionId,
+                    });
+                }
             }
             const email = String(root?.querySelector('#app-email')?.value ?? '').trim();
             const firstName = String(root?.querySelector('#app-first-name')?.value ?? '').trim();
@@ -1151,7 +1151,7 @@ class ApplicationFormComponent extends HTMLElement {
                 }
                 const principal = snap.principal.toText();
                 try {
-                    await linkSubscriptionToPrincipal({
+                    await linkPayPalSubscriptionToPrincipal({
                         fusionPendingId: this._fusionPendingId,
                         email,
                         principal,

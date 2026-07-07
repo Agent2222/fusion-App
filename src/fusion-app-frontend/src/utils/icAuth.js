@@ -246,31 +246,46 @@ export async function runPostLoginPipeline() {
         return;
     }
 
-    /** Push Stripe subscription status to the canister, then create minimal linked artist when membership allows (pay-first recovery). */
+    /** Push subscription status to the canister (PayPal primary; Stripe legacy), then create minimal linked artist when membership allows. */
     try {
         const { principal } = await getAuthSnapshot();
         const pText = principal.toText();
         const {
             syncSubscriptionFromStripe,
             syncSubscriptionFromStripeByEmail,
+            syncPayPalSubscription,
             getStoredBillingEmailForPrincipal,
             readPendingPaymentEmailLocal,
         } = await import('./integrationApi.js');
-        const syncResult = await syncSubscriptionFromStripe(pText);
-        if (
-            DEV_MODE &&
-            syncResult &&
-            syncResult.synced === false &&
-            typeof syncResult.reason === 'string' &&
-            syncResult.reason
-        ) {
-            console.warn('[Fusion] post-login sync-subscription:', syncResult.reason);
+        let paypalSubId = '';
+        try {
+            if (typeof actor.getAccountForCaller === 'function') {
+                const rawAcc = await actor.getAccountForCaller();
+                const row = Array.isArray(rawAcc) ? (rawAcc.length ? rawAcc[0] : null) : rawAcc;
+                paypalSubId = String(row?.paypalSubscriptionId || '').trim();
+            }
+        } catch {
+            /* ignore */
         }
-        const billingEmail = getStoredBillingEmailForPrincipal(pText);
-        const pendingJoin = readPendingPaymentEmailLocal('join');
-        const syncEmail = billingEmail || pendingJoin?.email || '';
-        if (syncEmail.includes('@')) {
-            await syncSubscriptionFromStripeByEmail(syncEmail, pText);
+        if (paypalSubId) {
+            await syncPayPalSubscription({ principal: pText, subscriptionId: paypalSubId });
+        } else {
+            const syncResult = await syncSubscriptionFromStripe(pText);
+            if (
+                DEV_MODE &&
+                syncResult &&
+                syncResult.synced === false &&
+                typeof syncResult.reason === 'string' &&
+                syncResult.reason
+            ) {
+                console.warn('[Fusion] post-login sync-subscription:', syncResult.reason);
+            }
+            const billingEmail = getStoredBillingEmailForPrincipal(pText);
+            const pendingJoin = readPendingPaymentEmailLocal('join');
+            const syncEmail = billingEmail || pendingJoin?.email || '';
+            if (syncEmail.includes('@')) {
+                await syncSubscriptionFromStripeByEmail(syncEmail, pText);
+            }
         }
         const { ensureMyLinkedArtistProfile } = await import('./database.js');
         await ensureMyLinkedArtistProfile();
@@ -304,15 +319,28 @@ export async function runPostLoginPipeline() {
                 const {
                     syncSubscriptionFromStripe,
                     syncSubscriptionFromStripeByEmail,
+                    syncPayPalSubscription,
                     getStoredBillingEmailForPrincipal,
                     readPendingPaymentEmailLocal,
                 } = await import('./integrationApi.js');
-                await syncSubscriptionFromStripe(pr);
-                const billingEmail = getStoredBillingEmailForPrincipal(pr);
-                const pendingJoin = readPendingPaymentEmailLocal('join');
-                const syncEmail = billingEmail || pendingJoin?.email || '';
-                if (syncEmail.includes('@')) {
-                    await syncSubscriptionFromStripeByEmail(syncEmail, pr);
+                let paypalSubId = '';
+                try {
+                    const rawAcc = await actor.getAccountForCaller();
+                    const row = Array.isArray(rawAcc) ? (rawAcc.length ? rawAcc[0] : null) : rawAcc;
+                    paypalSubId = String(row?.paypalSubscriptionId || '').trim();
+                } catch {
+                    /* ignore */
+                }
+                if (paypalSubId) {
+                    await syncPayPalSubscription({ principal: pr, subscriptionId: paypalSubId });
+                } else {
+                    await syncSubscriptionFromStripe(pr);
+                    const billingEmail = getStoredBillingEmailForPrincipal(pr);
+                    const pendingJoin = readPendingPaymentEmailLocal('join');
+                    const syncEmail = billingEmail || pendingJoin?.email || '';
+                    if (syncEmail.includes('@')) {
+                        await syncSubscriptionFromStripeByEmail(syncEmail, pr);
+                    }
                 }
                 gate = await getMembershipAccessForCaller();
             }

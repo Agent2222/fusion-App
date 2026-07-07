@@ -68,8 +68,10 @@ persistent actor {
   stable var applicantEmailOutreachStable : [(Text, Text)] = [];
   stable var programPaymentSummariesStable : [(Text, Types.ProgramPaymentSummary)] = [];
   stable var programPaymentLedgerStable : [(Text, Types.ProgramPaymentLedgerRowV0)] = [];
-  stable var programPaymentLedgerStableV1 : [(Text, Types.ProgramPaymentLedgerRow)] = [];
-  stable var programPaymentPlansStable : [(Text, Types.ProgramPaymentPlan)] = [];
+  stable var programPaymentLedgerStableV1 : [(Text, Types.ProgramPaymentLedgerRowV1)] = [];
+  stable var programPaymentLedgerStableV2 : [(Text, Types.ProgramPaymentLedgerRow)] = [];
+  stable var programPaymentPlansStable : [(Text, Types.ProgramPaymentPlanV1)] = [];
+  stable var programPaymentPlansStableV2 : [(Text, Types.ProgramPaymentPlan)] = [];
   var programPaymentFlightPreferencesStable : [(Text, Types.ProgramPaymentFlightPreference)] = [];
   stable var siteSettingsStable : [(Text, Text)] = [];
 
@@ -326,15 +328,31 @@ persistent actor {
     ];
   };
 
-  /// Load program payment ledger into transient map from stable (V1 preferred, else migrate V0).
+  /// Load program payment ledger into transient map from stable (V2 preferred, else migrate V1/V0).
   private func reloadProgramPaymentLedgerFromStables() {
-    if (programPaymentLedgerStableV1.size() > 0) {
-      for (entry in programPaymentLedgerStableV1.vals()) {
+    if (programPaymentLedgerStableV2.size() > 0) {
+      for (entry in programPaymentLedgerStableV2.vals()) {
         programPaymentLedgerById.put(entry.0, entry.1);
+      };
+    } else if (programPaymentLedgerStableV1.size() > 0) {
+      for (entry in programPaymentLedgerStableV1.vals()) {
+        programPaymentLedgerById.put(entry.0, Types.programPaymentLedgerFromV1(entry.1));
       };
     } else {
       for (entry in programPaymentLedgerStable.vals()) {
         programPaymentLedgerById.put(entry.0, Types.programPaymentLedgerFromV0(entry.1));
+      };
+    };
+  };
+
+  private func reloadProgramPaymentPlansFromStables() {
+    if (programPaymentPlansStableV2.size() > 0) {
+      for (entry in programPaymentPlansStableV2.vals()) {
+        programPaymentPlansById.put(entry.0, entry.1);
+      };
+    } else {
+      for (entry in programPaymentPlansStable.vals()) {
+        programPaymentPlansById.put(entry.0, Types.programPaymentPlanFromV1(entry.1));
       };
     };
   };
@@ -385,9 +403,7 @@ persistent actor {
     programPaymentSummariesByKey.put(entry.0, entry.1);
   };
   reloadProgramPaymentLedgerFromStables();
-  for (entry in programPaymentPlansStable.vals()) {
-    programPaymentPlansById.put(entry.0, entry.1);
-  };
+  reloadProgramPaymentPlansFromStables();
   for (entry in programPaymentFlightPreferencesStable.vals()) {
     programPaymentFlightPreferencesByKey.put(entry.0, entry.1);
   };
@@ -904,7 +920,19 @@ persistent actor {
       stripeCustomerId = null;
       stripeSubscriptionId = null;
       stripeSubscriptionStatus = null;
+      paypalSubscriptionId = null;
+      paypalSubscriptionStatus = null;
+      paymentProvider = null;
       membershipExemptManual = false;
+    };
+  };
+
+  private func paypalSubscriptionIsActive(status : ?Text) : Bool {
+    switch (status) {
+      case null { false };
+      case (?s) {
+        s == "ACTIVE" or s == "APPROVED";
+      };
     };
   };
 
@@ -929,6 +957,9 @@ persistent actor {
           stripeCustomerId = m.stripeCustomerId;
           stripeSubscriptionId = m.stripeSubscriptionId;
           stripeSubscriptionStatus = m.stripeSubscriptionStatus;
+          paypalSubscriptionId = m.paypalSubscriptionId;
+          paypalSubscriptionStatus = m.paypalSubscriptionStatus;
+          paymentProvider = m.paymentProvider;
           stripeCurrentPeriodEnd = periodEnd;
           membershipExemptManual = m.membershipExemptManual;
           trialStartedAtSec = switch (membershipTrialWindowByPrincipal.get(p)) { case null { null }; case (?w) { ?w.startedAtSec } };
@@ -1053,6 +1084,9 @@ persistent actor {
       stripeCustomerId = u.stripeCustomerId;
       stripeSubscriptionId = u.stripeSubscriptionId;
       stripeSubscriptionStatus = u.stripeSubscriptionStatus;
+      paypalSubscriptionId = u.paypalSubscriptionId;
+      paypalSubscriptionStatus = u.paypalSubscriptionStatus;
+      paymentProvider = u.paymentProvider;
       membershipExemptManual = u.membershipExemptManual;
     };
     putUserAccountParts(core, m, p);
@@ -1249,6 +1283,9 @@ persistent actor {
         if (st == "active" or st == "trialing") {
           return #ok;
         };
+        if (paypalSubscriptionIsActive(m.paypalSubscriptionStatus)) {
+          return #ok;
+        };
         return #needsSubscription;
       };
     };
@@ -1426,9 +1463,11 @@ persistent actor {
     applicantsStable := _Iter.toArray(applicantsById.entries());
     archivedApplicantsStable := _Iter.toArray(archivedApplicantsById.entries());
     programPaymentSummariesStable := _Iter.toArray(programPaymentSummariesByKey.entries());
-    programPaymentLedgerStableV1 := _Iter.toArray(programPaymentLedgerById.entries());
+    programPaymentLedgerStableV2 := _Iter.toArray(programPaymentLedgerById.entries());
+    programPaymentLedgerStableV1 := [];
     programPaymentLedgerStable := [];
-    programPaymentPlansStable := _Iter.toArray(programPaymentPlansById.entries());
+    programPaymentPlansStableV2 := _Iter.toArray(programPaymentPlansById.entries());
+    programPaymentPlansStable := [];
     programPaymentFlightPreferencesStable := _Iter.toArray(programPaymentFlightPreferencesByKey.entries());
     siteSettingsStable := _Iter.toArray(siteSettingsByKey.entries());
     applicationByArtistProgramStable := _Iter.toArray(applicationByArtistProgram.entries());
@@ -1652,12 +1691,12 @@ persistent actor {
     reloadProgramPaymentLedgerFromStables();
     programPaymentLedgerStable := [];
     programPaymentLedgerStableV1 := [];
+    programPaymentLedgerStableV2 := [];
 
     programPaymentPlansById := _HashMap.HashMap<Text, Types.ProgramPaymentPlan>(0, Text.equal, Text.hash);
-    for (entry in programPaymentPlansStable.vals()) {
-      programPaymentPlansById.put(entry.0, entry.1);
-    };
+    reloadProgramPaymentPlansFromStables();
     programPaymentPlansStable := [];
+    programPaymentPlansStableV2 := [];
 
     programPaymentFlightPreferencesByKey := _HashMap.HashMap<Text, Types.ProgramPaymentFlightPreference>(0, Text.equal, Text.hash);
     for (entry in programPaymentFlightPreferencesStable.vals()) {
@@ -1854,9 +1893,7 @@ persistent actor {
     reloadProgramPaymentLedgerFromStables();
 
     programPaymentPlansById := _HashMap.HashMap<Text, Types.ProgramPaymentPlan>(0, Text.equal, Text.hash);
-    for (entry in programPaymentPlansStable.vals()) {
-      programPaymentPlansById.put(entry.0, entry.1);
-    };
+    reloadProgramPaymentPlansFromStables();
 
     programPaymentFlightPreferencesByKey := _HashMap.HashMap<Text, Types.ProgramPaymentFlightPreference>(0, Text.equal, Text.hash);
     for (entry in programPaymentFlightPreferencesStable.vals()) {
@@ -2082,6 +2119,9 @@ persistent actor {
       stripeCustomerId = m0.stripeCustomerId;
       stripeSubscriptionId = m0.stripeSubscriptionId;
       stripeSubscriptionStatus = m0.stripeSubscriptionStatus;
+      paypalSubscriptionId = m0.paypalSubscriptionId;
+      paypalSubscriptionStatus = m0.paypalSubscriptionStatus;
+      paymentProvider = m0.paymentProvider;
       membershipExemptManual = exempt;
     };
     membershipByPrincipal.put(memberPrincipal, m1);
@@ -2128,10 +2168,57 @@ persistent actor {
         case null { m0.stripeSubscriptionStatus };
         case (?x) { ?x };
       };
+      paypalSubscriptionId = m0.paypalSubscriptionId;
+      paypalSubscriptionStatus = m0.paypalSubscriptionStatus;
+      paymentProvider = switch (stripeSubscriptionId) {
+        case null { m0.paymentProvider };
+        case (?_) { ?"stripe" };
+      };
       membershipExemptManual = m0.membershipExemptManual;
     };
     membershipByPrincipal.put(memberPrincipal, m1);
     switch (stripeCurrentPeriodEnd) {
+      case null { };
+      case (?pe) { putStripePeriodEndForPrincipal(memberPrincipal, ?pe) };
+    };
+  };
+
+  /// Integration API only — updates PayPal subscription ids/status for a member principal.
+  public shared (msg) func integrationRecordPayPalSubscription(
+    memberPrincipal : Principal,
+    paypalSubscriptionId : ?Text,
+    paypalSubscriptionStatus : ?Text,
+    paypalCurrentPeriodEnd : ?Text,
+  ) : async () {
+    assertIntegrationCaller(msg.caller);
+    switch (accountsByPrincipal.get(memberPrincipal)) {
+      case null { Debug.trap("No account for member principal") };
+      case (?_) {};
+    };
+    let m0 = switch (membershipByPrincipal.get(memberPrincipal)) {
+      case null { defaultMembership() };
+      case (?x) { x };
+    };
+    let m1 : Types.MembershipFields = {
+      stripeCustomerId = m0.stripeCustomerId;
+      stripeSubscriptionId = m0.stripeSubscriptionId;
+      stripeSubscriptionStatus = m0.stripeSubscriptionStatus;
+      paypalSubscriptionId = switch (paypalSubscriptionId) {
+        case null { m0.paypalSubscriptionId };
+        case (?x) { ?x };
+      };
+      paypalSubscriptionStatus = switch (paypalSubscriptionStatus) {
+        case null { m0.paypalSubscriptionStatus };
+        case (?x) { ?x };
+      };
+      paymentProvider = switch (paypalSubscriptionId) {
+        case null { m0.paymentProvider };
+        case (?_) { ?"paypal" };
+      };
+      membershipExemptManual = m0.membershipExemptManual;
+    };
+    membershipByPrincipal.put(memberPrincipal, m1);
+    switch (paypalCurrentPeriodEnd) {
       case null { };
       case (?pe) { putStripePeriodEndForPrincipal(memberPrincipal, ?pe) };
     };
@@ -3194,6 +3281,10 @@ persistent actor {
       dueAt = null;
       feeCents = feeCents;
       staffNote = staffNote;
+      paymentProvider = "staff";
+      externalPaymentId = "";
+      externalChargeId = "";
+      externalReceiptUrl = "";
     };
     let totalDueCents = effectiveTotalDueForStaffLedger(principal, programId, applicantId);
     let depositAmountCents = switch (programPaymentSummariesByKey.get(programPaymentKey(principal, programId))) {
@@ -3219,6 +3310,9 @@ persistent actor {
       stripeCustomerId = m0.stripeCustomerId;
       stripeSubscriptionId = m0.stripeSubscriptionId;
       stripeSubscriptionStatus = m0.stripeSubscriptionStatus;
+      paypalSubscriptionId = m0.paypalSubscriptionId;
+      paypalSubscriptionStatus = m0.paypalSubscriptionStatus;
+      paymentProvider = m0.paymentProvider;
       membershipExemptManual = exempt;
     };
     membershipByPrincipal.put(memberPrincipal, m1);

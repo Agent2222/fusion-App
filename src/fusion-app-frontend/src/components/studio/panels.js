@@ -160,8 +160,17 @@ import { getFieldKind, getFieldKindBadgeLabel } from '../../utils/studioFieldReg
 import { appendContentLocalePairRow } from './studioFieldRender.js';
 import { shoutHtmlToPlain } from '../../utils/shoutHeadlineText.js';
 import {
+    bindProgramEditorChrome,
+    renderProgramEditorFooter,
+    renderProgramEditorShell,
+} from '../../utils/studioProgramModalShell.js';
+import {
+    bindProgramKeyDatesRepeater,
+    bindProgramLocaleTranslate,
+    bindProgramModalTabs,
     bindStudioProgGalleryUrlPreviews,
     collectProgramLocalesFromForm,
+    mergeKeyDatesSeed,
     renderProgramLocaleFormHtml,
 } from '../../utils/studioProgramLocaleForm.js';
 import {
@@ -190,6 +199,9 @@ import {
     LS_S3_REGION,
     LS_STRIPE_PK_LIVE,
     LS_STRIPE_PK_TEST,
+    LS_PAYPAL_CLIENT_ID_LIVE,
+    LS_PAYPAL_CLIENT_ID_TEST,
+    getPayPalClientIdResolved,
     buildServerEnvSnippet,
     getStripeMode,
     getStripePublishableKeyResolved,
@@ -1384,8 +1396,19 @@ function renderServices() {
                     </div>
                     <div id="studio-svc-panel-stripe" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-svc-tab-stripe" hidden>
                         <div class="studio-form-grid studio-services-grid studio-services-grid--panel">
-                            <h3 class="studio-subheading studio-field--full">Stripe</h3>
-                            <p class="studio-muted studio-field--full">Use <strong>test</strong> keys until launch. Secret keys are for the integration server only — paste below to copy into <code>.env</code>; they are not saved in the browser.</p>
+                            <h3 class="studio-subheading studio-field--full">PayPal (new checkouts)</h3>
+                            <p class="studio-muted studio-field--full">All <strong>new</strong> memberships, application fees, and program payments use PayPal. Configure client ID here (publishable) and secrets on the integration server.</p>
+                            <label class="studio-field studio-field--full">
+                                <span>PayPal client ID (test)</span>
+                                <input type="text" id="studio-svc-paypal-test" class="studio-input" placeholder="Sandbox client id" autocomplete="off" />
+                            </label>
+                            <label class="studio-field studio-field--full">
+                                <span>PayPal client ID (live)</span>
+                                <input type="text" id="studio-svc-paypal-live" class="studio-input" placeholder="Live client id" autocomplete="off" />
+                            </label>
+                            <p class="studio-field--full">Resolved PayPal client ID: <code id="studio-svc-paypal-resolved">—</code></p>
+                            <h3 class="studio-subheading studio-field--full">Stripe (legacy subscriptions)</h3>
+                            <p class="studio-muted studio-field--full">Stripe is <strong>read-only</strong> for pre-existing subscriptions (sync, cancel, webhooks). Do not use for new checkouts.</p>
                             <div class="studio-field-row studio-field--full">
                                 <label class="studio-field studio-field--inline">
                                     <input type="radio" name="studio-svc-stripe-mode" value="test" id="studio-svc-mode-test" checked />
@@ -4758,7 +4781,7 @@ async function initPrograms(mainEl) {
         }
         const routeLinkKind = getFieldKind('program-hero', 'routeLink');
         const cardImgKind = getFieldKind('all-programs', 'programs.en.0.imageSrc');
-        const localeFormHtml = renderProgramLocaleFormHtml(escapeHtml, enObj, jaObj);
+        const panelsHtml = renderProgramLocaleFormHtml(escapeHtml, enObj, jaObj);
         const visCur = normalizeProgramVisibility(p.visibility);
         const visOptions = ['public', 'private', 'none']
             .map(
@@ -4766,47 +4789,46 @@ async function initPrograms(mainEl) {
                     `<option value="${opt}" ${visCur === opt ? 'selected' : ''}>${escapeHtml(opt)}</option>`,
             )
             .join('');
-        const body = `
-          <form id="studio-prog-form" class="studio-modal-form studio-modal-form--program">
-            <div class="studio-modal-fields-row">
-            <label class="studio-field"><span>ID</span><input name="id" required class="studio-input" value="${escapeHtml(String(p.id))}" ${existing ? 'readonly' : ''} /></label>
-            <label class="studio-field"><span>routeLink (record) <span class="studio-field-kind-badge studio-field-kind-badge--${routeLinkKind}">${escapeHtml(getFieldKindBadgeLabel(routeLinkKind))}</span></span><input name="routeLink" class="studio-input" value="${escapeHtml(String(p.routeLink || ''))}" /></label>
-            <label class="studio-field"><span>Deposit (display) — on-chain</span><input name="depositAmountDisplay" class="studio-input" value="${escapeHtml(String(p.depositAmountDisplay ?? ''))}" placeholder="e.g. $1,000 USD" autocomplete="off" /></label>
-            <label class="studio-field"><span>featuredOrder</span><input name="featuredOrder" type="number" class="studio-input" value="${escapeHtml(String(p.featuredOrder ?? 0))}" /></label>
-            <label class="studio-field"><span>visibility</span><select name="visibility" class="studio-select">${visOptions}</select></label>
-            <label class="studio-field"><span>studioStatus</span>
-              <select name="studioStatus" class="studio-select">
-                ${['open', 'full', 'active', 'completed', 'comingUp']
-                    .map(
-                        (s) =>
-                            `<option value="${s}" ${String(p.studioStatus) === s ? 'selected' : ''}>${escapeHtml(s)}</option>`
-                    )
-                    .join('')}
-              </select>
-            </label>
-            </div>
-            <p class="studio-modal-hint">Each row is <strong>English</strong> and <strong>日本語</strong> side by side. <strong>Deposit (on-chain)</strong> is stored in the <code>ProgramRecord</code> and mirrored into locale JSON for the application form. Card <code>imageSrc</code> supports upload (below). For bulk gallery paths use Services → S3 or Content → <strong>all-programs</strong>.</p>
-            <div class="studio-modal-fields-row studio-prog-cover-uploads">
-              <label class="studio-file-label studio-btn-ghost studio-field--shrink">
-                <input type="file" id="studio-prog-cover-file-en" accept="image/*,video/*,.pdf" class="studio-file-input studio-prog-cover-file" data-upload-target-locale="en" />
-                Upload → imageSrc (EN)
-              </label>
-              <label class="studio-file-label studio-btn-ghost studio-field--shrink">
-                <input type="file" id="studio-prog-cover-file-ja" accept="image/*,video/*,.pdf" class="studio-file-input studio-prog-cover-file" data-upload-target-locale="ja" />
-                Upload → imageSrc (JA)
-              </label>
-              <span class="studio-muted studio-prog-cover-hint"><span class="studio-field-kind-badge studio-field-kind-badge--${cardImgKind}">${escapeHtml(getFieldKindBadgeLabel(cardImgKind))}</span> fills the card <code>imageSrc</code> field in the grid below.</span>
-            </div>
-            ${localeFormHtml}
-            <div class="studio-modal-actions">
-              <button type="submit" class="studio-btn-primary">Save program</button>
-            </div>
-          </form>`;
+        const studioStatusOptions = ['open', 'full', 'active', 'completed', 'comingUp']
+            .map(
+                (s) =>
+                    `<option value="${s}" ${String(p.studioStatus) === s ? 'selected' : ''}>${escapeHtml(s)}</option>`,
+            )
+            .join('');
+        const body = renderProgramEditorShell({
+            escapeHtml,
+            existing: Boolean(existing),
+            p,
+            visOptions,
+            studioStatusOptions,
+            routeLinkKind,
+            routeLinkKindLabel: getFieldKindBadgeLabel(routeLinkKind),
+            cardImgKind,
+            cardImgKindLabel: getFieldKindBadgeLabel(cardImgKind),
+            panelsHtml,
+        });
         const { close, root } = openStudioModal(body, {
-            title: existing ? 'Edit program' : 'Add program',
-            wide: true,
+            title: existing ? 'Edit Program' : 'Add Program',
+            subtitle: 'Manage program content and settings',
+            panelClass: 'studio-modal-panel studio-modal-panel--program-editor',
+            bodyClass: 'studio-modal-body--program-editor',
+            headerClass: 'studio-modal-header--program-editor',
+            footerHtml: renderProgramEditorFooter(Boolean(existing)),
         });
         const localeFormRoot = root.querySelector('.studio-prog-locale-form');
+        const setProgModalStatus = (msg) => {
+            const el = root.querySelector('#studio-prog-modal-status');
+            if (el) {
+                el.textContent = msg || '';
+                el.classList.toggle('studio-sr-only', !msg);
+            }
+        };
+        const chrome = bindProgramEditorChrome(root, {
+            onCancel: close,
+            routeLinkSeed: String(p.routeLink || ''),
+        });
+        bindProgramKeyDatesRepeater(root, mergeKeyDatesSeed(enObj, jaObj), escapeHtml);
+        bindProgramLocaleTranslate(root, studioTranslateEnToJa, { setStatus: setProgModalStatus });
         bindStudioProgGalleryUrlPreviews(localeFormRoot);
         root.querySelectorAll('input.studio-prog-cover-file[data-upload-target-locale]').forEach((fileEl) => {
             fileEl.addEventListener('change', async (ev) => {
@@ -4918,6 +4940,7 @@ async function initPrograms(mainEl) {
                     depositAmountDisplay,
                     localesJson,
                 });
+                chrome?.markSaved();
                 close();
                 onSave();
             } catch (e) {
@@ -7385,6 +7408,8 @@ async function initServices(mainEl) {
     const modeLive = mainEl.querySelector('#studio-svc-mode-live');
     const pkTest = mainEl.querySelector('#studio-svc-pk-test');
     const pkLive = mainEl.querySelector('#studio-svc-pk-live');
+    const paypalTest = mainEl.querySelector('#studio-svc-paypal-test');
+    const paypalLive = mainEl.querySelector('#studio-svc-paypal-live');
     const skTest = mainEl.querySelector('#studio-svc-sk-test');
     const skLive = mainEl.querySelector('#studio-svc-sk-live');
     const resendTo = mainEl.querySelector('#studio-svc-resend-to');
@@ -7394,6 +7419,7 @@ async function initServices(mainEl) {
     const s3b = mainEl.querySelector('#studio-svc-s3-bucket');
     const s3p = mainEl.querySelector('#studio-svc-s3-public');
     const resolvedEl = mainEl.querySelector('#studio-svc-pk-resolved');
+    const paypalResolvedEl = mainEl.querySelector('#studio-svc-paypal-resolved');
 
     const load = () => {
         try {
@@ -7404,6 +7430,8 @@ async function initServices(mainEl) {
             if (modeLive) modeLive.checked = m === 'live';
             if (pkTest) pkTest.value = localStorage.getItem(LS_STRIPE_PK_TEST) || '';
             if (pkLive) pkLive.value = localStorage.getItem(LS_STRIPE_PK_LIVE) || '';
+            if (paypalTest) paypalTest.value = localStorage.getItem(LS_PAYPAL_CLIENT_ID_TEST) || '';
+            if (paypalLive) paypalLive.value = localStorage.getItem(LS_PAYPAL_CLIENT_ID_LIVE) || '';
             if (resendTo) resendTo.value = localStorage.getItem(LS_RESEND_TEST_TO) || '';
             if (resendFrom) resendFrom.value = localStorage.getItem(LS_RESEND_FROM_OVERRIDE) || '';
             if (appNotify) appNotify.value = localStorage.getItem(LS_APPLICATION_ADMIN_EMAILS) || '';
@@ -7417,6 +7445,10 @@ async function initServices(mainEl) {
             const k = getStripePublishableKeyResolved();
             resolvedEl.textContent = k ? `${k.slice(0, 12)}…` : '(none — set Studio or VITE_STRIPE_PUBLISHABLE_KEY)';
         }
+        if (paypalResolvedEl) {
+            const k = getPayPalClientIdResolved();
+            paypalResolvedEl.textContent = k ? `${k.slice(0, 12)}…` : '(none — set Studio or VITE_PAYPAL_CLIENT_ID)';
+        }
     };
 
     const save = () => {
@@ -7427,6 +7459,8 @@ async function initServices(mainEl) {
             else setStripeMode('test');
             if (pkTest) localStorage.setItem(LS_STRIPE_PK_TEST, pkTest.value.trim());
             if (pkLive) localStorage.setItem(LS_STRIPE_PK_LIVE, pkLive.value.trim());
+            if (paypalTest) localStorage.setItem(LS_PAYPAL_CLIENT_ID_TEST, paypalTest.value.trim());
+            if (paypalLive) localStorage.setItem(LS_PAYPAL_CLIENT_ID_LIVE, paypalLive.value.trim());
             if (resendTo) localStorage.setItem(LS_RESEND_TEST_TO, resendTo.value.trim());
             if (resendFrom) localStorage.setItem(LS_RESEND_FROM_OVERRIDE, resendFrom.value.trim());
             if (appNotify) localStorage.setItem(LS_APPLICATION_ADMIN_EMAILS, appNotify.value.trim());

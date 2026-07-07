@@ -136,3 +136,44 @@ export async function pushSubscriptionToCanister(subscription, customerId) {
         periodEndIso ? [periodEndIso] : [],
     );
 }
+
+/**
+ * @param {object} subscription PayPal subscription resource
+ */
+export async function pushPayPalSubscriptionToCanister(subscription) {
+    const actor = await getIntegrationActor();
+    if (!actor) {
+        console.warn('[canister] Integration actor not configured');
+        return;
+    }
+    const customId = subscription.custom_id || '';
+    let meta = {};
+    try {
+        meta = JSON.parse(customId);
+    } catch {
+        meta = {};
+    }
+    const principalText = meta.principal;
+    if (!principalText || typeof principalText !== 'string') {
+        console.warn('[canister] PayPal subscription missing principal in custom_id');
+        return;
+    }
+    let p;
+    try {
+        p = Principal.fromText(principalText.trim());
+    } catch (e) {
+        console.warn('[canister] Invalid principal in PayPal custom_id:', principalText);
+        return;
+    }
+    const status = String(subscription.status || '').toUpperCase();
+    const periodEnd =
+        subscription.billing_info?.next_billing_time ||
+        subscription.billing_info?.last_payment?.time ||
+        '';
+    await actor.integrationRecordPayPalSubscription(
+        p,
+        [subscription.id],
+        [status],
+        periodEnd ? [periodEnd] : [],
+    );
+}

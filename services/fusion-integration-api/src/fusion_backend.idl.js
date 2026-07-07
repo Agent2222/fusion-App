@@ -22,6 +22,10 @@ export const idlFactory = ({ IDL }) => {
         dueAt: IDL.Opt(IDL.Text),
         feeCents: IDL.Nat,
         staffNote: IDL.Text,
+        paymentProvider: IDL.Text,
+        externalPaymentId: IDL.Text,
+        externalChargeId: IDL.Text,
+        externalReceiptUrl: IDL.Text,
     });
     const ProgramPaymentPlan = IDL.Record({
         id: IDL.Text,
@@ -30,6 +34,8 @@ export const idlFactory = ({ IDL }) => {
         applicationId: IDL.Text,
         stripeSubscriptionId: IDL.Text,
         stripeScheduleId: IDL.Text,
+        paypalSubscriptionId: IDL.Opt(IDL.Text),
+        paymentProvider: IDL.Text,
         installmentCount: IDL.Nat,
         installmentAmountCents: IDL.Nat,
         currency: IDL.Text,
@@ -57,6 +63,11 @@ export const idlFactory = ({ IDL }) => {
         ),
         integrationRecordStripeSubscription: IDL.Func(
             [IDL.Principal, IDL.Opt(IDL.Text), IDL.Opt(IDL.Text), IDL.Opt(IDL.Text), IDL.Opt(IDL.Text)],
+            [],
+            [],
+        ),
+        integrationRecordPayPalSubscription: IDL.Func(
+            [IDL.Principal, IDL.Opt(IDL.Text), IDL.Opt(IDL.Text), IDL.Opt(IDL.Text)],
             [],
             [],
         ),

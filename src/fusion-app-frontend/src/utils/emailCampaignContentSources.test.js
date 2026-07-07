@@ -11,6 +11,7 @@ import {
     resolveFeaturedArtistSource,
     resolveJournalSource,
     resolveProgramSource,
+    resolveVideoSource,
     serializeCampaignMeta,
 } from './emailCampaignContentSources.js';
 import {
@@ -80,6 +81,52 @@ describe('emailCampaignContentSources', () => {
         expect(slots.eyebrow).toBe('Program Update');
         expect(slots.heroImageUrl).toContain('program.jpg');
         expect(slots.cta?.href).toContain('kaga-ishikawa');
+    });
+
+    it('resolveVideoSource maps community video', () => {
+        const slots = resolveVideoSource({
+            id: 'vid_1',
+            slug: 'studio-visit',
+            posterUrl: 'https://cdn.example/poster.jpg',
+            previewVideoUrl: 'https://cdn.example/preview.mp4',
+            overlayGuests: 'Jane Doe',
+            overlayDuration: '12 min',
+            localesJson: JSON.stringify({
+                headlineEn: 'Studio Visit',
+                lineEn: 'Inside the practice.',
+                bodyEn: 'A conversation about process and place.',
+                kickerEn: 'Fusion Video',
+            }),
+        });
+        expect(slots.eyebrow).toBe('Fusion Video');
+        expect(slots.heroImageUrl).toContain('poster.jpg');
+        expect(slots.headlineHtml).toContain('Studio<br>Visit');
+        expect(slots.bodyHtml).toContain('Featuring Jane Doe');
+        expect(slots.cta?.href).toBe('https://www.fusionart.world/videos');
+        expect(slots.cta?.label).toBe('WATCH NOW');
+        expect(slots.subject).toBe('Studio Visit');
+    });
+
+    it('buildTemplateDraftFromSource works for featured video template', () => {
+        const draft = buildTemplateDraftFromSource(
+            'tpl_featured_video',
+            { type: 'video', id: 'vid_1' },
+            {
+                videos: [
+                    {
+                        id: 'vid_1',
+                        posterUrl: 'https://cdn.example/poster.jpg',
+                        localesJson: JSON.stringify({
+                            headlineEn: 'New Clip',
+                            lineEn: 'Watch now.',
+                        }),
+                    },
+                ],
+            },
+        );
+        expect(draft).not.toBeNull();
+        expect(draft?.bodyHtml).toContain('fusion-email-layout');
+        expect(draft?.subject).toBe('New Clip');
     });
 
     it('collectStudioEmailMedia separates images and videos', () => {

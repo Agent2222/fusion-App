@@ -42,6 +42,47 @@ describe('studioArtistForm', () => {
         expect(html).toContain('data-studio-world-source="newWorld"');
         expect(html).toContain('id="studio-art-hero-profile-image-approved"');
         expect(html).toContain('Profile image approved');
+        expect(html).toContain('data-art-kind="discipline-select"');
+        expect(html).toContain('value="sound"');
+        expect(html).toContain('Film/Video');
+    });
+
+    it('renderArtistManageModalHtml maps stored discipline label to select option', () => {
+        const html = renderArtistManageModalHtml(
+            escHtml,
+            {
+                id: 'a2',
+                slug: 'sound-artist',
+                image: '',
+                locales: {
+                    en: { name: 'En', discipline: 'Sound' },
+                    ja: { name: 'Ja', discipline: 'Sound' },
+                },
+            },
+            { isTest: true },
+        );
+        expect(html).toContain('value="sound" selected');
+    });
+
+    it('renderArtistManageModalHtml clears invalid LLM discipline text from select', () => {
+        const html = renderArtistManageModalHtml(
+            escHtml,
+            {
+                id: 'a3',
+                slug: 'bad-discipline',
+                image: '',
+                locales: {
+                    en: {
+                        name: 'En',
+                        discipline: "I don't see any source text provided for translation.",
+                    },
+                    ja: { name: 'Ja' },
+                },
+            },
+            { isTest: true },
+        );
+        expect(html).not.toContain("I don't see any source text");
+        expect(html).toContain('— Select discipline —');
     });
 
     it('normalizeArtistImportRow accepts flat collect-shaped payload', () => {

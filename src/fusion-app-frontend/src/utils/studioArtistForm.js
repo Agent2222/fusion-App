@@ -12,6 +12,13 @@ import {
 import { normalizeLocalesWorldForStorage } from './worldNormalize.js';
 import { normalizeArtistRosterVisibility } from './database.js';
 import {
+    DISCIPLINE_OPTIONS,
+    disciplineKeyToLabel,
+    disciplineLabelToKey,
+    normalizeDisciplineKey,
+} from './feedFilterApply.js';
+import { isLlmFailureText } from './llmTextSanitize.js';
+import {
     getPublicWorldSourceFromLocales,
     localesHaveUsableWorldNew,
 } from './worldPublicPick.js';
@@ -119,6 +126,59 @@ function rowArt2(escapeHtml, label, path, enRoot, jaRoot, kind = 'text') {
       <input type="${type}" class="studio-input studio-prog-grid-input" value="${esc(escapeHtml, enV ?? '')}" data-art-locale="en" data-art-path="${esc(escapeHtml, path)}" />
       <input type="${type}" class="studio-input studio-prog-grid-input" value="${esc(escapeHtml, jaV ?? '')}" data-art-locale="ja" data-art-path="${esc(escapeHtml, path)}" />
     </div>`;
+}
+
+/**
+ * @param {unknown} stored
+ * @returns {string}
+ */
+function disciplineStoredToSelectKey(stored) {
+    const s = String(stored ?? '').trim();
+    if (!s || isLlmFailureText(s)) return '';
+    return disciplineLabelToKey(s) || '';
+}
+
+/**
+ * @param {(s: string) => string} escapeHtml
+ * @param {string} [selectedKey]
+ */
+function disciplineSelectOptionsHtml(escapeHtml, selectedKey = '') {
+    const sel = String(selectedKey ?? '').trim();
+    let html = `<option value="">— Select discipline —</option>`;
+    for (const o of DISCIPLINE_OPTIONS) {
+        const selected = o.key === sel ? ' selected' : '';
+        html += `<option value="${esc(escapeHtml, o.key)}"${selected}>${esc(escapeHtml, o.label)}</option>`;
+    }
+    return html;
+}
+
+/**
+ * @param {(s: string) => string} escapeHtml
+ * @param {unknown} enRoot
+ * @param {unknown} jaRoot
+ */
+function rowArtDiscipline(escapeHtml, enRoot, jaRoot) {
+    const enKey = disciplineStoredToSelectKey(deepGet(enRoot, 'discipline'));
+    const jaKey = disciplineStoredToSelectKey(deepGet(jaRoot, 'discipline'));
+    return `<div class="studio-prog-grid-row">
+      <span class="studio-prog-grid-label">discipline</span>
+      <select class="studio-input studio-prog-grid-input" data-art-locale="en" data-art-path="discipline" data-art-kind="discipline-select" aria-label="Discipline (English)">${disciplineSelectOptionsHtml(escapeHtml, enKey)}</select>
+      <select class="studio-input studio-prog-grid-input" data-art-locale="ja" data-art-path="discipline" data-art-kind="discipline-select" aria-label="Discipline (Japanese)">${disciplineSelectOptionsHtml(escapeHtml, jaKey)}</select>
+    </div>`;
+}
+
+/**
+ * @param {(s: string) => string} escapeHtml
+ * @param {string} [selectedKey]
+ */
+function disciplineKeyFilterSelectHtml(escapeHtml, selectedKey = '') {
+    const sel = normalizeDisciplineKey(String(selectedKey ?? '').trim());
+    let html = `<option value="">— None —</option>`;
+    for (const o of DISCIPLINE_OPTIONS) {
+        const selected = o.key === sel ? ' selected' : '';
+        html += `<option value="${esc(escapeHtml, o.key)}"${selected}>${esc(escapeHtml, o.label)}</option>`;
+    }
+    return html;
 }
 
 /**
@@ -353,7 +413,7 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
           <label class="studio-field studio-field--grow"><span>cohort years</span><input name="art-filter-cohortYears" class="studio-input" placeholder="e.g. 2024, 2025" value="${esc(escapeHtml, formatCohortYearsForForm(filter))}" title="Comma-separated years — artist can match multiple cohort filters" /></label>
         </div>
         <div class="studio-modal-fields-row">
-          <label class="studio-field"><span>disciplineKey</span><input name="art-filter-disciplineKey" class="studio-input" value="${esc(escapeHtml, String(filter.disciplineKey ?? ''))}" /></label>
+          <label class="studio-field"><span>disciplineKey</span><select name="art-filter-disciplineKey" class="studio-input" aria-label="Feed filter discipline">${disciplineKeyFilterSelectHtml(escapeHtml, String(filter.disciplineKey ?? ''))}</select></label>
           <label class="studio-field"><span>locationKey</span><input name="art-filter-locationKey" class="studio-input" value="${esc(escapeHtml, String(filter.locationKey ?? ''))}" /></label>
         </div>
         <h4 class="studio-prog-subhead">Gallery filter defaults</h4>
@@ -372,7 +432,7 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
             <span class="studio-prog-col-title">日本語</span>
           </div>
           ${rowArt2(escapeHtml, 'name', 'name', en, ja)}
-          ${rowArt2(escapeHtml, 'discipline', 'discipline', en, ja)}
+          ${rowArtDiscipline(escapeHtml, en, ja)}
           ${rowArt2(escapeHtml, 'status', 'status', en, ja)}
           ${rowArt2(escapeHtml, 'location.city', 'location.city', en, ja)}
           ${rowArt2(escapeHtml, 'location.state', 'location.state', en, ja)}
@@ -568,10 +628,15 @@ export function collectArtistRecordFromForm(root, baseArtist) {
 
     const applyLocaleFields = (target, locale) => {
         root.querySelectorAll(`[data-art-locale="${locale}"][data-art-path]`).forEach((el) => {
-            if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return;
             const path = el.getAttribute('data-art-path');
             const kind = el.getAttribute('data-art-kind') || '';
             if (!path) return;
+            if (el instanceof HTMLSelectElement && kind === 'discipline-select') {
+                const key = String(el.value ?? '').trim();
+                deepSet(target, path, key ? disciplineKeyToLabel(key) : '');
+                return;
+            }
+            if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return;
             const raw = el.value;
             if (kind === 'world-paras') {
                 deepSet(target, path, textareaToWorldArray(raw));
