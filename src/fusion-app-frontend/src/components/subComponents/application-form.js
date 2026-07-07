@@ -17,11 +17,13 @@ import {
     clearPendingPaymentEmailLocal,
     confirmPayPalOneTimePayment,
     createPayPalOneTimePayment,
-    createPayPalSubscription,
+    createPaymentIntent,
+    createSubscription,
     FUSION_PENDING_APPLICATION_SUB_KEY,
     getIntegrationBaseUrl,
     getStoredBillingEmailForPrincipal,
     linkPayPalSubscriptionToPrincipal,
+    linkSubscriptionToPrincipal,
     mapIntegrationUserMessage,
     readPendingPaymentEmailLocal,
     setPendingPaymentEmailLocal,
@@ -30,9 +32,20 @@ import {
     syncSubscriptionFromStripe,
     syncSubscriptionFromStripeByEmail,
 } from '../../utils/integrationApi.js';
-import { mountPayPalOrderButtons, mountPayPalSubscriptionApproval } from '../../utils/paymentCheckout.js';
+import {
+    mountPayPalOneTimeCheckout,
+    mountPayPalSubscriptionButtons,
+} from '../../utils/paymentCheckout.js';
+import {
+    fetchPaymentConfig,
+    getActiveProvider,
+    paymentModeMismatch,
+} from '../../utils/paymentProvider.js';
 import { getProfileSetupDraft } from '../../utils/profileSetupDraft.js';
-import { getPayPalClientIdResolved } from '../../utils/studioServicesConfig.js';
+import {
+    getPayPalClientIdResolved,
+    getStripePublishableKeyResolved,
+} from '../../utils/studioServicesConfig.js';
 import posthog from 'posthog-js';
 import { metaTrack } from '../../utils/metaPixel.js';
 import { syncPosthogConversionPerson } from '../../utils/posthogConversionIdentity.js';
@@ -845,6 +858,216 @@ class ApplicationFormComponent extends HTMLElement {
 
     async _prepareStripePayment() {
         if (this._alreadyApplied || this._membershipFeeWaived) return;
+        const provider = getActiveProvider();
+        if (provider === 'stripe') {
+            await this._prepareStripeElementsPayment();
+        } else {
+            await this._preparePayPalEmbeddedPayment();
+        }
+    }
+
+    async _preparePayPalEmbeddedPayment() {
+        if (this._alreadyApplied || this._membershipFeeWaived) return;
+        const prepareKey = this._computeStripePrepareKey();
+        if (
+            this._stripePaymentReady &&
+            !this._stripe &&
+            this._stripePrepareKey === prepareKey
+        ) {
+            return;
+        }
+        const myGen = ++this._stripePrepareGen;
+        this._teardownStripePayment();
+        this._fusionPendingId = null;
+        this._fusionSubscriptionId = null;
+        this._paypalOrderId = '';
+
+        const root = this.shadowRoot;
+        const L = this._labels();
+        const payBtn = root?.querySelector('#app-pay-submit');
+
+        const setHint = (text, busy) => {
+            this._syncPaymentHintChrome(root, { busy, text });
+        };
+
+        if (!this._paymentPlan) {
+            setHint('', false);
+            if (payBtn) payBtn.disabled = true;
+            return;
+        }
+
+        const email = String(root?.querySelector('#app-email')?.value ?? '').trim();
+        if (!email.includes('@')) {
+            setHint(L.emailRequiredForPayment, false);
+            if (payBtn) payBtn.disabled = true;
+            return;
+        }
+
+        const programId = this.getAttribute('data-program-id') || '';
+        const clientId = getPayPalClientIdResolved();
+        const base = getIntegrationBaseUrl();
+        if (!clientId || !base) {
+            setHint(L.paymentConfigureServices, false);
+            if (payBtn) payBtn.disabled = true;
+            return;
+        }
+
+        if (payBtn) payBtn.disabled = true;
+        setHint(L.paymentPreparing, true);
+
+        try {
+            const mountEl = this._ensureStripeSlotEl();
+            await new Promise((r) => requestAnimationFrame(r));
+            if (myGen !== this._stripePrepareGen) return;
+
+            if (this._paymentPlan === 'one_time') {
+                const centsRaw = this._programFormContext.applicationFeeAmountCents;
+                const amountCents =
+                    typeof centsRaw === 'number' && Number.isFinite(centsRaw) && centsRaw >= 50
+                        ? Math.round(centsRaw)
+                        : null;
+                if (amountCents == null) {
+                    setHint(L.oneTimePlanUnavailable, false);
+                    if (payBtn) payBtn.disabled = true;
+                    return;
+                }
+                await mountPayPalOneTimeCheckout(mountEl, {
+                    clientId,
+                    amountCents,
+                    metadata: {
+                        programId,
+                        purpose: 'program_application',
+                        payment_plan: 'one_time',
+                    },
+                    createOrder: async (body) =>
+                        createPayPalOneTimePayment({
+                            amountCents: body.amountCents,
+                            metadata: body.metadata,
+                        }),
+                    onApproved: async (oid) => {
+                        this._paypalOrderId = oid;
+                        await confirmPayPalOneTimePayment(oid);
+                    },
+                    onError: (err) => {
+                        console.warn('[application-form] PayPal order error', err);
+                    },
+                });
+            } else {
+                const payConfig = await fetchPaymentConfig();
+                if (myGen !== this._stripePrepareGen) return;
+                const planId =
+                    this._paymentPlan === 'annual'
+                        ? payConfig.planAnnual
+                        : payConfig.planBimonthly;
+                if (!planId) {
+                    throw new Error(
+                        this._paymentPlan === 'annual'
+                            ? 'PayPal annual plan not configured on integration server.'
+                            : 'PayPal bimonthly plan not configured on integration server.',
+                    );
+                }
+                if (paymentModeMismatch(payConfig)) {
+                    setHint(
+                        'Warning: Studio environment does not match server PayPal mode.',
+                        true,
+                    );
+                }
+                const fusionPendingId = crypto.randomUUID();
+                this._fusionPendingId = fusionPendingId;
+                setPendingPaymentEmailLocal({
+                    email,
+                    source: 'application',
+                    fusionPendingId,
+                    subscriptionId: '',
+                    programId,
+                });
+                /** @type {Record<string, string>} */
+                const customData = {
+                    fusion_pending_id: fusionPendingId,
+                    pending_email: email,
+                    programId,
+                    purpose: 'program_application',
+                    payment_plan:
+                        this._paymentPlan === 'annual'
+                            ? 'subscription_annual'
+                            : 'subscription_bimonthly',
+                };
+                const sdkMode = payConfig.mode === 'live' ? 'live' : 'sandbox';
+                await mountPayPalSubscriptionButtons(mountEl, {
+                    clientId,
+                    mode: sdkMode,
+                    planId,
+                    email,
+                    customData,
+                    onApprove: async (subscriptionId) => {
+                        if (myGen !== this._stripePrepareGen) return;
+                        this._fusionSubscriptionId = subscriptionId;
+                        setPendingPaymentEmailLocal({
+                            email,
+                            source: 'application',
+                            fusionPendingId: this._fusionPendingId || '',
+                            subscriptionId,
+                            programId,
+                        });
+                        setHint(
+                            'Subscription approved. Click Pay & submit application to continue.',
+                            false,
+                        );
+                        if (payBtn) payBtn.disabled = false;
+                    },
+                    onError: (err) => {
+                        console.warn('[application-form] PayPal subscription error', err);
+                        setHint(
+                            err instanceof Error ? err.message : 'PayPal checkout failed.',
+                            false,
+                        );
+                    },
+                });
+            }
+
+            if (myGen !== this._stripePrepareGen) return;
+            this._stripePaymentReady = true;
+            this._stripePrepareKey = prepareKey;
+            setHint('', false);
+            if (payBtn) payBtn.disabled = this._paymentPlan !== 'one_time' && !this._fusionSubscriptionId;
+            const ph = root?.querySelector('#app-payment-placeholder');
+            if (ph instanceof HTMLElement) ph.hidden = true;
+            try {
+                posthog.capture('program_application_payment_elements_ready', {
+                    ...this._posthogApplicationBaseProps(),
+                    payment_plan: this._paymentPlan || 'unknown',
+                    payment_provider: 'paypal',
+                    ads_conversion: 'AddPaymentInfo',
+                });
+                const pidReady = String(this.getAttribute('data-program-id') || '').trim();
+                metaTrack('AddPaymentInfo', {
+                    content_name: 'program_application_card_form',
+                    payment_plan: this._paymentPlan || undefined,
+                    ...(pidReady ? { content_ids: [pidReady] } : {}),
+                });
+            } catch {
+                /* ignore */
+            }
+        } catch (e) {
+            if (myGen !== this._stripePrepareGen) return;
+            this._teardownStripePayment();
+            const raw = e instanceof Error ? e.message : String(e);
+            setHint(mapIntegrationUserMessage(raw, 0), false);
+            if (payBtn) payBtn.disabled = true;
+            try {
+                posthog.capture('program_application_payment_prepare_failed', {
+                    ...this._posthogApplicationBaseProps(),
+                    payment_plan: this._paymentPlan || 'unknown',
+                    failure_stage: 'paypal_elements',
+                });
+            } catch {
+                /* ignore */
+            }
+        }
+    }
+
+    async _prepareStripeElementsPayment() {
+        if (this._alreadyApplied || this._membershipFeeWaived) return;
         const prepareKey = this._computeStripePrepareKey();
         if (
             this._stripePaymentReady &&
@@ -889,18 +1112,15 @@ class ApplicationFormComponent extends HTMLElement {
         }
 
         const programId = this.getAttribute('data-program-id') || '';
-        const clientId = getPayPalClientIdResolved();
+        const pk = getStripePublishableKeyResolved();
         const base = getIntegrationBaseUrl();
-        if (!clientId || !base) {
+        if (!pk || !base) {
             setHint(L.paymentConfigureServices, false);
             if (payBtn) payBtn.disabled = true;
             return;
         }
 
-        /** @type {string} */
-        let orderId = '';
-        /** @type {string} */
-        let approveUrl = '';
+        let clientSecret = '';
         if (this._paymentPlan === 'one_time') {
             const centsRaw = this._programFormContext.applicationFeeAmountCents;
             const amountCents =
@@ -916,31 +1136,19 @@ class ApplicationFormComponent extends HTMLElement {
             setHint(L.paymentPreparing, true);
             if (myGen !== this._stripePrepareGen) return;
             try {
-                const piRes = await createPayPalOneTimePayment({
-                    amountCents,
-                    metadata: {
-                        programId,
-                        purpose: 'program_application',
-                        payment_plan: 'one_time',
-                    },
+                const piRes = await createPaymentIntent(amountCents, 'usd', {
+                    programId,
+                    purpose: 'program_application',
+                    payment_plan: 'one_time',
                 });
                 if (myGen !== this._stripePrepareGen) return;
-                orderId = piRes.orderId;
+                clientSecret = piRes.clientSecret;
             } catch (e) {
                 if (myGen !== this._stripePrepareGen) return;
                 this._teardownStripePayment();
                 const raw = e instanceof Error ? e.message : String(e);
                 setHint(mapIntegrationUserMessage(raw, 0), false);
                 if (payBtn) payBtn.disabled = true;
-                try {
-                    posthog.capture('program_application_payment_prepare_failed', {
-                        ...this._posthogApplicationBaseProps(),
-                        payment_plan: 'one_time',
-                        failure_stage: 'payment_intent',
-                    });
-                } catch {
-                    /* ignore */
-                }
                 return;
             }
         } else {
@@ -948,18 +1156,21 @@ class ApplicationFormComponent extends HTMLElement {
             setHint(L.paymentPreparing, true);
             if (myGen !== this._stripePrepareGen) return;
             try {
-                const subRes = await createPayPalSubscription({
+                const subRes = await createSubscription({
                     email,
                     payFirst: true,
                     subscriptionTier: this._paymentPlan === 'annual' ? 'annual' : 'bimonthly',
                     metadata: {
                         programId,
                         purpose: 'program_application',
-                        payment_plan: this._paymentPlan === 'annual' ? 'subscription_annual' : 'subscription_bimonthly',
+                        payment_plan:
+                            this._paymentPlan === 'annual'
+                                ? 'subscription_annual'
+                                : 'subscription_bimonthly',
                     },
                 });
                 if (myGen !== this._stripePrepareGen) return;
-                approveUrl = subRes.approveUrl || '';
+                clientSecret = subRes.clientSecret;
                 this._fusionPendingId = subRes.fusionPendingId || null;
                 this._fusionSubscriptionId = subRes.subscriptionId || null;
                 setPendingPaymentEmailLocal({
@@ -975,15 +1186,6 @@ class ApplicationFormComponent extends HTMLElement {
                 const raw = e instanceof Error ? e.message : String(e);
                 setHint(mapIntegrationUserMessage(raw, 0), false);
                 if (payBtn) payBtn.disabled = true;
-                try {
-                    posthog.capture('program_application_payment_prepare_failed', {
-                        ...this._posthogApplicationBaseProps(),
-                        payment_plan: this._paymentPlan === 'annual' ? 'annual' : 'bimonthly',
-                        failure_stage: 'subscription',
-                    });
-                } catch {
-                    /* ignore */
-                }
                 return;
             }
         }
@@ -991,26 +1193,32 @@ class ApplicationFormComponent extends HTMLElement {
         setHint(L.paymentLoadingForm, true);
         if (myGen !== this._stripePrepareGen) return;
         try {
+            const { loadStripe } = await import('@stripe/stripe-js');
+            const stripe = await loadStripe(pk);
+            if (!stripe) throw new Error('Stripe failed to load');
+            if (myGen !== this._stripePrepareGen) return;
+
+            const elements = stripe.elements({
+                clientSecret,
+                appearance: { theme: 'stripe' },
+            });
+            const paymentElement = elements.create('payment');
             const mountEl = this._ensureStripeSlotEl();
             await new Promise((r) => requestAnimationFrame(r));
             if (myGen !== this._stripePrepareGen) return;
-            if (this._paymentPlan === 'one_time' && orderId) {
-                await mountPayPalOrderButtons(mountEl, {
-                    clientId,
-                    orderId,
-                    onApproved: async (oid) => {
-                        await confirmPayPalOneTimePayment(oid);
-                    },
-                    onError: (err) => {
-                        console.warn('[application-form] PayPal order error', err);
-                    },
-                });
-            } else if (approveUrl) {
-                mountPayPalSubscriptionApproval(mountEl, { approveUrl });
-            } else {
-                throw new Error('PayPal checkout could not be prepared');
+
+            const readyPromise = this._whenPaymentElementReady(paymentElement);
+            paymentElement.mount(mountEl);
+            this._stripe = stripe;
+            this._stripeElements = elements;
+            this._stripePaymentElement = paymentElement;
+
+            await readyPromise;
+            if (myGen !== this._stripePrepareGen) {
+                this._teardownStripePayment();
+                return;
             }
-            this._paypalOrderId = orderId;
+
             this._stripePaymentReady = true;
             this._stripePrepareKey = prepareKey;
             setHint('', false);
@@ -1021,13 +1229,8 @@ class ApplicationFormComponent extends HTMLElement {
                 posthog.capture('program_application_payment_elements_ready', {
                     ...this._posthogApplicationBaseProps(),
                     payment_plan: this._paymentPlan || 'unknown',
+                    payment_provider: 'stripe',
                     ads_conversion: 'AddPaymentInfo',
-                });
-                const pidReady = String(this.getAttribute('data-program-id') || '').trim();
-                metaTrack('AddPaymentInfo', {
-                    content_name: 'program_application_card_form',
-                    payment_plan: this._paymentPlan || undefined,
-                    ...(pidReady ? { content_ids: [pidReady] } : {}),
                 });
             } catch {
                 /* ignore */
@@ -1038,15 +1241,6 @@ class ApplicationFormComponent extends HTMLElement {
             const raw = e instanceof Error ? e.message : String(e);
             setHint(mapIntegrationUserMessage(raw, 0), false);
             if (payBtn) payBtn.disabled = true;
-            try {
-                posthog.capture('program_application_payment_prepare_failed', {
-                    ...this._posthogApplicationBaseProps(),
-                    payment_plan: this._paymentPlan || 'unknown',
-                    failure_stage: 'stripe_elements',
-                });
-            } catch {
-                /* ignore */
-            }
         }
     }
 
@@ -1086,13 +1280,43 @@ class ApplicationFormComponent extends HTMLElement {
             }
             return;
         }
+        const provider = getActiveProvider();
+        if (provider === 'paypal' && this._paymentPlan !== 'one_time' && !this._fusionSubscriptionId) {
+            if (statusEl) {
+                statusEl.textContent = 'Approve your subscription with PayPal below, then try again.';
+                statusEl.classList.add('is-error');
+            }
+            return;
+        }
+        if (provider === 'stripe' && (!this._stripe || !this._stripeElements)) {
+            if (statusEl) {
+                statusEl.textContent = L.paymentStillLoading;
+                statusEl.classList.add('is-error');
+            }
+            return;
+        }
         this._setPaySubmittingState(true, L.paymentPreparing);
         if (statusEl) {
             statusEl.textContent = '';
             statusEl.classList.remove('is-error', 'is-success');
         }
         try {
-            if (this._paymentPlan === 'one_time' && this._paypalOrderId) {
+            if (provider === 'stripe' && this._stripe && this._stripeElements) {
+                const { error } = await this._stripe.confirmPayment({
+                    elements: this._stripeElements,
+                    confirmParams: {
+                        return_url: typeof window !== 'undefined' ? window.location.href : '',
+                    },
+                    redirect: 'if_required',
+                });
+                if (error) {
+                    const wrapped = new Error(error.message || L.paymentFailed);
+                    /** @type {{ stripeError?: import('@stripe/stripe-js').StripeError }} */
+                    const w = /** @type {any} */ (wrapped);
+                    w.stripeError = error;
+                    throw wrapped;
+                }
+            } else if (this._paymentPlan === 'one_time' && this._paypalOrderId) {
                 await confirmPayPalOneTimePayment(this._paypalOrderId);
             } else if (this._fusionSubscriptionId) {
                 const snap = await getAuthSnapshot();
@@ -1151,12 +1375,19 @@ class ApplicationFormComponent extends HTMLElement {
                 }
                 const principal = snap.principal.toText();
                 try {
-                    await linkPayPalSubscriptionToPrincipal({
-                        fusionPendingId: this._fusionPendingId,
-                        email,
-                        principal,
-                        subscriptionId: this._fusionSubscriptionId || undefined,
-                    });
+                    await (provider === 'paypal'
+                        ? linkPayPalSubscriptionToPrincipal({
+                              fusionPendingId: this._fusionPendingId,
+                              email,
+                              principal,
+                              subscriptionId: this._fusionSubscriptionId || undefined,
+                          })
+                        : linkSubscriptionToPrincipal({
+                              fusionPendingId: this._fusionPendingId,
+                              email,
+                              principal,
+                              subscriptionId: this._fusionSubscriptionId || undefined,
+                          }));
                 } catch (linkErr) {
                     const raw = linkErr instanceof Error ? linkErr.message : String(linkErr);
                     const line = mapIntegrationUserMessage(raw, 0);

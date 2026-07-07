@@ -37,6 +37,8 @@ export function registerPaymentRoutes(app, opts) {
             paypalClientId: getPayPalClientId(),
             mode: getPayPalMode(),
             configured: isPayPalConfigured(),
+            planBimonthly: process.env.PAYPAL_PLAN_BIMONTHLY_ID || '',
+            planAnnual: process.env.PAYPAL_PLAN_ANNUAL_ID || '',
         });
     });
 

@@ -4516,6 +4516,292 @@ a.studio-app-payload-link:hover {
   align-items: center;
 }
 
+/* --- Payments panel (Services → Payments) --- */
+.studio-pay {
+  display: flex;
+  flex-direction: column;
+  gap: var(--studio-space-lg, 1.5rem);
+}
+
+.studio-pay-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--studio-space-lg, 1.5rem);
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 1.1rem 1.25rem;
+  border: 1px solid color-mix(in srgb, var(--c2, #000) 12%, transparent);
+  border-radius: var(--studio-card-radius, 8px);
+  background: color-mix(in srgb, var(--c2, #000) 4%, var(--studio-card-bg, #fff));
+}
+
+.studio-pay-topbar__intro {
+  flex: 1 1 20rem;
+  min-width: 0;
+}
+
+.studio-pay-topbar__title {
+  margin: 0 0 0.35rem;
+  font-size: 1.05rem;
+  font-variation-settings: var(--fv-label-strong);
+}
+
+.studio-pay-topbar__intro .studio-muted {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.studio-pay-controls {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--studio-space-md, 1rem);
+  align-items: flex-start;
+}
+
+.studio-pay-env {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: flex-start;
+}
+
+.studio-pay-env__label {
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--studio-muted, #66615c);
+  font-variation-settings: var(--fv-label);
+}
+
+.studio-pay-segmented {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c2, #000) 10%, #fff);
+  border: 1px solid color-mix(in srgb, var(--c2, #000) 16%, transparent);
+}
+
+.studio-pay-segmented__input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.studio-pay-segmented__btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.34rem 0.9rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-variation-settings: var(--fv-label);
+  color: var(--c2, #111);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.studio-pay-segmented__input:checked + .studio-pay-segmented__btn {
+  background: var(--c2, #111);
+  color: var(--c3, #fff);
+  font-variation-settings: var(--fv-label-strong);
+}
+
+.studio-pay-segmented__input:focus-visible + .studio-pay-segmented__btn {
+  outline: 2px solid var(--studio-accent-on-light, #2563eb);
+  outline-offset: 2px;
+}
+
+.studio-pay-env__pill {
+  font-size: 0.72rem;
+  color: var(--studio-muted, #66615c);
+}
+
+.studio-pay-providers {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--studio-space-md, 1rem);
+}
+
+.studio-pay-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 1.15rem 1.25rem;
+  border-radius: var(--studio-card-radius, 8px);
+  border: 1px solid color-mix(in srgb, var(--c2, #000) 14%, transparent);
+  background: var(--studio-card-bg, #fff);
+}
+
+.studio-pay-card--active {
+  border-color: color-mix(in srgb, var(--studio-positive, #16a34a) 45%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--studio-positive, #16a34a) 22%, transparent);
+}
+
+.studio-pay-card--legacy {
+  background: color-mix(in srgb, var(--c2, #000) 3%, var(--studio-card-bg, #fff));
+}
+
+.studio-pay-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.studio-pay-card__ident {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.studio-pay-logo {
+  font-size: 0.95rem;
+  font-variation-settings: var(--fv-label-strong);
+  font-weight: 700;
+}
+
+.studio-pay-logo--paypal {
+  color: #003087;
+}
+
+.studio-pay-logo--stripe {
+  color: #635bff;
+}
+
+.studio-pay-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.16rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+  font-variation-settings: var(--fv-label);
+}
+
+.studio-pay-badge--active {
+  background: var(--studio-pill-active, #dcfce7);
+  color: var(--studio-pill-active-text, #166534);
+}
+
+.studio-pay-badge--legacy {
+  background: color-mix(in srgb, var(--c2, #000) 10%, #fff);
+  color: var(--studio-muted, #66615c);
+}
+
+.studio-pay-status {
+  font-size: 0.74rem;
+  color: var(--studio-muted, #66615c);
+}
+
+.studio-pay-status.is-ok {
+  color: var(--studio-positive, #16a34a);
+  font-variation-settings: var(--fv-label);
+}
+
+.studio-pay-status.is-warn {
+  color: #b45309;
+}
+
+.studio-pay-card__desc {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.studio-pay-card .studio-field {
+  margin: 0;
+}
+
+.studio-pay-card .studio-field > span em {
+  font-style: normal;
+  color: var(--studio-muted-faint, #7b756f);
+  font-size: 0.85em;
+}
+
+.studio-pay-resolved {
+  margin: 0.15rem 0 0;
+  font-size: 0.8rem;
+  color: var(--studio-muted, #66615c);
+}
+
+.studio-pay-resolved code {
+  color: var(--c2, #111);
+}
+
+.studio-pay-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.15rem;
+}
+
+.studio-pay-details {
+  border: 1px solid color-mix(in srgb, var(--c2, #000) 14%, transparent);
+  border-radius: var(--studio-card-radius, 8px);
+  padding: 0.35rem 0.9rem;
+  background: var(--studio-card-bg, #fff);
+}
+
+.studio-pay-details > summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-variation-settings: var(--fv-label);
+  padding: 0.4rem 0;
+  list-style-position: inside;
+}
+
+.studio-pay-details[open] > summary {
+  margin-bottom: 0.5rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--c2, #000) 10%, transparent);
+}
+
+.studio-pay-details__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding-bottom: 0.6rem;
+}
+
+.studio-pay-devtools__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.studio-pay-devtools__row .studio-field {
+  flex: 1 1 8rem;
+  margin: 0;
+}
+
+.studio-pay-savebar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid color-mix(in srgb, var(--c2, #000) 12%, transparent);
+}
+
+.studio-pay-savebar__hint {
+  flex: 1 1 16rem;
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+@media (max-width: 720px) {
+  .studio-pay-providers {
+    grid-template-columns: 1fr;
+  }
+
+  .studio-pay-env {
+    width: 100%;
+  }
+}
+
 .studio-help-list {
   margin: 0;
   padding-left: 1.25rem;

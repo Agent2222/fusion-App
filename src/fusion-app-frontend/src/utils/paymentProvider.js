@@ -1,16 +1,21 @@
 /**
- * Payment config — PayPal is the sole provider for new checkouts.
+ * Payment config — active provider from Studio (PayPal default); legacy members may use Stripe.
  */
 import { getIntegrationBaseUrl } from './integrationApi.js';
-import { getPayPalClientIdResolved, getStripeMode } from './studioServicesConfig.js';
+import {
+    getActivePaymentProviderSetting,
+    getPayPalClientIdResolved,
+    getStripeMode,
+} from './studioServicesConfig.js';
 
-/** @type {{ provider: string, paypalClientId: string, mode: string, configured?: boolean } | null} */
+/** @type {{ provider: string, paypalClientId: string, mode: string, configured?: boolean, planBimonthly?: string, planAnnual?: string } | null} */
 let _cached = null;
 
 /**
- * @returns {Promise<{ provider: 'paypal', paypalClientId: string, mode: string, configured: boolean }>}
+ * @returns {Promise<{ provider: 'paypal'|'stripe', paypalClientId: string, mode: string, configured: boolean, planBimonthly: string, planAnnual: string }>}
  */
 export async function fetchPaymentConfig() {
+    const activeProvider = getActivePaymentProviderSetting();
     const base = getIntegrationBaseUrl();
     if (base) {
         try {
@@ -18,10 +23,12 @@ export async function fetchPaymentConfig() {
             if (res.ok) {
                 const data = await res.json();
                 _cached = {
-                    provider: 'paypal',
+                    provider: activeProvider,
                     paypalClientId: String(data.paypalClientId || getPayPalClientIdResolved()),
-                    mode: String(data.mode || getStripeMode() === 'live' ? 'live' : 'sandbox'),
+                    mode: String(data.mode || (getStripeMode() === 'live' ? 'live' : 'sandbox')),
                     configured: Boolean(data.configured ?? data.paypalClientId),
+                    planBimonthly: String(data.planBimonthly || ''),
+                    planAnnual: String(data.planAnnual || ''),
                 };
                 return /** @type {typeof _cached} */ (_cached);
             }
@@ -30,17 +37,32 @@ export async function fetchPaymentConfig() {
         }
     }
     _cached = {
-        provider: 'paypal',
+        provider: activeProvider,
         paypalClientId: getPayPalClientIdResolved(),
         mode: getStripeMode() === 'live' ? 'live' : 'sandbox',
         configured: Boolean(getPayPalClientIdResolved()),
+        planBimonthly: '',
+        planAnnual: '',
     };
     return /** @type {typeof _cached} */ (_cached);
 }
 
-/** @returns {'paypal'} */
+/** @returns {'paypal'|'stripe'} */
 export function getActiveProvider() {
-    return 'paypal';
+    return getActivePaymentProviderSetting();
+}
+
+/**
+ * True when Studio Test/Live disagrees with integration server PayPal mode.
+ *
+ * @param {{ mode?: string } | null | undefined} serverConfig
+ * @returns {boolean}
+ */
+export function paymentModeMismatch(serverConfig) {
+    if (!serverConfig?.mode) return false;
+    const studioLive = getStripeMode() === 'live';
+    const serverLive = String(serverConfig.mode).toLowerCase() === 'live';
+    return studioLive !== serverLive;
 }
 
 /**

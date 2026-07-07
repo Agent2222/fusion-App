@@ -11,6 +11,8 @@ export const LS_STRIPE_PK_TEST = 'fusion-studio-stripe-pk-test';
 export const LS_STRIPE_PK_LIVE = 'fusion-studio-stripe-pk-live';
 export const LS_PAYPAL_CLIENT_ID_TEST = 'fusion-studio-paypal-client-id-test';
 export const LS_PAYPAL_CLIENT_ID_LIVE = 'fusion-studio-paypal-client-id-live';
+/** Active checkout provider for new payments: 'paypal' | 'stripe' */
+export const LS_PAYMENT_PROVIDER = 'fusion-studio-payment-provider';
 export const LS_RESEND_TEST_TO = 'fusion-studio-resend-test-to';
 /** Optional Resend From override for Studio test email (must be allowed in Resend) */
 export const LS_RESEND_FROM_OVERRIDE = 'fusion-studio-resend-from-override';
@@ -75,6 +77,28 @@ export function getStripeMode() {
 export function setStripeMode(mode) {
     try {
         localStorage.setItem(LS_STRIPE_MODE, mode === 'live' ? 'live' : 'test');
+    } catch {
+        /* ignore */
+    }
+}
+
+/** @returns {'paypal'|'stripe'} */
+export function getActivePaymentProviderSetting() {
+    try {
+        const v = localStorage.getItem(LS_PAYMENT_PROVIDER);
+        return v === 'stripe' ? 'stripe' : 'paypal';
+    } catch {
+        return 'paypal';
+    }
+}
+
+/** @param {'paypal'|'stripe'} provider */
+export function setActivePaymentProvider(provider) {
+    try {
+        localStorage.setItem(
+            LS_PAYMENT_PROVIDER,
+            provider === 'stripe' ? 'stripe' : 'paypal',
+        );
     } catch {
         /* ignore */
     }

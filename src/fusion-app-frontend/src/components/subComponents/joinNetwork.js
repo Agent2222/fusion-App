@@ -30,10 +30,11 @@ import {
 import {
   clearPendingMembershipPayload,
   clearPendingPaymentEmailLocal,
-  createPayPalSubscription,
+  createSubscription,
   FUSION_PENDING_MEMBERSHIP_LINK_KEY,
   getIntegrationBaseUrl,
   linkPayPalSubscriptionToPrincipal,
+  linkSubscriptionToPrincipal,
   mapIntegrationUserMessage,
   markPendingMembershipPaymentCompleted,
   readPendingMembershipPayload,
@@ -43,8 +44,16 @@ import {
   setStoredBillingEmailForPrincipal,
   syncPayPalSubscription,
 } from "../../utils/integrationApi.js";
-import { mountPayPalSubscriptionApproval } from "../../utils/paymentCheckout.js";
-import { getPayPalClientIdResolved } from "../../utils/studioServicesConfig.js";
+import { mountPayPalSubscriptionButtons } from "../../utils/paymentCheckout.js";
+import {
+  fetchPaymentConfig,
+  getActiveProvider,
+  paymentModeMismatch,
+} from "../../utils/paymentProvider.js";
+import {
+  getPayPalClientIdResolved,
+  getStripePublishableKeyResolved,
+} from "../../utils/studioServicesConfig.js";
 import { saveProfileSetupDraft } from "../../utils/profileSetupDraft.js";
 
 /** Persisted while the join dialog is on the exempt (access-code) path so refresh keeps the digits. */
@@ -1452,12 +1461,19 @@ class JoinNetworkComponent extends HTMLElement {
         firstName: this._formFirstName,
         lastName: this._formLastName,
       });
-      await linkPayPalSubscriptionToPrincipal({
-        fusionPendingId: this._fusionPendingId,
-        email,
-        principal,
-        subscriptionId: this._fusionSubscriptionId || undefined,
-      });
+      await (getActiveProvider() === "paypal"
+        ? linkPayPalSubscriptionToPrincipal({
+            fusionPendingId: this._fusionPendingId,
+            email,
+            principal,
+            subscriptionId: this._fusionSubscriptionId || undefined,
+          })
+        : linkSubscriptionToPrincipal({
+            fusionPendingId: this._fusionPendingId,
+            email,
+            principal,
+            subscriptionId: this._fusionSubscriptionId || undefined,
+          }));
       setStoredBillingEmailForPrincipal(principal, email);
       clearPendingPaymentEmailLocal("join");
       const cat = this._getSelectedCategoryNormalized();
@@ -1865,6 +1881,16 @@ class JoinNetworkComponent extends HTMLElement {
 
   async _prepareStripePayment() {
     if (this._isStudioPreview()) return;
+    const provider = getActiveProvider();
+    if (provider === "stripe") {
+      await this._prepareStripeElementsPayment();
+    } else {
+      await this._preparePayPalEmbeddedPayment();
+    }
+  }
+
+  async _preparePayPalEmbeddedPayment() {
+    if (this._isStudioPreview()) return;
     const myGen = ++this._stripePrepareGen;
     const root = this.shadowRoot;
     if (!root) return;
@@ -1898,7 +1924,6 @@ class JoinNetworkComponent extends HTMLElement {
 
     try {
       const cat = this._getSelectedCategoryNormalized();
-      // _ensureAccountBeforeStripe is often the slow part for full join (IC upsertSubscriber), not Stripe yet.
       if (hint) {
         hint.textContent =
           this._joinMode === "resubscribe"
@@ -1937,7 +1962,6 @@ class JoinNetworkComponent extends HTMLElement {
 
       if (myGen !== this._stripePrepareGen || this._stage !== "payment") return;
 
-      // Load Stripe.js and create Subscription (first invoice PaymentIntent) in parallel.
       /** @type {'bimonthly' | 'annual' | undefined} */
       let subscriptionTier;
       if (this._joinMode === "resubscribe") {
@@ -1948,38 +1972,50 @@ class JoinNetworkComponent extends HTMLElement {
         subscriptionTier = "bimonthly";
       }
 
-      const [subRes] = await Promise.all([
-        createPayPalSubscription({
-          email: emailForSub,
-          payFirst: this._joinMode !== "resubscribe",
-          ...(this._joinMode === "resubscribe" && principalOpt
-            ? { principal: principalOpt }
-            : {}),
-          ...(subscriptionTier ? { subscriptionTier } : {}),
-          metadata: {
-            category: cat || "",
-            intent: this._modalType,
-            first_name: this._formFirstName || "",
-            last_name: this._formLastName || "",
-            full_name: this._concatProfileFullName(),
-          },
-        }),
-      ]);
-      const approveUrl = subRes.approveUrl;
-      if (subRes.fusionPendingId) {
-        this._fusionPendingId = subRes.fusionPendingId;
-        this._fusionSubscriptionId = subRes.subscriptionId || null;
+      const payConfig = await fetchPaymentConfig();
+      if (myGen !== this._stripePrepareGen || this._stage !== "payment") return;
+
+      const planId =
+        subscriptionTier === "annual"
+          ? payConfig.planAnnual
+          : payConfig.planBimonthly;
+      if (!planId) {
+        throw new Error(
+          subscriptionTier === "annual"
+            ? "PayPal annual plan not configured on integration server (PAYPAL_PLAN_ANNUAL_ID)."
+            : "PayPal bimonthly plan not configured on integration server (PAYPAL_PLAN_BIMONTHLY_ID).",
+        );
+      }
+
+      if (paymentModeMismatch(payConfig) && hint) {
+        hint.textContent =
+          "Warning: Studio environment (Test/Live) does not match the integration server PayPal mode. Approval may fail.";
+      }
+
+      const payFirst = this._joinMode !== "resubscribe";
+      const fusionPendingId = payFirst ? crypto.randomUUID() : "";
+      if (payFirst) {
+        this._fusionPendingId = fusionPendingId;
         savePendingMembershipPayload({
-          fusionPendingId: subRes.fusionPendingId,
+          fusionPendingId,
           email: emailForSub,
-          subscriptionId: subRes.subscriptionId || null,
+          subscriptionId: null,
           paymentCompleted: false,
         });
-      } else if (subRes.subscriptionId) {
-        this._fusionSubscriptionId = subRes.subscriptionId;
       }
-      this._paypalApproveUrl = approveUrl;
-      if (myGen !== this._stripePrepareGen || this._stage !== "payment") return;
+
+      /** @type {Record<string, string>} */
+      const customData = { pending_email: emailForSub };
+      if (payFirst) {
+        customData.fusion_pending_id = fusionPendingId;
+      } else if (principalOpt) {
+        customData.principal = principalOpt;
+      }
+      customData.category = cat || "";
+      customData.intent = this._modalType || "";
+      customData.first_name = this._formFirstName || "";
+      customData.last_name = this._formLastName || "";
+      customData.full_name = this._concatProfileFullName();
 
       if (hint) {
         hint.textContent = "Loading PayPal checkout…";
@@ -1988,16 +2024,57 @@ class JoinNetworkComponent extends HTMLElement {
       const mountEl = this._getStripeMountLightEl();
       await new Promise((r) => requestAnimationFrame(r));
       if (myGen !== this._stripePrepareGen || this._stage !== "payment") return;
-      if (!approveUrl) throw new Error("PayPal approval URL missing");
-      mountPayPalSubscriptionApproval(mountEl, {
-        approveUrl,
-        label: "Continue with PayPal",
+
+      const sdkMode = payConfig.mode === "live" ? "live" : "sandbox";
+      await mountPayPalSubscriptionButtons(mountEl, {
+        clientId,
+        mode: sdkMode,
+        planId,
+        email: emailForSub,
+        customData,
+        onApprove: async (subscriptionId) => {
+          if (myGen !== this._stripePrepareGen || this._stage !== "payment") return;
+          this._fusionSubscriptionId = subscriptionId;
+          if (payFirst && this._fusionPendingId) {
+            savePendingMembershipPayload({
+              fusionPendingId: this._fusionPendingId,
+              email: emailForSub,
+              subscriptionId,
+              paymentCompleted: false,
+            });
+          }
+          setHintBusy(false);
+          if (hint) {
+            hint.textContent =
+              "Subscription approved. Click Secure Access to continue.";
+          }
+          if (payBtn) payBtn.disabled = false;
+        },
+        onError: (err) => {
+          if (DEV_MODE) console.error("[JoinNetwork] PayPal subscription", err);
+          setHintBusy(false);
+          if (hint) {
+            hint.textContent =
+              err instanceof Error
+                ? err.message
+                : "PayPal checkout failed. Try again.";
+          }
+        },
+        onCancel: () => {
+          setHintBusy(false);
+          if (hint) hint.textContent = "PayPal checkout cancelled.";
+        },
       });
+
+      if (myGen !== this._stripePrepareGen || this._stage !== "payment") return;
+
       this._stripePaymentReady = true;
       this._stripePrepareKey = this._computeStripePrepareKeySync();
       setHintBusy(false);
-      if (hint) hint.textContent = "Approve your subscription in PayPal, then click Secure Access.";
-      if (payBtn) payBtn.disabled = false;
+      if (hint && !this._fusionSubscriptionId) {
+        hint.textContent =
+          "Approve your subscription with PayPal below, then click Secure Access.";
+      }
       try {
         posthog.capture("membership_payment_elements_ready", {
           modal_type:
@@ -2019,6 +2096,190 @@ class JoinNetworkComponent extends HTMLElement {
       if (myGen !== this._stripePrepareGen) return;
       this._teardownStripePayment();
       if (DEV_MODE) console.error("[JoinNetwork] PayPal init", e);
+      setHintBusy(false);
+      if (hint) {
+        const raw = e instanceof Error ? e.message : "";
+        hint.textContent = mapIntegrationUserMessage(
+          raw || "Could not start payment. Try Studio → Services.",
+          0,
+        );
+      }
+      if (devSkip) devSkip.style.display = DEV_MODE ? "block" : "none";
+      if (payBtn) payBtn.disabled = !DEV_MODE;
+    }
+  }
+
+  async _prepareStripeElementsPayment() {
+    if (this._isStudioPreview()) return;
+    const myGen = ++this._stripePrepareGen;
+    const root = this.shadowRoot;
+    if (!root) return;
+    this._teardownStripePayment();
+    const hint = root.querySelector("#jnPayStripeHint");
+    const devSkip = root.querySelector("#jnPayDevSkip");
+    const payBtn = root.querySelector("#jnPayComplete");
+    const setHintBusy = (busy) => {
+      if (hint) hint.classList.toggle("jn-pay-stripe-hint--busy", !!busy);
+    };
+    if (payBtn) payBtn.disabled = true;
+    if (hint) {
+      hint.textContent = "Preparing payment…";
+      setHintBusy(true);
+    }
+    if (devSkip) devSkip.style.display = "none";
+
+    const pk = getStripePublishableKeyResolved();
+    const base = getIntegrationBaseUrl();
+    if (!pk || !base) {
+      setHintBusy(false);
+      if (hint) {
+        hint.textContent = !base
+          ? "Configure Integration API URL in Studio → Services (or VITE_INTEGRATION_API_URL)."
+          : "Configure Stripe publishable key in Studio → Services (or VITE_STRIPE_PUBLISHABLE_KEY).";
+      }
+      if (devSkip) devSkip.style.display = DEV_MODE ? "block" : "none";
+      if (payBtn) payBtn.disabled = !DEV_MODE;
+      return;
+    }
+
+    try {
+      const cat = this._getSelectedCategoryNormalized();
+      if (hint) {
+        hint.textContent =
+          this._joinMode === "resubscribe"
+            ? "Verifying your account…"
+            : "Saving your signup…";
+        setHintBusy(true);
+      }
+
+      await this._ensureAccountBeforeStripe();
+      if (hint) {
+        hint.textContent = "Connecting to payment service…";
+        setHintBusy(true);
+      }
+      const { getIdentityIfAuthenticated } =
+        await import("../../utils/icAuth.js");
+      const emailForSub = this._getEmailForSubscription();
+      if (!emailForSub.includes("@")) {
+        throw new Error(
+          this._joinMode === "resubscribe"
+            ? "Enter the email for your membership billing."
+            : "Enter a valid email on step 1.",
+        );
+      }
+
+      /** @type {string | undefined} */
+      let principalOpt;
+      if (this._joinMode === "resubscribe") {
+        const identity = await getIdentityIfAuthenticated();
+        if (!identity) throw new Error("Sign in with Internet Identity first.");
+        principalOpt = identity.getPrincipal().toText();
+      } else {
+        this._fusionPendingId = null;
+        this._fusionSubscriptionId = null;
+        clearPendingMembershipPayload();
+      }
+
+      if (myGen !== this._stripePrepareGen || this._stage !== "payment") return;
+
+      /** @type {'bimonthly' | 'annual' | undefined} */
+      let subscriptionTier;
+      if (this._joinMode === "resubscribe") {
+        subscriptionTier = undefined;
+      } else if (this._joinSubscriptionTier === "annual") {
+        subscriptionTier = "annual";
+      } else {
+        subscriptionTier = "bimonthly";
+      }
+
+      const [{ loadStripe }, subRes] = await Promise.all([
+        import("@stripe/stripe-js"),
+        createSubscription({
+          email: emailForSub,
+          payFirst: this._joinMode !== "resubscribe",
+          ...(this._joinMode === "resubscribe" && principalOpt
+            ? { principal: principalOpt }
+            : {}),
+          ...(subscriptionTier ? { subscriptionTier } : {}),
+          metadata: {
+            category: cat || "",
+            intent: this._modalType,
+            first_name: this._formFirstName || "",
+            last_name: this._formLastName || "",
+            full_name: this._concatProfileFullName(),
+          },
+        }),
+      ]);
+      const clientSecret = subRes.clientSecret;
+      if (subRes.fusionPendingId) {
+        this._fusionPendingId = subRes.fusionPendingId;
+        this._fusionSubscriptionId = subRes.subscriptionId || null;
+        savePendingMembershipPayload({
+          fusionPendingId: subRes.fusionPendingId,
+          email: emailForSub,
+          subscriptionId: subRes.subscriptionId || null,
+          paymentCompleted: false,
+        });
+      }
+      if (myGen !== this._stripePrepareGen || this._stage !== "payment") return;
+
+      if (hint) {
+        hint.textContent = "Loading secure card form…";
+        setHintBusy(true);
+      }
+      const stripe = await loadStripe(pk);
+      if (!stripe) throw new Error("Stripe failed to load");
+      if (myGen !== this._stripePrepareGen || this._stage !== "payment") return;
+
+      const elements = stripe.elements({
+        clientSecret,
+        appearance: { theme: "stripe" },
+      });
+      const paymentElement = elements.create("payment");
+      const mountEl = this._getStripeMountLightEl();
+
+      await new Promise((r) => requestAnimationFrame(r));
+      await new Promise((r) => requestAnimationFrame(r));
+      if (myGen !== this._stripePrepareGen || this._stage !== "payment") return;
+
+      const readyPromise = this._whenPaymentElementReady(paymentElement);
+      paymentElement.mount(mountEl);
+      this._stripe = stripe;
+      this._stripeElements = elements;
+      this._stripePaymentElement = paymentElement;
+
+      await readyPromise;
+      if (myGen !== this._stripePrepareGen || this._stage !== "payment") {
+        this._teardownStripePayment();
+        return;
+      }
+
+      this._stripePaymentReady = true;
+      this._stripePrepareKey = this._computeStripePrepareKeySync();
+      setHintBusy(false);
+      if (hint) hint.textContent = "";
+      if (payBtn) payBtn.disabled = false;
+      try {
+        posthog.capture("membership_payment_elements_ready", {
+          modal_type:
+            this._modalType ||
+            this.getAttribute("data-modal-type") ||
+            "membership",
+          join_mode: this._joinMode || "full",
+          payment_provider: "stripe",
+          ads_conversion: "AddPaymentInfo",
+        });
+        metaTrack("AddPaymentInfo", {
+          content_name: "signup_payment_modal",
+          source: "join_network",
+        });
+      } catch {
+        /* ignore */
+      }
+    } catch (e) {
+      if (myGen !== this._stripePrepareGen) return;
+      this._teardownStripePayment();
+      if (DEV_MODE) console.error("[JoinNetwork] Stripe init", e);
       setHintBusy(false);
       if (hint) {
         const raw = e instanceof Error ? e.message : "";
@@ -3267,11 +3528,155 @@ class JoinNetworkComponent extends HTMLElement {
       }
       if (this._joinNetworkSubmitting) return;
 
-      if (this._stripePaymentReady) {
+      if (this._stripe && this._stripeElements) {
+        if (!this._stripePaymentReady) {
+          if (errEl) {
+            errEl.textContent =
+              "Payment form is still loading. Wait until the card fields appear, then try again.";
+          }
+          return;
+        }
+        const payBtn = root.querySelector("#jnPayComplete");
+        const doneLabel =
+          this._paymentCompleteLabel ||
+          payBtn?.textContent?.trim() ||
+          "Secure Access";
+        const procLabel = this._paymentProcessingLabel || "Processing…";
+        this._joinNetworkSubmitting = true;
+        if (payBtn) {
+          payBtn.disabled = true;
+          payBtn.textContent = procLabel;
+        }
+        try {
+          const { error } = await this._stripe.confirmPayment({
+            elements: this._stripeElements,
+            confirmParams: {
+              return_url: window.location.href,
+            },
+            redirect: "if_required",
+          });
+          if (error) {
+            posthog.capture("membership_payment_failed", {
+              modal_type:
+                this._modalType ||
+                this.getAttribute("data-modal-type") ||
+                "membership",
+              join_mode: this._joinMode || "full",
+              stripe_error_type: error.type || undefined,
+              stripe_error_code: error.code || undefined,
+            });
+            if (errEl) errEl.textContent = error.message || "Payment failed.";
+            return;
+          }
+          const purchaseValue = this._paymentAmountCents / 100;
+          const pageContext = String(
+            this.getAttribute("context") || "home",
+          ).trim() || "home";
+          syncPosthogConversionPerson({
+            email,
+            firstName: this._formFirstName,
+            lastName: this._formLastName,
+          });
+          posthog.capture("membership_payment_completed", {
+            modal_type:
+              this._modalType ||
+              this.getAttribute("data-modal-type") ||
+              "membership",
+            join_mode: this._joinMode || "full",
+            join_role: cat,
+            page_context: pageContext,
+            amount_cents: this._paymentAmountCents,
+            amount: purchaseValue,
+            value: purchaseValue,
+            currency: "USD",
+            payment_plan: this._paymentPlanKey ?? "unknown",
+            payment_provider: "stripe",
+            ...(this._paymentPlanLabel
+              ? { payment_plan_label: this._paymentPlanLabel }
+              : {}),
+            ...(this._fusionSubscriptionId
+              ? { stripe_subscription_id: this._fusionSubscriptionId }
+              : {}),
+            ads_conversion: "Purchase",
+          });
+          metaTrack("Purchase", {
+            value: purchaseValue,
+            currency: "USD",
+            content_name: "membership_signup",
+          });
+          if (this._joinMode === "full" && this._fusionPendingId) {
+            try {
+              sessionStorage.setItem(FUSION_PENDING_MEMBERSHIP_LINK_KEY, "1");
+            } catch {
+              /* ignore */
+            }
+            markPendingMembershipPaymentCompleted();
+            void this._sendPostPaymentLinkInternetIdentityEmail(
+              this._getEmailForSubscription(),
+            );
+            this._showStage("linkAccount");
+            return;
+          }
+          try {
+            const { getIdentityIfAuthenticated } =
+              await import("../../utils/icAuth.js");
+            const id = await getIdentityIfAuthenticated();
+            const em = this._getEmailForSubscription();
+            if (id && em.includes("@")) {
+              setStoredBillingEmailForPrincipal(
+                id.getPrincipal().toText(),
+                em,
+              );
+            }
+          } catch {
+            /* ignore */
+          }
+          await afterJoinSaved();
+        } catch (e) {
+          if (DEV_MODE) console.error("[JoinNetwork] confirmPayment", e);
+          const stripeLike =
+            e &&
+            typeof e === "object" &&
+            "type" in e &&
+            typeof e.type === "string";
+          posthog.capture("membership_payment_failed", {
+            modal_type:
+              this._modalType ||
+              this.getAttribute("data-modal-type") ||
+              "membership",
+            join_mode: this._joinMode || "full",
+            failure_kind: "exception",
+            ...(stripeLike
+              ? {
+                  stripe_error_type: e.type,
+                  stripe_error_code:
+                    "code" in e && typeof e.code === "string"
+                      ? e.code
+                      : undefined,
+                }
+              : {}),
+          });
+          if (errEl) {
+            errEl.textContent =
+              e instanceof Error
+                ? e.message
+                : "Payment could not be completed.";
+          }
+        } finally {
+          this._joinNetworkSubmitting = false;
+          if (payBtn) {
+            payBtn.disabled = false;
+            payBtn.textContent = doneLabel;
+          }
+        }
+        return;
+      }
+
+      if (this._stripePaymentReady && getActiveProvider() === "paypal") {
         if (!this._fusionSubscriptionId) {
           if (errEl) {
             errEl.textContent =
-              "Complete PayPal approval first (Continue with PayPal), then try again.";
+              "Approve your subscription with PayPal below, then try again.";
           }
           return;
         }
@@ -3320,11 +3725,12 @@ class JoinNetworkComponent extends HTMLElement {
             value: purchaseValue,
             currency: "USD",
             payment_plan: this._paymentPlanKey ?? "unknown",
+            payment_provider: "paypal",
             ...(this._paymentPlanLabel
               ? { payment_plan_label: this._paymentPlanLabel }
               : {}),
             ...(this._fusionSubscriptionId
-              ? { stripe_subscription_id: this._fusionSubscriptionId }
+              ? { paypal_subscription_id: this._fusionSubscriptionId }
               : {}),
             ads_conversion: "Purchase",
           });

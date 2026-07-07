@@ -172,6 +172,15 @@ module {
         updatedAt : Text;
     };
 
+    /// Pre-PayPal membership row (as stored on mainnet before the PayPal fields were added).
+    /// Read-only migration source; upgrade path is `membershipFieldsFromV0`.
+    public type MembershipFieldsV0 = {
+        stripeCustomerId : ?Text;
+        stripeSubscriptionId : ?Text;
+        stripeSubscriptionStatus : ?Text;
+        membershipExemptManual : Bool;
+    };
+
     /// Stripe / PayPal subscription + manual exemption (stored in `membershipByPrincipal` stable map).
     /// Renewal end date is stored separately (`membershipStripePeriodEndStable` in the actor) so this record stays compatible with older canisters.
     public type MembershipFields = {
@@ -182,6 +191,19 @@ module {
         paypalSubscriptionStatus : ?Text;
         paymentProvider : ?Text;
         membershipExemptManual : Bool;
+    };
+
+    /// Migrate a pre-PayPal membership row to the current shape (no PayPal subscription).
+    public func membershipFieldsFromV0(row : MembershipFieldsV0) : MembershipFields {
+        {
+            stripeCustomerId = row.stripeCustomerId;
+            stripeSubscriptionId = row.stripeSubscriptionId;
+            stripeSubscriptionStatus = row.stripeSubscriptionStatus;
+            paypalSubscriptionId = null;
+            paypalSubscriptionStatus = null;
+            paymentProvider = null;
+            membershipExemptManual = row.membershipExemptManual;
+        };
     };
 
     /// Authenticated user profile (Principal -> account). Admin list in actor still gates destructive ops.

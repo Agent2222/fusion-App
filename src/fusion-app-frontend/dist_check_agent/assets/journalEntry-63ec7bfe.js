@@ -1,0 +1,26 @@
+import{s as _,a3 as $,o as k,E as C,ac as K,ad as N,C as H,q as D,V as O,Y as U,u as R}from"./index-20317f29.js";function W(){const n=window.location.pathname;if(!n.startsWith("/journal/entry/"))return null;const e=n.slice(15).split("/").filter(Boolean)[0];if(!e)return null;try{return decodeURIComponent(e)}catch{return e}}function z(n){if(!n||typeof n!="string")return"";const e=n.trim().match(/\/journal\/entry\/([^/?#]+)/);return e?e[1]:""}function V(n,e){if(!n||!Array.isArray(e))return null;const i=String(n).trim();for(const o of e){if(!o||typeof o!="object")continue;const t=o.id;if((t==null?"":String(t))===i)return o;if(/^\d+$/.test(i)){const s=Number(i);if(Number(t)===s)return o}const l=z(o.link);if(l&&l===i)return o}return null}function G(){return`
+        <div class="page journal-entry-page">
+            <main id="journalEntryMain" class="main-cont">
+                <div id="journalEntryMainContent" class="feed-container">
+                    <div class="page-content journal-entry-content">
+                        <nav class="journal-entry-back" aria-label="Journal">
+                            <a href="/journal" class="journal-entry-back-link">← Journal</a>
+                        </nav>
+                        <article class="journal-entry-detail is-pending" id="journalEntryDetail">
+                            <div class="journal-entry-hero">
+                                <img id="journalEntryImage" src="" alt="${$}" decoding="async" />
+                            </div>
+                            <div class="journal-entry-body">
+                                <h1 id="journalEntryTitle" class="journal-entry-title"></h1>
+                                <div id="journalEntryDescription" class="journal-entry-description"></div>
+                            </div>
+                        </article>
+                        <div id="journalEntryNotFound" class="journal-entry-not-found" hidden>
+                            <p>We could not find that journal entry.</p>
+                            <p><a href="/journal">Back to journal</a></p>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    `}let h="",J="",b="",M=null,p=null,d=null,j=null;function q(n,e){const i=n.en&&typeof n.en=="object"?n.en:{},o=n.ja&&typeof n.ja=="object"?n.ja:{};return e==="ja"?R(i,o):i}function E(n,e){n&&(e?n.removeAttribute("hidden"):n.setAttribute("hidden",""))}function P(n){const e=typeof window.getLocale=="function"&&window.getLocale()==="ja"?"ja":"en",i=n.en&&typeof n.en=="object"?n.en:{},o=n.ja&&typeof n.ja=="object"?n.ja:{},t=q(n,e),a=String((t==null?void 0:t.title)??"").trim(),l=(t==null?void 0:t.description)??"",s=(t==null?void 0:t.imageAlt)??a,m=String(n.id??""),T=document.getElementById("journalEntryDetail"),c=document.getElementById("journalEntryImage"),I=document.getElementById("journalEntryTitle"),f=document.getElementById("journalEntryDescription"),y=k(n.imageSrc,o==null?void 0:o.imageSrc,i==null?void 0:i.imageSrc);if(c instanceof HTMLImageElement&&y&&c.getAttribute("src")!==y&&(c.src=y),c instanceof HTMLImageElement){const S=C(s);c.alt!==S&&(c.alt=S)}I&&(I.textContent=a);const g=K(String(l)),x=g!==J||m!==h||e!==b||f instanceof HTMLElement&&f.innerHTML!==g;f instanceof HTMLElement&&x&&(f.innerHTML=g,J=g),T instanceof HTMLElement&&T.classList.remove("is-pending"),h=m,b=e;const L=`${a||"Journal"} · Fusion`;document.title!==L&&(document.title=L);const A=window.location.pathname,B=N(l)||"Editorial entry from Fusion’s art platform and Japan artist residency network.";let r=y;r&&!/^https?:\/\//i.test(r)&&(r=`${H()}${r.startsWith("/")?r:`/${r}`}`);const u=n,F=u.datePublished!=null?String(u.datePublished):u.publishedAt!=null?String(u.publishedAt):u.date!=null?String(u.date):"",v={"@context":"https://schema.org","@type":"Article",headline:a||"Journal",description:B.slice(0,2e3),publisher:{"@type":"Organization",name:"Fusion",url:`${H()}/`}};r&&(v.image=[r]),F&&(v.datePublished=F),D({title:L,description:B,path:A,ogType:"article",imageUrl:r||void 0,breadcrumbItems:[{name:"Home",path:"/"},{name:"Journal",path:"/journal"},{name:String(a||"Entry").slice(0,96),path:A}],articleJsonLd:v})}function w(){h="",J="",b=""}function Q(){j&&(j(),j=null),d&&(window.removeEventListener("fusion-localechange",d),d=null);const n=W(),e=typeof window.getLocale=="function"&&window.getLocale()==="ja"?"ja":"en";(n!==M||e!==b)&&(M=n,w());const i=async()=>{const o=await O(),t=n!=null?V(n,o):null,a=document.getElementById("journalEntryDetail"),l=document.getElementById("journalEntryNotFound");if(n==null||!t||!U(t)){p=null,E(a,!1),E(l,!0),a instanceof HTMLElement&&a.classList.add("is-pending"),w(),D({title:"Journal entry not found · Fusion",description:"This journal entry is not available on Fusion.",path:window.location.pathname,robots:"noindex, nofollow"});return}p=t;const s=String(t.id??""),m=s&&s===h;E(a,!0),E(l,!1),!m&&a instanceof HTMLElement&&a.classList.add("is-pending"),P(t)};d=()=>{if(w(),p){P(p);return}i()},window.addEventListener("fusion-localechange",d),i(),j=_(()=>{i()})}export{Q as default,V as findJournalByPathSegment,G as generateJournalEntryContent,z as journalEntrySegmentFromLink};

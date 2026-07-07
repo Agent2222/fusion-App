@@ -39,7 +39,9 @@ persistent actor {
   stable var accountsStable : [(Principal, Types.UserAccountCore)] = [];
 
   /// Stripe + membership flags (parallel to `accountsStable`).
-  stable var membershipByPrincipalStable : [(Principal, Types.MembershipFields)] = [];
+  /// V0 slot keeps the pre-PayPal on-disk layout for upgrade compatibility; V2 holds the current shape.
+  stable var membershipByPrincipalStable : [(Principal, Types.MembershipFieldsV0)] = [];
+  stable var membershipByPrincipalStableV2 : [(Principal, Types.MembershipFields)] = [];
   /// Principal -> trial window seconds (`startedAtSec`, `endsAtSec`) for access-code trials.
   stable var membershipTrialWindowStable : [(Principal, Types.TrialMembershipWindow)] = [];
 
@@ -164,7 +166,7 @@ persistent actor {
 
   transient var membershipByPrincipal : _HashMap.HashMap<Principal, Types.MembershipFields> =
     _HashMap.HashMap<Principal, Types.MembershipFields>(
-      membershipByPrincipalStable.size(),
+      membershipByPrincipalStable.size() + membershipByPrincipalStableV2.size(),
       Principal.equal,
       Principal.hash
     );
@@ -357,6 +359,19 @@ persistent actor {
     };
   };
 
+  /// Load membership rows into the transient map (V2 preferred, else migrate pre-PayPal V0).
+  private func reloadMembershipFromStables() {
+    if (membershipByPrincipalStableV2.size() > 0) {
+      for (entry in membershipByPrincipalStableV2.vals()) {
+        membershipByPrincipal.put(entry.0, entry.1);
+      };
+    } else {
+      for (entry in membershipByPrincipalStable.vals()) {
+        membershipByPrincipal.put(entry.0, Types.membershipFieldsFromV0(entry.1));
+      };
+    };
+  };
+
   /// Prefer `subscribersV1` (rows with `audiences`); otherwise migrate 5-field `subscribersStable` (legacy).
   private func reloadSubscribersFromStables() {
     subscribersByEmail := _HashMap.HashMap<Text, Types.Subscriber>(
@@ -388,9 +403,7 @@ persistent actor {
     accountsByPrincipal.put(p, acc);
   };
 
-  for (entry in membershipByPrincipalStable.vals()) {
-    membershipByPrincipal.put(entry.0, entry.1);
-  };
+  reloadMembershipFromStables();
   for (entry in membershipTrialWindowStable.vals()) {
     membershipTrialWindowByPrincipal.put(entry.0, entry.1);
   };
@@ -1451,7 +1464,8 @@ persistent actor {
     subscribersV1 := _Iter.toArray(subscribersByEmail.entries());
     subscribersStable := [];
     accountsStable := _Iter.toArray(accountsByPrincipal.entries());
-    membershipByPrincipalStable := _Iter.toArray(membershipByPrincipal.entries());
+    membershipByPrincipalStableV2 := _Iter.toArray(membershipByPrincipal.entries());
+    membershipByPrincipalStable := [];
     membershipTrialWindowStable := _Iter.toArray(membershipTrialWindowByPrincipal.entries());
     membershipStripePeriodEndStable := _Iter.toArray(membershipStripePeriodEndByPrincipal.entries());
     artistsStable := _Iter.toArray(artistsById.entries());
@@ -1524,14 +1538,13 @@ persistent actor {
     accountsStable := [];
 
     membershipByPrincipal := _HashMap.HashMap<Principal, Types.MembershipFields>(
-      membershipByPrincipalStable.size(),
+      membershipByPrincipalStable.size() + membershipByPrincipalStableV2.size(),
       Principal.equal,
       Principal.hash
     );
-    for (entry in membershipByPrincipalStable.vals()) {
-      membershipByPrincipal.put(entry.0, entry.1);
-    };
+    reloadMembershipFromStables();
     membershipByPrincipalStable := [];
+    membershipByPrincipalStableV2 := [];
 
     membershipTrialWindowByPrincipal := _HashMap.HashMap<Principal, Types.TrialMembershipWindow>(
       membershipTrialWindowStable.size(),
@@ -1788,13 +1801,11 @@ persistent actor {
     };
 
     membershipByPrincipal := _HashMap.HashMap<Principal, Types.MembershipFields>(
-      membershipByPrincipalStable.size(),
+      membershipByPrincipalStable.size() + membershipByPrincipalStableV2.size(),
       Principal.equal,
       Principal.hash
     );
-    for (entry in membershipByPrincipalStable.vals()) {
-      membershipByPrincipal.put(entry.0, entry.1);
-    };
+    reloadMembershipFromStables();
 
     membershipStripePeriodEndByPrincipal := _HashMap.HashMap<Principal, Text>(
       membershipStripePeriodEndStable.size(),
@@ -2002,7 +2013,8 @@ persistent actor {
     subscribersV1 := snapshot.subscribersStable;
     subscribersStable := [];
     accountsStable := snapshot.accountsStable;
-    membershipByPrincipalStable := snapshot.membershipByPrincipalStable;
+    membershipByPrincipalStableV2 := snapshot.membershipByPrincipalStable;
+    membershipByPrincipalStable := [];
     membershipTrialWindowStable := switch (snapshot.membershipTrialWindowStable) {
       case null { [] };
       case (?rows) { rows };

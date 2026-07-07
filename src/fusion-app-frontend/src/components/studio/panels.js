@@ -201,10 +201,13 @@ import {
     LS_STRIPE_PK_TEST,
     LS_PAYPAL_CLIENT_ID_LIVE,
     LS_PAYPAL_CLIENT_ID_TEST,
+    LS_PAYMENT_PROVIDER,
+    getActivePaymentProviderSetting,
     getPayPalClientIdResolved,
     buildServerEnvSnippet,
     getStripeMode,
     getStripePublishableKeyResolved,
+    setActivePaymentProvider,
     setStripeMode,
 } from '../../utils/studioServicesConfig.js';
 import {
@@ -1349,13 +1352,13 @@ function renderUsers() {
 function renderServices() {
     return `
         <div class="studio-section-stack studio-services">
-            <p class="studio-muted">Configure off-chain integrations (Stripe, Resend, S3). Publishable keys and URLs can be stored here for dev; <strong>never</strong> ship live secret keys in a public build. Server secrets belong in <code>services/fusion-integration-api/.env</code>.</p>
+            <p class="studio-muted">Configure off-chain integrations (Payments, Resend, S3). Publishable keys and URLs can be stored here for dev; <strong>never</strong> ship live secret keys in a public build. Server secrets belong in <code>services/fusion-integration-api/.env</code>.</p>
             <p class="studio-banner studio-banner--info" id="studio-svc-msg" style="display:none"></p>
             <div class="studio-tabs" data-studio-tabs="services">
                 <div class="studio-tabs__list" role="tablist" aria-label="Services sections">
                     <button type="button" class="studio-tabs__tab is-active" role="tab" id="studio-svc-tab-connect" aria-selected="true" aria-controls="studio-svc-panel-connect">Connection</button>
                     <button type="button" class="studio-tabs__tab" role="tab" id="studio-svc-tab-subscription" aria-selected="false" aria-controls="studio-svc-panel-subscription">Subscription</button>
-                    <button type="button" class="studio-tabs__tab" role="tab" id="studio-svc-tab-stripe" aria-selected="false" aria-controls="studio-svc-panel-stripe">Stripe</button>
+                    <button type="button" class="studio-tabs__tab" role="tab" id="studio-svc-tab-stripe" aria-selected="false" aria-controls="studio-svc-panel-stripe">Payments</button>
                     <button type="button" class="studio-tabs__tab" role="tab" id="studio-svc-tab-resend" aria-selected="false" aria-controls="studio-svc-panel-resend">Resend</button>
                     <button type="button" class="studio-tabs__tab" role="tab" id="studio-svc-tab-s3" aria-selected="false" aria-controls="studio-svc-panel-s3">Amazon S3</button>
                 </div>
@@ -1395,77 +1398,132 @@ function renderServices() {
                         </div>
                     </div>
                     <div id="studio-svc-panel-stripe" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-svc-tab-stripe" hidden>
-                        <div class="studio-form-grid studio-services-grid studio-services-grid--panel">
-                            <h3 class="studio-subheading studio-field--full">PayPal (new checkouts)</h3>
-                            <p class="studio-muted studio-field--full">All <strong>new</strong> memberships, application fees, and program payments use PayPal. Configure client ID here (publishable) and secrets on the integration server.</p>
-                            <label class="studio-field studio-field--full">
-                                <span>PayPal client ID (test)</span>
-                                <input type="text" id="studio-svc-paypal-test" class="studio-input" placeholder="Sandbox client id" autocomplete="off" />
-                            </label>
-                            <label class="studio-field studio-field--full">
-                                <span>PayPal client ID (live)</span>
-                                <input type="text" id="studio-svc-paypal-live" class="studio-input" placeholder="Live client id" autocomplete="off" />
-                            </label>
-                            <p class="studio-field--full">Resolved PayPal client ID: <code id="studio-svc-paypal-resolved">—</code></p>
-                            <h3 class="studio-subheading studio-field--full">Stripe (legacy subscriptions)</h3>
-                            <p class="studio-muted studio-field--full">Stripe is <strong>read-only</strong> for pre-existing subscriptions (sync, cancel, webhooks). Do not use for new checkouts.</p>
-                            <div class="studio-field-row studio-field--full">
-                                <label class="studio-field studio-field--inline">
-                                    <input type="radio" name="studio-svc-stripe-mode" value="test" id="studio-svc-mode-test" checked />
-                                    Test (pk_test / sk_test)
-                                </label>
-                                <label class="studio-field studio-field--inline">
-                                    <input type="radio" name="studio-svc-stripe-mode" value="live" id="studio-svc-mode-live" />
-                                    Live publishable (pk_live)
-                                </label>
+                        <div class="studio-pay">
+                            <div class="studio-pay-topbar">
+                                <div class="studio-pay-topbar__intro">
+                                    <h3 class="studio-pay-topbar__title">Payments</h3>
+                                    <p class="studio-muted">Choose the <strong>active provider</strong> for all new checkouts (memberships, application fees, program payments). Use <strong>Environment</strong> to switch Test/Sandbox vs Live keys for the selected provider.</p>
+                                </div>
+                                <div class="studio-pay-controls">
+                                    <div class="studio-pay-env" role="group" aria-label="Active payment provider">
+                                        <span class="studio-pay-env__label">Provider</span>
+                                        <div class="studio-pay-segmented">
+                                            <input type="radio" name="studio-svc-payment-provider" value="paypal" id="studio-svc-provider-paypal" class="studio-pay-segmented__input" checked />
+                                            <label for="studio-svc-provider-paypal" class="studio-pay-segmented__btn">PayPal</label>
+                                            <input type="radio" name="studio-svc-payment-provider" value="stripe" id="studio-svc-provider-stripe" class="studio-pay-segmented__input" />
+                                            <label for="studio-svc-provider-stripe" class="studio-pay-segmented__btn">Stripe</label>
+                                        </div>
+                                        <span class="studio-pay-env__pill" data-studio-pay-provider-label>PayPal</span>
+                                    </div>
+                                    <div class="studio-pay-env" role="group" aria-label="Payment environment">
+                                        <span class="studio-pay-env__label">Environment</span>
+                                        <div class="studio-pay-segmented">
+                                            <input type="radio" name="studio-svc-stripe-mode" value="test" id="studio-svc-mode-test" class="studio-pay-segmented__input" checked />
+                                            <label for="studio-svc-mode-test" class="studio-pay-segmented__btn">Test / Sandbox</label>
+                                            <input type="radio" name="studio-svc-stripe-mode" value="live" id="studio-svc-mode-live" class="studio-pay-segmented__input" />
+                                            <label for="studio-svc-mode-live" class="studio-pay-segmented__btn">Live</label>
+                                        </div>
+                                        <span class="studio-pay-env__pill" data-studio-pay-env-label>Test / Sandbox</span>
+                                    </div>
+                                </div>
                             </div>
-                            <label class="studio-field studio-field--full">
-                                <span>Publishable key (test) <code>pk_test_…</code></span>
-                                <input type="text" id="studio-svc-pk-test" class="studio-input" placeholder="pk_test_…" autocomplete="off" />
-                            </label>
-                            <label class="studio-field studio-field--full">
-                                <span>Secret key (test) <code>sk_test_…</code> — server only, not persisted</span>
-                                <input type="password" id="studio-svc-sk-test" class="studio-input" placeholder="Paste to generate .env; cleared on reload" autocomplete="off" />
-                            </label>
-                            <details class="studio-field studio-field--full" id="studio-svc-live-details">
-                                <summary>Live keys (production)</summary>
-                                <label class="studio-field studio-field--full">
-                                    <span>Publishable key (live) <code>pk_live_…</code></span>
-                                    <input type="text" id="studio-svc-pk-live" class="studio-input" placeholder="pk_live_…" autocomplete="off" />
-                                </label>
-                                <label class="studio-field studio-field--full">
-                                    <span>Secret key (live) <code>sk_live_…</code> — server only, not persisted</span>
-                                    <input type="password" id="studio-svc-sk-live" class="studio-input" placeholder="Never commit" autocomplete="off" />
-                                </label>
+
+                            <div class="studio-pay-providers">
+                                <section class="studio-pay-card studio-pay-card--active" id="studio-svc-paypal-card" data-studio-pay-card="paypal">
+                                    <header class="studio-pay-card__head">
+                                        <div class="studio-pay-card__ident">
+                                            <span class="studio-pay-logo studio-pay-logo--paypal">PayPal</span>
+                                            <span class="studio-pay-badge studio-pay-badge--active" data-studio-pay-provider-badge="paypal">Active · new checkouts</span>
+                                        </div>
+                                        <span class="studio-pay-status" id="studio-svc-paypal-status">—</span>
+                                    </header>
+                                    <p class="studio-muted studio-pay-card__desc">Embedded PayPal buttons for memberships and application fees. Set the browser <strong>client ID</strong> here; keep the secret on the integration server (<code>PAYPAL_CLIENT_SECRET</code>).</p>
+                                    <label class="studio-field">
+                                        <span>Client ID — Sandbox</span>
+                                        <input type="text" id="studio-svc-paypal-test" class="studio-input" placeholder="AY… (sandbox)" autocomplete="off" />
+                                    </label>
+                                    <label class="studio-field">
+                                        <span>Client ID — Live</span>
+                                        <input type="text" id="studio-svc-paypal-live" class="studio-input" placeholder="AY… (live)" autocomplete="off" />
+                                    </label>
+                                    <p class="studio-pay-resolved">Resolved for <span data-studio-pay-env-label>Test / Sandbox</span>: <code id="studio-svc-paypal-resolved">—</code></p>
+                                    <div class="studio-pay-card__actions">
+                                        <button type="button" class="studio-btn-ghost" id="studio-svc-help-paypal">How to set up PayPal</button>
+                                    </div>
+                                </section>
+
+                                <section class="studio-pay-card studio-pay-card--legacy" id="studio-svc-stripe-card" data-studio-pay-card="stripe">
+                                    <header class="studio-pay-card__head">
+                                        <div class="studio-pay-card__ident">
+                                            <span class="studio-pay-logo studio-pay-logo--stripe">Stripe</span>
+                                            <span class="studio-pay-badge studio-pay-badge--legacy" data-studio-pay-provider-badge="stripe">Legacy · existing subs</span>
+                                        </div>
+                                        <span class="studio-pay-status" id="studio-svc-stripe-status">—</span>
+                                    </header>
+                                    <p class="studio-muted studio-pay-card__desc">When selected as the active provider, new checkouts use embedded Stripe Elements. Existing Stripe subscriptions still sync, cancel, and appear in Finance.</p>
+                                    <label class="studio-field">
+                                        <span>Publishable key — Test <code>pk_test_…</code></span>
+                                        <input type="text" id="studio-svc-pk-test" class="studio-input" placeholder="pk_test_…" autocomplete="off" />
+                                    </label>
+                                    <label class="studio-field">
+                                        <span>Secret key — Test <code>sk_test_…</code> <em>(server only, never saved)</em></span>
+                                        <input type="password" id="studio-svc-sk-test" class="studio-input" placeholder="Paste to build .env; cleared on reload" autocomplete="off" />
+                                    </label>
+                                    <details class="studio-pay-details" id="studio-svc-live-details">
+                                        <summary>Live keys (production)</summary>
+                                        <div class="studio-pay-details__body">
+                                            <label class="studio-field">
+                                                <span>Publishable key — Live <code>pk_live_…</code></span>
+                                                <input type="text" id="studio-svc-pk-live" class="studio-input" placeholder="pk_live_…" autocomplete="off" />
+                                            </label>
+                                            <label class="studio-field">
+                                                <span>Secret key — Live <code>sk_live_…</code> <em>(server only, never saved)</em></span>
+                                                <input type="password" id="studio-svc-sk-live" class="studio-input" placeholder="Never commit" autocomplete="off" />
+                                            </label>
+                                        </div>
+                                    </details>
+                                    <p class="studio-pay-resolved">Resolved for <span data-studio-pay-env-label>Test / Sandbox</span>: <code id="studio-svc-pk-resolved">—</code></p>
+                                    <div class="studio-pay-card__actions">
+                                        <button type="button" class="studio-btn-ghost" id="studio-svc-help-stripe">How to set up Stripe</button>
+                                        <button type="button" class="studio-btn-ghost" id="studio-svc-copy-env">Copy .env snippet</button>
+                                    </div>
+                                </section>
+                            </div>
+
+                            <details class="studio-pay-details studio-pay-devtools">
+                                <summary>Developer tools — test Stripe PaymentIntent</summary>
+                                <div class="studio-pay-details__body">
+                                    <p class="studio-muted">Creates a one-off PaymentIntent via <code>POST /stripe/create-payment-intent</code> (min 50 in smallest units). Test card <code>4242 4242 4242 4242</code>.</p>
+                                    <div class="studio-pay-devtools__row">
+                                        <label class="studio-field">
+                                            <span>Amount</span>
+                                            <input type="number" id="studio-svc-pi-amount" class="studio-input" min="0.5" step="0.01" value="1.00" />
+                                        </label>
+                                        <label class="studio-field">
+                                            <span>Currency</span>
+                                            <select id="studio-svc-pi-currency" class="studio-input">
+                                                <option value="usd" selected>usd</option>
+                                                <option value="eur">eur</option>
+                                                <option value="gbp">gbp</option>
+                                                <option value="jpy">jpy</option>
+                                            </select>
+                                        </label>
+                                    </div>
+                                    <div class="studio-pay-card__actions">
+                                        <button type="button" class="studio-btn-primary" id="studio-svc-pi-create">Create test PaymentIntent</button>
+                                        <button type="button" class="studio-btn-ghost" id="studio-svc-pi-copy" disabled>Copy client secret</button>
+                                    </div>
+                                    <label class="studio-field studio-field--full">
+                                        <span>Client secret</span>
+                                        <textarea id="studio-svc-pi-secret" class="studio-input studio-textarea-mono" rows="3" readonly placeholder="Create a PaymentIntent to see the secret"></textarea>
+                                    </label>
+                                </div>
                             </details>
-                            <p class="studio-field--full">Resolved publishable key: <code id="studio-svc-pk-resolved">—</code></p>
-                            <div class="studio-field studio-field--full studio-services-actions">
-                                <button type="button" class="studio-btn-ghost" id="studio-svc-help-stripe">How to set up Stripe</button>
-                                <button type="button" class="studio-btn-ghost" id="studio-svc-copy-env">Copy .env snippet</button>
+
+                            <div class="studio-pay-savebar">
+                                <span class="studio-muted studio-pay-savebar__hint">Client IDs, publishable keys, and the environment save to this browser. Secret keys are only used to build the <code>.env</code> snippet.</span>
+                                <button type="button" class="studio-btn-primary" id="studio-svc-save-payments">Save payment settings</button>
                             </div>
-                            <h4 class="studio-subheading studio-field--full studio-services-test-heading">Test PaymentIntent (legacy / Studio)</h4>
-                            <p class="studio-muted studio-field--full">Join uses <code>POST /stripe/create-subscription</code> + recurring <code>STRIPE_PRICE_ID</code>. This button creates a one-off PaymentIntent via <code>POST /stripe/create-payment-intent</code> (min 50 in smallest units). Test card <code>4242424242424242</code>.</p>
-                            <label class="studio-field">
-                                <span>Amount</span>
-                                <input type="number" id="studio-svc-pi-amount" class="studio-input" min="0.5" step="0.01" value="1.00" />
-                            </label>
-                            <label class="studio-field">
-                                <span>Currency</span>
-                                <select id="studio-svc-pi-currency" class="studio-input">
-                                    <option value="usd" selected>usd</option>
-                                    <option value="eur">eur</option>
-                                    <option value="gbp">gbp</option>
-                                    <option value="jpy">jpy</option>
-                                </select>
-                            </label>
-                            <div class="studio-field studio-field--full studio-services-actions">
-                                <button type="button" class="studio-btn-primary" id="studio-svc-pi-create">Create test PaymentIntent</button>
-                                <button type="button" class="studio-btn-ghost" id="studio-svc-pi-copy" disabled>Copy client secret</button>
-                            </div>
-                            <label class="studio-field studio-field--full">
-                                <span>Client secret</span>
-                                <textarea id="studio-svc-pi-secret" class="studio-input studio-textarea-mono" rows="3" readonly placeholder="Create a PaymentIntent to see the secret"></textarea>
-                            </label>
                         </div>
                     </div>
                     <div id="studio-svc-panel-resend" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-svc-tab-resend" hidden>
@@ -7318,6 +7376,21 @@ async function copyToClipboard(text) {
     }
 }
 
+function openServicesHelpPayPal() {
+    const body = `
+      <p class="studio-muted">PayPal is the active provider for every new payment. You only need the <strong>client ID</strong> in the browser; the secret and plan IDs live on the integration server.</p>
+      <ol class="studio-help-list">
+        <li>Open the <a href="https://developer.paypal.com/dashboard/applications/sandbox" target="_blank" rel="noopener">PayPal Developer Dashboard → Apps &amp; Credentials</a>. Use <strong>Sandbox</strong> while testing, then repeat in <strong>Live</strong>.</li>
+        <li>Create (or open) an app and copy the <strong>Client ID</strong> into the matching field above (Sandbox → Sandbox, Live → Live).</li>
+        <li>Copy the <strong>Secret</strong> into <code>services/fusion-integration-api/.env</code> as <code>PAYPAL_CLIENT_SECRET</code>, with <code>PAYPAL_CLIENT_ID</code> and <code>PAYPAL_MODE=sandbox</code> (or <code>live</code>).</li>
+        <li>Under <strong>Billing → Products &amp; plans</strong> (or via API), create a product, then subscription plans: bimonthly (<code>MONTH</code> ×2) and annual (<code>YEAR</code> ×1). Put the plan IDs on the server as <code>PAYPAL_PLAN_BIMONTHLY_ID</code> and <code>PAYPAL_PLAN_ANNUAL_ID</code>.</li>
+        <li>Add a webhook pointing at <code>&lt;integration-api&gt;/webhooks/paypal</code> and set <code>PAYPAL_WEBHOOK_ID</code>.</li>
+        <li>Set the environment toggle above to <strong>Test / Sandbox</strong> for testing. Use the sandbox buyer account to complete a checkout.</li>
+      </ol>
+      <p class="studio-muted">Program installment plans are currently disabled for PayPal — members use manual payments until variable-length plans ship.</p>`;
+    openStudioModal(body, { title: 'Set up PayPal (primary payments)', wide: true });
+}
+
 function openServicesHelpStripe() {
     const body = `
       <ol class="studio-help-list">
@@ -7406,6 +7479,8 @@ async function initServices(mainEl) {
     const bearerEl = mainEl.querySelector('#studio-svc-bearer');
     const modeTest = mainEl.querySelector('#studio-svc-mode-test');
     const modeLive = mainEl.querySelector('#studio-svc-mode-live');
+    const providerPaypal = mainEl.querySelector('#studio-svc-provider-paypal');
+    const providerStripe = mainEl.querySelector('#studio-svc-provider-stripe');
     const pkTest = mainEl.querySelector('#studio-svc-pk-test');
     const pkLive = mainEl.querySelector('#studio-svc-pk-live');
     const paypalTest = mainEl.querySelector('#studio-svc-paypal-test');
@@ -7420,6 +7495,66 @@ async function initServices(mainEl) {
     const s3p = mainEl.querySelector('#studio-svc-s3-public');
     const resolvedEl = mainEl.querySelector('#studio-svc-pk-resolved');
     const paypalResolvedEl = mainEl.querySelector('#studio-svc-paypal-resolved');
+    const paypalStatusEl = mainEl.querySelector('#studio-svc-paypal-status');
+    const stripeStatusEl = mainEl.querySelector('#studio-svc-stripe-status');
+    const envLabelEls = mainEl.querySelectorAll('[data-studio-pay-env-label]');
+    const providerLabelEls = mainEl.querySelectorAll('[data-studio-pay-provider-label]');
+    const providerBadgeEls = mainEl.querySelectorAll('[data-studio-pay-provider-badge]');
+    const providerCardEls = mainEl.querySelectorAll('[data-studio-pay-card]');
+
+    /**
+     * Reflect the selected environment and whether each provider is configured.
+     * Reads current input values so typing gives immediate feedback (before Save).
+     */
+    const refreshPaymentStatus = () => {
+        const mode = modeLive?.checked ? 'live' : 'test';
+        const envLabel = mode === 'live' ? 'Live' : 'Test / Sandbox';
+        envLabelEls.forEach((el) => {
+            el.textContent = envLabel;
+        });
+        const activeProvider = providerStripe?.checked ? 'stripe' : 'paypal';
+        const providerLabel = activeProvider === 'stripe' ? 'Stripe' : 'PayPal';
+        providerLabelEls.forEach((el) => {
+            el.textContent = providerLabel;
+        });
+        providerCardEls.forEach((card) => {
+            if (!(card instanceof HTMLElement)) return;
+            const cardProvider = card.getAttribute('data-studio-pay-card');
+            const isActive = cardProvider === activeProvider;
+            card.classList.toggle('studio-pay-card--active', isActive);
+            card.classList.toggle('studio-pay-card--legacy', !isActive);
+        });
+        providerBadgeEls.forEach((badge) => {
+            if (!(badge instanceof HTMLElement)) return;
+            const badgeProvider = badge.getAttribute('data-studio-pay-provider-badge');
+            const isActive = badgeProvider === activeProvider;
+            badge.textContent = isActive ? 'Active · new checkouts' : 'Inactive';
+            badge.classList.toggle('studio-pay-badge--active', isActive);
+            badge.classList.toggle('studio-pay-badge--legacy', !isActive);
+        });
+        const ppInput = (mode === 'live' ? paypalLive?.value : paypalTest?.value)?.trim() || '';
+        const ppResolved = ppInput || getPayPalClientIdResolved();
+        if (paypalResolvedEl) {
+            paypalResolvedEl.textContent = ppResolved ? `${ppResolved.slice(0, 14)}…` : '(none)';
+        }
+        if (paypalStatusEl) {
+            const ok = Boolean(ppResolved);
+            paypalStatusEl.textContent = ok ? `${envLabel} · client ID set` : `${envLabel} · not configured`;
+            paypalStatusEl.classList.toggle('is-ok', ok);
+            paypalStatusEl.classList.toggle('is-warn', !ok);
+        }
+        const stInput = (mode === 'live' ? pkLive?.value : pkTest?.value)?.trim() || '';
+        const stResolved = stInput || getStripePublishableKeyResolved();
+        if (resolvedEl) {
+            resolvedEl.textContent = stResolved ? `${stResolved.slice(0, 14)}…` : '(none)';
+        }
+        if (stripeStatusEl) {
+            const ok = Boolean(stResolved);
+            stripeStatusEl.textContent = ok ? `${envLabel} · key set` : `${envLabel} · not configured`;
+            stripeStatusEl.classList.toggle('is-ok', ok);
+            stripeStatusEl.classList.toggle('is-warn', !ok);
+        }
+    };
 
     const load = () => {
         try {
@@ -7428,6 +7563,9 @@ async function initServices(mainEl) {
             const m = getStripeMode();
             if (modeTest) modeTest.checked = m !== 'live';
             if (modeLive) modeLive.checked = m === 'live';
+            const p = getActivePaymentProviderSetting();
+            if (providerPaypal) providerPaypal.checked = p !== 'stripe';
+            if (providerStripe) providerStripe.checked = p === 'stripe';
             if (pkTest) pkTest.value = localStorage.getItem(LS_STRIPE_PK_TEST) || '';
             if (pkLive) pkLive.value = localStorage.getItem(LS_STRIPE_PK_LIVE) || '';
             if (paypalTest) paypalTest.value = localStorage.getItem(LS_PAYPAL_CLIENT_ID_TEST) || '';
@@ -7441,14 +7579,7 @@ async function initServices(mainEl) {
         } catch {
             /* ignore */
         }
-        if (resolvedEl) {
-            const k = getStripePublishableKeyResolved();
-            resolvedEl.textContent = k ? `${k.slice(0, 12)}…` : '(none — set Studio or VITE_STRIPE_PUBLISHABLE_KEY)';
-        }
-        if (paypalResolvedEl) {
-            const k = getPayPalClientIdResolved();
-            paypalResolvedEl.textContent = k ? `${k.slice(0, 12)}…` : '(none — set Studio or VITE_PAYPAL_CLIENT_ID)';
-        }
+        refreshPaymentStatus();
     };
 
     const save = () => {
@@ -7457,6 +7588,7 @@ async function initServices(mainEl) {
             if (bearerEl) localStorage.setItem(LS_INTEGRATION_API_KEY, bearerEl.value.trim());
             if (modeLive?.checked) setStripeMode('live');
             else setStripeMode('test');
+            setActivePaymentProvider(providerStripe?.checked ? 'stripe' : 'paypal');
             if (pkTest) localStorage.setItem(LS_STRIPE_PK_TEST, pkTest.value.trim());
             if (pkLive) localStorage.setItem(LS_STRIPE_PK_LIVE, pkLive.value.trim());
             if (paypalTest) localStorage.setItem(LS_PAYPAL_CLIENT_ID_TEST, paypalTest.value.trim());
@@ -7534,6 +7666,26 @@ async function initServices(mainEl) {
     void loadSubscriptionFields();
 
     initServicesTabs(mainEl);
+
+    // Provider + environment toggles apply immediately (persisted) so status updates live.
+    [providerPaypal, providerStripe].forEach((el) => {
+        el?.addEventListener('change', () => {
+            setActivePaymentProvider(providerStripe?.checked ? 'stripe' : 'paypal');
+            refreshPaymentStatus();
+        });
+    });
+    [modeTest, modeLive].forEach((el) => {
+        el?.addEventListener('change', () => {
+            setStripeMode(modeLive?.checked ? 'live' : 'test');
+            refreshPaymentStatus();
+        });
+    });
+    [paypalTest, paypalLive, pkTest, pkLive].forEach((el) => {
+        el?.addEventListener('input', refreshPaymentStatus);
+    });
+
+    mainEl.querySelector('#studio-svc-save-payments')?.addEventListener('click', () => save());
+    mainEl.querySelector('#studio-svc-help-paypal')?.addEventListener('click', () => openServicesHelpPayPal());
 
     mainEl.querySelector('#studio-svc-subscription-save')?.addEventListener('click', async () => {
         const linesEn = String(subEn?.value || '')
