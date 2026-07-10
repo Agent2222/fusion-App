@@ -106,5 +106,24 @@ export const idlFactory = ({ IDL }) => {
             [],
             [],
         ),
+        integrationReconnectMemberPrincipal: IDL.Func(
+            [IDL.Principal, IDL.Principal],
+            [
+                IDL.Variant({
+                    ok: IDL.Record({
+                        fromPrincipal: IDL.Text,
+                        toPrincipal: IDL.Text,
+                        linkedArtistId: IDL.Opt(IDL.Text),
+                        paymentProvider: IDL.Opt(IDL.Text),
+                    }),
+                    samePrincipal: IDL.Null,
+                    noSourceAccount: IDL.Null,
+                    targetHasAccount: IDL.Null,
+                    targetLinkedToDifferentArtist: IDL.Null,
+                    cannotMigratePrivilegedAccount: IDL.Null,
+                }),
+            ],
+            [],
+        ),
     });
 };

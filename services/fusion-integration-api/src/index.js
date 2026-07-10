@@ -13,6 +13,7 @@ import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { presignPutObjectUrl } from './storagePresign.js';
 import { registerPaymentRoutes } from './payments/routes.js';
+import { registerAccountReconnectRoutes } from './accountReconnect.js';
 import { isPayPalConfigured, getPayPalClientId, getPayPalMode } from './payments/paypalClient.js';
 import { handlePayPalWebhookEvent } from './webhooks/paypal.js';
 import { getIntegrationActor, pushSubscriptionToCanister } from './canisterActor.js';
@@ -2706,6 +2707,13 @@ registerPaymentRoutes(app, {
         cancelPlatformSubscriptionImmediately,
         addConfirmedArtistToProgram,
     },
+});
+
+registerAccountReconnectRoutes(app, {
+    requireApiKey,
+    stripe,
+    getStripeCustomerAndBestSubscriptionByEmail,
+    syncStripeSubscriptionByEmailAndPrincipal,
 });
 
 app.use((_req, res) => {

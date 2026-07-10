@@ -1,0 +1,79 @@
+/* PayPal Card Fields host layout (light-DOM mount targets) */
+.paypal-advanced-checkout {
+    width: 100%;
+}
+
+.paypal-card-fields-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    margin-bottom: 0.75rem;
+}
+
+.paypal-card-field-host {
+    display: block;
+    width: 100%;
+    min-height: 44px;
+    border: 1px solid rgba(0, 0, 0, 0.28);
+    border-radius: 2px;
+    background: #fff;
+    box-sizing: border-box;
+}
+
+.paypal-card-fields-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.65rem;
+}
+
+@media (max-width: 480px) {
+    .paypal-card-fields-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.paypal-pay-divider {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 0.85rem 0;
+    font-size: 0.82rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    opacity: 0.72;
+}
+
+.paypal-pay-divider::before,
+.paypal-pay-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: rgba(0, 0, 0, 0.18);
+}
+
+.paypal-wallet-section {
+    margin-top: 0.25rem;
+}
+
+.paypal-card-pay-now {
+    margin-top: 0.85rem;
+    width: 100%;
+    min-height: 44px;
+    padding: 0.55rem 1rem;
+    border: 1px solid rgba(0, 0, 0, 0.35);
+    background: #111;
+    color: #fff;
+    font-family: inherit;
+    font-size: 0.95rem;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+}
+
+.paypal-card-pay-now:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.paypal-card-pay-now:not(:disabled):hover {
+    background: #333;
+}

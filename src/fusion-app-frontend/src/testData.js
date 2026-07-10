@@ -31,11 +31,71 @@ export const testData = {
                 'Two months of Fusion platform membership with your application fee',
                 'Apply to additional Fusion programs without paying another application fee',
             ],
+            securePaymentLine: 'Secure payment • Encrypted & safe',
+            choosePaymentHeading: 'Choose your payment option',
+            choosePaymentSubtext:
+                'Select the option that works best for you, then enter your card details to continue.',
+            paymentPlaceholderTitle: 'Select an option above to load the secure card form.',
+            paymentPlaceholderSub: "We'll securely collect your payment details here.",
+            paymentPlaceholderExtended:
+                "Select an option above to load the secure card form. We'll securely collect your payment details here.",
+            footerThankYou:
+                'Thank you for supporting artists and helping us build a thoughtful, global creative community.',
+            footerQuestionsPrefix: 'Questions?',
+            footerContactUs: 'Contact us',
+            trustBadges: [
+                {
+                    title: 'Secure & Encrypted',
+                    body: 'Your payment details are protected with industry-standard encryption.',
+                },
+                {
+                    title: 'Fair & Transparent',
+                    body: 'Clear pricing with no hidden fees—we believe in honest communication.',
+                },
+                {
+                    title: 'Global Community',
+                    body: 'Join artists from around the world in the Fusion network.',
+                },
+                {
+                    title: 'Artist Focused',
+                    body: 'Every dollar supports our mission to empower creative practitioners.',
+                },
+            ],
         },
         ja: {
             whatsIncludedBullets: [
                 '応募料に含まれる Fusion プラットフォームの2か月分のメンバーシップ',
                 '他の Fusion プログラムへ追加の応募料なしで応募できます',
+            ],
+            securePaymentLine: '安全な決済 • 暗号化で保護',
+            choosePaymentHeading: 'お支払い方法を選択',
+            choosePaymentSubtext:
+                'ご自身に合ったオプションを選び、カード情報を入力して次へお進みください。',
+            paymentPlaceholderTitle: '上のいずれかのオプションを選ぶと、安全なカード入力フォームが表示されます。',
+            paymentPlaceholderSub: 'お支払い情報はここで安全に収集されます。',
+            paymentPlaceholderExtended:
+                '上のいずれかのオプションを選ぶと、安全なカード入力フォームがここに表示されます。',
+            footerThankYou:
+                'アーティストを支え、思慮深いグローバルなクリエイティブコミュニティづくりにご協力いただきありがとうございます。',
+            footerQuestionsPrefix: 'ご不明点は',
+            footerContactUs: 'お問い合わせ',
+            trustBadges: [
+                {
+                    title: '安全・暗号化',
+                    body: 'お支払い情報は業界標準の暗号化で保護されます。',
+                },
+                {
+                    title: '公正・透明',
+                    body: '隠れた費用のない明確な料金設定です。',
+                },
+                {
+                    title: 'グローバルコミュニティ',
+                    body: '世界中のアーティストとつながる Fusion ネットワークへ。',
+                },
+                {
+                    title: 'アーティスト第一',
+                    body: 'すべての収益がクリエイティブ実践者を支える使命に役立ちます。',
+                },
             ],
         },
     },

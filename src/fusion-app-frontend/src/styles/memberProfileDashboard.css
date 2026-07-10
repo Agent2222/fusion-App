@@ -345,6 +345,38 @@
   margin-bottom: 1rem;
 }
 
+.settings-profile-page .mpd-no-account-recovery {
+  display: block;
+  margin-bottom: 0.75rem;
+}
+
+.settings-profile-page .mpd-no-account-principal-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+
+.settings-profile-page .mpd-no-account-principal-label {
+  font-size: 0.85rem;
+}
+
+.settings-profile-page .mpd-no-account-principal-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.72rem;
+  word-break: break-all;
+  padding: 0.25rem 0.4rem;
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.settings-profile-page .mpd-copy-principal-btn {
+  min-height: 2rem;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .settings-profile-page .mpd-membership-actions {
   display: flex;
   flex-wrap: wrap;
@@ -3295,6 +3327,19 @@
   border-radius: 12px;
   padding: 0.85rem;
   background: #fff;
+}
+
+.settings-profile-page .mpd-program-stripe-mount .paypal-advanced-checkout {
+  width: 100%;
+}
+
+.settings-profile-page .mpd-program-stripe-mount .paypal-card-field-host {
+  border-color: rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+}
+
+.settings-profile-page .mpd-program-stripe-mount .paypal-card-pay-now {
+  border-radius: 8px;
 }
 
 .settings-profile-page .mpd-payment-loading {

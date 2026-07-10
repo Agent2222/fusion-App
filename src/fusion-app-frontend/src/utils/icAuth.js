@@ -128,8 +128,10 @@ const TTL_7D_NS = BigInt(7 * 24 * 60 * 60) * BigInt(1_000_000_000);
 /**
  * `AuthClient.login()` opens the II window and returns immediately — it does **not** await success.
  * We must use `onSuccess` / `onError` or the app would dispatch `fusion-auth-change` while still anonymous.
+ * @param {{ source?: 'sign-in' | 'join-link' }} [opts]
  */
-export async function loginInternetIdentity() {
+export async function loginInternetIdentity(opts = {}) {
+    const source = opts?.source === 'join-link' ? 'join-link' : 'sign-in';
     await clearAuthActorCaches();
     const client = await getAuthClientSingleton();
     const identityProvider = getInternetIdentityUrl();
@@ -169,8 +171,15 @@ export async function loginInternetIdentity() {
         identifyPosthogAfterInternetIdentityLogin(principalText);
         posthog.capture('sign_in_succeeded', { auth_method: 'internet_identity' });
     }
+    try {
+        if (typeof window !== 'undefined' && typeof window.focus === 'function') {
+            window.focus();
+        }
+    } catch {
+        /* ignore */
+    }
     await dispatchFusionAuthChange();
-    await runPostLoginPipeline();
+    await runPostLoginPipeline({ source });
 }
 
 export async function logoutInternetIdentity() {
@@ -184,15 +193,33 @@ export async function logoutInternetIdentity() {
 }
 
 /**
- * After a fresh II login: if not admin and no `UserAccount`, open join/register modal.
+ * After a fresh II login: sync account/subscription state. Only auto-opens join when the user
+ * is mid pay-first link (`join-link` or active pending-link session) — never on ordinary sign-in.
+ *
+ * @param {{ source?: 'sign-in' | 'join-link' }} [opts]
  */
-export async function runPostLoginPipeline() {
+export async function runPostLoginPipeline(opts = {}) {
+    const source = opts?.source === 'join-link' ? 'join-link' : 'sign-in';
+    let joinLinkInProgress = false;
     try {
-        if (sessionStorage.getItem(FUSION_PENDING_MEMBERSHIP_LINK_KEY) === '1') {
-            return;
-        }
+        joinLinkInProgress = sessionStorage.getItem(FUSION_PENDING_MEMBERSHIP_LINK_KEY) === '1';
     } catch {
         /* ignore */
+    }
+    if (joinLinkInProgress) {
+        try {
+            const { readPendingMembershipPayload } = await import('./integrationApi.js');
+            const pending = readPendingMembershipPayload();
+            if (!pending?.fusionPendingId) {
+                sessionStorage.removeItem(FUSION_PENDING_MEMBERSHIP_LINK_KEY);
+                joinLinkInProgress = false;
+            }
+        } catch {
+            joinLinkInProgress = false;
+        }
+    }
+    if (joinLinkInProgress && source === 'join-link') {
+        return;
     }
     const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
     const actor = await getAuthenticatedFusionBackendActor();
@@ -220,26 +247,29 @@ export async function runPostLoginPipeline() {
         }
     }
     if (acc == null) {
-        try {
-            const { readPendingMembershipPayload } = await import('./integrationApi.js');
-            const pending = readPendingMembershipPayload();
-            if (pending?.paymentCompleted && pending.fusionPendingId) {
-                window.dispatchEvent(
-                    new CustomEvent('fusion-open-join-network', {
-                        detail: { resumePendingLink: true },
-                    })
-                );
-                return;
+        if (source === 'join-link') {
+            try {
+                const { readPendingMembershipPayload } = await import('./integrationApi.js');
+                const pending = readPendingMembershipPayload();
+                if (pending?.paymentCompleted && pending.fusionPendingId) {
+                    window.dispatchEvent(
+                        new CustomEvent('fusion-open-join-network', {
+                            detail: { resumePendingLink: true },
+                        })
+                    );
+                }
+            } catch {
+                /* ignore */
             }
-        } catch {
-            /* ignore */
         }
-        window.dispatchEvent(
-            new CustomEvent('fusion-open-join-network', {
-                detail: { logoutIfDismissedWithoutAccount: true },
-            })
-        );
         return;
+    }
+
+    try {
+        const { clearJoinPendingMembershipStorage } = await import('./integrationApi.js');
+        clearJoinPendingMembershipStorage();
+    } catch {
+        /* ignore */
     }
 
     if (accountIsStudioTeamRole(/** @type {Record<string, unknown>} */ (acc))) {
@@ -344,14 +374,6 @@ export async function runPostLoginPipeline() {
                 }
                 gate = await getMembershipAccessForCaller();
             }
-            if (gate === 'needsSubscription') {
-                window.dispatchEvent(
-                    new CustomEvent('fusion-open-join-network', {
-                        detail: { mode: 'resubscribe' },
-                    })
-                );
-                return;
-            }
         } catch (_) {
             /* ignore */
         }
@@ -392,13 +414,6 @@ export async function runPostLoginPipeline() {
             } catch {
                 /* ignore */
             }
-        }
-        if (gate === 'needsSubscription') {
-            window.dispatchEvent(
-                new CustomEvent('fusion-open-join-network', {
-                    detail: { mode: 'resubscribe' },
-                })
-            );
         }
     } catch (_) {
         /* ignore */

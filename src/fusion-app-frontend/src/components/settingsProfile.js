@@ -692,7 +692,7 @@ function formatMemberProfileSaveError(err) {
     return "Your linked profile record could not be found. Refresh this page, or contact Fusion for help.";
   }
   if (/No account for caller/i.test(blob)) {
-    return "No member account was found for this login. Sign in with Internet Identity and complete profile setup.";
+    return "You're signed in, but this Internet Identity isn't linked to a Fusion member account. Contact support with your checkout email if you paid with a different login.";
   }
   if (/Active membership required/i.test(blob)) {
     return "Translation requires an active membership. Choose Just save to update your profile without translation, or renew membership first.";
@@ -1374,6 +1374,38 @@ function escapeHtmlMpd(s) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+/**
+ * Member-facing recovery copy when signed in but no canister account row exists.
+ * @param {HTMLElement | null} hintEl
+ * @param {string} principalText
+ */
+function renderNoAccountRecoveryHint(hintEl, principalText) {
+  if (!hintEl) return;
+  const safePrincipal = escapeHtmlMpd(principalText);
+  hintEl.innerHTML = `<span class="mpd-no-account-recovery">You're signed in, but this Internet Identity isn't linked to a Fusion member account. If you already paid or completed setup with a different login, contact support with your checkout email and we'll reconnect your account.</span>
+<span class="mpd-no-account-principal-row">
+  <span class="mpd-no-account-principal-label">Internet Identity ID for support:</span>
+  <code class="mpd-no-account-principal-code">${safePrincipal}</code>
+  <button type="button" class="studio-btn-ghost mpd-copy-principal-btn" id="settingsProfileCopyPrincipal">Copy ID</button>
+</span>`;
+  const btn = document.getElementById("settingsProfileCopyPrincipal");
+  btn?.addEventListener(
+    "click",
+    async () => {
+      try {
+        await navigator.clipboard.writeText(principalText);
+        btn.textContent = "Copied";
+        window.setTimeout(() => {
+          btn.textContent = "Copy ID";
+        }, 2000);
+      } catch {
+        btn.textContent = "Copy failed";
+      }
+    },
+    { once: false },
+  );
 }
 
 /** @param {unknown} value */
@@ -2273,41 +2305,57 @@ async function openMpdStripePaymentModal(item, paymentType, amountCents) {
   const errEl = modal.querySelector("#mpdProgramPaymentError");
   const mount = modal.querySelector("#mpdProgramStripeMount");
   try {
-    const [svc, cfg, checkout] = await Promise.all([
+    const [svc, cfg, checkout, payProvider] = await Promise.all([
       import("../utils/integrationApi.js"),
       import("../utils/studioServicesConfig.js"),
       import("../utils/paymentCheckout.js"),
+      import("../utils/paymentProvider.js"),
     ]);
     const clientId = cfg.getPayPalClientIdResolved();
     if (!clientId) throw new Error("Configure PayPal client ID in Studio → Services.");
-    const intent = await svc.createPayPalOneTimePayment({
-      principal: snap.principal.toText(),
-      programId: item.programId,
-      applicationId: item.applicationId,
-      email: item.email,
-      applicantName: item.fullName,
-      paymentType,
-      amountCents,
-      totalDueCents: item.totalDueCents,
-      depositAmountCents: item.depositCents,
-      ownFlight: item.ownFlight,
-      flightCreditCents: item.flightCreditCents,
-    });
+    const payConfig = await payProvider.fetchPaymentConfig();
+    const principal = snap.principal.toText();
+    const showError = (e) => {
+      if (errEl instanceof HTMLElement) {
+        errEl.hidden = false;
+        errEl.textContent = e instanceof Error ? e.message : String(e);
+      }
+    };
+    const finishPayment = async (orderId) => {
+      await svc.confirmPayPalOneTimePayment(orderId);
+      closeMpdPaymentModal();
+      await hydrateProgramPaymentsPanel(mpdLastProgramsForPayments);
+    };
     if (mount) {
       mount.textContent = "";
-      await checkout.mountPayPalOrderButtons(mount, {
+      await checkout.mountPayPalAdvancedOneTimeCheckout(mount, {
         clientId,
-        orderId: intent.orderId,
-        onApproved: async (orderId) => {
-          await svc.confirmPayPalOneTimePayment(orderId);
-          closeMpdPaymentModal();
-          await hydrateProgramPaymentsPanel(mpdLastProgramsForPayments);
+        mode: payConfig.mode === "live" ? "live" : "sandbox",
+        amountCents,
+        metadata: {
+          programId: item.programId,
+          purpose: paymentType,
         },
-        onError: (e) => {
-          if (errEl instanceof HTMLElement) {
-            errEl.hidden = false;
-            errEl.textContent = e instanceof Error ? e.message : String(e);
-          }
+        createOrder: async () =>
+          svc.createPayPalOneTimePayment({
+            principal,
+            programId: item.programId,
+            applicationId: item.applicationId,
+            email: item.email,
+            applicantName: item.fullName,
+            paymentType,
+            amountCents,
+            totalDueCents: item.totalDueCents,
+            depositAmountCents: item.depositCents,
+            ownFlight: item.ownFlight,
+            flightCreditCents: item.flightCreditCents,
+          }),
+        onApproved: finishPayment,
+        onError: showError,
+        showPayNowButton: true,
+        payNowLabel: "Pay now",
+        onPayNowClick: async (submit) => {
+          await submit();
         },
       });
     }
@@ -5354,10 +5402,9 @@ export default function initSettingsProfile() {
     if (!isTest && snap.authenticated && !adminViewingMemberPerspective) {
       const ens = await ensureMyLinkedArtistProfile();
       if (ens === "noAccount" && !acc) {
-        if (hint) {
-          hint.textContent =
-            "No member account found. You are signed in, so complete your profile setup, then return to this page.";
-        }
+        const principalText =
+          snap.authenticated && snap.principal ? snap.principal.toText() : "";
+        renderNoAccountRecoveryHint(hint, principalText);
         if (formWrap) formWrap.setAttribute("hidden", "");
         setInitialProfileLoading(false);
         applySettingsProfileDocumentSeo(dashTitle);

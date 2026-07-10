@@ -2116,6 +2116,98 @@ persistent actor {
     putUserAccountFull(p, account);
   };
 
+  private func roleIsAdminOnly(r : Types.UserRole) : Bool {
+    switch (r) {
+      case (#admin) { true };
+      case _ { false };
+    };
+  };
+
+  /// Move member account, membership, contact, and artist link to a new Internet Identity principal.
+  private func reconnectMemberPrincipalBetween(
+    fromP : Principal,
+    toP : Principal,
+  ) : Types.AdminReconnectMemberResult {
+    if (Principal.equal(fromP, toP)) {
+      return #samePrincipal;
+    };
+    let fromCore = switch (accountsByPrincipal.get(fromP)) {
+      case null { return #noSourceAccount };
+      case (?c) { c };
+    };
+    if (roleIsAdminOnly(fromCore.role)) {
+      return #cannotMigratePrivilegedAccount;
+    };
+    switch (accountsByPrincipal.get(toP)) {
+      case (?_) { return #targetHasAccount };
+      case null {};
+    };
+    let fromM = switch (membershipByPrincipal.get(fromP)) {
+      case null { defaultMembership() };
+      case (?x) { x };
+    };
+    let now = nowText();
+    let toCore : Types.UserAccountCore = {
+      role = fromCore.role;
+      status = fromCore.status;
+      linkedArtistId = fromCore.linkedArtistId;
+      linkedOrgId = fromCore.linkedOrgId;
+      updatedAt = now;
+    };
+    putUserAccountParts(toCore, fromM, toP);
+    switch (membershipStripePeriodEndByPrincipal.get(fromP)) {
+      case null {};
+      case (?end) { membershipStripePeriodEndByPrincipal.put(toP, end) };
+    };
+    switch (membershipTrialWindowByPrincipal.get(fromP)) {
+      case null {
+        ignore membershipTrialWindowByPrincipal.remove(toP);
+      };
+      case (?w) {
+        membershipTrialWindowByPrincipal.put(toP, w);
+      };
+    };
+    switch (accountContactByPrincipal.get(fromP)) {
+      case null {};
+      case (?contact) {
+        accountContactByPrincipal.put(toP, contact);
+      };
+    };
+    let suspendedCore : Types.UserAccountCore = {
+      fromCore with
+      status = #suspended;
+      linkedArtistId = null;
+      linkedOrgId = null;
+      updatedAt = now;
+    };
+    accountsByPrincipal.put(fromP, suspendedCore);
+    ignore membershipTrialWindowByPrincipal.remove(fromP);
+    #ok({
+      fromPrincipal = Principal.toText(fromP);
+      toPrincipal = Principal.toText(toP);
+      linkedArtistId = fromCore.linkedArtistId;
+      paymentProvider = fromM.paymentProvider;
+    });
+  };
+
+  /// Admin: reconnect a paid member account to a new Internet Identity principal.
+  public shared (msg) func adminReconnectMemberPrincipal(
+    fromPrincipal : Principal,
+    toPrincipal : Principal,
+  ) : async Types.AdminReconnectMemberResult {
+    assertAdmin(msg.caller);
+    reconnectMemberPrincipalBetween(fromPrincipal, toPrincipal);
+  };
+
+  /// Integration API: same reconnect as admin (Studio server orchestration with API key).
+  public shared (msg) func integrationReconnectMemberPrincipal(
+    fromPrincipal : Principal,
+    toPrincipal : Principal,
+  ) : async Types.AdminReconnectMemberResult {
+    assertIntegrationCaller(msg.caller);
+    reconnectMemberPrincipalBetween(fromPrincipal, toPrincipal);
+  };
+
   /// Admin: set whether this member is exempt from subscription (manual veteran / complimentary).
   public shared (msg) func adminSetMembershipExemptManual(memberPrincipal : Principal, exempt : Bool) : async () {
     assertAdmin(msg.caller);

@@ -13,6 +13,13 @@ export const LS_PAYPAL_CLIENT_ID_TEST = 'fusion-studio-paypal-client-id-test';
 export const LS_PAYPAL_CLIENT_ID_LIVE = 'fusion-studio-paypal-client-id-live';
 /** Active checkout provider for new payments: 'paypal' | 'stripe' */
 export const LS_PAYMENT_PROVIDER = 'fusion-studio-payment-provider';
+
+/**
+ * Built-in live PayPal client ID so checkouts work without per-browser Studio setup.
+ * Studio overrides (localStorage) and VITE_PAYPAL_CLIENT_ID still take precedence when set.
+ */
+export const DEFAULT_PAYPAL_CLIENT_ID_LIVE =
+    'AYTYqTdSbmRaxJTwmDDHdkKkadQPoc0OwDFMAUYdAqwbURwsDSqV86rNhKcyVLMeQFo7hCBmcqs4YxX0';
 export const LS_RESEND_TEST_TO = 'fusion-studio-resend-test-to';
 /** Optional Resend From override for Studio test email (must be allowed in Resend) */
 export const LS_RESEND_FROM_OVERRIDE = 'fusion-studio-resend-from-override';
@@ -63,13 +70,14 @@ export function getApplicationStaffNotificationEmails() {
     return out;
 }
 
-/** @returns {'test'|'live'} */
+/** @returns {'test'|'live'} — defaults to live so hosted checkouts work out of the box. */
 export function getStripeMode() {
     try {
         const v = localStorage.getItem(LS_STRIPE_MODE);
-        return v === 'live' ? 'live' : 'test';
+        if (v === 'live' || v === 'test') return v;
+        return 'live';
     } catch {
-        return 'test';
+        return 'live';
     }
 }
 
@@ -139,7 +147,10 @@ export function getPayPalClientIdResolved() {
     }
     const env =
         typeof import.meta !== 'undefined' && import.meta.env?.VITE_PAYPAL_CLIENT_ID;
-    return typeof env === 'string' ? env.trim() : '';
+    const envId = typeof env === 'string' ? env.trim() : '';
+    if (envId) return envId;
+    // Built-in live default so PayPal works without per-browser Studio setup.
+    return DEFAULT_PAYPAL_CLIENT_ID_LIVE;
 }
 
 /**

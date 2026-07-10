@@ -226,13 +226,58 @@ export async function setPlatformUpdateBanner(value) {
 }
 
 /**
- * @returns {{ en: { whatsIncludedBullets: string[] }, ja: { whatsIncludedBullets: string[] } }}
+ * @type {readonly string[]}
+ */
+const APPLICATION_PAYMENT_GLOBAL_CHROME_KEYS = [
+    'securePaymentLine',
+    'choosePaymentHeading',
+    'choosePaymentSubtext',
+    'paymentPlaceholderExtended',
+    'paymentPlaceholderTitle',
+    'paymentPlaceholderSub',
+    'footerThankYou',
+    'footerQuestionsPrefix',
+    'footerContactUs',
+];
+
+/**
+ * @returns {{ en: Record<string, unknown>, ja: Record<string, unknown> }}
  */
 export function defaultApplicationPaymentGlobal() {
     return {
         en: { whatsIncludedBullets: [] },
         ja: { whatsIncludedBullets: [] },
     };
+}
+
+/**
+ * @param {unknown} block
+ * @param {Record<string, unknown>} target
+ */
+function mergeApplicationPaymentGlobalLocaleBlock(block, target) {
+    if (!block || typeof block !== 'object' || Array.isArray(block)) return;
+    const o = /** @type {Record<string, unknown>} */ (block);
+    const bullets = o.whatsIncludedBullets;
+    if (Array.isArray(bullets)) {
+        target.whatsIncludedBullets = bullets.map((x) => String(x ?? '').trim()).filter(Boolean);
+    }
+    for (const key of APPLICATION_PAYMENT_GLOBAL_CHROME_KEYS) {
+        const v = String(o[key] ?? '').trim();
+        if (v) target[key] = v;
+    }
+    const trustBadges = o.trustBadges;
+    if (Array.isArray(trustBadges) && trustBadges.length > 0) {
+        target.trustBadges = trustBadges
+            .map((row) => {
+                if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
+                const r = /** @type {Record<string, unknown>} */ (row);
+                const title = String(r.title ?? '').trim();
+                const body = String(r.body ?? '').trim();
+                if (!title && !body) return null;
+                return { title, body };
+            })
+            .filter(Boolean);
+    }
 }
 
 /**
@@ -245,12 +290,7 @@ export function parseApplicationPaymentGlobalJson(raw) {
     const o = /** @type {Record<string, unknown>} */ (raw);
     for (const loc of /** @type {const} */ (['en', 'ja'])) {
         const block = o[loc];
-        if (!block || typeof block !== 'object' || Array.isArray(block)) continue;
-        const bullets = /** @type {Record<string, unknown>} */ (block).whatsIncludedBullets;
-        if (!Array.isArray(bullets)) continue;
-        base[loc].whatsIncludedBullets = bullets
-            .map((x) => String(x ?? '').trim())
-            .filter(Boolean);
+        mergeApplicationPaymentGlobalLocaleBlock(block, base[loc]);
     }
     return base;
 }
@@ -6249,6 +6289,51 @@ export async function adminUpsertUserAccountStudio(principalText, userAccount) {
     }
     const { Principal } = await import('@dfinity/principal');
     await actor.adminUpsertUserAccount(Principal.fromText(String(principalText || '').trim()), userAccount);
+}
+
+/**
+ * Admin: move member account + membership + artist link to a new Internet Identity principal.
+ * @param {string} fromPrincipalText
+ * @param {string} toPrincipalText
+ * @returns {Promise<{ ok: true, fromPrincipal: string, toPrincipal: string, linkedArtistId: string | null, paymentProvider: string | null } | { ok: false, code: string }>}
+ */
+export async function adminReconnectMemberPrincipalStudio(fromPrincipalText, toPrincipalText) {
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminReconnectMemberPrincipal !== 'function') {
+        throw new Error('adminReconnectMemberPrincipal unavailable — run dfx generate fusion-app-backend');
+    }
+    const { Principal } = await import('@dfinity/principal');
+    const fromP = Principal.fromText(String(fromPrincipalText || '').trim());
+    const toP = Principal.fromText(String(toPrincipalText || '').trim());
+    const raw = await actor.adminReconnectMemberPrincipal(fromP, toP);
+    if (raw && typeof raw === 'object') {
+        const o = /** @type {Record<string, unknown>} */ (raw);
+        if ('ok' in o && o.ok && typeof o.ok === 'object') {
+            const ok = /** @type {Record<string, unknown>} */ (o.ok);
+            const linked = candidOptUnwrap(ok.linkedArtistId);
+            const provider = candidOptUnwrap(ok.paymentProvider);
+            return {
+                ok: true,
+                fromPrincipal: String(ok.fromPrincipal ?? ''),
+                toPrincipal: String(ok.toPrincipal ?? ''),
+                linkedArtistId: linked != null ? String(linked) : null,
+                paymentProvider: provider != null ? String(provider) : null,
+            };
+        }
+        const codes = [
+            'samePrincipal',
+            'noSourceAccount',
+            'targetHasAccount',
+            'targetLinkedToDifferentArtist',
+            'cannotMigratePrivilegedAccount',
+        ];
+        for (const code of codes) {
+            if (code in o) {
+                return { ok: false, code };
+            }
+        }
+    }
+    return { ok: false, code: 'unknown' };
 }
 
 /**

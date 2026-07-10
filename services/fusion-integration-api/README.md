@@ -71,6 +71,9 @@ stripe listen --forward-to localhost:8787/webhooks/stripe
 - `POST /stripe/subscription-status-by-email` — body `{ email }` — looks up Stripe customer by email, returns best subscription + `membershipActive` (`true` when status is `active` or `trialing`). Studio “Manage user” live check (API key required)
 - `POST /stripe/membership-revenue-summary` — no body — aggregates active/trialing Fusion membership subscriptions from Stripe into `mrrCents`, per-cadence cycle totals (`monthlyCents`, `bimonthlyCents`, `annualCents`), and subscriber counts. Studio Finance → Users (API key required)
 - `POST /stripe/sync-subscription-by-email` — body `{ email, principal }` — finds customer by email, pushes best subscription to the canister with `metadata.principal` (Studio after email check; API key required)
+- `POST /account/lookup-by-email` — body `{ email, paypalSubscriptionId? }` — Stripe subscription + principal hint from metadata; optional PayPal sub when id provided (Studio reconnect lookup; API key required)
+- `POST /account/reconnect/preview` — body `{ email?, fromPrincipal, toPrincipal }` — validates source/target canister rows + Stripe membership before migrate (API key required)
+- `POST /account/reconnect/complete` — body `{ fromPrincipal, toPrincipal, email?, paypalSubscriptionId? }` — calls canister `integrationReconnectMemberPrincipal`, then Stripe sync-by-email + optional PayPal sync to new principal (API key required)
 - `POST /stripe/create-payment-intent` — body `{ amount, currency?, metadata? }` (Studio tests / legacy)
 - `POST /webhooks/stripe` — **raw** JSON body; Stripe signature via `STRIPE_WEBHOOK_SECRET`
 - `POST /email/send` — body `{ to, subject, html | text, replyTo?, from? }` — optional `from` overrides `RESEND_FROM` when set (must be a verified sender in Resend)

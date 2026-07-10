@@ -264,6 +264,26 @@ export function savePendingMembershipPayload(p) {
     }
 }
 
+/** True while pay-first join is waiting for Internet Identity link (same tab / explicit resume). */
+export function hasActiveJoinMembershipLinkSession() {
+    try {
+        return sessionStorage.getItem(FUSION_PENDING_MEMBERSHIP_LINK_KEY) === '1';
+    } catch {
+        return false;
+    }
+}
+
+/** Clear pay-first join recovery keys (session + localStorage mirror). */
+export function clearJoinPendingMembershipStorage() {
+    clearPendingMembershipPayload();
+    clearPendingPaymentEmailLocal('join');
+    try {
+        sessionStorage.removeItem(FUSION_PENDING_MEMBERSHIP_LINK_KEY);
+    } catch {
+        /* ignore */
+    }
+}
+
 /** @returns {{ fusionPendingId: string, email: string, subscriptionId: string | null, paymentCompleted: boolean } | null} */
 export function readPendingMembershipPayload() {
     try {
@@ -282,6 +302,8 @@ export function readPendingMembershipPayload() {
     } catch {
         /* fall through to localStorage */
     }
+    // localStorage alone can linger after abandoned flows — require an active link session.
+    if (!hasActiveJoinMembershipLinkSession()) return null;
     const ls = readPendingPaymentEmailLocal('join');
     if (!ls?.fusionPendingId) return null;
     return {
@@ -485,6 +507,89 @@ export async function syncSubscriptionFromStripeByEmail(email, principalText) {
         console.warn('[Fusion] sync-subscription-by-email failed:', e);
         return { synced: false, reason: msg };
     }
+}
+
+/**
+ * Studio admin: lookup paid membership hints by checkout email.
+ * @param {string} email
+ * @param {string} [paypalSubscriptionId]
+ */
+export async function accountLookupByEmailForStudio(email, paypalSubscriptionId = '') {
+    const em = String(email ?? '').trim();
+    if (!em.includes('@')) {
+        throw new Error('valid email required');
+    }
+    const base = getIntegrationBaseUrl();
+    if (!base) {
+        throw new Error('Integration API URL not configured.');
+    }
+    /** @type {Record<string, string>} */
+    const body = { email: em };
+    const ppSub = String(paypalSubscriptionId ?? '').trim();
+    if (ppSub) body.paypalSubscriptionId = ppSub;
+    const res = await fetch(`${base}/account/lookup-by-email`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        throw new Error(typeof data.error === 'string' ? data.error : `HTTP ${res.status}`);
+    }
+    return data;
+}
+
+/**
+ * Studio admin: preview reconnecting member account to a new II principal.
+ * @param {{ email?: string, fromPrincipal: string, toPrincipal: string }} opts
+ */
+export async function accountReconnectPreviewForStudio(opts) {
+    const base = getIntegrationBaseUrl();
+    if (!base) {
+        throw new Error('Integration API URL not configured.');
+    }
+    const res = await fetch(`${base}/account/reconnect/preview`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify({
+            email: String(opts?.email ?? '').trim(),
+            fromPrincipal: String(opts?.fromPrincipal ?? '').trim(),
+            toPrincipal: String(opts?.toPrincipal ?? '').trim(),
+        }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        throw new Error(typeof data.error === 'string' ? data.error : `HTTP ${res.status}`);
+    }
+    return data;
+}
+
+/**
+ * Studio admin: migrate member row + refresh Stripe/PayPal subscription on new principal.
+ * @param {{ fromPrincipal: string, toPrincipal: string, email?: string, paypalSubscriptionId?: string }} opts
+ */
+export async function accountReconnectCompleteForStudio(opts) {
+    const base = getIntegrationBaseUrl();
+    if (!base) {
+        throw new Error('Integration API URL not configured.');
+    }
+    const res = await fetch(`${base}/account/reconnect/complete`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify({
+            fromPrincipal: String(opts?.fromPrincipal ?? '').trim(),
+            toPrincipal: String(opts?.toPrincipal ?? '').trim(),
+            email: String(opts?.email ?? '').trim(),
+            paypalSubscriptionId: String(opts?.paypalSubscriptionId ?? '').trim(),
+        }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        const code = typeof data.code === 'string' ? data.code : '';
+        const err = typeof data.error === 'string' ? data.error : `HTTP ${res.status}`;
+        throw new Error(code ? `${code}: ${err}` : err);
+    }
+    return data;
 }
 
 /**

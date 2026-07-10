@@ -242,6 +242,24 @@ module {
         #noAccount;
     };
 
+    /// Successful admin / integration reconnect of a member row to a new Internet Identity principal.
+    public type AdminReconnectMemberOk = {
+        fromPrincipal : Text;
+        toPrincipal : Text;
+        linkedArtistId : ?Text;
+        paymentProvider : ?Text;
+    };
+
+    /// Move membership + artist link from one principal to another (old row suspended).
+    public type AdminReconnectMemberResult = {
+        #ok : AdminReconnectMemberOk;
+        #samePrincipal;
+        #noSourceAccount;
+        #targetHasAccount;
+        #targetLinkedToDifferentArtist;
+        #cannotMigratePrivilegedAccount;
+    };
+
     /// Admin-generated join invite (gallery / curator / collector / artist) — single-use while `active`.
     public type JoinInviteRecord = {
         role : UserRole;

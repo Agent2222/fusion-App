@@ -25,8 +25,10 @@ export async function fetchPaymentConfig() {
                 _cached = {
                     provider: activeProvider,
                     paypalClientId: String(data.paypalClientId || getPayPalClientIdResolved()),
-                    mode: String(data.mode || (getStripeMode() === 'live' ? 'live' : 'sandbox')),
-                    configured: Boolean(data.configured ?? data.paypalClientId),
+                    // Follow the Studio environment (which also picks the client ID) so the SDK
+                    // load mode stays consistent with the resolved client ID.
+                    mode: getStripeMode() === 'live' ? 'live' : 'sandbox',
+                    configured: Boolean(data.configured ?? data.paypalClientId ?? getPayPalClientIdResolved()),
                     planBimonthly: String(data.planBimonthly || ''),
                     planAnnual: String(data.planAnnual || ''),
                 };

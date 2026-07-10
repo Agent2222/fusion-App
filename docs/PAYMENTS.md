@@ -2,11 +2,25 @@
 
 ## Overview
 
-- **New checkouts** (membership, application fee, program deposit/full/manual) use **PayPal** via `POST /payments/*`.
+- **New checkouts** (membership, application fee, program deposit/full/manual) use **PayPal** via `POST /payments/*` when PayPal is the active provider in Studio.
+- **One-time PayPal checkouts** use **embedded Card Fields** (no popup for card entry) plus a **Pay with PayPal** wallet button fallback. Implemented in `mountPayPalAdvancedOneTimeCheckout()` (`paymentCheckout.js`).
+- **Subscription checkouts** (membership bimonthly/annual, program application subscription plans) use **PayPal Buttons** with popup approval — Card Fields do not support `createSubscription`.
 - **Program installment plans** are **disabled** for PayPal until variable-cycle plan creation ships. Members can use manual payments; legacy Stripe plans can still be cancelled.
-- **Stripe** remains for **legacy** subscriptions only: webhooks, sync, status-by-email, cancel-at-period-end, receipts, and Finance MRR for pre-existing Stripe subscribers.
+- **Stripe** remains available as an **alternative provider** for new checkouts when selected in Studio (embedded Elements). Legacy Stripe subscriptions still use webhooks, sync, status-by-email, cancel-at-period-end, receipts, and Finance MRR.
 
-There is **no global provider toggle**. The SPA always mounts PayPal checkout for new money movement.
+**Studio → Services → Payments:** site-wide **Provider** toggle (PayPal / Stripe) plus **Environment** (Test / Live).
+
+## PayPal Card Fields (ACDC)
+
+Embedded card checkout requires **Advanced Card Processing (ACDC)** enabled on the PayPal business account. If `CardFields.isEligible()` returns false, the UI falls back to the PayPal wallet button only (popup).
+
+| Flow | UI |
+|------|-----|
+| Program application one-time fee | Card Fields + Pay & submit (card) or PayPal button |
+| Member dashboard deposit / full / manual | Card Fields + Pay now or PayPal button |
+| Membership / application subscriptions | PayPal subscription buttons (popup) |
+
+No backend changes are required for Card Fields — same `POST /payments/one-time` + `/confirm` Orders v2 flow.
 
 ## Integration API env (`services/fusion-integration-api/.env`)
 
@@ -27,7 +41,9 @@ There is **no global provider toggle**. The SPA always mounts PayPal checkout fo
 | Key | Purpose |
 |-----|---------|
 | `VITE_PAYPAL_CLIENT_ID` | PayPal JS SDK (fallback) |
-| Studio → Services → PayPal client ID (test/live) | localStorage override |
+| Studio → Services → PayPal client ID (test/live) | localStorage override; built-in live default when unset |
+| Studio → Services → Provider | `paypal` (default) or `stripe` |
+| Studio → Services → Environment | `test` or `live` (defaults to live) |
 | `VITE_INTEGRATION_API_URL` | Integration API base |
 
 ## Bootstrap billing plans (sandbox)
@@ -73,8 +89,9 @@ After Motoko changes, run `dfx generate` and redeploy `fusion-app-backend`. New 
 ## Deploy checklist
 
 1. Provision PayPal sandbox/live products and plans; set env vars.
-2. Deploy integration API with PayPal + Stripe credentials.
-3. Register `POST /webhooks/paypal` in PayPal Developer Dashboard.
-4. `dfx deploy fusion-app-backend` (types + `integrationRecordPayPalSubscription`).
-5. `npm run build` + deploy frontend with `VITE_PAYPAL_CLIENT_ID` or Studio client ID.
-6. Test: join (PayPal), application fee (PayPal), legacy Stripe member still has access.
+2. Enable **Advanced Card Processing** on the live PayPal business account for embedded card fields.
+3. Deploy integration API with PayPal + Stripe credentials.
+4. Register `POST /webhooks/paypal` in PayPal Developer Dashboard.
+5. `dfx deploy fusion-app-backend` (types + `integrationRecordPayPalSubscription`).
+6. `npm run build` + deploy frontend (CSP already allows PayPal script/frame/connect domains).
+7. Test: application one-time fee (card + wallet), MPD deposit/manual, join subscription (popup), legacy Stripe member still has access.

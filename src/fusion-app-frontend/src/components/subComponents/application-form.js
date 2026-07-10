@@ -33,7 +33,7 @@ import {
     syncSubscriptionFromStripeByEmail,
 } from '../../utils/integrationApi.js';
 import {
-    mountPayPalOneTimeCheckout,
+    mountPayPalAdvancedOneTimeCheckout,
     mountPayPalSubscriptionButtons,
 } from '../../utils/paymentCheckout.js';
 import {
@@ -49,6 +49,43 @@ import {
 import posthog from 'posthog-js';
 import { metaTrack } from '../../utils/metaPixel.js';
 import { syncPosthogConversionPerson } from '../../utils/posthogConversionIdentity.js';
+import paymentCardIcon from '../../assets/icons/fusion_svg_icons_b2/payment-card.svg';
+import popularCrownIcon from '../../assets/icons/fusion_svg_icons_b2/popular-crown.svg';
+import annualDiamondIcon from '../../assets/icons/fusion_svg_icons_b2/annual-diamond.svg';
+import benefitCheckIcon from '../../assets/icons/fusion_svg_icons_b2/benefit-check.svg';
+import calendarSlotsIcon from '../../assets/icons/fusion_svg_icons_b2/calendar-slots.svg';
+import secureShieldIcon from '../../assets/icons/fusion_svg_icons_b2/secure-shield.svg';
+import includedGiftIcon from '../../assets/icons/fusion_svg_icons_b2/included-gift.svg';
+import memberUserIcon from '../../assets/icons/fusion_svg_icons_b2/member-user.svg';
+import globalCommunityIcon from '../../assets/icons/fusion_svg_icons_b2/global-community.svg';
+import artistHeartIcon from '../../assets/icons/fusion_svg_icons_b2/artist-heart.svg';
+import secureLockIcon from '../../assets/icons/fusion_svg_icons_b2/secure-lock.svg';
+
+/** @type {Record<string, string>} */
+const APP_FEE_ICONS = {
+    paymentCard: paymentCardIcon,
+    popularCrown: popularCrownIcon,
+    annualDiamond: annualDiamondIcon,
+    benefitCheck: benefitCheckIcon,
+    calendarSlots: calendarSlotsIcon,
+    secureShield: secureShieldIcon,
+    includedGift: includedGiftIcon,
+    memberUser: memberUserIcon,
+    globalCommunity: globalCommunityIcon,
+    artistHeart: artistHeartIcon,
+    secureLock: secureLockIcon,
+};
+
+/**
+ * @param {string} iconUrl
+ * @param {string} [extraClass]
+ * @returns {string}
+ */
+function appFeeIconHtml(iconUrl, extraClass = '') {
+    const cls = ['app-fee-icon', extraClass].filter(Boolean).join(' ');
+    const url = String(iconUrl || '').replace(/"/g, '');
+    return `<span class="${cls}" style="--app-fee-icon-url: url(&quot;${url}&quot;)" aria-hidden="true"></span>`;
+}
 
 const DEFAULT_PROGRAM_FORM_CTX = {
     applicationFeeLine: '',
@@ -131,6 +168,10 @@ class ApplicationFormComponent extends HTMLElement {
         this._fusionPendingId = null;
         /** @type {string | null} */
         this._fusionSubscriptionId = null;
+        /** PayPal one-time order id after card or wallet approval. */
+        this._paypalOrderId = '';
+        /** @type {{ usesCardFields: boolean, submit: () => Promise<void>, destroy: () => void } | null} */
+        this._paypalCheckoutController = null;
         /** @type {AbortController | null} */
         this._wireAbort = null;
         /** User has a stored application for this `data-program-id` — hide fee UI; submit without Stripe. */
@@ -180,9 +221,37 @@ class ApplicationFormComponent extends HTMLElement {
         if (obj && typeof obj === 'object') {
             for (const loc of ['en', 'ja']) {
                 const b = obj[loc];
-                if (b && typeof b === 'object' && Array.isArray(b.whatsIncludedBullets)) {
-                    base[loc].whatsIncludedBullets = b.whatsIncludedBullets
+                if (!b || typeof b !== 'object' || Array.isArray(b)) continue;
+                const row = /** @type {Record<string, unknown>} */ (b);
+                if (Array.isArray(row.whatsIncludedBullets)) {
+                    base[loc].whatsIncludedBullets = row.whatsIncludedBullets
                         .map((x) => String(x ?? '').trim())
+                        .filter(Boolean);
+                }
+                for (const key of [
+                    'securePaymentLine',
+                    'choosePaymentHeading',
+                    'choosePaymentSubtext',
+                    'paymentPlaceholderExtended',
+                    'paymentPlaceholderTitle',
+                    'paymentPlaceholderSub',
+                    'footerThankYou',
+                    'footerQuestionsPrefix',
+                    'footerContactUs',
+                ]) {
+                    const v = String(row[key] ?? '').trim();
+                    if (v) base[loc][key] = v;
+                }
+                if (Array.isArray(row.trustBadges) && row.trustBadges.length > 0) {
+                    base[loc].trustBadges = row.trustBadges
+                        .map((item) => {
+                            if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+                            const r = /** @type {Record<string, unknown>} */ (item);
+                            const title = String(r.title ?? '').trim();
+                            const body = String(r.body ?? '').trim();
+                            if (!title && !body) return null;
+                            return { title, body };
+                        })
                         .filter(Boolean);
                 }
             }
@@ -248,17 +317,26 @@ class ApplicationFormComponent extends HTMLElement {
             Number.isFinite(tot);
         const top = root.querySelector('#app-cohort-slots-top');
         const pay = root.querySelector('#app-cohort-slots-payment');
+        const a = show ? String(Math.max(0, Math.floor(av))) : '';
+        const b = show ? String(Math.max(0, Math.floor(tot))) : '';
         const tpl = String(L.slotsRemainingValue || '').trim();
-        const html = show
-            ? tpl
-                  .replace(/\{\{a\}\}/g, String(Math.max(0, Math.floor(av))))
-                  .replace(/\{\{b\}\}/g, String(Math.max(0, Math.floor(tot))))
-            : '';
+        const html = show ? tpl.replace(/\{\{a\}\}/g, a).replace(/\{\{b\}\}/g, b) : '';
+        const countTpl = String(L.slotsCountValue || '{{a}} of {{b}}');
+        const countText = show ? countTpl.replace(/\{\{a\}\}/g, a).replace(/\{\{b\}\}/g, b) : '';
+        const slotsLabel = String(L.slotsRemainingLabel || 'Slots remaining');
         for (const el of [top, pay]) {
             if (!el) continue;
             if (!show || !html) {
                 el.setAttribute('hidden', '');
                 el.innerHTML = '';
+            } else if (el.id === 'app-cohort-slots-payment') {
+                el.removeAttribute('hidden');
+                el.innerHTML =
+                    `<span class="app-fee-meta-icon-box">${appFeeIconHtml(APP_FEE_ICONS.calendarSlots, 'app-fee-icon app-fee-icon--sm')}</span>` +
+                    `<span class="app-fee-meta-slots-lines">` +
+                    `<span class="app-fee-meta-slots-count">${countText}</span>` +
+                    `<span class="app-fee-meta-slots-label">${slotsLabel}</span>` +
+                    `</span>`;
             } else {
                 el.removeAttribute('hidden');
                 el.innerHTML = html;
@@ -290,19 +368,11 @@ class ApplicationFormComponent extends HTMLElement {
         if (planHead) planHead.textContent = L.whatsIncludedPlanHeading;
 
         if (globalUl) {
-            globalUl.innerHTML = '';
-            if (globalBullets.length === 0) {
-                const li = document.createElement('li');
-                li.className = 'app-whats-included-empty';
-                li.textContent = L.whatsIncludedGlobalEmpty;
-                globalUl.appendChild(li);
-            } else {
-                for (const t of globalBullets) {
-                    const li = document.createElement('li');
-                    li.textContent = t;
-                    globalUl.appendChild(li);
-                }
-            }
+            const emptyText = globalBullets.length === 0 ? L.whatsIncludedGlobalEmpty : '';
+            this._fillBulletList(globalUl, globalBullets, {
+                emptyText,
+                emptyClass: 'app-whats-included-empty',
+            });
         }
 
         const plan = this._paymentPlan;
@@ -316,23 +386,106 @@ class ApplicationFormComponent extends HTMLElement {
         const planBullets = opt?.includedBullets?.length ? opt.includedBullets : [];
 
         if (planUl && planBlock) {
-            planUl.innerHTML = '';
             if (!plan) {
                 planBlock.hidden = false;
-                const li = document.createElement('li');
-                li.className = 'app-whats-included-empty';
-                li.textContent = L.whatsIncludedPickPlan;
-                planUl.appendChild(li);
+                this._fillBulletList(planUl, [], {
+                    pickPlan: true,
+                    emptyText: L.whatsIncludedPickPlan,
+                    pickPlanClass: 'app-whats-included-empty app-whats-included-pickplan',
+                });
             } else if (planBullets.length === 0) {
                 planBlock.hidden = true;
+                planUl.innerHTML = '';
             } else {
                 planBlock.hidden = false;
-                for (const t of planBullets) {
-                    const li = document.createElement('li');
-                    li.textContent = t;
-                    planUl.appendChild(li);
-                }
+                this._fillBulletList(planUl, planBullets);
             }
+        }
+    }
+
+    /**
+     * @returns {'en' | 'ja'}
+     */
+    _formLocale() {
+        return typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
+    }
+
+    /**
+     * @returns {Record<string, unknown>}
+     */
+    _paymentGlobalLocaleBlock() {
+        const locale = this._formLocale();
+        return (
+            this._applicationPaymentGlobal[locale] ||
+            this._applicationPaymentGlobal.en ||
+            defaultApplicationPaymentGlobal().en
+        );
+    }
+
+    /**
+     * @param {Record<string, unknown>} base
+     * @returns {Record<string, unknown>}
+     */
+    _mergePaymentChromeLabels(base) {
+        const g = this._paymentGlobalLocaleBlock();
+        for (const key of [
+            'securePaymentLine',
+            'choosePaymentHeading',
+            'choosePaymentSubtext',
+            'paymentPlaceholderExtended',
+            'paymentPlaceholderTitle',
+            'paymentPlaceholderSub',
+            'footerThankYou',
+            'footerQuestionsPrefix',
+            'footerContactUs',
+        ]) {
+            const v = String(g[key] ?? '').trim();
+            if (v) base[key] = v;
+        }
+        if (Array.isArray(g.trustBadges) && g.trustBadges.length >= 4) {
+            base.trustBadges = g.trustBadges.slice(0, 4);
+        }
+        return base;
+    }
+
+    /**
+     * @param {string} text
+     * @returns {string}
+     */
+    _bulletItemHtml(text) {
+        return `${appFeeIconHtml(APP_FEE_ICONS.benefitCheck, 'app-fee-icon app-fee-icon--check')}<span>${String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')}</span>`;
+    }
+
+    /**
+     * @param {Element | null} ul
+     * @param {string[]} items
+     * @param {{ pickPlan?: boolean, emptyText?: string, pickPlanClass?: string, emptyClass?: string }} [opts]
+     */
+    _fillBulletList(ul, items, opts = {}) {
+        if (!ul) return;
+        ul.innerHTML = '';
+        const filtered = items.map((s) => String(s ?? '').trim()).filter(Boolean);
+        if (filtered.length === 0 && opts.pickPlan) {
+            const li = document.createElement('li');
+            li.className = opts.pickPlanClass || 'app-whats-included-empty app-whats-included-pickplan';
+            li.textContent = opts.emptyText || '';
+            ul.appendChild(li);
+            return;
+        }
+        if (filtered.length === 0 && opts.emptyText) {
+            const li = document.createElement('li');
+            li.className = opts.emptyClass || 'app-whats-included-empty';
+            li.textContent = opts.emptyText;
+            ul.appendChild(li);
+            return;
+        }
+        for (const text of filtered) {
+            const li = document.createElement('li');
+            li.innerHTML = this._bulletItemHtml(text);
+            ul.appendChild(li);
         }
     }
 
@@ -369,18 +522,22 @@ class ApplicationFormComponent extends HTMLElement {
         const oneTimeTitle = root.querySelector('#app-plan-one-time-title');
         const oneTimePrice = root.querySelector('#app-plan-one-time-price');
         const oneTimeSub = root.querySelector('#app-plan-one-time-sub');
+        const oneTimeBullets = root.querySelector('#app-plan-one-time-bullets');
         const dispOne = String(one.displayPrice ?? '').trim();
         if (oneTimeTitle) oneTimeTitle.textContent = String(one.title ?? '').trim() || L.planOneTimeTitle;
         if (oneTimePrice) {
             if (dispOne) oneTimePrice.textContent = dispOne;
             else oneTimePrice.textContent = cents != null ? this._formatUsdFromCents(cents) : '—';
         }
-        if (oneTimeSub) {
-            const s = String(one.subtext ?? '').trim();
-            const s2 = String(one.subtext2 ?? '').trim();
-            oneTimeSub.textContent = s2 ? `${s}\n${s2}` : s || L.planOneTimeSub;
-            oneTimeSub.style.whiteSpace = s2 ? 'pre-line' : '';
-        }
+        const oneSub = String(one.subtext ?? '').trim() || L.planOneTimeSub;
+        const oneSub2 = String(one.subtext2 ?? '').trim();
+        if (oneTimeSub) oneTimeSub.textContent = oneSub2 ? `${oneSub}\n${oneSub2}` : oneSub;
+        const oneBulletItems = [
+            ...(Array.isArray(one.includedBullets) ? one.includedBullets : []),
+            oneSub,
+            ...(oneSub2 ? [oneSub2] : []),
+        ].filter((v, i, arr) => arr.indexOf(v) === i);
+        this._fillBulletList(oneTimeBullets, oneBulletItems.length ? oneBulletItems : [L.planOneTimeSub]);
         if (oneTimeCard instanceof HTMLElement) {
             const unavailable = cents == null;
             oneTimeCard.toggleAttribute('disabled', unavailable);
@@ -394,11 +551,18 @@ class ApplicationFormComponent extends HTMLElement {
         const biEvery = root.querySelector('#app-plan-bimonthly-every');
         const biSub1 = root.querySelector('#app-plan-bimonthly-sub1');
         const biSub2 = root.querySelector('#app-plan-bimonthly-sub2');
+        const biBullets = root.querySelector('#app-plan-bimonthly-bullets');
         if (biTitle) biTitle.textContent = String(bi.title ?? '').trim() || L.planBimonthlyTitle;
         if (biPrice) biPrice.textContent = String(bi.displayPrice ?? '').trim() || L.planBimonthlyPriceLine;
         if (biEvery) biEvery.textContent = L.planBimonthlyEvery;
-        if (biSub1) biSub1.textContent = String(bi.subtext ?? '').trim() || L.planBimonthlySub1;
-        if (biSub2) biSub2.textContent = String(bi.subtext2 ?? '').trim() || L.planBimonthlySub2;
+        const biSubA = String(bi.subtext ?? '').trim() || L.planBimonthlySub1;
+        const biSubB = String(bi.subtext2 ?? '').trim() || L.planBimonthlySub2;
+        if (biSub1) biSub1.textContent = biSubA;
+        if (biSub2) biSub2.textContent = biSubB;
+        const biBulletItems = Array.isArray(bi.includedBullets) && bi.includedBullets.length
+            ? bi.includedBullets
+            : [biSubA, biSubB].filter(Boolean);
+        this._fillBulletList(biBullets, biBulletItems);
 
         const an = o.annual || {};
         const anTitle = root.querySelector('#app-plan-annual-title');
@@ -406,11 +570,18 @@ class ApplicationFormComponent extends HTMLElement {
         const anDisc = root.querySelector('#app-plan-annual-discount');
         const anSub1 = root.querySelector('#app-plan-annual-sub1');
         const anSub2 = root.querySelector('#app-plan-annual-sub2');
+        const anBullets = root.querySelector('#app-plan-annual-bullets');
         if (anTitle) anTitle.textContent = String(an.title ?? '').trim() || L.planAnnualTitle;
         if (anPrice) anPrice.textContent = String(an.displayPrice ?? '').trim() || L.planAnnualPrice;
         if (anDisc) anDisc.textContent = L.planAnnualDiscount;
-        if (anSub1) anSub1.textContent = String(an.subtext ?? '').trim() || L.planAnnualSub1;
-        if (anSub2) anSub2.textContent = String(an.subtext2 ?? '').trim() || L.planAnnualSub2;
+        const anSubA = String(an.subtext ?? '').trim() || L.planAnnualSub1;
+        const anSubB = String(an.subtext2 ?? '').trim() || L.planAnnualSub2;
+        if (anSub1) anSub1.textContent = anSubA;
+        if (anSub2) anSub2.textContent = anSubB;
+        const anBulletItems = Array.isArray(an.includedBullets) && an.includedBullets.length
+            ? an.includedBullets
+            : [anSubA, anSubB].filter(Boolean);
+        this._fillBulletList(anBullets, anBulletItems);
     }
 
     /**
@@ -439,7 +610,7 @@ class ApplicationFormComponent extends HTMLElement {
     _labels() {
         const locale = typeof window.getLocale === 'function' ? window.getLocale() : 'en';
         if (locale === 'ja') {
-            return {
+            const jaLabels = {
                 title: '応募フォーム',
                 contactSectionTitle: '連絡先と所在地',
                 portfolioSectionTitle: 'ポートフォリオ',
@@ -469,6 +640,36 @@ class ApplicationFormComponent extends HTMLElement {
                     '下から支払い方法を選び、安全なフォームにカード情報を入力して応募を完了してください。',
                 paymentPlanGroupLabel: '応募料の支払い方法',
                 paymentPlaceholderNoSelection: '上のいずれかのオプションを選ぶと、カード入力フォームが表示されます。',
+                choosePaymentHeading: 'お支払い方法を選択',
+                choosePaymentSubtext:
+                    'ご自身に合ったオプションを選び、カード情報を入力して次へお進みください。',
+                securePaymentLine: '安全な決済 • 暗号化で保護',
+                paymentPlaceholderTitle: '上のいずれかのオプションを選ぶと、安全なカード入力フォームが表示されます。',
+                paymentPlaceholderSub: 'お支払い情報はここで安全に収集されます。',
+                paymentPlaceholderExtended:
+                    '上のいずれかのオプションを選ぶと、安全なカード入力フォームがここに表示されます。',
+                footerThankYou:
+                    'アーティストを支え、思慮深いグローバルなクリエイティブコミュニティづくりにご協力いただきありがとうございます。',
+                footerQuestionsPrefix: 'ご不明点は',
+                footerContactUs: 'お問い合わせ',
+                trustBadges: [
+                    {
+                        title: '安全・暗号化',
+                        body: 'お支払い情報は業界標準の暗号化で保護されます。',
+                    },
+                    {
+                        title: '公正・透明',
+                        body: '隠れた費用のない明確な料金設定です。',
+                    },
+                    {
+                        title: 'グローバルコミュニティ',
+                        body: '世界中のアーティストとつながる Fusion ネットワークへ。',
+                    },
+                    {
+                        title: 'アーティスト第一',
+                        body: 'すべての収益がクリエイティブ実践者を支える使命に役立ちます。',
+                    },
+                ],
                 suggestedBadge: 'おすすめ',
                 planOneTimeTitle: '1. 一回払い（応募料のみ）',
                 planOneTimeSub: '一度だけのお支払い',
@@ -508,6 +709,9 @@ class ApplicationFormComponent extends HTMLElement {
                 city: '市区町村',
                 step0FillRequired: '名・姓・メール・国・市区町村を入力してください。',
                 step0InvalidEmail: '有効なメールアドレスを入力してください。',
+                validationTitle: '入力が必要です',
+                validationBody: '続ける前に、次の必須項目を入力してください：',
+                validationContinue: '続ける',
                 website: 'あなたの世界をどこで体験できますか？',
                 websiteByline: '（ウェブサイト、ポートフォリオ、作品を置いている場所 — リンク可）',
                 discipline: 'いま、実践をどう定義していますか？',
@@ -534,6 +738,8 @@ class ApplicationFormComponent extends HTMLElement {
                     'その他（自由記述）',
                 ],
                 slotsRemainingValue: '残り <strong>{{a}}</strong> / 全 <strong>{{b}}</strong> 枠',
+                slotsCountValue: '{{a}} / {{b}}',
+                slotsRemainingLabel: '残り枠',
                 bioStatement: 'アーティストとして、ひとりの人として、あなたについて教えてください。',
                 bioStatementByline: '（短い経歴でも、もっと個人的なことでも — 正直に書ける方）',
                 exploration: 'いま探求・問いかけ・変化の途中にあることは何ですか？',
@@ -567,8 +773,9 @@ class ApplicationFormComponent extends HTMLElement {
                 feeInfoP3:
                     'お支払いが完了し応募が送信されたあと、プロフィールのダッシュボードから、いつでもサブスクリプションの内容を更新したり、解約したりできます。',
             };
+            return /** @type {Record<string, unknown>} */ (this._mergePaymentChromeLabels(/** @type {Record<string, unknown>} */ (jaLabels)));
         }
-        return {
+        const enLabels = {
             title: 'Application Form',
             contactSectionTitle: 'Contact & location',
             portfolioSectionTitle: 'Portfolio',
@@ -597,7 +804,37 @@ class ApplicationFormComponent extends HTMLElement {
                 'Choose a payment option below, then enter your card in the secure form and submit to complete your application.',
             paymentPlanGroupLabel: 'Application fee payment options',
             paymentPlaceholderNoSelection: 'Select an option above to load the secure card form.',
-            suggestedBadge: 'Suggested',
+            choosePaymentHeading: 'Choose your payment option',
+            choosePaymentSubtext:
+                'Select the option that works best for you, then enter your card details to continue.',
+            securePaymentLine: 'Secure payment • Encrypted & safe',
+            paymentPlaceholderTitle: 'Select an option above to load the secure card form.',
+            paymentPlaceholderSub: "We'll securely collect your payment details here.",
+            paymentPlaceholderExtended:
+                "Select an option above to load the secure card form. We'll securely collect your payment details here.",
+            footerThankYou:
+                'Thank you for supporting artists and helping us build a thoughtful, global creative community.',
+            footerQuestionsPrefix: 'Questions?',
+            footerContactUs: 'Contact us',
+            trustBadges: [
+                {
+                    title: 'Secure & Encrypted',
+                    body: 'Your payment details are protected with industry-standard encryption.',
+                },
+                {
+                    title: 'Fair & Transparent',
+                    body: 'Clear pricing with no hidden fees—we believe in honest communication.',
+                },
+                {
+                    title: 'Global Community',
+                    body: 'Join artists from around the world in the Fusion network.',
+                },
+                {
+                    title: 'Artist Focused',
+                    body: 'Every dollar supports our mission to empower creative practitioners.',
+                },
+            ],
+            suggestedBadge: 'Most popular',
             planOneTimeTitle: '1. Single Application Payment',
             planOneTimeSub: 'One-time payment',
             planBimonthlyTitle: '2. Application + Subscription',
@@ -637,6 +874,9 @@ class ApplicationFormComponent extends HTMLElement {
             step0FillRequired:
                 'Please fill in first name, last name, email, country, and city before paying or submitting.',
             step0InvalidEmail: 'Please enter a valid email address.',
+            validationTitle: 'A few details needed',
+            validationBody: 'Please complete these required fields before continuing:',
+            validationContinue: 'Continue',
             website: 'Where can we experience your world?',
             websiteByline: '(Website, portfolio, or any place your work lives — links welcome)',
             discipline: 'How do you define your practice right now?',
@@ -662,7 +902,9 @@ class ApplicationFormComponent extends HTMLElement {
                 'Mixed media',
                 'Other (describe in your own words)',
             ],
-            slotsRemainingValue: '<strong>{{a}}</strong> of <strong>{{b}}</strong> Slots Remaining',
+            slotsRemainingValue: '<strong>{{a}}</strong> of <strong>{{b}}</strong> slots remaining',
+            slotsCountValue: '{{a}} of {{b}}',
+            slotsRemainingLabel: 'Slots remaining',
             bioStatement: 'Tell us about yourself, as an artist and as a person.',
             bioStatementByline: '(A short bio, or something more personal — whichever feels more honest to you)',
             exploration: 'What are you currently exploring, questioning, or becoming?',
@@ -699,6 +941,7 @@ class ApplicationFormComponent extends HTMLElement {
             feeInfoP3:
                 'After your payment completes and your application is sent, you can use your profile dashboard to update or cancel your subscription at any time.',
         };
+        return /** @type {Record<string, unknown>} */ (this._mergePaymentChromeLabels(/** @type {Record<string, unknown>} */ (enLabels)));
     }
 
     /**
@@ -733,17 +976,149 @@ class ApplicationFormComponent extends HTMLElement {
      * Soft validation for contact fields — avoids native `required` / strict `type=url` friction.
      * @returns {string | null} Error message, or null if OK.
      */
-    _validateStep0Soft() {
+    /**
+     * @returns {{ missing: { id: string, label: string }[], invalidEmail: boolean }}
+     */
+    _getStep0Missing() {
         const L = this._labels();
         const root = this.shadowRoot;
         const get = (id) => String(root?.querySelector(`#${id}`)?.value ?? '').trim();
-        if (!get('app-first-name') || !get('app-last-name') || !get('app-email') || !get('app-country') || !get('app-city')) {
-            return L.step0FillRequired;
+        const fields = [
+            { id: 'app-first-name', label: L.firstName },
+            { id: 'app-last-name', label: L.lastName },
+            { id: 'app-email', label: L.email },
+            { id: 'app-country', label: L.country },
+            { id: 'app-city', label: L.city },
+        ];
+        const missing = fields.filter((f) => !get(f.id));
+        const invalidEmail =
+            !missing.some((f) => f.id === 'app-email') && !isLooseEmail(get('app-email'));
+        return { missing, invalidEmail };
+    }
+
+    /**
+     * Validate the required step-0 fields; on failure, show a popup and return false.
+     * @returns {boolean}
+     */
+    _ensureStep0OrPrompt() {
+        const result = this._getStep0Missing();
+        if (result.missing.length || result.invalidEmail) {
+            this._showStep0ValidationPopup(result);
+            return false;
         }
-        if (!isLooseEmail(get('app-email'))) {
-            return L.step0InvalidEmail;
+        this._setFormStatusMessage('', 'neutral');
+        return true;
+    }
+
+    /**
+     * @param {string} id
+     */
+    _highlightStep0Field(id) {
+        const el = this.shadowRoot?.querySelector(`#${id}`);
+        if (!(el instanceof HTMLElement)) return;
+        el.classList.add('app-field--invalid');
+        const clear = () => {
+            el.classList.remove('app-field--invalid');
+            el.removeEventListener('input', clear);
+            el.removeEventListener('change', clear);
+        };
+        el.addEventListener('input', clear);
+        el.addEventListener('change', clear);
+    }
+
+    /**
+     * @param {{ missing: { id: string, label: string }[], invalidEmail: boolean }} result
+     */
+    _showStep0ValidationPopup(result) {
+        const root = this.shadowRoot;
+        if (!root) return;
+        const L = this._labels();
+        root.querySelector('.app-validation-overlay')?.remove();
+
+        const targets = result.missing.map((f) => f.id);
+        if (result.invalidEmail && !targets.includes('app-email')) targets.push('app-email');
+        const firstId = targets[0] || '';
+
+        try {
+            posthog.capture('program_application_validation_popup_shown', {
+                ...this._posthogApplicationBaseProps(),
+                payment_plan: this._paymentPlan || 'none',
+                missing_fields: result.missing.map((f) => f.id),
+                missing_field_count: result.missing.length,
+                invalid_email: result.invalidEmail,
+            });
+        } catch {
+            /* ignore */
         }
-        return null;
+
+        const overlay = document.createElement('div');
+        overlay.className = 'app-validation-overlay';
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.setAttribute('aria-labelledby', 'app-validation-title');
+
+        const modal = document.createElement('div');
+        modal.className = 'app-validation-modal';
+
+        const title = document.createElement('h3');
+        title.className = 'app-validation-title';
+        title.id = 'app-validation-title';
+        title.textContent = L.validationTitle;
+        modal.appendChild(title);
+
+        const text = document.createElement('p');
+        text.className = 'app-validation-text';
+        text.textContent = result.invalidEmail && result.missing.length === 0
+            ? L.step0InvalidEmail
+            : L.validationBody;
+        modal.appendChild(text);
+
+        if (result.missing.length) {
+            const list = document.createElement('ul');
+            list.className = 'app-validation-list';
+            for (const f of result.missing) {
+                const li = document.createElement('li');
+                li.textContent = f.label;
+                list.appendChild(li);
+            }
+            modal.appendChild(list);
+        }
+
+        const actions = document.createElement('div');
+        actions.className = 'app-validation-actions';
+        const continueBtn = document.createElement('button');
+        continueBtn.type = 'button';
+        continueBtn.className = 'app-btn app-btn--primary';
+        continueBtn.textContent = L.validationContinue;
+        actions.appendChild(continueBtn);
+        modal.appendChild(actions);
+
+        overlay.appendChild(modal);
+        root.appendChild(overlay);
+
+        const close = () => overlay.remove();
+        const proceed = () => {
+            close();
+            targets.forEach((id) => this._highlightStep0Field(id));
+            const target = firstId ? root.querySelector(`#${firstId}`) : null;
+            if (target instanceof HTMLElement) {
+                target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                try {
+                    target.focus({ preventScroll: true });
+                } catch {
+                    target.focus();
+                }
+            }
+        };
+
+        continueBtn.addEventListener('click', proceed);
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) close();
+        });
+        overlay.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') close();
+        });
+        continueBtn.focus();
     }
 
     /**
@@ -806,6 +1181,15 @@ class ApplicationFormComponent extends HTMLElement {
         this._stripePrepareKey = '';
         this._fusionPendingId = null;
         this._fusionSubscriptionId = null;
+        this._paypalOrderId = '';
+        try {
+            this._paypalCheckoutController?.destroy();
+        } catch {
+            /* ignore */
+        }
+        this._paypalCheckoutController = null;
+        const mount = this.querySelector('[slot="app-stripe-mount"]');
+        if (mount) mount.textContent = '';
         try {
             this._stripePaymentElement?.unmount();
         } catch {
@@ -876,8 +1260,10 @@ class ApplicationFormComponent extends HTMLElement {
         ) {
             return;
         }
-        const myGen = ++this._stripePrepareGen;
+        // Teardown bumps _stripePrepareGen, so capture the generation AFTER it —
+        // otherwise every myGen check below would bail and leave "Preparing payment…" stuck.
         this._teardownStripePayment();
+        const myGen = ++this._stripePrepareGen;
         this._fusionPendingId = null;
         this._fusionSubscriptionId = null;
         this._paypalOrderId = '';
@@ -931,8 +1317,11 @@ class ApplicationFormComponent extends HTMLElement {
                     if (payBtn) payBtn.disabled = true;
                     return;
                 }
-                await mountPayPalOneTimeCheckout(mountEl, {
+                const oneTimeConfig = await fetchPaymentConfig();
+                if (myGen !== this._stripePrepareGen) return;
+                this._paypalCheckoutController = await mountPayPalAdvancedOneTimeCheckout(mountEl, {
                     clientId,
+                    mode: oneTimeConfig.mode === 'live' ? 'live' : 'sandbox',
                     amountCents,
                     metadata: {
                         programId,
@@ -946,12 +1335,18 @@ class ApplicationFormComponent extends HTMLElement {
                         }),
                     onApproved: async (oid) => {
                         this._paypalOrderId = oid;
-                        await confirmPayPalOneTimePayment(oid);
                     },
                     onError: (err) => {
                         console.warn('[application-form] PayPal order error', err);
+                        setHint(
+                            err instanceof Error ? err.message : 'PayPal checkout failed.',
+                            false,
+                        );
                     },
                 });
+                if (this._paypalCheckoutController.usesCardFields) {
+                    setHint('Enter your card details below, then click Pay & submit application.', false);
+                }
             } else {
                 const payConfig = await fetchPaymentConfig();
                 if (myGen !== this._stripePrepareGen) return;
@@ -1316,8 +1711,17 @@ class ApplicationFormComponent extends HTMLElement {
                     w.stripeError = error;
                     throw wrapped;
                 }
-            } else if (this._paymentPlan === 'one_time' && this._paypalOrderId) {
-                await confirmPayPalOneTimePayment(this._paypalOrderId);
+            } else if (provider === 'paypal' && this._paymentPlan === 'one_time') {
+                if (!this._paypalOrderId) {
+                    if (this._paypalCheckoutController?.usesCardFields) {
+                        await this._paypalCheckoutController.submit();
+                    } else {
+                        throw new Error('Complete payment with PayPal below, then try again.');
+                    }
+                }
+                if (this._paypalOrderId) {
+                    await confirmPayPalOneTimePayment(this._paypalOrderId);
+                }
             } else if (this._fusionSubscriptionId) {
                 const snap = await getAuthSnapshot();
                 if (snap.authenticated) {
@@ -1625,12 +2029,7 @@ class ApplicationFormComponent extends HTMLElement {
     }
 
     async _onPaySubmitClick() {
-        const err = this._validateStep0Soft();
-        if (err) {
-            this._setFormStatusMessage(err, 'error');
-            return;
-        }
-        this._setFormStatusMessage('', 'neutral');
+        if (!this._ensureStep0OrPrompt()) return;
         await this._confirmPayAndSubmit();
     }
 
@@ -1741,23 +2140,13 @@ class ApplicationFormComponent extends HTMLElement {
 
     async _onSubmitUpdatesClick() {
         if (!this._alreadyApplied) return;
-        const err = this._validateStep0Soft();
-        if (err) {
-            this._setFormStatusMessage(err, 'error');
-            return;
-        }
-        this._setFormStatusMessage('', 'neutral');
+        if (!this._ensureStep0OrPrompt()) return;
         await this._submitApplication();
     }
 
     async _onSubmitFreeClick() {
         if (!this._membershipFeeWaived || this._alreadyApplied) return;
-        const err = this._validateStep0Soft();
-        if (err) {
-            this._setFormStatusMessage(err, 'error');
-            return;
-        }
-        this._setFormStatusMessage('', 'neutral');
+        if (!this._ensureStep0OrPrompt()) return;
         await this._submitApplication();
     }
 
@@ -1771,12 +2160,7 @@ class ApplicationFormComponent extends HTMLElement {
             const ok = typeof centsRaw === 'number' && Number.isFinite(centsRaw) && centsRaw >= 50;
             if (!ok) return;
         }
-        const err = this._validateStep0Soft();
-        if (err) {
-            this._setFormStatusMessage(err, 'error');
-            return;
-        }
-        this._setFormStatusMessage('', 'neutral');
+        if (!this._ensureStep0OrPrompt()) return;
         this._paymentPlan = plan;
         this._syncPaymentPlanUi();
         this._teardownStripePayment();
@@ -1852,14 +2236,7 @@ class ApplicationFormComponent extends HTMLElement {
             }
             return;
         }
-        const step0Err = this._validateStep0Soft();
-        if (step0Err) {
-            if (statusEl) {
-                statusEl.textContent = step0Err;
-                statusEl.classList.add('is-error');
-            }
-            return;
-        }
+        if (!this._ensureStep0OrPrompt()) return;
         if (statusEl) {
             statusEl.textContent = '';
             statusEl.classList.remove('is-error', 'is-success');
@@ -2113,11 +2490,29 @@ class ApplicationFormComponent extends HTMLElement {
         this._hasCapturedProgramApplicationStarted = false;
         this._teardownStripePayment();
         const L = this._labels();
+        const I = APP_FEE_ICONS;
         const escAttr = (s) =>
             String(s)
                 .replace(/&/g, '&amp;')
                 .replace(/"/g, '&quot;')
                 .replace(/</g, '&lt;');
+        const escHtml = (s) =>
+            String(s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+        const trustBadges = Array.isArray(L.trustBadges) ? L.trustBadges : [];
+        const trustIcons = [I.secureShield, I.memberUser, I.globalCommunity, I.artistHeart];
+        const trustRowHtml = [0, 1, 2, 3]
+            .map((i) => {
+                const b = /** @type {{ title?: string, body?: string }} */ (trustBadges[i] || {});
+                return `<div class="app-fee-trust-item">
+                    <span class="app-fee-trust-icon-wrap">${appFeeIconHtml(trustIcons[i], 'app-fee-icon app-fee-icon--trust')}</span>
+                    <p class="app-fee-trust-title">${escHtml(b.title || '')}</p>
+                    <p class="app-fee-trust-body">${escHtml(b.body || '')}</p>
+                </div>`;
+            })
+            .join('');
         const disciplineOpts = Array.isArray(L.disciplineDatalistOptions) ? L.disciplineDatalistOptions : [];
         const disciplineDatalistHtml = disciplineOpts
             .map((v) => `<option value="${escAttr(v)}"></option>`)
@@ -2224,28 +2619,222 @@ class ApplicationFormComponent extends HTMLElement {
 
                 .app-form-card--payment {
                     margin-top: clamp(1.25rem, 3vw, 2rem);
+                    padding: clamp(1.5rem, 3.5vw, 2.35rem);
                 }
 
-                .app-payment-fee-lead {
-                    margin: 0 0 1rem;
+                .app-fee-icon {
+                    display: inline-block;
+                    flex-shrink: 0;
+                    width: 1.35rem;
+                    height: 1.35rem;
+                    background: currentColor;
+                    color: inherit;
+                    mask: var(--app-fee-icon-url) center / contain no-repeat;
+                    -webkit-mask: var(--app-fee-icon-url) center / contain no-repeat;
+                }
+
+                .app-fee-icon--sm {
+                    width: 1.1rem;
+                    height: 1.1rem;
+                }
+
+                .app-fee-icon--check {
+                    width: 0.95rem;
+                    height: 0.95rem;
+                    margin-top: 0.12rem;
+                }
+
+                .app-fee-icon--trust {
+                    width: 1.5rem;
+                    height: 1.5rem;
+                }
+
+                .app-fee-icon--plan {
+                    width: 1.65rem;
+                    height: 1.65rem;
+                }
+
+                .app-fee-icon--gift {
+                    width: 2rem;
+                    height: 2rem;
+                }
+
+                .app-fee-header {
+                    text-align: left;
+                    margin: 0 0 clamp(1.4rem, 3vw, 2rem);
+                }
+
+                .app-fee-title {
+                    margin: 0 0 0.5rem;
+                    font-size: clamp(1rem, 1.35vw, 1.2rem);
+                    font-variation-settings: var(--fv-headline-wide);
+                    color: var(--c2);
+                    letter-spacing: 0.04em;
+                    line-height: 1.15;
+                }
+
+                .app-fee-price {
+                    margin: 0 0 0.85rem;
+                    font-size: clamp(1.15rem, 1.5vw, 1.45rem);
+                    font-variation-settings: var(--fv-emphasis);
+                    color: var(--c2);
+                    letter-spacing: 0.02em;
+                }
+
+                .app-fee-intro {
+                    margin: 0;
+                    max-width: 34rem;
+                    font-size: clamp(0.88rem, 1.1vw, 0.98rem);
+                    font-variation-settings: var(--fv-body-wide);
+                    line-height: 1.5;
+                    color: var(--c2);
+                    opacity: 0.9;
+                }
+
+                .app-fee-meta-row {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    gap: 0.75rem;
+                    margin: 0 0 clamp(1.6rem, 3.5vw, 2.35rem);
+                    padding: 0.9rem 0;
+                    border-top: 1px solid rgba(0, 0, 0, 0.12);
+                    border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+                }
+
+                .app-fee-meta-slots,
+                .app-fee-meta-secure {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.65rem;
+                    min-width: 0;
+                    font-size: clamp(0.72rem, 0.9vw, 0.82rem);
+                    font-variation-settings: var(--fv-caption);
+                    color: var(--c2);
+                    letter-spacing: 0.03em;
+                    line-height: 1.3;
+                }
+
+                .app-fee-meta-secure {
+                    opacity: 0.92;
+                }
+
+                .app-fee-meta-slots[hidden] {
+                    display: none !important;
+                }
+
+                .app-fee-meta-icon-box {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    flex-shrink: 0;
+                    width: 2.1rem;
+                    height: 2.1rem;
+                    border-radius: 8px;
+                    background: rgba(0, 0, 0, 0.05);
+                    color: var(--c2);
+                }
+
+                .app-fee-meta-slots-lines {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0.1rem;
+                    min-width: 0;
+                }
+
+                .app-fee-meta-slots-count {
+                    font-size: clamp(0.85rem, 1.05vw, 0.98rem);
+                    font-variation-settings: var(--fv-body-wide);
+                    font-weight: 600;
+                    letter-spacing: 0.01em;
+                }
+
+                .app-fee-meta-slots-label {
+                    font-size: clamp(0.62rem, 0.75vw, 0.7rem);
+                    text-transform: uppercase;
+                    letter-spacing: 0.08em;
+                    opacity: 0.82;
+                }
+
+                .app-fee-meta-divider {
+                    display: none;
+                }
+
+                .app-fee-meta-row:not(:has(.app-fee-meta-slots:not([hidden]))) .app-fee-meta-divider {
+                    display: none;
+                }
+
+                .app-fee-meta-row:not(:has(.app-fee-meta-slots:not([hidden]))) {
+                    justify-content: center;
+                }
+
+                .app-fee-choose {
+                    text-align: center;
+                    margin: 0 0 clamp(1.1rem, 2.5vw, 1.5rem);
+                }
+
+                .app-fee-choose-title {
+                    margin: 0 0 0.35rem;
+                    font-size: clamp(1rem, 1.35vw, 1.2rem);
+                    font-variation-settings: var(--fv-title);
+                    color: var(--c2);
+                    letter-spacing: 0.02em;
+                }
+
+                .app-fee-choose-sub {
+                    margin: 0 auto;
+                    max-width: 34rem;
                     font-size: clamp(0.88rem, 1.1vw, 0.98rem);
                     font-variation-settings: var(--fv-body-wide);
                     color: var(--c2);
                     line-height: 1.5;
-                    opacity: 0.95;
+                    opacity: 0.9;
+                }
+
+                .app-payment-fee-lead {
+                    display: none;
                 }
 
                 .app-payment-plan-grid {
                     display: grid;
                     grid-template-columns: repeat(3, 1fr);
-                    gap: 0.75rem;
+                    gap: clamp(0.85rem, 1.8vw, 1.25rem);
                     align-items: stretch;
-                    margin: 0 0 1.25rem;
+                    margin: 0 0 clamp(1.5rem, 3vw, 2rem);
                 }
 
                 @media (max-width: 900px) {
                     .app-payment-plan-grid {
                         grid-template-columns: 1fr;
+                    }
+
+                    .app-fee-meta-row {
+                        flex-direction: column;
+                        align-items: flex-start;
+                    }
+
+                    .app-fee-meta-divider {
+                        width: 100%;
+                        height: 1px;
+                        min-height: 0;
+                    }
+
+                    .app-whats-included-panel__cols {
+                        grid-template-columns: 1fr !important;
+                    }
+
+                    .app-whats-included-panel__divider {
+                        display: none;
+                    }
+
+                    .app-fee-trust-row {
+                        grid-template-columns: repeat(2, 1fr) !important;
+                    }
+
+                    .app-fee-footer {
+                        flex-direction: column;
+                        align-items: center !important;
+                        gap: 1rem !important;
                     }
                 }
 
@@ -2257,7 +2846,7 @@ class ApplicationFormComponent extends HTMLElement {
                 }
 
                 .app-payment-plan-wrap--suggested {
-                    padding-top: 0.65rem;
+                    padding-top: 0.75rem;
                 }
 
                 .app-payment-plan-suggested-badge {
@@ -2266,45 +2855,50 @@ class ApplicationFormComponent extends HTMLElement {
                     left: 50%;
                     transform: translate(-50%, -50%);
                     z-index: 1;
-                    padding: 0.2rem 0.55rem;
+                    padding: 0.24rem 0.7rem;
                     border-radius: 999px;
-                    font-size: clamp(0.65rem, 0.75vw, 0.72rem);
-                    font-variation-settings: var(--fv-caption);
-                    letter-spacing: 0.04em;
+                    font-size: clamp(0.62rem, 0.72vw, 0.7rem);
+                    font-variation-settings: var(--fv-label-strong);
+                    font-weight: 700;
+                    letter-spacing: 0.06em;
                     text-transform: uppercase;
-                    background: #2e7d4a;
-                    color: var(--c3);
+                    background: var(--c4);
+                    color: var(--c2);
                     white-space: nowrap;
                 }
 
                 .app-payment-plan-card {
                     position: relative;
                     display: flex;
-                    gap: 0.65rem;
-                    align-items: flex-start;
+                    flex-direction: column;
+                    align-items: stretch;
                     width: 100%;
                     min-height: 100%;
                     margin: 0;
-                    padding: 0.85rem 0.75rem;
+                    padding: clamp(1.35rem, 2.2vw, 1.75rem) clamp(0.9rem, 1.5vw, 1.25rem) clamp(1.15rem, 2vw, 1.5rem);
                     box-sizing: border-box;
-                    border: 1px solid rgba(0, 0, 0, 0.18);
-                    border-radius: 4px;
+                    border: 1px solid rgba(0, 0, 0, 0.16);
+                    border-radius: 8px;
                     background: var(--c3);
                     color: var(--c2);
-                    text-align: left;
+                    text-align: center;
                     cursor: pointer;
                     font-family: inherit;
                     transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
                 }
 
                 .app-payment-plan-card:hover:not([disabled]) {
-                    border-color: var(--c2);
+                    border-color: var(--c4);
                 }
 
                 .app-payment-plan-card.is-selected {
                     border: 2px solid var(--c4);
-                    background: rgba(0, 0, 0, 0.02);
-                    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.04);
+                    background: color-mix(in srgb, var(--c4) 14%, var(--c3));
+                    box-shadow: 0 0 0 1px color-mix(in srgb, var(--c4) 40%, transparent);
+                }
+
+                .app-payment-plan-wrap--suggested .app-payment-plan-card {
+                    border-color: var(--c4);
                 }
 
                 .app-payment-plan-card[disabled],
@@ -2314,10 +2908,11 @@ class ApplicationFormComponent extends HTMLElement {
                 }
 
                 .app-payment-plan-radio {
-                    flex-shrink: 0;
-                    width: 18px;
-                    height: 18px;
-                    margin-top: 0.15rem;
+                    position: absolute;
+                    top: 0.75rem;
+                    left: 0.75rem;
+                    width: 16px;
+                    height: 16px;
                     border: 2px solid var(--c2);
                     border-radius: 50%;
                     box-sizing: border-box;
@@ -2333,23 +2928,48 @@ class ApplicationFormComponent extends HTMLElement {
                 .app-payment-plan-card-body {
                     display: flex;
                     flex-direction: column;
-                    gap: 0.35rem;
+                    align-items: center;
+                    gap: 0.4rem;
                     min-width: 0;
+                    padding-top: 0.15rem;
+                }
+
+                .app-payment-plan-icon-wrap {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 3rem;
+                    height: 3rem;
+                    margin: 0.1rem 0 0.55rem;
+                    border-radius: 50%;
+                    background: rgba(0, 0, 0, 0.05);
+                    color: var(--c2);
+                }
+
+                .app-payment-plan-wrap--suggested .app-payment-plan-icon-wrap,
+                .app-payment-plan-card.is-selected .app-payment-plan-icon-wrap {
+                    background: color-mix(in srgb, var(--c4) 32%, transparent);
                 }
 
                 .app-payment-plan-title {
-                    font-size: clamp(0.82rem, 1vw, 0.92rem);
+                    font-size: clamp(0.86rem, 1.02vw, 0.98rem);
                     font-variation-settings: var(--fv-body-wide);
                     font-weight: 600;
                     line-height: 1.35;
                     color: var(--c2);
+                    max-width: 12rem;
+                    min-height: 2.6em;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
                 }
 
                 .app-payment-plan-price-row {
                     display: flex;
                     flex-wrap: wrap;
                     align-items: baseline;
-                    gap: 0.35rem 0.5rem;
+                    justify-content: center;
+                    gap: 0.3rem 0.45rem;
                 }
 
                 .app-payment-plan-price {
@@ -2360,21 +2980,216 @@ class ApplicationFormComponent extends HTMLElement {
 
                 .app-payment-plan-every,
                 .app-payment-plan-discount {
-                    font-size: clamp(0.78rem, 0.95vw, 0.88rem);
+                    font-size: clamp(0.74rem, 0.9vw, 0.84rem);
                     font-variation-settings: var(--fv-caption);
-                    opacity: 0.85;
+                    opacity: 0.92;
                 }
 
                 .app-payment-plan-discount {
-                    color: #2e7d4a;
-                    font-weight: 600;
+                    color: color-mix(in srgb, var(--c4), var(--c2) 45%);
+                    font-weight: 700;
+                    opacity: 1;
                 }
 
                 .app-payment-plan-sub {
-                    font-size: clamp(0.75rem, 0.9vw, 0.84rem);
+                    display: none;
+                }
+
+                .app-payment-plan-bullets {
+                    list-style: none;
+                    margin: clamp(0.75rem, 1.5vw, 1.05rem) 0 0;
+                    padding: clamp(0.75rem, 1.5vw, 1.05rem) 0 0;
+                    width: 100%;
+                    text-align: left;
+                    border-top: 1px solid rgba(0, 0, 0, 0.1);
+                }
+
+                .app-payment-plan-bullets:empty {
+                    border-top: 0;
+                    padding-top: 0;
+                    margin-top: 0;
+                }
+
+                .app-payment-plan-bullets li {
+                    display: flex;
+                    align-items: flex-start;
+                    gap: 0.5rem;
+                    margin: 0 0 0.5rem;
+                    font-size: clamp(0.76rem, 0.92vw, 0.84rem);
+                    font-variation-settings: var(--fv-body-wide);
+                    line-height: 1.45;
+                    color: var(--c2);
+                    opacity: 1;
+                }
+
+                .app-payment-plan-bullets li:last-child {
+                    margin-bottom: 0;
+                }
+
+                .app-whats-included-panel {
+                    display: grid;
+                    grid-template-columns: auto 1fr;
+                    gap: clamp(1rem, 2vw, 1.5rem);
+                    align-items: center;
+                    margin: 0 0 clamp(1.5rem, 3vw, 2rem);
+                    padding: clamp(1.15rem, 2.2vw, 1.6rem);
+                    border: 1px solid color-mix(in srgb, var(--c4) 45%, transparent);
+                    border-radius: 8px;
+                    background: color-mix(in srgb, var(--c4) 12%, transparent);
+                }
+
+                .app-whats-included-panel__icon {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: clamp(3.25rem, 5vw, 4rem);
+                    height: clamp(3.25rem, 5vw, 4rem);
+                    border-radius: 50%;
+                    background: var(--c4);
+                    color: var(--c2);
+                }
+
+                .app-whats-included-panel__content {
+                    min-width: 0;
+                }
+
+                .app-whats-included-panel__cols {
+                    display: grid;
+                    grid-template-columns: 1fr auto 1fr;
+                    gap: 0.85rem 1.5rem;
+                    align-items: start;
+                    min-width: 0;
+                }
+
+                .app-whats-included-panel__divider {
+                    width: 1px;
+                    align-self: stretch;
+                    min-height: 2.5rem;
+                    background: rgba(0, 0, 0, 0.12);
+                }
+
+                .app-whats-included-panel__title {
+                    margin: 0 0 0.65rem;
+                    font-size: clamp(1rem, 1.35vw, 1.2rem);
+                    font-variation-settings: var(--fv-title);
+                    color: var(--c2);
+                    letter-spacing: 0.02em;
+                }
+
+                .app-whats-included-subhead {
+                    margin: 0 0 0.4rem;
+                    font-size: clamp(0.78rem, 0.95vw, 0.88rem);
+                    font-variation-settings: var(--fv-body-wide);
+                    font-weight: 600;
+                    letter-spacing: 0.01em;
+                    color: var(--c2);
+                    opacity: 1;
+                }
+
+                .app-whats-included-panel ul {
+                    list-style: none;
+                    margin: 0;
+                    padding: 0;
+                }
+
+                .app-whats-included-panel ul li {
+                    display: flex;
+                    align-items: flex-start;
+                    gap: 0.5rem;
+                    margin: 0 0 0.4rem;
+                    font-size: clamp(0.78rem, 0.92vw, 0.88rem);
+                    font-variation-settings: var(--fv-body-wide);
+                    line-height: 1.45;
+                    color: var(--c2);
+                    opacity: 1;
+                }
+
+                .app-whats-included-empty {
+                    list-style: none;
+                    margin-left: 0;
+                    padding-left: 0;
+                    opacity: 0.82;
+                }
+
+                .app-whats-included-pickplan {
+                    color: var(--c2);
+                    font-weight: 700;
+                    opacity: 1;
+                }
+
+                .app-fee-trust-row {
+                    display: grid;
+                    grid-template-columns: repeat(4, 1fr);
+                    gap: clamp(0.85rem, 2vw, 1.5rem);
+                    margin: 0 0 clamp(1.5rem, 3vw, 2rem);
+                    padding: clamp(0.5rem, 1.5vw, 1rem) 0;
+                    border-top: 1px solid rgba(0, 0, 0, 0.08);
+                    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+                }
+
+                .app-fee-trust-item {
+                    text-align: center;
+                    padding: 0.35rem 0.25rem;
+                }
+
+                .app-fee-trust-icon-wrap {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 1.85rem;
+                    height: 1.85rem;
+                    margin: 0 auto 0.55rem;
+                    color: var(--c2);
+                }
+
+                .app-fee-trust-icon-wrap .app-fee-icon--trust {
+                    width: 1.65rem;
+                    height: 1.65rem;
+                }
+
+                .app-fee-trust-title {
+                    margin: 0 0 0.3rem;
+                    font-size: clamp(0.76rem, 0.92vw, 0.86rem);
+                    font-variation-settings: var(--fv-body-wide);
+                    font-weight: 600;
+                    color: var(--c2);
+                    line-height: 1.3;
+                }
+
+                .app-fee-trust-body {
+                    margin: 0 auto;
+                    font-size: clamp(0.68rem, 0.82vw, 0.76rem);
                     font-variation-settings: var(--fv-caption);
-                    opacity: 0.78;
+                    color: var(--c2);
                     line-height: 1.4;
+                    opacity: 0.9;
+                    max-width: 12rem;
+                }
+
+                .app-fee-footer {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 1.25rem;
+                    margin-top: clamp(1.25rem, 2.5vw, 1.65rem);
+                    padding-top: 1rem;
+                    border-top: 1px solid rgba(0, 0, 0, 0.1);
+                }
+
+                .app-fee-footer-right {
+                    text-align: center;
+                    font-size: clamp(0.72rem, 0.88vw, 0.82rem);
+                    font-variation-settings: var(--fv-caption);
+                    letter-spacing: 0.05em;
+                    text-transform: uppercase;
+                    color: var(--c2);
+                }
+
+                .app-fee-footer-right a {
+                    color: inherit;
+                    text-decoration: underline;
+                    text-underline-offset: 0.14em;
+                    margin-left: 0.35rem;
                 }
 
                 .app-step-heading {
@@ -2468,92 +3283,121 @@ class ApplicationFormComponent extends HTMLElement {
                 }
 
                 .app-application-fee-line {
-                    margin: 0 0 0.35rem;
-                    font-size: clamp(1rem, 1.2vw, 1.15rem);
-                    font-variation-settings: var(--fv-emphasis);
-                    color: var(--c2);
-                }
-
-                .app-fee-notice-italic {
-                    margin: 0 0 1rem;
-                    font-size: clamp(0.86rem, 1.05vw, 0.96rem);
-                    font-variation-settings: var(--fv-body-wide);
-                    font-style: italic;
-                    line-height: 1.5;
-                    color: var(--c2);
-                    opacity: 0.92;
+                    display: none;
                 }
 
                 .app-whats-included-details {
-                    margin: 0 0 1rem;
-                    border: 1px solid rgba(0, 0, 0, 0.12);
-                    padding: 0.5rem 0.75rem;
-                    background: var(--c3);
-                }
-
-                .app-whats-included-details[hidden] {
                     display: none !important;
-                }
-
-                .app-whats-included-details summary {
-                    cursor: pointer;
-                    font-size: clamp(0.88rem, 1.05vw, 0.98rem);
-                    font-variation-settings: var(--fv-body-wide);
-                    color: var(--c2);
-                    letter-spacing: 0.02em;
-                }
-
-                .app-whats-included-body {
-                    margin: 0.5rem 0 0;
-                    font-size: clamp(0.86rem, 1vw, 0.95rem);
-                    font-variation-settings: var(--fv-body-wide);
-                    line-height: 1.55;
-                    color: var(--c2);
-                }
-
-                .app-whats-included-subhead {
-                    margin: 0.65rem 0 0.2rem;
-                    font-size: clamp(0.8rem, 0.95vw, 0.9rem);
-                    font-variation-settings: var(--fv-label);
-                    letter-spacing: 0.02em;
-                    opacity: 0.88;
-                }
-
-                .app-whats-included-subhead:first-child {
-                    margin-top: 0;
-                }
-
-                .app-whats-included-body ul {
-                    margin: 0.25rem 0 0.5rem;
-                    padding-left: 1.25rem;
-                }
-
-                .app-whats-included-empty {
-                    list-style: none;
-                    margin-left: 0;
-                    padding-left: 0;
-                    opacity: 0.82;
                 }
 
                 .app-payment-placeholder {
                     margin: 0.75rem 0 1rem;
-                    padding: 1.25rem 1rem;
-                    border: 2px dashed rgba(0, 0, 0, 0.22);
-                    border-radius: 2px;
+                    padding: clamp(1.5rem, 3vw, 2.1rem) 1.1rem;
+                    border: 1px dashed rgba(0, 0, 0, 0.28);
+                    border-radius: 6px;
                     text-align: center;
-                    font-size: clamp(0.82rem, 1vw, 0.92rem);
+                    color: var(--c2);
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    gap: 0.4rem;
+                }
+
+                .app-payment-placeholder-head {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 0.55rem;
+                }
+
+                .app-payment-placeholder-title {
+                    margin: 0;
+                    font-size: clamp(0.86rem, 1.05vw, 0.98rem);
+                    font-variation-settings: var(--fv-body-wide);
+                    font-weight: 600;
+                    color: var(--c2);
+                    line-height: 1.4;
+                }
+
+                .app-payment-placeholder-sub {
+                    margin: 0;
+                    font-size: clamp(0.78rem, 0.95vw, 0.88rem);
                     font-variation-settings: var(--fv-caption);
                     color: var(--c2);
                     line-height: 1.45;
-                    opacity: 0.88;
+                    opacity: 0.72;
+                    max-width: 28rem;
+                }
+                .app-field input.app-field--invalid,
+                .app-field select.app-field--invalid,
+                .app-field textarea.app-field--invalid {
+                    border-color: #8b2942;
+                    box-shadow: 0 0 0 2px rgba(139, 41, 66, 0.18);
+                    background: rgba(139, 41, 66, 0.04);
+                }
+
+                .app-validation-overlay {
+                    position: fixed;
+                    inset: 0;
+                    z-index: 2147483000;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 1.25rem;
+                    background: rgba(0, 0, 0, 0.5);
+                    animation: app-validation-fade 0.15s ease;
+                }
+
+                @keyframes app-validation-fade {
+                    from { opacity: 0; }
+                    to { opacity: 1; }
+                }
+
+                .app-validation-modal {
+                    width: min(420px, 100%);
+                    box-sizing: border-box;
+                    background: var(--c3);
+                    color: var(--c2);
+                    border: 1px solid rgba(0, 0, 0, 0.15);
+                    padding: 1.5rem 1.4rem 1.25rem;
+                    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+                }
+
+                .app-validation-title {
+                    margin: 0 0 0.5rem;
+                    font-size: clamp(1.02rem, 1.4vw, 1.18rem);
+                    font-variation-settings: var(--fv-body-wide);
+                    letter-spacing: 0.01em;
+                }
+
+                .app-validation-text {
+                    margin: 0 0 0.65rem;
+                    font-size: clamp(0.86rem, 1vw, 0.95rem);
+                    font-variation-settings: var(--fv-body);
+                    line-height: 1.5;
+                    opacity: 0.9;
+                }
+
+                .app-validation-list {
+                    margin: 0 0 1.1rem;
+                    padding-left: 1.2rem;
+                    font-size: clamp(0.86rem, 1vw, 0.95rem);
+                    font-variation-settings: var(--fv-body-wide);
+                    line-height: 1.6;
+                }
+
+                .app-validation-list li {
+                    font-weight: 600;
+                }
+
+                .app-validation-actions {
+                    display: flex;
+                    justify-content: flex-end;
+                    gap: 0.6rem;
                 }
 
                 .app-payment-placeholder[hidden] {
                     display: none !important;
-                }
-
-                .app-payment-placeholder p {
-                    margin: 0.35rem 0;
                 }
 
                 .app-form-actions {
@@ -2728,6 +3572,10 @@ class ApplicationFormComponent extends HTMLElement {
                     min-height: 100px;
                 }
 
+                ::slotted(.app-application-stripe-mount) .paypal-advanced-checkout {
+                    width: 100%;
+                }
+
                 .app-payment-support {
                     margin: 1rem 0 0;
                     font-size: clamp(0.82rem, 1vw, 0.92rem);
@@ -2837,63 +3685,98 @@ class ApplicationFormComponent extends HTMLElement {
                         </div>
 
                         <div id="app-payment-section" class="app-form-card app-form-card--payment">
-                            <h3 class="app-step-heading">${L.applicationFeeHeading}</h3>
-                            <p class="app-application-fee-line" id="app-application-fee-line">
-                                <span id="app-application-fee-amount"></span>
-                            </p>
-                            <p id="app-fee-notice-italic" class="app-fee-notice-italic"></p>
-                            <p class="app-payment-fee-lead">${L.paymentFeeLead}</p>
-                            <p id="app-cohort-slots-payment" class="app-cohort-slots app-cohort-slots--payment" hidden></p>
-                            <div class="app-payment-plan-grid" role="radiogroup" aria-label="${L.paymentPlanGroupLabel}">
+                            <header class="app-fee-header">
+                                <h3 class="app-fee-title">${L.applicationFeeHeading}</h3>
+                                <p class="app-fee-price" id="app-application-fee-amount"></p>
+                                <p id="app-fee-notice-italic" class="app-fee-intro"></p>
+                            </header>
+
+                            <div class="app-fee-meta-row">
+                                <div id="app-cohort-slots-payment" class="app-fee-meta-slots" hidden></div>
+                                <div class="app-fee-meta-divider" aria-hidden="true"></div>
+                                <div class="app-fee-meta-secure">
+                                    ${appFeeIconHtml(I.secureShield, 'app-fee-icon app-fee-icon--sm')}
+                                    <span>${escHtml(L.securePaymentLine || '')}</span>
+                                </div>
+                            </div>
+
+                            <div class="app-fee-choose">
+                                <h4 class="app-fee-choose-title">${escHtml(L.choosePaymentHeading || L.applicationFeeHeading)}</h4>
+                                <p class="app-fee-choose-sub">${escHtml(L.choosePaymentSubtext || L.paymentFeeLead)}</p>
+                            </div>
+
+                            <div class="app-payment-plan-grid" role="radiogroup" aria-label="${escAttr(L.paymentPlanGroupLabel)}">
                                 <button type="button" class="app-payment-plan-card" role="radio" aria-checked="false" data-app-payment-plan="one_time" id="app-plan-one-time">
                                     <span class="app-payment-plan-radio" aria-hidden="true"></span>
                                     <span class="app-payment-plan-card-body">
-                                        <span class="app-payment-plan-title" id="app-plan-one-time-title">${L.planOneTimeTitle}</span>
+                                        <span class="app-payment-plan-icon-wrap">${appFeeIconHtml(I.paymentCard, 'app-fee-icon app-fee-icon--plan')}</span>
+                                        <span class="app-payment-plan-title" id="app-plan-one-time-title">${escHtml(L.planOneTimeTitle)}</span>
                                         <span class="app-payment-plan-price" id="app-plan-one-time-price">—</span>
-                                        <span class="app-payment-plan-sub" id="app-plan-one-time-sub">${L.planOneTimeSub}</span>
+                                        <ul class="app-payment-plan-bullets" id="app-plan-one-time-bullets"></ul>
+                                        <span class="app-payment-plan-sub" id="app-plan-one-time-sub" hidden>${escHtml(L.planOneTimeSub)}</span>
                                     </span>
                                 </button>
                                 <div class="app-payment-plan-wrap app-payment-plan-wrap--suggested">
-                                    <span class="app-payment-plan-suggested-badge">${L.suggestedBadge}</span>
+                                    <span class="app-payment-plan-suggested-badge">${escHtml(L.suggestedBadge)}</span>
                                     <button type="button" class="app-payment-plan-card" role="radio" aria-checked="false" data-app-payment-plan="bimonthly" id="app-plan-bimonthly">
                                         <span class="app-payment-plan-radio" aria-hidden="true"></span>
                                         <span class="app-payment-plan-card-body">
-                                            <span class="app-payment-plan-title" id="app-plan-bimonthly-title">${L.planBimonthlyTitle}</span>
+                                            <span class="app-payment-plan-icon-wrap">${appFeeIconHtml(I.popularCrown, 'app-fee-icon app-fee-icon--plan')}</span>
+                                            <span class="app-payment-plan-title" id="app-plan-bimonthly-title">${escHtml(L.planBimonthlyTitle)}</span>
                                             <span class="app-payment-plan-price-row">
-                                                <span class="app-payment-plan-price" id="app-plan-bimonthly-price">${L.planBimonthlyPriceLine}</span>
-                                                <span class="app-payment-plan-every" id="app-plan-bimonthly-every">${L.planBimonthlyEvery}</span>
+                                                <span class="app-payment-plan-price" id="app-plan-bimonthly-price">${escHtml(L.planBimonthlyPriceLine)}</span>
+                                                <span class="app-payment-plan-every" id="app-plan-bimonthly-every">${escHtml(L.planBimonthlyEvery)}</span>
                                             </span>
-                                            <span class="app-payment-plan-sub" id="app-plan-bimonthly-sub1">${L.planBimonthlySub1}</span>
-                                            <span class="app-payment-plan-sub" id="app-plan-bimonthly-sub2">${L.planBimonthlySub2}</span>
+                                            <ul class="app-payment-plan-bullets" id="app-plan-bimonthly-bullets"></ul>
+                                            <span class="app-payment-plan-sub" id="app-plan-bimonthly-sub1" hidden>${escHtml(L.planBimonthlySub1)}</span>
+                                            <span class="app-payment-plan-sub" id="app-plan-bimonthly-sub2" hidden>${escHtml(L.planBimonthlySub2)}</span>
                                         </span>
                                     </button>
                                 </div>
                                 <button type="button" class="app-payment-plan-card" role="radio" aria-checked="false" data-app-payment-plan="annual" id="app-plan-annual">
                                     <span class="app-payment-plan-radio" aria-hidden="true"></span>
                                     <span class="app-payment-plan-card-body">
-                                        <span class="app-payment-plan-title" id="app-plan-annual-title">${L.planAnnualTitle}</span>
+                                        <span class="app-payment-plan-icon-wrap">${appFeeIconHtml(I.annualDiamond, 'app-fee-icon app-fee-icon--plan')}</span>
+                                        <span class="app-payment-plan-title" id="app-plan-annual-title">${escHtml(L.planAnnualTitle)}</span>
                                         <span class="app-payment-plan-price-row">
-                                            <span class="app-payment-plan-price" id="app-plan-annual-price">${L.planAnnualPrice}</span>
-                                            <span class="app-payment-plan-discount" id="app-plan-annual-discount">${L.planAnnualDiscount}</span>
+                                            <span class="app-payment-plan-price" id="app-plan-annual-price">${escHtml(L.planAnnualPrice)}</span>
+                                            <span class="app-payment-plan-discount" id="app-plan-annual-discount">${escHtml(L.planAnnualDiscount)}</span>
                                         </span>
-                                        <span class="app-payment-plan-sub" id="app-plan-annual-sub1">${L.planAnnualSub1}</span>
-                                        <span class="app-payment-plan-sub" id="app-plan-annual-sub2">${L.planAnnualSub2}</span>
+                                        <ul class="app-payment-plan-bullets" id="app-plan-annual-bullets"></ul>
+                                        <span class="app-payment-plan-sub" id="app-plan-annual-sub1" hidden>${escHtml(L.planAnnualSub1)}</span>
+                                        <span class="app-payment-plan-sub" id="app-plan-annual-sub2" hidden>${escHtml(L.planAnnualSub2)}</span>
                                     </span>
                                 </button>
                             </div>
-                            <details id="app-whats-included-details" class="app-whats-included-details">
-                                <summary>${L.whatsIncludedSummary}</summary>
-                                <div id="app-whats-included-body" class="app-whats-included-body">
-                                    <p class="app-whats-included-subhead" id="app-whats-included-global-head"></p>
-                                    <ul id="app-whats-included-global-ul"></ul>
-                                    <div id="app-whats-included-plan-block">
-                                        <p class="app-whats-included-subhead" id="app-whats-included-plan-head"></p>
-                                        <ul id="app-whats-included-plan-ul"></ul>
+
+                            <div class="app-whats-included-panel">
+                                <div class="app-whats-included-panel__icon">
+                                    ${appFeeIconHtml(I.includedGift, 'app-fee-icon app-fee-icon--gift')}
+                                </div>
+                                <div class="app-whats-included-panel__content">
+                                    <h4 class="app-whats-included-panel__title">${escHtml(L.whatsIncludedSummary)}</h4>
+                                    <div class="app-whats-included-panel__cols">
+                                        <div class="app-whats-included-panel__col">
+                                            <p class="app-whats-included-subhead" id="app-whats-included-global-head"></p>
+                                            <ul id="app-whats-included-global-ul"></ul>
+                                        </div>
+                                        <div class="app-whats-included-panel__divider" aria-hidden="true"></div>
+                                        <div class="app-whats-included-panel__col" id="app-whats-included-plan-block">
+                                            <p class="app-whats-included-subhead" id="app-whats-included-plan-head"></p>
+                                            <ul id="app-whats-included-plan-ul"></ul>
+                                        </div>
                                     </div>
                                 </div>
-                            </details>
+                            </div>
+
+                            <div class="app-fee-trust-row">${trustRowHtml}</div>
+
                             <div id="app-payment-placeholder" class="app-payment-placeholder">
-                                <p>${L.paymentPlaceholderNoSelection}</p>
+                                <div class="app-payment-placeholder-head">
+                                    ${appFeeIconHtml(I.secureLock, 'app-fee-icon app-fee-icon--sm')}
+                                    <p class="app-payment-placeholder-title">${escHtml(L.paymentPlaceholderTitle || L.paymentPlaceholderNoSelection)}</p>
+                                </div>
+                                <p class="app-payment-placeholder-sub">${escHtml(L.paymentPlaceholderSub || '')}</p>
                             </div>
                             <div class="app-payment-slot-wrap">
                                 <slot name="app-stripe-mount"></slot>
@@ -2905,12 +3788,15 @@ class ApplicationFormComponent extends HTMLElement {
                                 <p id="app-payment-hint" aria-live="polite"></p>
                             </div>
                             <div class="app-form-actions">
-                                <button type="button" class="app-btn app-btn--primary" id="app-pay-submit" disabled hidden>${L.payAndSubmitApplication}</button>
+                                <button type="button" class="app-btn app-btn--primary" id="app-pay-submit" disabled hidden>${escHtml(L.payAndSubmitApplication)}</button>
                             </div>
-                            <p class="app-payment-support">
-                                ${L.paymentSupportPrefix}
-                                <a class="app-payment-mail" href="mailto:info@fusionart.world">info@fusionart.world</a>${L.paymentSupportSuffix}
-                            </p>
+
+                            <footer class="app-fee-footer">
+                                <div class="app-fee-footer-right">
+                                    <span>${escHtml(L.footerQuestionsPrefix || L.paymentSupportPrefix)}</span>
+                                    <a href="mailto:info@fusionart.world">${escHtml(L.footerContactUs || 'info@fusionart.world')}</a>
+                                </div>
+                            </footer>
                         </div>
                     </form>
                 </div>

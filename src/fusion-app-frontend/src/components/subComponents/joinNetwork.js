@@ -28,11 +28,13 @@ import {
   submitEarlyAccessToCanister,
 } from "../../utils/earlyAccessSubscribe.js";
 import {
+  clearJoinPendingMembershipStorage,
   clearPendingMembershipPayload,
   clearPendingPaymentEmailLocal,
   createSubscription,
   FUSION_PENDING_MEMBERSHIP_LINK_KEY,
   getIntegrationBaseUrl,
+  hasActiveJoinMembershipLinkSession,
   linkPayPalSubscriptionToPrincipal,
   linkSubscriptionToPrincipal,
   mapIntegrationUserMessage,
@@ -208,6 +210,8 @@ class JoinNetworkComponent extends HTMLElement {
     this._joinExemptCodePath = false;
     /** Blocks re-entrant exempt redemption when `dispatchFusionAuthChange` runs mid-flow. */
     this._exemptAccessCodeJoinInFlight = false;
+    /** Prevents concurrent pay-first Internet Identity link attempts. */
+    this._pendingLinkInFlight = false;
     this._formEmail = "";
     /** @type {string} */
     this._lastFocused = null;
@@ -332,11 +336,20 @@ class JoinNetworkComponent extends HTMLElement {
         }
     }
 
+  _isActivePendingMembershipLinkFlow() {
+    return (
+      this._stage === "linkAccount" ||
+      hasActiveJoinMembershipLinkSession() ||
+      Boolean(this._fusionPendingId)
+    );
+  }
+
   /**
    * After refresh, restore pay-first state so the user can still complete Internet Identity link.
    * @returns {boolean} true if pending link state was restored
    */
   _restorePendingMembershipFromStorage() {
+    if (!hasActiveJoinMembershipLinkSession()) return false;
     const p = readPendingMembershipPayload();
     if (!p?.paymentCompleted || !p.fusionPendingId) return false;
     this._fusionPendingId = p.fusionPendingId;
@@ -1431,14 +1444,45 @@ class JoinNetworkComponent extends HTMLElement {
    * After pay-first checkout + II sign-in: link Stripe subscription to principal, register account, finish confirmation.
    */
   async _tryCompletePendingLink() {
+    if (!this._isActivePendingMembershipLinkFlow()) {
+      try {
+        const { getIdentityIfAuthenticated } =
+          await import("../../utils/icAuth.js");
+        const identity = await getIdentityIfAuthenticated();
+        if (identity) {
+          const { getAccountForCaller } =
+            await import("../../utils/database.js");
+          const acc = await getAccountForCaller();
+          if (acc) {
+            clearJoinPendingMembershipStorage();
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+
+    if (!this._fusionPendingId) {
+      this._restorePendingMembershipFromStorage();
+    }
     if (this._stage !== "linkAccount") {
-      if (!this._restorePendingMembershipFromStorage()) return;
+      this._stage = "linkAccount";
+      const stageRoot = this.shadowRoot;
+      if (stageRoot) {
+        STAGES.forEach((s) => {
+          const panel = stageRoot.querySelector(`[data-jn-panel="${s}"]`);
+          if (panel) panel.hidden = s !== "linkAccount";
+        });
+      }
     }
     if (this._joinExemptCodePath) {
       await this._tryCompleteExemptAccessCodeJoin();
       return;
     }
     if (!this._fusionPendingId) return;
+    if (this._pendingLinkInFlight) return;
+    this._pendingLinkInFlight = true;
     const root = this.shadowRoot;
     const errEl = root?.querySelector("#jnLinkErr");
     const linkingEl = root?.querySelector("#jnLinkLinking");
@@ -1518,12 +1562,18 @@ class JoinNetworkComponent extends HTMLElement {
       }
       clearPendingMembershipPayload();
       await this._afterJoinSaved();
-      if (this.hasAttribute("data-header-bridge")) {
+      if (
+        this.hasAttribute("data-header-bridge") &&
+        hasActiveJoinMembershipLinkSession()
+      ) {
         this._ensureJoinDialogVisible();
       }
     } catch (e) {
       if (DEV_MODE) console.error("[JoinNetwork] link pending", e);
-      if (this.hasAttribute("data-header-bridge")) {
+      if (
+        this.hasAttribute("data-header-bridge") &&
+        hasActiveJoinMembershipLinkSession()
+      ) {
         this._ensureJoinDialogVisible();
       }
       if (linkingEl) {
@@ -1537,6 +1587,8 @@ class JoinNetworkComponent extends HTMLElement {
             ? e.message
             : "Could not link your account. Try again.";
       }
+    } finally {
+      this._pendingLinkInFlight = false;
     }
   }
 
@@ -3076,7 +3128,7 @@ class JoinNetworkComponent extends HTMLElement {
                                     </span>
                                 </button>
                             </div>
-                            <details id="jnWhatsIncludedDetails" class="jn-whats-included-details">
+                            <details id="jnWhatsIncludedDetails" class="jn-whats-included-details" open>
                                 <summary id="jnWhatsIncludedSummary"></summary>
                                 <div class="jn-whats-included-body">
                                     <p class="jn-whats-included-subhead" id="jnWhatsIncludedGlobalHead"></p>
@@ -3231,9 +3283,10 @@ class JoinNetworkComponent extends HTMLElement {
       readPendingMembershipPayload();
     const resumeLink =
       (!detail || detail.mode !== "resubscribe") &&
+      pendingRestore?.paymentCompleted &&
+      pendingRestore?.fusionPendingId &&
       (Boolean(detail?.resumePendingLink) ||
-        (pendingRestore?.paymentCompleted &&
-          pendingRestore?.fusionPendingId));
+        hasActiveJoinMembershipLinkSession());
 
     if (resumeLink) {
       this._joinExemptCodePath = false;
@@ -3485,11 +3538,13 @@ class JoinNetworkComponent extends HTMLElement {
 
     root.querySelector("#jnLinkSignIn")?.addEventListener("click", async () => {
       const errEl = root.querySelector("#jnLinkErr");
+      const linkingEl = root.querySelector("#jnLinkLinking");
+      const signInBtn = root.querySelector("#jnLinkSignIn");
       if (errEl) errEl.textContent = "";
       try {
         const { getAuthSnapshot, loginInternetIdentity } =
           await import("../../utils/icAuth.js");
-        await loginInternetIdentity();
+        await loginInternetIdentity({ source: "join-link" });
         const snap = await getAuthSnapshot();
         if (snap.authenticated) {
           identifyPosthogAfterInternetIdentityLogin(
@@ -3500,9 +3555,20 @@ class JoinNetworkComponent extends HTMLElement {
               lastName: this._formLastName,
             },
           );
+          if (linkingEl) {
+            linkingEl.textContent = "Linking your access…";
+            linkingEl.hidden = false;
+          }
+          if (signInBtn instanceof HTMLElement) signInBtn.hidden = true;
+          await this._tryCompletePendingLink();
         }
       } catch (e) {
         if (e === ERROR_USER_INTERRUPT) return;
+        if (linkingEl) {
+          linkingEl.textContent = "";
+          linkingEl.hidden = true;
+        }
+        if (signInBtn instanceof HTMLElement) signInBtn.hidden = false;
         if (errEl) {
           errEl.textContent =
             e instanceof Error

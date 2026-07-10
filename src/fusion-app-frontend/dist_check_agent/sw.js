@@ -97,7 +97,7 @@ define(['./workbox-6d1fb45c'], (function (workbox) { 'use strict';
     "revision": "268070e17a4a96c98b3f48d35eb4edad"
   }, {
     "url": "index.html",
-    "revision": "75fa7bef83d8f052e8f39f2efb16b50e"
+    "revision": "eb34f919c03ad8c0f5967f5280d2f77a"
   }, {
     "url": "favicon.ico",
     "revision": "3020841241212772e5977c8f2ccdc6a6"
@@ -132,49 +132,61 @@ define(['./workbox-6d1fb45c'], (function (workbox) { 'use strict';
     "url": "assets/warning-d449b082.svg",
     "revision": null
   }, {
-    "url": "assets/videos-a6f14262.js",
+    "url": "assets/videos-0d8fcd8b.js",
     "revision": null
   }, {
-    "url": "assets/videoPageModel-ac2c636a.js",
+    "url": "assets/videoPageModel-101070bf.js",
     "revision": null
   }, {
-    "url": "assets/studioDateFormat-528ac2a2.css",
+    "url": "assets/studioDateFormat-a5701e6e.js",
     "revision": null
   }, {
-    "url": "assets/studioDateFormat-30c8922b.js",
+    "url": "assets/studioDateFormat-52889a06.css",
     "revision": null
   }, {
     "url": "assets/studio-ff970ce3.css",
     "revision": null
   }, {
-    "url": "assets/studio-3a34e0ef.js",
+    "url": "assets/studio-ad91b820.js",
     "revision": null
   }, {
-    "url": "assets/settingsProfile-e571a19b.js",
+    "url": "assets/settingsProfile-cd6b5682.js",
+    "revision": null
+  }, {
+    "url": "assets/secure-shield-a73133d2.svg",
+    "revision": null
+  }, {
+    "url": "assets/secure-lock-9c0d6f85.svg",
     "revision": null
   }, {
     "url": "assets/receipt-download-ee91e1a5.svg",
     "revision": null
   }, {
-    "url": "assets/programs-c869dcd3.js",
+    "url": "assets/programs-3d5548db.js",
     "revision": null
   }, {
-    "url": "assets/programView-42473368.js",
+    "url": "assets/programView-b1d289ac.js",
     "revision": null
   }, {
     "url": "assets/programSidebarRunDates-de5d2f88.js",
     "revision": null
   }, {
-    "url": "assets/profileSetupSeedLocales-93a0bcb3.js",
+    "url": "assets/profileSetupSeedLocales-95f2d1d0.js",
     "revision": null
   }, {
-    "url": "assets/profile-f2973c81.js",
+    "url": "assets/profile-328cdf4f.js",
+    "revision": null
+  }, {
+    "url": "assets/popular-crown-6dc8d234.svg",
     "revision": null
   }, {
     "url": "assets/payments-08af1cce.svg",
     "revision": null
   }, {
     "url": "assets/payment-plan-d3fd375b.svg",
+    "revision": null
+  }, {
+    "url": "assets/payment-card-cee1840f.svg",
     "revision": null
   }, {
     "url": "assets/oh-4-23fc44cb.webp",
@@ -198,34 +210,40 @@ define(['./workbox-6d1fb45c'], (function (workbox) { 'use strict';
     "url": "assets/my-programs-83f66ba0.svg",
     "revision": null
   }, {
+    "url": "assets/member-user-49ed14c8.svg",
+    "revision": null
+  }, {
     "url": "assets/manual-payment-417bd749.svg",
     "revision": null
   }, {
-    "url": "assets/journalEntry-63ec7bfe.js",
+    "url": "assets/journalEntry-93630bf5.js",
     "revision": null
   }, {
-    "url": "assets/journal-b824699d.js",
+    "url": "assets/journal-c54e5ad1.js",
     "revision": null
   }, {
-    "url": "assets/joinFusion-93fa7fc9.js",
+    "url": "assets/joinFusion-af80b18b.js",
     "revision": null
   }, {
-    "url": "assets/index-914b9052.js",
+    "url": "assets/index-9cf3f32f.js",
+    "revision": null
+  }, {
+    "url": "assets/index-686caa2f.js",
+    "revision": null
+  }, {
+    "url": "assets/index-66da80aa.css",
     "revision": null
   }, {
     "url": "assets/index-3a3133d7.js",
     "revision": null
   }, {
-    "url": "assets/index-20317f29.js",
+    "url": "assets/index-224e362e.js",
     "revision": null
   }, {
-    "url": "assets/index-1167a94b.js",
+    "url": "assets/included-gift-898177ef.svg",
     "revision": null
   }, {
-    "url": "assets/index-06c7870c.css",
-    "revision": null
-  }, {
-    "url": "assets/imageProbe-99c1dfc5.js",
+    "url": "assets/imageProbe-c655afa7.js",
     "revision": null
   }, {
     "url": "assets/ic-nav-users-7aa702f7.svg",
@@ -366,10 +384,13 @@ define(['./workbox-6d1fb45c'], (function (workbox) { 'use strict';
     "url": "assets/ic-artist-cancel-1ffacbe9.svg",
     "revision": null
   }, {
-    "url": "assets/home-70dbb058.js",
+    "url": "assets/home-549c84ff.js",
     "revision": null
   }, {
-    "url": "assets/gallery-access-df696eb2.js",
+    "url": "assets/global-community-11b0e3ac.svg",
+    "revision": null
+  }, {
+    "url": "assets/gallery-access-6eb6f6e8.js",
     "revision": null
   }, {
     "url": "assets/flight-icon-a8cccfa4.png",
@@ -381,31 +402,43 @@ define(['./workbox-6d1fb45c'], (function (workbox) { 'use strict';
     "url": "assets/explore-programs-3becc4f9.svg",
     "revision": null
   }, {
-    "url": "assets/event-a9df9d12.js",
+    "url": "assets/event-c6f3175a.js",
     "revision": null
   }, {
-    "url": "assets/editions-0b2e97a7.js",
+    "url": "assets/editions-0c64c334.js",
     "revision": null
   }, {
-    "url": "assets/editionView-0d458682.js",
+    "url": "assets/editionView-38413978.js",
     "revision": null
   }, {
-    "url": "assets/databaseSnapshotJson-6bc0c3e5.js",
+    "url": "assets/databaseSnapshotJson-718b8693.js",
     "revision": null
   }, {
-    "url": "assets/context-449aa0b0.js",
+    "url": "assets/context-f7af7c45.js",
     "revision": null
   }, {
     "url": "assets/contact-b3312608.js",
     "revision": null
   }, {
-    "url": "assets/communityPageDefaults-7a9546dc.js",
+    "url": "assets/communityPageDefaults-9372d18b.js",
     "revision": null
   }, {
-    "url": "assets/community-33da1cb4.js",
+    "url": "assets/community-b6017471.js",
     "revision": null
   }, {
-    "url": "assets/artists-3512dab0.js",
+    "url": "assets/calendar-slots-e9ac9b65.svg",
+    "revision": null
+  }, {
+    "url": "assets/benefit-check-1d8548b7.svg",
+    "revision": null
+  }, {
+    "url": "assets/artists-f5be17c3.js",
+    "revision": null
+  }, {
+    "url": "assets/artist-heart-57ccbe16.svg",
+    "revision": null
+  }, {
+    "url": "assets/annual-diamond-d24a5692.svg",
     "revision": null
   }, {
     "url": "assets/Fusion-X-logo-03-53ecd82a.png",

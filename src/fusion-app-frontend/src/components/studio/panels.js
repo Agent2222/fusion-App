@@ -130,6 +130,9 @@ import { resolveJournalEntryLink } from '../../utils/journalEntryModalHelpers.js
 import { formatStudioDate, formatStudioDateWithTitle } from '../../utils/studioDateFormat.js';
 import {
     createPaymentIntent,
+    accountLookupByEmailForStudio,
+    accountReconnectPreviewForStudio,
+    accountReconnectCompleteForStudio,
     fetchStripeAccountContactsForPrincipals,
     fetchIntegrationHealth,
     fetchStripeSubscriptionStatusByEmail,
@@ -6539,6 +6542,10 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
             ? `<p class="studio-muted studio-user-manage-billing-hint" id="studio-user-billing-hint">Client billing email (this browser): <code>${escapeHtml(billingHintStored)}</code></p>`
             : '<p class="studio-muted studio-user-manage-billing-hint" id="studio-user-billing-hint" hidden></p>';
 
+    const paypalSubId = String(
+        workingRaw.paypalSubscriptionId ?? workingRaw.paypal_subscription_id ?? '',
+    ).trim();
+
     const body = `
       <div class="studio-user-manage-modal">
         <p class="studio-muted studio-user-manage-legend">The Users table <strong>dot</strong> and <strong>Membership</strong> below reflect the <strong>canister</strong>. <strong>Live Stripe</strong> queries Stripe directly — use Push / Check to align the canister.</p>
@@ -6611,6 +6618,21 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
           <div id="studio-user-stripe-ids" class="studio-user-manage-stripe-ids" hidden></div>
         </section>
 
+        <section class="studio-user-manage-section studio-user-manage-section--reconnect">
+          <h3 class="studio-user-manage-section-title">Reconnect Internet Identity</h3>
+          <p class="studio-muted studio-user-manage-hint">Move this member account (subscription + artist profile link) to a <strong>new</strong> Internet Identity principal when the member lost access to their original login. Source principal is this row above.</p>
+          <div class="studio-user-manage-stripe-row">
+            <label class="studio-user-manage-label" for="studio-user-reconnect-to">New principal</label>
+            <input type="text" id="studio-user-reconnect-to" class="studio-input studio-user-manage-email-input" placeholder="Paste new II principal from member" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="studio-user-manage-sync-actions">
+            <button type="button" class="studio-btn-ghost" id="studio-user-reconnect-lookup">Lookup by email</button>
+            <button type="button" class="studio-btn-ghost" id="studio-user-reconnect-preview">Preview reconnect</button>
+            <button type="button" class="studio-btn-primary" id="studio-user-reconnect-complete">Reconnect account</button>
+          </div>
+          <p id="studio-user-reconnect-result" class="studio-muted studio-user-manage-push-result" hidden></p>
+        </section>
+
         <p id="studio-user-sync-warn" class="studio-banner studio-banner--warn studio-user-manage-warn" hidden></p>
         <p id="studio-user-edit-err" class="studio-banner studio-banner--error studio-user-manage-err" hidden></p>
         <div class="studio-modal-actions studio-user-manage-actions">
@@ -6650,6 +6672,8 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
     const syncWarnEl = root.querySelector('#studio-user-sync-warn');
     const pushResultEl = root.querySelector('#studio-user-push-result');
     const stripeIdsEl = root.querySelector('#studio-user-stripe-ids');
+    const reconnectResultEl = root.querySelector('#studio-user-reconnect-result');
+    const reconnectToInput = root.querySelector('#studio-user-reconnect-to');
     const CHECK_LABEL = 'Check Stripe';
     const stripeCheckEmailLsKey = studioStripeCheckEmailStorageKey(principal);
 
@@ -6668,6 +6692,12 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
         if (!(pushResultEl instanceof HTMLElement)) return;
         pushResultEl.hidden = !show;
         pushResultEl.textContent = show ? text : '';
+    };
+
+    const setReconnectResult = (text, show) => {
+        if (!(reconnectResultEl instanceof HTMLElement)) return;
+        reconnectResultEl.hidden = !show;
+        reconnectResultEl.textContent = show ? text : '';
     };
 
     /** @param {Record<string, unknown>} liveR */
@@ -6797,6 +6827,136 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
             }
         });
     }
+
+    const getReconnectEmail = () =>
+        emailInput instanceof HTMLInputElement ? emailInput.value.trim() : '';
+
+    const getReconnectToPrincipal = () =>
+        reconnectToInput instanceof HTMLInputElement ? reconnectToInput.value.trim() : '';
+
+    root.querySelector('#studio-user-reconnect-lookup')?.addEventListener('click', async () => {
+        const emailStr = getReconnectEmail();
+        if (!emailStr.includes('@')) {
+            setReconnectResult('Enter the member checkout email in Live Stripe first.', true);
+            return;
+        }
+        if (!getIntegrationBaseUrl()) {
+            setReconnectResult('Set Integration API URL in Studio → Services.', true);
+            return;
+        }
+        setReconnectResult('Looking up…', true);
+        try {
+            const data = await accountLookupByEmailForStudio(emailStr, paypalSubId);
+            const stripe = data?.stripe && typeof data.stripe === 'object' ? data.stripe : null;
+            const paypal = data?.paypal && typeof data.paypal === 'object' ? data.paypal : null;
+            const lines = [];
+            if (stripe) {
+                if (stripe.membershipActive) {
+                    lines.push(
+                        `Stripe: active (${String(stripe.subscriptionStatus || '')}), sub ${String(stripe.subscriptionId || '')}`,
+                    );
+                } else {
+                    lines.push(`Stripe: ${String(stripe.reason || 'no active subscription')}`);
+                }
+                if (stripe.principalHint) {
+                    lines.push(`Stripe metadata.principal: ${String(stripe.principalHint)}`);
+                }
+            }
+            if (paypal) {
+                if (paypal.subscriptionId) {
+                    lines.push(`PayPal: ${String(paypal.status || '')} (${String(paypal.subscriptionId)})`);
+                    if (paypal.principalHint) {
+                        lines.push(`PayPal custom_id.principal: ${String(paypal.principalHint)}`);
+                    }
+                } else if (paypal.note) {
+                    lines.push(String(paypal.note));
+                }
+            }
+            lines.push(`Canister source (this row): ${principal}`);
+            if (row.linkedArtistId) {
+                lines.push(`linkedArtistId: ${row.linkedArtistId}`);
+            }
+            setReconnectResult(lines.join(' · '), true);
+        } catch (e) {
+            setReconnectResult(e instanceof Error ? e.message : String(e), true);
+        }
+    });
+
+    root.querySelector('#studio-user-reconnect-preview')?.addEventListener('click', async () => {
+        const toPr = getReconnectToPrincipal();
+        const emailStr = getReconnectEmail();
+        if (!toPr) {
+            setReconnectResult('Enter the new Internet Identity principal.', true);
+            return;
+        }
+        if (!getIntegrationBaseUrl()) {
+            setReconnectResult('Set Integration API URL in Studio → Services.', true);
+            return;
+        }
+        setReconnectResult('Previewing…', true);
+        try {
+            const preview = await accountReconnectPreviewForStudio({
+                email: emailStr,
+                fromPrincipal: principal,
+                toPrincipal: toPr,
+            });
+            const warnings = Array.isArray(preview.warnings) ? preview.warnings : [];
+            const warnText = warnings.length ? ` Warnings: ${warnings.join(' ')}` : '';
+            setReconnectResult(
+                `${preview.canProceed ? 'Ready to reconnect.' : 'Cannot reconnect yet.'}${warnText} from=${principal} → to=${toPr}`,
+                true,
+            );
+        } catch (e) {
+            setReconnectResult(e instanceof Error ? e.message : String(e), true);
+        }
+    });
+
+    root.querySelector('#studio-user-reconnect-complete')?.addEventListener('click', async () => {
+        const toPr = getReconnectToPrincipal();
+        const emailStr = getReconnectEmail();
+        if (!toPr) {
+            setReconnectResult('Enter the new Internet Identity principal.', true);
+            return;
+        }
+        if (toPr === principal) {
+            setReconnectResult('New principal must differ from the source row principal.', true);
+            return;
+        }
+        if (
+            !window.confirm(
+                `Move this member account from\n${principal}\nto\n${toPr}\n\nThe old principal will be suspended. Continue?`,
+            )
+        ) {
+            return;
+        }
+        if (!getIntegrationBaseUrl()) {
+            setReconnectResult('Set Integration API URL in Studio → Services.', true);
+            return;
+        }
+        setReconnectResult('Reconnecting…', true);
+        setSyncWarn('');
+        try {
+            const result = await accountReconnectCompleteForStudio({
+                fromPrincipal: principal,
+                toPrincipal: toPr,
+                email: emailStr,
+                paypalSubscriptionId: paypalSubId,
+            });
+            const linked = result?.migrated?.linkedArtistId
+                ? String(result.migrated.linkedArtistId)
+                : row.linkedArtistId || '—';
+            setReconnectResult(
+                `Reconnected. Artist link: ${linked}. Ask the member to sign in with the new Internet Identity and reload Settings → Profile.`,
+                true,
+            );
+            const { refreshErr } = await refetchUserRowAndRefreshTable();
+            if (refreshErr) {
+                setSyncWarn(`Reconnect succeeded but table refresh failed: ${refreshErr}`);
+            }
+        } catch (e) {
+            setReconnectResult(e instanceof Error ? e.message : String(e), true);
+        }
+    });
 
     const applyMembershipFromStudioRow = (upRow) => {
         if (!upRow) return;
