@@ -1,6 +1,7 @@
 /**
  * PayPal payment routes — all new money movement.
  */
+import { randomUUID } from 'node:crypto';
 import { Principal } from '@dfinity/principal';
 import {
     getPayPalClientId,
@@ -16,9 +17,13 @@ import {
     getPayPalOrder,
     getPayPalSubscription,
     parsePayPalCustomId,
-    programPaymentCustomId,
     safePayPalMetaValue,
+    subscriptionCustomId,
 } from './providers/paypalProvider.js';
+import {
+    buildPendingPayPalProgramMetadata,
+    putPendingPayPalMetadata,
+} from './pendingPaymentStore.js';
 import { recordVerifiedPayPalOrder, pushPayPalSubscriptionToCanister } from './recordPayment.js';
 
 /** Re-enable when PayPal supports per-user installment plan creation. */
@@ -58,12 +63,19 @@ export function registerPaymentRoutes(app, opts) {
                 metadata[k.slice(0, 40)] =
                     typeof v === 'string' ? v.slice(0, 500) : String(v ?? '').slice(0, 500);
             }
-            const customId = programPaymentCustomId({ ...req.body, ...metadata }, amountCents);
+            const pendingMeta = buildPendingPayPalProgramMetadata(
+                { ...req.body, ...metadata },
+                amountCents,
+            );
+            const ref = randomUUID();
+            await putPendingPayPalMetadata(ref, pendingMeta);
             const order = await createPayPalOrder({
                 amountCents,
-                description: safePayPalMetaValue(req.body?.description || metadata.purpose || 'Fusion payment', 127),
-                customId,
-                metadata,
+                description: safePayPalMetaValue(
+                    req.body?.description || metadata.purpose || 'Fusion payment',
+                    127,
+                ),
+                customId: ref,
             });
             return res.json({ orderId: order.id, provider: 'paypal' });
         } catch (e) {
@@ -90,6 +102,55 @@ export function registerPaymentRoutes(app, opts) {
             }
             const recorded = await recordVerifiedPayPalOrder(order, programPaymentDeps);
             return res.json({ ok: true, orderId, ...recorded });
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            return res.status(500).json({ error: msg });
+        }
+    });
+
+    app.post('/payments/paypal/repair', requireApiKey, async (req, res) => {
+        try {
+            if (!isPayPalConfigured()) {
+                return res.status(503).json({ error: 'PayPal not configured' });
+            }
+            const orderId = safePayPalMetaValue(req.body?.orderId, 120);
+            if (!orderId) {
+                return res.status(400).json({ error: 'orderId required' });
+            }
+            const principal = safePayPalMetaValue(req.body?.principal, 500);
+            const programId = safePayPalMetaValue(req.body?.programId, 120);
+            const applicationId = safePayPalMetaValue(req.body?.applicationId, 240);
+            const paymentType = safePayPalMetaValue(req.body?.paymentType, 80);
+            if (!principal) return res.status(400).json({ error: 'principal required' });
+            if (!programId) return res.status(400).json({ error: 'programId required' });
+            if (!applicationId) return res.status(400).json({ error: 'applicationId required' });
+            if (!paymentType) return res.status(400).json({ error: 'paymentType required' });
+            Principal.fromText(principal);
+            const ownFlight =
+                req.body?.ownFlight === true ||
+                String(req.body?.ownFlight || '').toLowerCase() === 'true';
+            const metaOverride = {
+                principal,
+                programId,
+                applicationId,
+                paymentType,
+                totalDueCents: String(Math.max(0, Math.round(Number(req.body?.totalDueCents || 0)))),
+                depositAmountCents: String(
+                    Math.max(0, Math.round(Number(req.body?.depositAmountCents || 0))),
+                ),
+                ownFlight: ownFlight ? 'true' : 'false',
+                flightCreditCents: String(
+                    Math.max(0, Math.round(Number(req.body?.flightCreditCents || 0))),
+                ),
+                applicantEmail: safePayPalMetaValue(req.body?.applicantEmail || req.body?.email, 320),
+                applicantName: safePayPalMetaValue(req.body?.applicantName || req.body?.fullName, 160),
+            };
+            const order = await getPayPalOrder(orderId);
+            if (order.status !== 'COMPLETED') {
+                return res.status(409).json({ error: `Order not completed: ${order.status}` });
+            }
+            const recorded = await recordVerifiedPayPalOrder(order, programPaymentDeps, metaOverride);
+            return res.json({ ok: true, orderId, repaired: true, ...recorded });
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             return res.status(500).json({ error: msg });
@@ -167,11 +228,11 @@ export function registerPaymentRoutes(app, opts) {
             }
             const linkedSub = {
                 ...sub,
-                custom_id: JSON.stringify({
+                custom_id: subscriptionCustomId({
                     ...meta,
-                    principal: trimmedPrincipal.slice(0, 500),
+                    principal: trimmedPrincipal.slice(0, 63),
                     fusion_pending_id: '',
-                }).slice(0, 127),
+                }),
             };
             await pushPayPalSubscriptionToCanister(linkedSub);
             return res.json({
@@ -206,7 +267,7 @@ export function registerPaymentRoutes(app, opts) {
             }
             const linked = {
                 ...sub,
-                custom_id: JSON.stringify({ ...meta, principal: principalText }).slice(0, 127),
+                custom_id: subscriptionCustomId({ ...meta, principal: principalText }),
             };
             await pushPayPalSubscriptionToCanister(linked);
             return res.json({ ok: true, status: sub.status, subscriptionId: sub.id });
@@ -274,7 +335,7 @@ export function registerPaymentRoutes(app, opts) {
                 method: 'POST',
                 body: {
                     plan_id: planId,
-                    custom_id: JSON.stringify(customData).slice(0, 127),
+                    custom_id: subscriptionCustomId(customData),
                     subscriber: { email_address: email.trim() },
                     application_context: {
                         shipping_preference: 'NO_SHIPPING',

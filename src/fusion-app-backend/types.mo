@@ -282,6 +282,40 @@ module {
         #inviteInactive;
     };
 
+    /// Admin-generated single-use account recovery code (8-digit) — migrates `fromPrincipal` to redeemer.
+    public type AccountRecoveryCodeRecord = {
+        fromPrincipal : Principal;
+        active : Bool;
+        createdAt : Text;
+        expiresAtSec : Nat;
+        redeemedAt : ?Text;
+        redeemedToPrincipal : ?Principal;
+    };
+
+    public type GenerateAccountRecoveryCodeOk = {
+        code : Text;
+        expiresAtSec : Nat;
+    };
+
+    public type GenerateAccountRecoveryCodeResult = {
+        #ok : GenerateAccountRecoveryCodeOk;
+        #noSourceAccount;
+        #cannotGenerateForPrivilegedAccount;
+        #allocationFailed;
+    };
+
+    public type RedeemAccountRecoveryCodeResult = {
+        #ok : AdminReconnectMemberOk;
+        #invalidCode;
+        #expiredCode;
+        #alreadyUsed;
+        #callerHasAccount;
+        #samePrincipal;
+        #noSourceAccount;
+        #targetHasAccount;
+        #cannotMigratePrivilegedAccount;
+    };
+
     /// Full artist row for canister + Studio: public `profile` + optional JSON blob for locales (versioned).
     /// `imported` / `accessCode` are Studio-only onboarding fields (not in public `Artist` / `listArtists`).
     public type ArtistRecord = {
@@ -738,6 +772,8 @@ module {
         artistFeaturedFeaturableIdsStable : [Text];
         artistFeaturedManualIdsStable : [Text];
         joinInvitesStable : [(Text, JoinInviteRecord)];
+        /// Account recovery codes for II migration; optional for backups before this field existed.
+        accountRecoveryCodesStable : ?[(Text, AccountRecoveryCodeRecord)];
         /// Studio → Permissions UI: role-tab defaults (`staff`, …) and per-principal overrides.
         studioPermissionDefaultsStable : [StudioPermissionDefaultsEntry];
         studioPermissionOverridesStable : [StudioPermissionOverrideEntry];

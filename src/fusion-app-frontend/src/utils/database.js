@@ -6337,6 +6337,128 @@ export async function adminReconnectMemberPrincipalStudio(fromPrincipalText, toP
 }
 
 /**
+ * Admin: generate single-use 8-digit account recovery code (7-day expiry).
+ * @param {string} fromPrincipalText
+ * @returns {Promise<{ code: string, expiresAtSec: number }>}
+ */
+export async function adminGenerateAccountRecoveryCodeStudio(fromPrincipalText) {
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminGenerateAccountRecoveryCode !== 'function') {
+        throw new Error(
+            'adminGenerateAccountRecoveryCode unavailable — deploy backend and run dfx generate fusion-app-backend.',
+        );
+    }
+    const { Principal } = await import('@dfinity/principal');
+    const fromP = Principal.fromText(String(fromPrincipalText || '').trim());
+    const raw = await actor.adminGenerateAccountRecoveryCode(fromP);
+    if (raw && typeof raw === 'object') {
+        const o = /** @type {Record<string, unknown>} */ (raw);
+        if ('ok' in o && o.ok && typeof o.ok === 'object') {
+            const ok = /** @type {Record<string, unknown>} */ (o.ok);
+            return {
+                code: String(ok.code ?? ''),
+                expiresAtSec: Number(ok.expiresAtSec ?? 0),
+            };
+        }
+        const codes = ['noSourceAccount', 'cannotGenerateForPrivilegedAccount', 'allocationFailed'];
+        for (const code of codes) {
+            if (code in o) {
+                const labels = {
+                    noSourceAccount: 'No account row for this principal.',
+                    cannotGenerateForPrivilegedAccount: 'Cannot generate recovery code for admin accounts.',
+                    allocationFailed: 'Could not allocate a unique recovery code. Try again.',
+                };
+                throw new Error(labels[/** @type {keyof typeof labels} */ (code)] || code);
+            }
+        }
+    }
+    throw new Error('Unexpected response from adminGenerateAccountRecoveryCode.');
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {{ ok: true, fromPrincipal: string, toPrincipal: string, linkedArtistId: string | null, paymentProvider: string | null } | { ok: false, code: string }}
+ */
+export function interpretRedeemAccountRecoveryCodeResult(raw) {
+    if (raw && typeof raw === 'object') {
+        const o = /** @type {Record<string, unknown>} */ (raw);
+        if ('ok' in o && o.ok && typeof o.ok === 'object') {
+            const ok = /** @type {Record<string, unknown>} */ (o.ok);
+            const linked = candidOptUnwrap(ok.linkedArtistId);
+            const provider = candidOptUnwrap(ok.paymentProvider);
+            return {
+                ok: true,
+                fromPrincipal: String(ok.fromPrincipal ?? ''),
+                toPrincipal: String(ok.toPrincipal ?? ''),
+                linkedArtistId: linked != null ? String(linked) : null,
+                paymentProvider: provider != null ? String(provider) : null,
+            };
+        }
+        const codes = [
+            'invalidCode',
+            'expiredCode',
+            'alreadyUsed',
+            'callerHasAccount',
+            'samePrincipal',
+            'noSourceAccount',
+            'targetHasAccount',
+            'cannotMigratePrivilegedAccount',
+        ];
+        for (const code of codes) {
+            if (code in o) {
+                return { ok: false, code };
+            }
+        }
+    }
+    return { ok: false, code: 'unknown' };
+}
+
+/** @param {string} code */
+export function memberFacingAccountRecoveryError(code) {
+    const map = {
+        invalidCode: 'That recovery code is not valid. Check the code and try again.',
+        expiredCode: 'This recovery code has expired. Contact support for a new code.',
+        alreadyUsed: 'This recovery code has already been used.',
+        callerHasAccount: 'This login already has a member account.',
+        samePrincipal: 'This recovery code cannot be used with this login.',
+        noSourceAccount: 'The account for this recovery code no longer exists. Contact support.',
+        targetHasAccount: 'This login already has a member account.',
+        cannotMigratePrivilegedAccount: 'This recovery code cannot be used for this account type.',
+        unknown: 'Account recovery failed. Try again or contact support.',
+    };
+    return map[/** @type {keyof typeof map} */ (code)] || map.unknown;
+}
+
+/**
+ * Redeem admin-issued account recovery code for the signed-in Internet Identity.
+ * @param {string} codeRaw
+ */
+export async function redeemAccountRecoveryCodeForCaller(codeRaw) {
+    const code = String(codeRaw || '').replace(/\D/g, '');
+    if (getDataSource() === 'test') {
+        if (code.length !== 8) {
+            return { ok: false, code: 'invalidCode' };
+        }
+        return {
+            ok: true,
+            fromPrincipal: 'test-from',
+            toPrincipal: 'test-to',
+            linkedArtistId: null,
+            paymentProvider: null,
+        };
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.redeemAccountRecoveryCode !== 'function') {
+        throw new Error(
+            'redeemAccountRecoveryCode unavailable — deploy backend and run dfx generate fusion-app-backend.',
+        );
+    }
+    const raw = await actor.redeemAccountRecoveryCode(code);
+    return interpretRedeemAccountRecoveryCodeResult(raw);
+}
+
+/**
  * @param {unknown} opt
  * @returns {unknown}
  */

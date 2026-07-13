@@ -29,6 +29,8 @@ import {
   getApplicationPaymentGlobal,
   getMyProgramPayments,
   setMyProgramPaymentFlightPreference,
+  redeemAccountRecoveryCodeForCaller,
+  memberFacingAccountRecoveryError,
 } from "../utils/database.js";
 import { withSeoImageAlt } from "../utils/mediaAltSeo.js";
 import {
@@ -80,6 +82,7 @@ import {
 import { canStartProgramPaymentPlan } from "../utils/paymentProvider.js";
 import { normalizeApplicantCategory } from "../utils/studioPlainForms.js";
 import { studioIconHref } from "../utils/studioIconRegistry.js";
+import { syncMembershipAfterAccountRecovery } from "../utils/integrationApi.js";
 import { formatStudioDate } from "../utils/studioDateFormat.js";
 import exploreProgramsIconUrl from "../assets/icons/fusion_dashboard_svg_icons/explore-programs.svg";
 import myProgramsIconUrl from "../assets/icons/fusion_dashboard_svg_icons/my-programs.svg";
@@ -1377,35 +1380,115 @@ function escapeHtmlMpd(s) {
 }
 
 /**
+ * @param {string} text
+ * @param {HTMLElement | null | undefined} feedbackEl
+ */
+async function copySettingsProfileUserId(text, feedbackEl) {
+  try {
+    await navigator.clipboard.writeText(text);
+    if (feedbackEl instanceof HTMLElement) {
+      feedbackEl.classList.add("is-copied");
+      feedbackEl.setAttribute("aria-label", "Copied");
+      window.setTimeout(() => {
+        feedbackEl.classList.remove("is-copied");
+        feedbackEl.setAttribute("aria-label", "Copy User ID");
+      }, 2000);
+    }
+    return true;
+  } catch {
+    if (feedbackEl instanceof HTMLElement) {
+      feedbackEl.classList.add("is-copy-failed");
+      window.setTimeout(() => {
+        feedbackEl.classList.remove("is-copy-failed");
+      }, 2000);
+    }
+    return false;
+  }
+}
+
+/**
+ * @param {HTMLElement | null} valueEl
+ * @param {HTMLButtonElement | null} copyBtn
+ * @param {string} text
+ */
+function wireSettingsProfileUserIdCopy(valueEl, copyBtn, text) {
+  const runCopy = () => {
+    void copySettingsProfileUserId(text, copyBtn || valueEl);
+  };
+  if (copyBtn instanceof HTMLButtonElement) {
+    copyBtn.onclick = runCopy;
+  }
+  if (valueEl instanceof HTMLElement) {
+    valueEl.onclick = runCopy;
+    valueEl.onkeydown = (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        runCopy();
+      }
+    };
+  }
+}
+
+/** @typedef {'sidebar' | 'main' | 'none'} SettingsProfileUserIdPlacement */
+
+/**
+ * Show User ID in one place only: sidebar (normal profile) or main (no-account notice).
+ * @param {{ authenticated?: boolean; principal?: import('@dfinity/principal').Principal }} snap
+ * @param {SettingsProfileUserIdPlacement} placement
+ */
+function updateSettingsProfileUserId(snap, placement = "sidebar") {
+  /** @type {Record<SettingsProfileUserIdPlacement, { wrapId: string; valueId: string; copyId: string } | null>} */
+  const slots = {
+    sidebar: {
+      wrapId: "settingsProfileUserIdWrap",
+      valueId: "settingsProfileUserId",
+      copyId: "settingsProfileCopyUserId",
+    },
+    main: {
+      wrapId: "settingsProfileMainUserIdWrap",
+      valueId: "settingsProfileMainUserId",
+      copyId: "settingsProfileMainUserIdCopy",
+    },
+    none: null,
+  };
+  const text =
+    snap.authenticated && snap.principal ? snap.principal.toText() : "";
+
+  for (const slot of /** @type {const} */ (["sidebar", "main"])) {
+    const ids = slots[slot];
+    const wrap = document.getElementById(ids.wrapId);
+    const valueEl = document.getElementById(ids.valueId);
+    const copyBtn = document.getElementById(ids.copyId);
+    if (!(wrap instanceof HTMLElement) || !(valueEl instanceof HTMLElement)) {
+      continue;
+    }
+    const show = Boolean(text) && placement === slot;
+    wrap.hidden = !show;
+    valueEl.textContent = show ? text : "—";
+    valueEl.title = show ? "Click to copy User ID" : "";
+    if (show) {
+      valueEl.setAttribute("aria-label", "User ID, click to copy");
+    } else {
+      valueEl.removeAttribute("aria-label");
+    }
+    if (show) {
+      wireSettingsProfileUserIdCopy(
+        valueEl,
+        copyBtn instanceof HTMLButtonElement ? copyBtn : null,
+        text,
+      );
+    }
+  }
+}
+
+/**
  * Member-facing recovery copy when signed in but no canister account row exists.
  * @param {HTMLElement | null} hintEl
- * @param {string} principalText
  */
-function renderNoAccountRecoveryHint(hintEl, principalText) {
+function renderNoAccountRecoveryHint(hintEl) {
   if (!hintEl) return;
-  const safePrincipal = escapeHtmlMpd(principalText);
-  hintEl.innerHTML = `<span class="mpd-no-account-recovery">You're signed in, but this Internet Identity isn't linked to a Fusion member account. If you already paid or completed setup with a different login, contact support with your checkout email and we'll reconnect your account.</span>
-<span class="mpd-no-account-principal-row">
-  <span class="mpd-no-account-principal-label">Internet Identity ID for support:</span>
-  <code class="mpd-no-account-principal-code">${safePrincipal}</code>
-  <button type="button" class="studio-btn-ghost mpd-copy-principal-btn" id="settingsProfileCopyPrincipal">Copy ID</button>
-</span>`;
-  const btn = document.getElementById("settingsProfileCopyPrincipal");
-  btn?.addEventListener(
-    "click",
-    async () => {
-      try {
-        await navigator.clipboard.writeText(principalText);
-        btn.textContent = "Copied";
-        window.setTimeout(() => {
-          btn.textContent = "Copy ID";
-        }, 2000);
-      } catch {
-        btn.textContent = "Copy failed";
-      }
-    },
-    { once: false },
-  );
+  hintEl.textContent =
+    "No member account found. You're signed in, but this Internet Identity isn't linked to a Fusion member account.";
 }
 
 /** @param {unknown} value */
@@ -2011,11 +2094,11 @@ function renderMpdFlightChoiceSection(item) {
   const locked = Boolean(item.paymentStarted);
   const option = (ownFlight) => {
     const selected = item.ownFlight === ownFlight;
-    const title = ownFlight ? "Yes, I’ll get my own flight" : "No, I need flight support";
-    const badge = ownFlight ? "$800 credit" : "No credit applied";
+    const title = ownFlight ? "I'll book my own flight" : "Fusion will book my flight";
+    const badge = ownFlight ? "$800 credit" : "Included in price";
     const copy = ownFlight
-      ? "Applied to your total residency price."
-      : "We’ll follow up with flight options and support.";
+      ? "$800 credit toward your residency balance."
+      : "Round-trip flight booked by Fusion—no separate flight fee.";
     return `<button type="button" class="mpd-flight-option ${selected ? "is-selected" : ""}" data-mpd-flight-choice="${ownFlight ? "own" : "support"}" aria-pressed="${selected ? "true" : "false"}" ${locked ? "disabled" : ""}>
       <span class="mpd-flight-option__icon" aria-hidden="true"><img src="${mpdEscapeAttr(flightIconUrl)}" alt="" /></span>
       <span class="mpd-flight-option__copy">
@@ -2025,13 +2108,13 @@ function renderMpdFlightChoiceSection(item) {
       <span class="mpd-flight-option__badge">${escapeHtmlMpd(badge)}</span>
     </button>`;
   };
-  return `<section class="mpd-flight-choice-card ${locked ? "is-locked" : ""}" aria-label="Flight pricing choice">
+  return `<section class="mpd-flight-choice-card ${locked ? "is-locked" : ""}" aria-label="Flight booking choice">
     <div class="mpd-flight-choice-card__head">
       <div class="mpd-flight-choice-card__icon" aria-hidden="true"><img src="${mpdEscapeAttr(flightIconUrl)}" alt="" /></div>
       <div>
-        <p class="mpd-payments-eyebrow">Travel support</p>
-        <h3>Will you be getting your own flight?</h3>
-        <p class="studio-muted">This helps us tailor the information and support we provide.</p>
+        <p class="mpd-payments-eyebrow">Flight booking</p>
+        <h3>Who will book your flight?</h3>
+        <p class="studio-muted">Fusion can book your round-trip flight as part of your residency. If you book your own flight, you receive an $800 credit toward your program balance.</p>
       </div>
     </div>
     <div class="mpd-flight-options">
@@ -2039,8 +2122,8 @@ function renderMpdFlightChoiceSection(item) {
       ${option(false)}
     </div>
     <div class="mpd-flight-choice-card__note">
-      <strong>${item.ownFlight ? "Flight credit applied" : "No flight credit applied"}</strong>
-      <span>${item.ownFlight ? "The $800 credit will be applied to your balance once you confirm your program slot." : `Total residency price is ${mpdUsd(item.baseTotalDueCents)} when Fusion provides flight support.`}</span>
+      <strong>${item.ownFlight ? "Flight credit applied" : "Fusion flight booking included"}</strong>
+      <span>${item.ownFlight ? "The $800 credit is applied to your total residency price once you confirm your program slot." : `Your residency price of ${mpdUsd(item.baseTotalDueCents)} includes Fusion booking your round-trip flight. There is no additional flight charge beyond this amount.`}</span>
       ${locked ? `<em>Flight choice is locked after payment activity starts.</em>` : ""}
     </div>
   </section>`;
@@ -2132,7 +2215,7 @@ function renderMpdPaymentsWorkspace() {
           ${mpdInlineIconHtml(paymentsIconUrl, "mpd-payments-overview-card__icon")}
           <span>Total residency price</span>
           <strong>${mpdUsd(item.totalDueCents)}</strong>
-          <small>${item.ownFlight ? "After flight credit" : "Flight support included"}</small>
+          <small>${item.ownFlight ? "After $800 own-flight credit" : "Includes Fusion flight booking"}</small>
         </div>
         ${
           item.categoryDiscountCents
@@ -2148,7 +2231,7 @@ function renderMpdPaymentsWorkspace() {
           ${mpdInlineIconHtml(warningIconUrl, "mpd-payments-overview-card__icon")}
           <span>Flight credit</span>
           <strong>${item.flightCreditCents ? `-${mpdUsd(item.flightCreditCents)}` : "$0.00"}</strong>
-          <small>${item.ownFlight ? "Own-flight discount" : "No credit selected"}</small>
+          <small>${item.ownFlight ? "Own-flight discount" : "Fusion books your flight"}</small>
         </div>
         <div class="mpd-payments-overview-card mpd-payments-overview-card--upcoming">
           ${mpdInlineIconHtml(paymentPlanIconUrl, "mpd-payments-overview-card__icon")}
@@ -3123,6 +3206,35 @@ export function generateSettingsProfileContent() {
   const storyEditIconHtml = storyEditIcon
     ? `<img src="${mpdEscapeAttr(storyEditIcon)}" alt="" />`
     : '<span aria-hidden="true">✎</span>';
+  const userIdCopyIcon = studioIconHref("assist-copy");
+  const mpdUserIdCopyIconHtml = userIdCopyIcon
+    ? `<img src="${mpdEscapeAttr(userIdCopyIcon)}" alt="" class="mpd-user-id__copy-icon" />`
+    : '<span class="mpd-user-id__copy-icon-fallback" aria-hidden="true">⧉</span>';
+
+  /**
+   * @param {'sidebar' | 'main'} slot
+   */
+  const mpdUserIdBlockHtml = (slot) => {
+    const ids =
+      slot === "sidebar"
+        ? {
+            wrap: "settingsProfileUserIdWrap",
+            value: "settingsProfileUserId",
+            copy: "settingsProfileCopyUserId",
+          }
+        : {
+            wrap: "settingsProfileMainUserIdWrap",
+            value: "settingsProfileMainUserId",
+            copy: "settingsProfileMainUserIdCopy",
+          };
+    return `<div class="mpd-user-id mpd-user-id--${slot}" id="${ids.wrap}" hidden>
+                    <span class="mpd-user-id__label">User ID</span>
+                    <div class="mpd-user-id__row">
+                        <code class="mpd-user-id__value" id="${ids.value}" tabindex="0" role="button" title="Click to copy User ID">—</code>
+                        <button type="button" class="mpd-user-id__copy-btn" id="${ids.copy}" aria-label="Copy User ID">${mpdUserIdCopyIconHtml}</button>
+                    </div>
+                </div>`;
+  };
 
   return `
         <div class="page settings-profile-page">
@@ -3140,6 +3252,7 @@ export function generateSettingsProfileContent() {
             <aside class="studio-sidebar" id="settingsProfileSidebar" aria-label="Profile navigation">
                 <button type="button" class="studio-wordmark studio-wordmark-btn" id="settingsProfileWordmark" aria-label="Fusion home">Fusion</button>
                 <p class="settings-profile-slug-line" id="mpd_sidebar_slug">—</p>
+                ${mpdUserIdBlockHtml("sidebar")}
                 <nav class="studio-nav" id="settingsProfileNav" aria-label="Profile sections">
                     <button type="button" class="studio-nav-item mpd-nav-btn is-active" data-mpd-panel="overview">${mpdNavIconHtml(
                       "artist-overview",
@@ -3212,7 +3325,21 @@ export function generateSettingsProfileContent() {
                 <div class="mpd-settings-shout shoutHeadline" id="settingsProfileShout">
                     Your work exists in context.<br />This is where it begins.
                 </div>
+                ${mpdUserIdBlockHtml("main")}
                 <p id="settingsProfileHint" class="studio-muted mpd-settings-hint"></p>
+                <div id="settingsProfileAccountRecovery" class="mpd-account-recovery" hidden>
+                    <p class="mpd-account-recovery__lead">If you already paid or completed setup with a different login, contact Fusion support with your checkout email and User ID above to receive a recovery code.</p>
+                    <button type="button" class="mpd-account-recovery__toggle" id="settingsProfileRecoverToggle">Enter recovery code</button>
+                    <div id="settingsProfileRecoverPanel" class="mpd-account-recovery__panel" hidden>
+                        <p class="mpd-account-recovery__notice">Enter the 8-digit recovery code Fusion support sent you.</p>
+                        <div class="mpd-account-recovery__row">
+                            <label class="studio-sr-only" for="settingsProfileRecoveryCode">Recovery code</label>
+                            <input type="text" id="settingsProfileRecoveryCode" class="studio-input mpd-account-recovery__input" inputmode="numeric" maxlength="8" pattern="[0-9]*" autocomplete="one-time-code" placeholder="8-digit code" />
+                            <button type="button" class="studio-btn-primary" id="settingsProfileRecoverySubmit">Recover</button>
+                        </div>
+                        <p id="settingsProfileRecoveryStatus" class="mpd-account-recovery__status studio-muted" role="status"></p>
+                    </div>
+                </div>
                 <div id="settingsProfileMembershipActions" class="mpd-membership-actions" style="display:none" hidden>
                     <button type="button" class="studio-btn-primary" id="settingsProfileFinishMembership">Finish membership setup</button>
                     <button type="button" class="studio-btn-ghost" id="settingsProfileSyncSubscription">Refresh subscription status</button>
@@ -3767,6 +3894,96 @@ export default function initSettingsProfile() {
   const statusEl = document.getElementById("settingsProfileStatus");
   const formWrap = document.getElementById("settingsProfileFormWrap");
   const initialLoadingEl = document.getElementById("settingsProfileInitialLoading");
+  const recoveryWrap = document.getElementById("settingsProfileAccountRecovery");
+  const recoverToggle = document.getElementById("settingsProfileRecoverToggle");
+  const recoverPanel = document.getElementById("settingsProfileRecoverPanel");
+  const recoveryCodeInput = /** @type {HTMLInputElement | null} */ (
+    document.getElementById("settingsProfileRecoveryCode")
+  );
+  const recoverySubmit = document.getElementById("settingsProfileRecoverySubmit");
+  const recoveryStatusEl = document.getElementById("settingsProfileRecoveryStatus");
+  let accountRecoveryHandlersWired = false;
+
+  /** @param {boolean} show */
+  const setAccountRecoveryVisible = (show) => {
+    if (recoveryWrap instanceof HTMLElement) {
+      recoveryWrap.hidden = !show;
+    }
+    if (!show) {
+      if (recoverPanel instanceof HTMLElement) recoverPanel.hidden = true;
+      if (recoveryStatusEl) recoveryStatusEl.textContent = "";
+      if (recoveryCodeInput) recoveryCodeInput.value = "";
+    }
+  };
+
+  const wireAccountRecoveryHandlers = () => {
+    if (accountRecoveryHandlersWired) return;
+    accountRecoveryHandlersWired = true;
+    recoverToggle?.addEventListener("click", () => {
+      if (!(recoverPanel instanceof HTMLElement)) return;
+      recoverPanel.hidden = !recoverPanel.hidden;
+    });
+    recoverySubmit?.addEventListener("click", async () => {
+      const code = recoveryCodeInput?.value?.trim() ?? "";
+      if (code.replace(/\D/g, "").length !== 8) {
+        if (recoveryStatusEl) {
+          recoveryStatusEl.textContent = "Enter the 8-digit recovery code from support.";
+        }
+        return;
+      }
+      if (recoverySubmit instanceof HTMLButtonElement) {
+        recoverySubmit.disabled = true;
+        recoverySubmit.textContent = "Recovering…";
+      }
+      if (recoveryStatusEl) recoveryStatusEl.textContent = "";
+      try {
+        const result = await redeemAccountRecoveryCodeForCaller(code);
+        if (!result.ok) {
+          if (recoveryStatusEl) {
+            recoveryStatusEl.textContent = memberFacingAccountRecoveryError(result.code);
+          }
+          return;
+        }
+        const snapAfter = await getAuthSnapshot();
+        const accAfter = await getAccountForCaller();
+        const contactAfter = await getMyAccountContactForCaller();
+        const email =
+          contactAfter && typeof contactAfter === "object" && "email" in contactAfter
+            ? String(/** @type {{ email?: unknown }} */ (contactAfter).email ?? "").trim()
+            : "";
+        const paypalSubId = String(accAfter?.paypalSubscriptionId || "").trim();
+        const principalText =
+          snapAfter.authenticated && snapAfter.principal
+            ? snapAfter.principal.toText()
+            : result.toPrincipal;
+        try {
+          await syncMembershipAfterAccountRecovery({
+            principal: principalText,
+            email,
+            paypalSubscriptionId: paypalSubId,
+          });
+        } catch {
+          if (recoveryStatusEl) {
+            recoveryStatusEl.textContent =
+              "Account linked. Refreshing subscription had an issue — use Membership → Refresh subscription status if needed. Loading profile…";
+          }
+        }
+        if (recoveryStatusEl && !recoveryStatusEl.textContent) {
+          recoveryStatusEl.textContent = "Account recovered. Loading profile…";
+        }
+        void load({ force: true });
+      } catch (e) {
+        if (recoveryStatusEl) {
+          recoveryStatusEl.textContent = e instanceof Error ? e.message : String(e);
+        }
+      } finally {
+        if (recoverySubmit instanceof HTMLButtonElement) {
+          recoverySubmit.disabled = false;
+          recoverySubmit.textContent = "Recover";
+        }
+      }
+    });
+  };
 
   const setStatus = (t) => {
     if (statusEl) statusEl.textContent = t || "";
@@ -5306,6 +5523,7 @@ export default function initSettingsProfile() {
     setStatus("");
     setInitialProfileLoading(true);
     setMpdMediaUploadsEnabled(false);
+    setAccountRecoveryVisible(false);
     const membershipActionsEl = document.getElementById(
       "settingsProfileMembershipActions",
     );
@@ -5360,6 +5578,7 @@ export default function initSettingsProfile() {
     }
 
     const hint = document.getElementById("settingsProfileHint");
+    updateSettingsProfileUserId(snap, snap.authenticated ? "sidebar" : "none");
     if (!isTest && !snap.authenticated) {
       if (hint)
         hint.textContent =
@@ -5402,9 +5621,10 @@ export default function initSettingsProfile() {
     if (!isTest && snap.authenticated && !adminViewingMemberPerspective) {
       const ens = await ensureMyLinkedArtistProfile();
       if (ens === "noAccount" && !acc) {
-        const principalText =
-          snap.authenticated && snap.principal ? snap.principal.toText() : "";
-        renderNoAccountRecoveryHint(hint, principalText);
+        updateSettingsProfileUserId(snap, "main");
+        renderNoAccountRecoveryHint(hint);
+        setAccountRecoveryVisible(true);
+        wireAccountRecoveryHandlers();
         if (formWrap) formWrap.setAttribute("hidden", "");
         setInitialProfileLoading(false);
         applySettingsProfileDocumentSeo(dashTitle);
@@ -5593,6 +5813,8 @@ export default function initSettingsProfile() {
     void syncResidencyApplyCta();
 
     showMpdPanel(panelKeyFromHash());
+
+    updateSettingsProfileUserId(snap, "sidebar");
 
     void resolveSettingsProfileContactEmail().then((email) => {
       updateSettingsProfileContactEmailField(email);

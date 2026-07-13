@@ -13,7 +13,7 @@ import { toCloudFrontAssetUrl } from '../../../utils/assetDistribution.js';
 import { studioPageHeaderHtml } from '../../../utils/studioCategoryLayout.js';
 import { studioFeatureAccess } from '../../../utils/studioShellState.js';
 import { featuredCardHtml } from './videosStudio.js';
-import { parseVideoLocales } from '../../../utils/videoPageModel.js';
+import { parseVideoLocales, resolveFeaturedVideos } from '../../../utils/videoPageModel.js';
 
 function escapeHtml(s) {
     return String(s ?? '')
@@ -672,22 +672,19 @@ function renderSessionsForm(bundle) {
  * @param {{ featuredVideoIds: string[], heroVideoId: string | null }} featuredCfg
  */
 function renderFeaturedTab(videos, featuredCfg) {
-    const featured = featuredCfg.featuredVideoIds
-        .map((id) => videos.find((v) => String(v.id) === id))
-        .filter(Boolean);
-    const preview = featured.length
-        ? featured
-        : videos.filter((v) => v.visible !== false).slice(0, 6);
-    const cards = preview.map((rec) =>
-        featuredCardHtml(rec, featuredCfg.featuredVideoIds.includes(String(rec.id)), {
-            isHero: String(rec.id) === String(featuredCfg.heroVideoId || ''),
+    const featured = resolveFeaturedVideos(videos, featuredCfg);
+    const heroId = featuredCfg.heroVideoId ? String(featuredCfg.heroVideoId) : '';
+    const cards = featured.map((rec) =>
+        featuredCardHtml(rec, true, {
+            isHero: String(rec.id) === heroId,
+            readOnly: true,
         }),
     );
-    const heroRec = videos.find((v) => String(v.id) === String(featuredCfg.heroVideoId || ''));
+    const heroRec = featured.find((v) => String(v.id) === heroId) || featured[0];
     const heroLocales = heroRec ? parseVideoLocales(heroRec.localesJson) : null;
     const heroLabel = heroLocales
         ? String(heroLocales.headlineEn || heroLocales.headlineJa || heroRec?.slug || 'Video')
-        : preview.length
+        : featured.length
           ? 'Default (first featured)'
           : 'None';
     return `
@@ -695,7 +692,7 @@ function renderFeaturedTab(videos, featuredCfg) {
             <div>
                 <p class="studio-kicker">Featured</p>
                 <h3 class="studio-subheading">Community video row</h3>
-                <p class="studio-muted">Up to six videos appear on /community. Edit the library and featured selection in <a href="/studio#videos">Content → Videos</a>.</p>
+                <p class="studio-muted">Pinned videos plus the most recently added (up to six). Manage pins and hero in <a href="/studio#videos">Content → Videos</a>.</p>
             </div>
             <a class="studio-btn-primary" href="/studio#videos">Open Videos workspace</a>
         </div>
@@ -703,7 +700,7 @@ function renderFeaturedTab(videos, featuredCfg) {
             <strong>${escapeHtml(heroLabel)}</strong>
             <span>Landing hero on /community</span>
         </div>
-        <div class="studio-videos-featured-rail studio-community__featured-preview" id="studio-com-featured-rail">
+        <div class="studio-videos-featured-grid studio-community__featured-preview" id="studio-com-featured-rail">
             ${cards.length ? cards.join('') : '<p class="studio-muted">No videos in the library yet. Add videos in Content → Videos.</p>'}
         </div>
     `;

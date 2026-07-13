@@ -345,36 +345,176 @@
   margin-bottom: 1rem;
 }
 
-.settings-profile-page .mpd-no-account-recovery {
-  display: block;
-  margin-bottom: 0.75rem;
+.settings-profile-page .mpd-user-id {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
 }
 
-.settings-profile-page .mpd-no-account-principal-row {
+.settings-profile-page .mpd-user-id--sidebar {
+  margin: 0 0 1rem;
+  padding: 0 0.25rem;
+}
+
+.settings-profile-page .mpd-user-id--main {
+  margin: 0 0 0.75rem;
+}
+
+.settings-profile-page .mpd-user-id__label {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(15, 23, 42, 0.55);
+}
+
+.settings-profile-page .mpd-user-id__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem;
+}
+
+.settings-profile-page .mpd-user-id__value {
+  flex: 1;
+  min-width: 0;
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.62rem;
+  line-height: 1.35;
+  word-break: break-all;
+  color: rgba(15, 23, 42, 0.85);
+  cursor: copy;
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+}
+
+.settings-profile-page .mpd-user-id__value:focus-visible {
+  outline: 2px solid rgba(15, 23, 42, 0.35);
+  outline-offset: 2px;
+}
+
+.settings-profile-page .mpd-user-id--main .mpd-user-id__value {
+  font-size: 0.72rem;
+}
+
+.settings-profile-page .mpd-user-id__copy-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  margin-top: 0.05rem;
+  padding: 0;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 0;
+  background: rgba(15, 23, 42, 0.04);
+  color: rgba(15, 23, 42, 0.75);
+  cursor: pointer;
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.settings-profile-page .mpd-user-id__copy-btn:hover {
+  background: rgba(15, 23, 42, 0.08);
+  border-color: rgba(15, 23, 42, 0.2);
+}
+
+.settings-profile-page .mpd-user-id__copy-btn:focus-visible {
+  outline: 2px solid rgba(15, 23, 42, 0.35);
+  outline-offset: 2px;
+}
+
+.settings-profile-page .mpd-user-id__copy-btn.is-copied {
+  background: rgba(15, 23, 42, 0.12);
+  border-color: rgba(15, 23, 42, 0.28);
+}
+
+.settings-profile-page .mpd-user-id__copy-btn.is-copy-failed {
+  border-color: rgba(185, 28, 28, 0.45);
+}
+
+.settings-profile-page .mpd-user-id__copy-icon {
+  width: 0.95rem;
+  height: 0.95rem;
+  display: block;
+}
+
+.settings-profile-page .mpd-user-id__copy-icon-fallback {
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.settings-profile-page .mpd-account-recovery {
+  margin: 0 0 1rem;
+}
+
+.settings-profile-page .mpd-account-recovery__lead {
+  margin: 0 0 0.85rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: rgba(15, 23, 42, 0.78);
+}
+
+.settings-profile-page .mpd-account-recovery__toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.5rem;
+  padding: 0.55rem 1.1rem;
+  border: 1px solid var(--c1, #c12525);
+  border-radius: 0;
+  background: var(--c1, #c12525);
+  color: var(--c3, #ffffff);
+  font-size: 0.78rem;
+  font-variation-settings: var(--fv-nav-active);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background-color 0.16s ease, border-color 0.16s ease, filter 0.16s ease;
+}
+
+.settings-profile-page .mpd-account-recovery__toggle:hover {
+  background: color-mix(in srgb, var(--c1, #c12525) 88%, #000);
+  border-color: color-mix(in srgb, var(--c1, #c12525) 88%, #000);
+  color: var(--c3, #ffffff);
+}
+
+.settings-profile-page .mpd-account-recovery__toggle:focus-visible {
+  outline: 2px solid var(--c1, #c12525);
+  outline-offset: 2px;
+}
+
+.settings-profile-page .mpd-account-recovery__panel {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.settings-profile-page .mpd-account-recovery__notice {
+  margin: 0 0 0.75rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.settings-profile-page .mpd-account-recovery__row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem 0.75rem;
 }
 
-.settings-profile-page .mpd-no-account-principal-label {
-  font-size: 0.85rem;
-}
-
-.settings-profile-page .mpd-no-account-principal-code {
+.settings-profile-page .mpd-account-recovery__input {
+  flex: 1 1 8rem;
+  min-width: 0;
+  max-width: 12rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.72rem;
-  word-break: break-all;
-  padding: 0.25rem 0.4rem;
-  background: rgba(15, 23, 42, 0.06);
+  letter-spacing: 0.08em;
 }
 
-.settings-profile-page .mpd-copy-principal-btn {
-  min-height: 2rem;
-  padding: 0.35rem 0.75rem;
-  font-size: 0.72rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+.settings-profile-page .mpd-account-recovery__status {
+  margin: 0.65rem 0 0;
+  min-height: 1.25rem;
 }
 
 .settings-profile-page .mpd-membership-actions {

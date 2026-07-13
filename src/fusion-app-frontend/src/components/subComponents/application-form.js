@@ -43,6 +43,10 @@ import {
 } from '../../utils/paymentProvider.js';
 import { getProfileSetupDraft } from '../../utils/profileSetupDraft.js';
 import {
+    PROGRAM_APPLICATION_VIEWPORT_TOP_GAP_PX,
+    scrollElementTopToViewportGap,
+} from '../../utils/scrollAnchorToViewportGap.js';
+import {
     getPayPalClientIdResolved,
     getStripePublishableKeyResolved,
 } from '../../utils/studioServicesConfig.js';
@@ -260,6 +264,26 @@ class ApplicationFormComponent extends HTMLElement {
         if (this.shadowRoot) this._hydrateWhatsIncludedForPlan();
     }
 
+    /**
+     * @param {ShadowRoot | DocumentFragment | Element} root
+     * @param {string} text
+     */
+    _setFeeIntroBlocks(root, text) {
+        const wrap = root.querySelector('#app-fee-notice-italic');
+        if (!wrap) return;
+        wrap.replaceChildren();
+        const raw = String(text ?? '').trim();
+        if (!raw) return;
+        const chunks = raw.split(/\n\n+/).map((s) => s.trim()).filter(Boolean);
+        const parts = chunks.length ? chunks : [raw];
+        for (const para of parts) {
+            const p = document.createElement('p');
+            p.className = 'app-fee-intro';
+            p.textContent = para;
+            wrap.appendChild(p);
+        }
+    }
+
     _hydrateProgramContextInDom() {
         const root = this.shadowRoot;
         if (!root) return;
@@ -290,11 +314,7 @@ class ApplicationFormComponent extends HTMLElement {
             }
         }
 
-        const feeNotice = root.querySelector('#app-fee-notice-italic');
-        if (feeNotice) {
-            const custom = String(ctx.feeNoticeItalic ?? '').trim();
-            feeNotice.textContent = custom || L.defaultFeeNoticeItalic;
-        }
+        this._setFeeIntroBlocks(root, String(ctx.feeNoticeItalic ?? '').trim() || L.defaultFeeNoticeItalic);
 
         this._hydratePaymentPlanCards();
         this._hydrateWhatsIncludedForPlan();
@@ -628,6 +648,7 @@ class ApplicationFormComponent extends HTMLElement {
                     '参加が確定した場合、{{deposit}} のデポジットを {{deadline}} までにお支払いいただきます。',
                 selectionSeeFaq: '日程や料金の詳細は',
                 faqDetailsLinkText: 'FAQ とプログラム詳細',
+                viewProgramDetails: 'プログラム詳細を見る',
                 defaultFeeNoticeItalic:
                     '応募料は返金できません。選考の結果にかかわらず、Fusion プラットフォームのメンバーシップ特典が適用されます。',
                 whatsIncludedEmpty: '（このプログラム用の説明がまだありません）',
@@ -792,6 +813,7 @@ class ApplicationFormComponent extends HTMLElement {
                 'If you are offered a place, a deposit of {{deposit}} is due to secure your slot, with final payment due by {{deadline}}.',
             selectionSeeFaq: 'For dates and costs, see',
             faqDetailsLinkText: 'FAQ and program details',
+            viewProgramDetails: 'View program details',
             defaultFeeNoticeItalic:
                 'The application fee is non-refundable. Regardless of selection outcome, your Fusion platform membership benefits apply as described.',
             whatsIncludedEmpty: '(No program-specific description yet.)',
@@ -1975,6 +1997,18 @@ class ApplicationFormComponent extends HTMLElement {
             { signal }
         );
 
+        root.querySelector('#app-view-program-details')?.addEventListener(
+            'click',
+            () => {
+                const id = this._programFormContext.detailsSectionId || 'programDetailsSection';
+                scrollElementTopToViewportGap(
+                    document.getElementById(id),
+                    PROGRAM_APPLICATION_VIEWPORT_TOP_GAP_PX
+                );
+            },
+            { signal }
+        );
+
         root.addEventListener(
             'click',
             (e) => {
@@ -2603,6 +2637,13 @@ class ApplicationFormComponent extends HTMLElement {
                     text-underline-offset: 0.12em;
                 }
 
+                .app-view-details-row {
+                    max-width: 820px;
+                    margin: 0 auto clamp(1.5rem, 4vw, 2.25rem);
+                    display: flex;
+                    justify-content: center;
+                }
+
                 .app-form-card {
                     max-width: 820px;
                     margin: 0 auto;
@@ -2681,9 +2722,13 @@ class ApplicationFormComponent extends HTMLElement {
                     letter-spacing: 0.02em;
                 }
 
-                .app-fee-intro {
+                .app-fee-intro-wrap {
                     margin: 0;
-                    max-width: 34rem;
+                }
+
+                .app-fee-intro {
+                    margin: 0 0 0.85rem;
+                    max-width: none;
                     font-size: clamp(0.88rem, 1.1vw, 0.98rem);
                     font-variation-settings: var(--fv-body-wide);
                     line-height: 1.5;
@@ -2691,10 +2736,14 @@ class ApplicationFormComponent extends HTMLElement {
                     opacity: 0.9;
                 }
 
+                .app-fee-intro-wrap .app-fee-intro:last-child {
+                    margin-bottom: 0;
+                }
+
                 .app-fee-meta-row {
                     display: flex;
                     align-items: center;
-                    justify-content: space-between;
+                    justify-content: center;
                     gap: 0.75rem;
                     margin: 0 0 clamp(1.6rem, 3.5vw, 2.35rem);
                     padding: 0.9rem 0;
@@ -2702,8 +2751,11 @@ class ApplicationFormComponent extends HTMLElement {
                     border-bottom: 1px solid rgba(0, 0, 0, 0.12);
                 }
 
-                .app-fee-meta-slots,
-                .app-fee-meta-secure {
+                .app-fee-meta-row:not(:has(.app-fee-meta-slots:not([hidden]))) {
+                    display: none;
+                }
+
+                .app-fee-meta-slots {
                     display: flex;
                     align-items: center;
                     gap: 0.65rem;
@@ -2713,10 +2765,6 @@ class ApplicationFormComponent extends HTMLElement {
                     color: var(--c2);
                     letter-spacing: 0.03em;
                     line-height: 1.3;
-                }
-
-                .app-fee-meta-secure {
-                    opacity: 0.92;
                 }
 
                 .app-fee-meta-slots[hidden] {
@@ -2754,18 +2802,6 @@ class ApplicationFormComponent extends HTMLElement {
                     text-transform: uppercase;
                     letter-spacing: 0.08em;
                     opacity: 0.82;
-                }
-
-                .app-fee-meta-divider {
-                    display: none;
-                }
-
-                .app-fee-meta-row:not(:has(.app-fee-meta-slots:not([hidden]))) .app-fee-meta-divider {
-                    display: none;
-                }
-
-                .app-fee-meta-row:not(:has(.app-fee-meta-slots:not([hidden]))) {
-                    justify-content: center;
                 }
 
                 .app-fee-choose {
@@ -2810,13 +2846,7 @@ class ApplicationFormComponent extends HTMLElement {
 
                     .app-fee-meta-row {
                         flex-direction: column;
-                        align-items: flex-start;
-                    }
-
-                    .app-fee-meta-divider {
-                        width: 100%;
-                        height: 1px;
-                        min-height: 0;
+                        align-items: center;
                     }
 
                     .app-whats-included-panel__cols {
@@ -3604,6 +3634,9 @@ class ApplicationFormComponent extends HTMLElement {
                 <div id="app-form-main">
                     <p id="app-cohort-slots-top" class="app-cohort-slots" hidden></p>
                     <div id="app-selection-intro" class="app-selection-intro"></div>
+                    <div class="app-view-details-row">
+                        <button type="button" class="app-btn app-btn--ghost" id="app-view-program-details">${L.viewProgramDetails}</button>
+                    </div>
                     <form id="app-application-form-fields" novalidate>
                         <div class="app-form-card">
                             <h3 class="app-step-heading">${L.contactSectionTitle}</h3>
@@ -3688,16 +3721,11 @@ class ApplicationFormComponent extends HTMLElement {
                             <header class="app-fee-header">
                                 <h3 class="app-fee-title">${L.applicationFeeHeading}</h3>
                                 <p class="app-fee-price" id="app-application-fee-amount"></p>
-                                <p id="app-fee-notice-italic" class="app-fee-intro"></p>
+                                <div id="app-fee-notice-italic" class="app-fee-intro-wrap"></div>
                             </header>
 
                             <div class="app-fee-meta-row">
                                 <div id="app-cohort-slots-payment" class="app-fee-meta-slots" hidden></div>
-                                <div class="app-fee-meta-divider" aria-hidden="true"></div>
-                                <div class="app-fee-meta-secure">
-                                    ${appFeeIconHtml(I.secureShield, 'app-fee-icon app-fee-icon--sm')}
-                                    <span>${escHtml(L.securePaymentLine || '')}</span>
-                                </div>
                             </div>
 
                             <div class="app-fee-choose">

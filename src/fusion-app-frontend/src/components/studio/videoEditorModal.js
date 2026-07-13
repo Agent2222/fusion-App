@@ -8,7 +8,7 @@ import {
     parseVideoLocales,
     stringifyVideoLocales,
 } from '../../utils/videoPageModel.js';
-import { getCommunityArtistsForStudio } from '../../utils/database.js';
+import { getCommunityArtistsForStudio, getDataSource, studioReinterpretWithPrompt, studioTranslateEnToJa } from '../../utils/database.js';
 import { uploadVideoFile } from '../../utils/studioVideoUpload.js';
 import { uploadBlobToS3 } from '../../utils/studioS3Upload.js';
 import { mountVideoFrameCapture, videoFrameCaptureShellHtml } from '../../utils/videoFrameCapture.js';
@@ -50,8 +50,7 @@ export async function openVideoEditorModal(rec, opts) {
     const featuredIds = Array.isArray(opts.featured?.videoIds) ? opts.featured.videoIds.map(String) : [];
     const isFeatured = featuredIds.includes(String(draft.id));
     const isHero = String(opts.featured?.heroVideoId || '') === String(draft.id);
-    const featuredAtCapacity = featuredIds.length >= 6 && !isFeatured;
-    const copyKeys = ['line', 'kicker', 'headline', 'body', 'ctaJoinLabel', 'ctaWatchLabel'];
+    const copyKeys = ['line', 'kicker', 'headline', 'ctaJoinLabel', 'ctaWatchLabel'];
     const otherVideos = (Array.isArray(opts.otherVideos) ? opts.otherVideos : []).filter(
         (v) => String(v?.id ?? '') !== String(draft.id),
     );
@@ -108,10 +107,14 @@ export async function openVideoEditorModal(rec, opts) {
                         <span>Visible on site</span>
                     </label>
                     <label class="studio-field studio-field--inline">
-                        <input type="checkbox" id="sv-featured" ${isFeatured ? 'checked' : ''} ${!opts.canEdit || (featuredAtCapacity && !isFeatured) ? 'disabled' : ''} />
-                        <span>Featured on Community &amp; /videos</span>
+                        <input type="checkbox" id="sv-featured" ${isFeatured ? 'checked' : ''} ${opts.canEdit ? '' : 'disabled'} />
+                        <span>Pin as featured (always shown on Community &amp; /videos)</span>
                     </label>
-                    ${featuredAtCapacity ? '<p class="studio-muted studio-video-featured-hint">Featured list is full (6 max). Remove one from the featured row above, then edit this video again.</p>' : '<p class="studio-muted studio-video-featured-hint">Featured videos appear in the Community hero row and /videos page.</p>'}
+                    <label class="studio-field studio-field--inline">
+                        <input type="checkbox" id="sv-hero" ${isHero ? 'checked' : ''} ${!opts.canEdit ? 'disabled' : ''} />
+                        <span>Set as landing hero</span>
+                    </label>
+                    <p class="studio-muted studio-video-featured-hint">Featured row shows pinned videos plus the most recently added (up to six). Hero is the large player on /community and /videos.</p>
                     <label class="studio-field"><span>Published (ISO)</span><input class="studio-input" id="sv-published" value="${esc(draft.publishedAt)}" /></label>
                     <label class="studio-field"><span>Sort order</span><input class="studio-input" id="sv-sort" type="number" value="${esc(draft.sortOrder)}" /></label>
                     <label class="studio-field"><span>Slug</span><input class="studio-input" id="sv-slug" value="${esc(draft.slug)}" /></label>
@@ -176,6 +179,16 @@ export async function openVideoEditorModal(rec, opts) {
                     <label class="studio-field"><span>${key} JA</span><input class="studio-input" id="sv-${key}-ja" value="${esc(locales[`${key}Ja`])}" /></label>`,
                         )
                         .join('')}
+                    <div class="studio-video-copy-body">
+                        <div class="studio-video-copy-body__assist" role="toolbar" aria-label="Body writing assistance">
+                            <span class="studio-video-copy-body__assist-label">Body assist</span>
+                            <input type="text" class="studio-input studio-video-copy-body__prompt" id="sv-body-ai-prompt" placeholder="Describe what the body should say…" ${opts.canEdit ? '' : 'disabled'} />
+                            <button type="button" class="studio-btn-secondary" id="sv-body-ai-generate" ${opts.canEdit ? '' : 'disabled'}>Generate</button>
+                            <button type="button" class="studio-btn-ghost" id="sv-body-ai-translate" ${opts.canEdit ? '' : 'disabled'}>Translate to Japanese</button>
+                        </div>
+                        <label class="studio-field studio-field--full"><span>body EN</span><textarea class="studio-input studio-textarea" id="sv-body-en" rows="5">${esc(locales.bodyEn)}</textarea></label>
+                        <label class="studio-field studio-field--full"><span>body JA</span><textarea class="studio-input studio-textarea" id="sv-body-ja" rows="5">${esc(locales.bodyJa)}</textarea></label>
+                    </div>
                 </div>
                 <div class="studio-video-panel studio-tabs__panel" data-panel="timestamps" hidden>
                     <div id="sv-timestamps-mount"></div>
@@ -359,6 +372,13 @@ export async function openVideoEditorModal(rec, opts) {
         input.value = '';
     });
 
+    const setLocaleField = (key, en, ja) => {
+        const enEl = root.querySelector(`#sv-${key}-en`);
+        const jaEl = root.querySelector(`#sv-${key}-ja`);
+        if (enEl instanceof HTMLInputElement || enEl instanceof HTMLTextAreaElement) enEl.value = String(en ?? '');
+        if (jaEl instanceof HTMLInputElement || jaEl instanceof HTMLTextAreaElement) jaEl.value = String(ja ?? '');
+    };
+
     root.querySelector('#sv-copy-from-btn')?.addEventListener('click', () => {
         const select = root.querySelector('#sv-copy-from');
         const sourceId = select instanceof HTMLSelectElement ? select.value.trim() : '';
@@ -373,34 +393,119 @@ export async function openVideoEditorModal(rec, opts) {
         }
         const sourceLocales = parseVideoLocales(source.localesJson);
         for (const key of copyKeys) {
-            const en = root.querySelector(`#sv-${key}-en`);
-            const ja = root.querySelector(`#sv-${key}-ja`);
-            if (en instanceof HTMLInputElement) en.value = String(sourceLocales[`${key}En`] ?? '');
-            if (ja instanceof HTMLInputElement) ja.value = String(sourceLocales[`${key}Ja`] ?? '');
+            setLocaleField(key, sourceLocales[`${key}En`], sourceLocales[`${key}Ja`]);
         }
+        setLocaleField('body', sourceLocales.bodyEn, sourceLocales.bodyJa);
         const title = String(sourceLocales.headlineEn || sourceLocales.headlineJa || source.slug || 'video');
         showMsg(`Copied copy from “${title}”.`);
         captureStudioVideoEvent('studio_video_copy_from', { video_id: draft.id, source_id: sourceId });
     });
 
+    let bodyAiBusy = false;
+    const guardBodyAi = () => {
+        if (getDataSource() === 'test') {
+            showMsg('Writing assist requires live mode and admin LLM access.', 'warn');
+            return false;
+        }
+        if (bodyAiBusy) return false;
+        return true;
+    };
+
+    root.querySelector('#sv-body-ai-generate')?.addEventListener('click', async () => {
+        if (!opts.canEdit || !guardBodyAi()) return;
+        const promptEl = root.querySelector('#sv-body-ai-prompt');
+        const bodyEnEl = root.querySelector('#sv-body-en');
+        const prompt = promptEl instanceof HTMLInputElement ? promptEl.value.trim() : '';
+        if (!prompt) {
+            showMsg('Enter a prompt for body generation.', 'warn');
+            return;
+        }
+        const source =
+            bodyEnEl instanceof HTMLTextAreaElement ? bodyEnEl.value.trim() : '';
+        bodyAiBusy = true;
+        try {
+            showMsg('Generating body…');
+            const out = await studioReinterpretWithPrompt(prompt, source || prompt, 'en');
+            if (bodyEnEl instanceof HTMLTextAreaElement) bodyEnEl.value = String(out).trim();
+            showMsg('Body generated.');
+        } catch (err) {
+            showMsg(err instanceof Error ? err.message : String(err), 'warn');
+        } finally {
+            bodyAiBusy = false;
+        }
+    });
+
+    root.querySelector('#sv-body-ai-translate')?.addEventListener('click', async () => {
+        if (!opts.canEdit || !guardBodyAi()) return;
+        const bodyEnEl = root.querySelector('#sv-body-en');
+        const bodyJaEl = root.querySelector('#sv-body-ja');
+        const en = bodyEnEl instanceof HTMLTextAreaElement ? bodyEnEl.value.trim() : '';
+        if (en.length < 2) {
+            showMsg('Add English body text to translate.', 'warn');
+            return;
+        }
+        bodyAiBusy = true;
+        try {
+            showMsg('Translating…');
+            const ja = await studioTranslateEnToJa(en);
+            if (bodyJaEl instanceof HTMLTextAreaElement) bodyJaEl.value = String(ja).trim();
+            showMsg('Japanese body updated.');
+        } catch (err) {
+            showMsg(err instanceof Error ? err.message : String(err), 'warn');
+        } finally {
+            bodyAiBusy = false;
+        }
+    });
+
+    const featuredEl = root.querySelector('#sv-featured');
+    const heroEl = root.querySelector('#sv-hero');
+    heroEl?.addEventListener('change', () => {
+        if (heroEl instanceof HTMLInputElement && heroEl.checked && featuredEl instanceof HTMLInputElement) {
+            featuredEl.checked = true;
+        }
+    });
+
     const syncFeaturedFromModal = async (videoId) => {
         if (!opts.onFeaturedChange) return;
-        const featuredEl = root.querySelector('#sv-featured');
         const wantFeatured = featuredEl instanceof HTMLInputElement ? featuredEl.checked : isFeatured;
+        const wantHero = heroEl instanceof HTMLInputElement ? heroEl.checked : isHero;
         let ids = [...featuredIds];
         let heroId = opts.featured?.heroVideoId ? String(opts.featured.heroVideoId) : null;
         const wasFeatured = ids.includes(videoId);
-        if (wantFeatured && !wasFeatured) {
+        const wasHero = heroId === videoId;
+
+        if (wantHero && !wantFeatured) {
+            if (featuredEl instanceof HTMLInputElement) featuredEl.checked = true;
+        }
+
+        const pinFeatured = wantFeatured || wantHero;
+
+        if (pinFeatured && !wasFeatured) {
             if (ids.length >= 6) {
-                showMsg('Featured list is full (6 max). Save the video, then remove one from the featured row.', 'warn');
+                showMsg('Pinned featured list is full (6 max). Unpin another video first.', 'warn');
+                if (featuredEl instanceof HTMLInputElement && !wasFeatured) featuredEl.checked = false;
+                if (heroEl instanceof HTMLInputElement && !wasHero) heroEl.checked = false;
                 return;
             }
             ids.push(videoId);
-            if (!heroId) heroId = videoId;
-        } else if (!wantFeatured && wasFeatured) {
+        } else if (!pinFeatured && wasFeatured) {
             ids = ids.filter((id) => id !== videoId);
-            if (heroId === videoId) heroId = ids[0] || null;
         }
+
+        if (wantHero) {
+            heroId = videoId;
+            if (!ids.includes(videoId)) {
+                if (ids.length >= 6) {
+                    showMsg('Pinned featured list is full (6 max). Unpin another video before setting hero.', 'warn');
+                    if (heroEl instanceof HTMLInputElement) heroEl.checked = false;
+                    return;
+                }
+                ids.push(videoId);
+            }
+        } else if (wasHero) {
+            heroId = ids[0] && ids[0] !== videoId ? ids[0] : ids.find((id) => id !== videoId) || null;
+        }
+
         await opts.onFeaturedChange({ featuredVideoIds: ids, heroVideoId: heroId });
     };
 

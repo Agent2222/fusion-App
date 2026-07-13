@@ -31,6 +31,35 @@ function mergeCustomId(base, extra) {
 }
 
 /**
+ * PayPal subscription custom_id — prioritize principal / pending id over email (email is on subscriber).
+ * @param {Record<string, string>} customData
+ */
+export function subscriptionCustomId(customData) {
+    /** @type {Record<string, string>} */
+    const essential = {};
+    if (customData.principal) {
+        essential.principal = safePayPalMetaValue(customData.principal, 63);
+    }
+    if (customData.fusion_pending_id) {
+        essential.fusion_pending_id = safePayPalMetaValue(customData.fusion_pending_id, 36);
+    }
+    for (const [k, v] of Object.entries(customData)) {
+        if (k === 'principal' || k === 'fusion_pending_id' || k === 'pending_email') continue;
+        if (typeof k !== 'string' || !k.length) continue;
+        essential[k.slice(0, 24)] = safePayPalMetaValue(v, 40);
+    }
+    let json = JSON.stringify(essential);
+    if (json.length <= 127) return json;
+    delete essential.pending_email;
+    json = JSON.stringify(essential);
+    if (json.length <= 127) return json;
+    const minimal = {};
+    if (essential.principal) minimal.principal = essential.principal;
+    if (essential.fusion_pending_id) minimal.fusion_pending_id = essential.fusion_pending_id;
+    return JSON.stringify(minimal).slice(0, 127);
+}
+
+/**
  * @param {object} body
  * @param {number} amountCents
  */
@@ -167,7 +196,7 @@ export async function createPayPalSubscription(reqBody) {
         method: 'POST',
         body: {
             plan_id: planId,
-            custom_id: mergeCustomId(customData, {}),
+            custom_id: subscriptionCustomId(customData),
             subscriber: {
                 email_address: email.trim(),
             },

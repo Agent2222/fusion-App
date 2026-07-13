@@ -81,6 +81,8 @@ persistent actor {
   stable var joinInvitesStable : [(Text, Types.JoinInviteRecord)] = [];
   /// Join invite code -> trial month duration (only present for trial invites).
   stable var joinInviteTrialMonthsStable : [(Text, Nat)] = [];
+  /// Account recovery codes (8-digit) — admin-generated; single-use; 7-day expiry.
+  stable var accountRecoveryCodesStable : [(Text, Types.AccountRecoveryCodeRecord)] = [];
 
   /// Composite key: `artistId|programId` → JSON `{"submittedAt":...,"payload":...}` (one entry per program).
   stable var applicationByArtistProgramStable : [(Text, Text)] = [];
@@ -270,6 +272,11 @@ persistent actor {
     _HashMap.HashMap<Text, Types.JoinInviteRecord>(0, Text.equal, Text.hash);
   transient var joinInviteTrialMonthsByCode : _HashMap.HashMap<Text, Nat> =
     _HashMap.HashMap<Text, Nat>(0, Text.equal, Text.hash);
+
+  transient var accountRecoveryCodesByCode : _HashMap.HashMap<Text, Types.AccountRecoveryCodeRecord> =
+    _HashMap.HashMap<Text, Types.AccountRecoveryCodeRecord>(0, Text.equal, Text.hash);
+  transient var activeRecoveryCodeByFromPrincipal : _HashMap.HashMap<Principal, Text> =
+    _HashMap.HashMap<Principal, Text>(0, Principal.equal, Principal.hash);
 
   transient var studioPermissionDefaultsByCategory : _HashMap.HashMap<Text, Types.StudioPermissionMatrix> =
     _HashMap.HashMap<Text, Types.StudioPermissionMatrix>(0, Text.equal, Text.hash);
@@ -486,6 +493,12 @@ persistent actor {
   };
   for (entry in joinInviteTrialMonthsStable.vals()) {
     joinInviteTrialMonthsByCode.put(entry.0, entry.1);
+  };
+  for (entry in accountRecoveryCodesStable.vals()) {
+    accountRecoveryCodesByCode.put(entry.0, entry.1);
+    if (entry.1.active) {
+      activeRecoveryCodeByFromPrincipal.put(entry.1.fromPrincipal, entry.0);
+    };
   };
   for (entry in artistMediaStable.vals()) {
     artistMediaByArtistId.put(entry.0, entry.1);
@@ -1046,8 +1059,43 @@ persistent actor {
       case null {
         switch (accessCodeToArtistId.get(code)) {
           case (?_) { true };
-          case null { false };
+          case null {
+            switch (accountRecoveryCodesByCode.get(code)) {
+              case (?_) { true };
+              case null { false };
+            };
+          };
         };
+      };
+    };
+  };
+
+  private let accountRecoveryDurationSec : Nat = 7 * 86_400;
+
+  private func invalidateActiveRecoveryCodeForPrincipal(fromP : Principal) {
+    switch (activeRecoveryCodeByFromPrincipal.get(fromP)) {
+      case null {};
+      case (?code) {
+        switch (accountRecoveryCodesByCode.get(code)) {
+          case null {};
+          case (?rec) {
+            accountRecoveryCodesByCode.put(code, { rec with active = false });
+          };
+        };
+        ignore activeRecoveryCodeByFromPrincipal.remove(fromP);
+      };
+    };
+  };
+
+  private func rebuildActiveRecoveryCodeIndex() {
+    activeRecoveryCodeByFromPrincipal := _HashMap.HashMap<Principal, Text>(
+      0,
+      Principal.equal,
+      Principal.hash,
+    );
+    for ((code, rec) in accountRecoveryCodesByCode.entries()) {
+      if (rec.active) {
+        activeRecoveryCodeByFromPrincipal.put(rec.fromPrincipal, code);
       };
     };
   };
@@ -1491,6 +1539,7 @@ persistent actor {
     artistFeaturedManualIdsStable := Buffer.toArray(manualFeaturedArtistIds);
     joinInvitesStable := _Iter.toArray(joinInvitesByCode.entries());
     joinInviteTrialMonthsStable := _Iter.toArray(joinInviteTrialMonthsByCode.entries());
+    accountRecoveryCodesStable := _Iter.toArray(accountRecoveryCodesByCode.entries());
     artistMediaStable := _Iter.toArray(artistMediaByArtistId.entries());
     studioPermissionDefaultsStable := _Iter.toArray(studioPermissionDefaultsByCategory.entries());
     studioPermissionOverridesStable := _Iter.toArray(studioPermissionOverridesByPrincipal.entries());
@@ -1599,6 +1648,17 @@ persistent actor {
       joinInviteTrialMonthsByCode.put(entry.0, entry.1);
     };
     joinInviteTrialMonthsStable := [];
+
+    accountRecoveryCodesByCode := _HashMap.HashMap<Text, Types.AccountRecoveryCodeRecord>(
+      accountRecoveryCodesStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in accountRecoveryCodesStable.vals()) {
+      accountRecoveryCodesByCode.put(entry.0, entry.1);
+    };
+    accountRecoveryCodesStable := [];
+    rebuildActiveRecoveryCodeIndex();
 
     artistMediaByArtistId := _HashMap.HashMap<Text, Types.ArtistMedia>(
       artistMediaStable.size(),
@@ -1949,6 +2009,16 @@ persistent actor {
       joinInvitesByCode.put(entry.0, entry.1);
     };
 
+    accountRecoveryCodesByCode := _HashMap.HashMap<Text, Types.AccountRecoveryCodeRecord>(
+      accountRecoveryCodesStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in accountRecoveryCodesStable.vals()) {
+      accountRecoveryCodesByCode.put(entry.0, entry.1);
+    };
+    rebuildActiveRecoveryCodeIndex();
+
     reloadStudioPermissionTransientFromStable();
     ensureStudioFeatureKeysMergedWithDefaults();
     seedStudioPermissionDefaultsIfEmpty();
@@ -1993,6 +2063,7 @@ persistent actor {
       artistFeaturedManualIdsStable = Buffer.toArray(manualFeaturedArtistIds);
       joinInvitesStable = _Iter.toArray(joinInvitesByCode.entries());
       joinInviteTrialMonthsStable = ?(_Iter.toArray(joinInviteTrialMonthsByCode.entries()));
+      accountRecoveryCodesStable = ?(_Iter.toArray(accountRecoveryCodesByCode.entries()));
       studioPermissionDefaultsStable = _Iter.toArray(studioPermissionDefaultsByCategory.entries());
       studioPermissionOverridesStable = _Iter.toArray(studioPermissionOverridesByPrincipal.entries());
       superStaffPrincipalsStable = superStaffPrincipalsAsArray();
@@ -2066,6 +2137,10 @@ persistent actor {
     artistFeaturedManualIdsStable := snapshot.artistFeaturedManualIdsStable;
     joinInvitesStable := snapshot.joinInvitesStable;
     joinInviteTrialMonthsStable := switch (snapshot.joinInviteTrialMonthsStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    accountRecoveryCodesStable := switch (snapshot.accountRecoveryCodesStable) {
       case null { [] };
       case (?rows) { rows };
     };
@@ -2208,6 +2283,93 @@ persistent actor {
     reconnectMemberPrincipalBetween(fromPrincipal, toPrincipal);
   };
 
+  /// Admin: generate a single-use 8-digit recovery code (7-day expiry) for self-serve II migration.
+  public shared (msg) func adminGenerateAccountRecoveryCode(
+    fromPrincipal : Principal,
+  ) : async Types.GenerateAccountRecoveryCodeResult {
+    assertAdmin(msg.caller);
+    switch (accountsByPrincipal.get(fromPrincipal)) {
+      case null { return #noSourceAccount };
+      case (?core) {
+        if (roleIsAdminOnly(core.role)) {
+          return #cannotGenerateForPrivilegedAccount;
+        };
+      };
+    };
+    invalidateActiveRecoveryCodeForPrincipal(fromPrincipal);
+    let now = nowText();
+    let expiresAtSec = nowSec() + accountRecoveryDurationSec;
+    var attempts : Nat = 0;
+    while (attempts < 50) {
+      let cand = randomEightDigitCandidate(attempts + accountRecoveryCodesByCode.size());
+      if (not isJoinInviteCodeTaken(cand)) {
+        let rec : Types.AccountRecoveryCodeRecord = {
+          fromPrincipal = fromPrincipal;
+          active = true;
+          createdAt = now;
+          expiresAtSec = expiresAtSec;
+          redeemedAt = null;
+          redeemedToPrincipal = null;
+        };
+        accountRecoveryCodesByCode.put(cand, rec);
+        activeRecoveryCodeByFromPrincipal.put(fromPrincipal, cand);
+        return #ok({ code = cand; expiresAtSec = expiresAtSec });
+      };
+      attempts += 1;
+    };
+    #allocationFailed;
+  };
+
+  /// Authenticated member: redeem recovery code — migrate source account to caller's Internet Identity.
+  public shared (msg) func redeemAccountRecoveryCode(codeRaw : Text) : async Types.RedeemAccountRecoveryCodeResult {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      return #invalidCode;
+    };
+    switch (accountsByPrincipal.get(msg.caller)) {
+      case (?_) { return #callerHasAccount };
+      case null {};
+    };
+    let code = normalizeJoinAccessCode(codeRaw);
+    if (not isEightDigitAccessCode(code)) {
+      return #invalidCode;
+    };
+    switch (accountRecoveryCodesByCode.get(code)) {
+      case null { return #invalidCode };
+      case (?rec) {
+        if (not rec.active) {
+          return #alreadyUsed;
+        };
+        if (nowSec() > rec.expiresAtSec) {
+          accountRecoveryCodesByCode.put(code, { rec with active = false });
+          ignore activeRecoveryCodeByFromPrincipal.remove(rec.fromPrincipal);
+          return #expiredCode;
+        };
+        let result = reconnectMemberPrincipalBetween(rec.fromPrincipal, msg.caller);
+        switch (result) {
+          case (#ok(ok)) {
+            let redeemedAt = nowText();
+            accountRecoveryCodesByCode.put(
+              code,
+              {
+                rec with
+                active = false;
+                redeemedAt = ?redeemedAt;
+                redeemedToPrincipal = ?msg.caller;
+              },
+            );
+            ignore activeRecoveryCodeByFromPrincipal.remove(rec.fromPrincipal);
+            #ok(ok);
+          };
+          case (#samePrincipal) { #samePrincipal };
+          case (#noSourceAccount) { #noSourceAccount };
+          case (#targetHasAccount) { #targetHasAccount };
+          case (#targetLinkedToDifferentArtist) { #targetHasAccount };
+          case (#cannotMigratePrivilegedAccount) { #cannotMigratePrivilegedAccount };
+        };
+      };
+    };
+  };
+
   /// Admin: set whether this member is exempt from subscription (manual veteran / complimentary).
   public shared (msg) func adminSetMembershipExemptManual(memberPrincipal : Principal, exempt : Bool) : async () {
     assertAdmin(msg.caller);
@@ -2243,6 +2405,48 @@ persistent actor {
   };
 
   /// Integration API only — updates Stripe ids/status for a member principal.
+  /// A canceled membership must not keep a public presence: when billing access is lost, take the
+  /// linked artist's roster row off public feeds by setting `visibility` to `inactive`. Only touches
+  /// rows that are currently `public` or `pending` (submitted for review); `private`/`inactive` and
+  /// unlinked accounts are left as-is. The profile data is preserved, so a returning member can
+  /// re-enable visibility in Studio. Does not auto-restore on resubscribe.
+  private func hideLinkedArtistProfileOnCancel(p : Principal) {
+    switch (accountsByPrincipal.get(p)) {
+      case null {};
+      case (?acc) {
+        switch (acc.linkedArtistId) {
+          case null {};
+          case (?aid) {
+            switch (artistsById.get(aid)) {
+              case null {};
+              case (?rec) {
+                if (rec.profile.visibility == "public" or rec.profile.visibility == "pending") {
+                  let newProfile : Types.ArtistCore = {
+                    rec.profile with
+                    visibility = "inactive";
+                    updatedAt = nowText();
+                  };
+                  putArtistRecord({ rec with profile = newProfile });
+                };
+              };
+            };
+          };
+        };
+      };
+    };
+  };
+
+  /// After a membership record update, hide the public profile if billing access is now lost due to a
+  /// canceled/ended subscription (not merely past-due). The `#needsSubscription` gate guarantees the
+  /// member is not exempt and has no other active plan before anything is taken down.
+  private func hideProfileIfMembershipCanceled(p : Principal, canceledSignal : Bool) {
+    if (not canceledSignal) { return };
+    switch (membershipAccessForPrincipal(p)) {
+      case (#needsSubscription) { hideLinkedArtistProfileOnCancel(p) };
+      case (_) {};
+    };
+  };
+
   public shared (msg) func integrationRecordStripeSubscription(
     memberPrincipal : Principal,
     stripeCustomerId : ?Text,
@@ -2285,6 +2489,11 @@ persistent actor {
       case null { };
       case (?pe) { putStripePeriodEndForPrincipal(memberPrincipal, ?pe) };
     };
+    let stripeCanceled = switch (m1.stripeSubscriptionStatus) {
+      case null { false };
+      case (?s) { s == "canceled" or s == "cancelled" };
+    };
+    hideProfileIfMembershipCanceled(memberPrincipal, stripeCanceled);
   };
 
   /// Integration API only — updates PayPal subscription ids/status for a member principal.
@@ -2326,6 +2535,11 @@ persistent actor {
       case null { };
       case (?pe) { putStripePeriodEndForPrincipal(memberPrincipal, ?pe) };
     };
+    let paypalCanceled = switch (m1.paypalSubscriptionStatus) {
+      case null { false };
+      case (?s) { s == "CANCELLED" or s == "EXPIRED" };
+    };
+    hideProfileIfMembershipCanceled(memberPrincipal, paypalCanceled);
   };
 
   /// Caller registers or updates a non-privileged role. New principals get `#pending`; existing rows

@@ -11,6 +11,8 @@ import {
 import {
     communityVideoRecordToFeatureItem,
     parseVideoLocales,
+    resolveFeaturedVideos,
+    sortVideosByRecency,
     videoMediaStatus,
 } from '../../../utils/videoPageModel.js';
 import { studioFeatureAccess } from '../../../utils/studioShellState.js';
@@ -34,7 +36,7 @@ function formatDate(iso) {
 /**
  * @param {Record<string, unknown>} rec
  * @param {boolean} selected
- * @param {{ isHero?: boolean, canEdit?: boolean }} meta
+ * @param {{ isHero?: boolean, canEdit?: boolean, readOnly?: boolean }} meta
  */
 function featuredCardHtml(rec, selected, meta = {}) {
     const locales = parseVideoLocales(rec.localesJson);
@@ -42,11 +44,16 @@ function featuredCardHtml(rec, selected, meta = {}) {
     const line = String(locales.lineEn || locales.lineJa || '');
     const img = String(rec.posterUrl || rec.imageUrl || '');
     const media = videoMediaStatus(rec);
+    const readOnly = meta.readOnly === true;
     const heroBtn =
-        meta.canEdit && selected
+        !readOnly && meta.canEdit && selected
             ? `<button type="button" class="studio-videos-featured-card__hero${meta.isHero ? ' is-hero' : ''}" data-hero-set="${esc(rec.id)}" aria-label="${meta.isHero ? 'Clear landing hero' : 'Set as landing hero'}">${meta.isHero ? '★ Hero' : 'Set hero'}</button>`
             : '';
-    return `<button type="button" class="studio-videos-featured-card${selected ? ' is-selected' : ''}" data-video-id="${esc(rec.id)}" aria-pressed="${selected ? 'true' : 'false'}">
+    const tag = readOnly ? 'div' : 'button';
+    const attrs = readOnly
+        ? `class="studio-videos-featured-card studio-videos-featured-card--readonly" data-video-id="${esc(rec.id)}" role="button" tabindex="0"`
+        : `type="button" class="studio-videos-featured-card${selected ? ' is-selected' : ''}" data-video-id="${esc(rec.id)}" aria-pressed="${selected ? 'true' : 'false'}"`;
+    return `<${tag} ${attrs}>
         <div class="studio-videos-featured-card__media" style="${img ? `background-image:url(${esc(img)})` : ''}"></div>
         <div class="studio-videos-featured-card__body">
             <strong>${esc(title)}</strong>
@@ -57,7 +64,7 @@ function featuredCardHtml(rec, selected, meta = {}) {
             </div>
             ${heroBtn}
         </div>
-    </button>`;
+    </${tag}>`;
 }
 
 /**
@@ -81,12 +88,11 @@ export async function initVideosSection(mainEl) {
             <section class="studio-videos-featured-section">
                 <div class="studio-videos-featured-head">
                     <div>
-                        <h3 class="studio-subheading">Featured on Community</h3>
-                        <p class="studio-muted">Select up to six visible videos for /community. Star one as the landing hero. Empty selection defaults to the six most recent visible videos.</p>
+                        <h3 class="studio-subheading">Featured</h3>
+                        <p class="studio-muted">What appears on /community and the /videos recent row: pinned videos (checked in each video&apos;s editor) plus the most recently added until six slots are filled. Set a hero in the video editor.</p>
                     </div>
-                    ${canEdit ? '<button type="button" class="studio-btn-primary" id="studio-videos-save-featured">Save featured</button>' : ''}
                 </div>
-                <div class="studio-videos-featured-rail" id="studio-videos-featured-rail"></div>
+                <div class="studio-videos-featured-grid" id="studio-videos-featured-grid"></div>
             </section>
             <div class="studio-videos-toolbar">
                 <input type="search" id="studio-videos-search" class="studio-input" placeholder="Search videos…" />
@@ -122,20 +128,16 @@ export async function initVideosSection(mainEl) {
     let allVideos = [];
     /** @type {{ featuredVideoIds: string[], heroVideoId: string | null }} */
     let featuredCfg = { featuredVideoIds: [], heroVideoId: null };
-    /** @type {string[]} */
-    let draftFeaturedIds = [];
-    /** @type {string | null} */
-    let draftHeroId = null;
     let page = 0;
     const pageSize = 10;
 
     const tbody = mainEl.querySelector('#studio-videos-tbody');
-    const rail = mainEl.querySelector('#studio-videos-featured-rail');
+    const featuredGrid = mainEl.querySelector('#studio-videos-featured-grid');
     const searchInput = mainEl.querySelector('#studio-videos-search');
     const visibleFilter = mainEl.querySelector('#studio-videos-visible');
 
     const filtered = () => {
-        let rows = allVideos;
+        let rows = sortVideosByRecency(allVideos);
         const vis = visibleFilter instanceof HTMLSelectElement ? visibleFilter.value : 'all';
         if (vis === 'visible') rows = rows.filter((r) => r.visible !== false);
         if (vis === 'hidden') rows = rows.filter((r) => r.visible === false);
@@ -150,65 +152,35 @@ export async function initVideosSection(mainEl) {
         return rows;
     };
 
-    const syncFeaturedDraftFromCfg = () => {
-        draftFeaturedIds = [...featuredCfg.featuredVideoIds];
-        draftHeroId = featuredCfg.heroVideoId ? String(featuredCfg.heroVideoId) : null;
-    };
+    const resolvedFeatured = () => resolveFeaturedVideos(allVideos, featuredCfg);
 
-    const renderFeaturedRail = () => {
-        if (!rail) return;
-        const visibleVideos = allVideos.filter((v) => v.visible !== false);
-        const cards = visibleVideos.length
-            ? visibleVideos.map((rec) => {
-                  const id = String(rec.id);
-                  const selected = draftFeaturedIds.includes(id);
-                  return featuredCardHtml(rec, selected, {
-                      isHero: draftHeroId === id,
-                      canEdit,
-                  });
-              })
-            : [];
-        rail.innerHTML = cards.length
+    const renderFeaturedGrid = () => {
+        if (!featuredGrid) return;
+        const featured = resolvedFeatured();
+        const pinnedSet = new Set(featuredCfg.featuredVideoIds.map(String));
+        const heroId = featuredCfg.heroVideoId ? String(featuredCfg.heroVideoId) : '';
+        const cards = featured.map((rec) =>
+            featuredCardHtml(rec, true, {
+                isHero: String(rec.id) === heroId,
+                canEdit: false,
+                readOnly: true,
+            }),
+        );
+        featuredGrid.innerHTML = cards.length
             ? cards.join('')
             : '<p class="studio-muted">No visible videos yet. Add a video and mark it visible.</p>';
-        rail.querySelectorAll('[data-video-id]').forEach((btn) => {
-            btn.addEventListener('click', (e) => {
-                if (e.target instanceof HTMLElement && e.target.closest('[data-hero-set]')) return;
-                const id = btn.getAttribute('data-video-id');
-                if (!id || !canEdit) {
-                    const rec = allVideos.find((v) => String(v.id) === id);
-                    if (rec) openEditor(rec);
-                    return;
+        featuredGrid.querySelectorAll('[data-video-id]').forEach((el) => {
+            const open = () => {
+                const id = el.getAttribute('data-video-id');
+                const rec = allVideos.find((v) => String(v.id) === id);
+                if (rec) openEditor(rec);
+            };
+            el.addEventListener('click', open);
+            el.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    open();
                 }
-                e.preventDefault();
-                const ix = draftFeaturedIds.indexOf(id);
-                if (ix >= 0) {
-                    draftFeaturedIds.splice(ix, 1);
-                    if (draftHeroId === id) draftHeroId = null;
-                } else if (draftFeaturedIds.length < 6) {
-                    draftFeaturedIds.push(id);
-                    if (!draftHeroId) draftHeroId = id;
-                }
-                renderFeaturedRail();
-            });
-        });
-        rail.querySelectorAll('[data-hero-set]').forEach((btn) => {
-            btn.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                const id = btn.getAttribute('data-hero-set');
-                if (!id || !canEdit) return;
-                if (draftHeroId === id) {
-                    draftHeroId = null;
-                    renderFeaturedRail();
-                    return;
-                }
-                if (!draftFeaturedIds.includes(id)) {
-                    if (draftFeaturedIds.length >= 6) return;
-                    draftFeaturedIds.push(id);
-                }
-                draftHeroId = id;
-                renderFeaturedRail();
             });
         });
     };
@@ -219,6 +191,8 @@ export async function initVideosSection(mainEl) {
         const pages = Math.max(1, Math.ceil(rows.length / pageSize));
         if (page >= pages) page = Math.max(0, pages - 1);
         const slice = rows.slice(page * pageSize, page * pageSize + pageSize);
+        const featuredSet = new Set(resolvedFeatured().map((v) => String(v.id)));
+        const pinnedSet = new Set(featuredCfg.featuredVideoIds.map(String));
         if (!slice.length) {
             tbody.innerHTML = `<tr><td colspan="6">${allVideos.length ? 'No matches.' : 'No videos yet.'}</td></tr>`;
         } else {
@@ -228,15 +202,22 @@ export async function initVideosSection(mainEl) {
                     const title = String(loc.headlineEn || loc.headlineJa || rec.slug);
                     const img = String(rec.posterUrl || rec.imageUrl || '');
                     const media = videoMediaStatus(rec);
-                    const featured = featuredCfg.featuredVideoIds.includes(String(rec.id));
-                    const isHero = String(featuredCfg.heroVideoId) === String(rec.id);
+                    const id = String(rec.id);
+                    const pinned = pinnedSet.has(id);
+                    const inFeatured = featuredSet.has(id);
+                    const isHero = String(featuredCfg.heroVideoId) === id;
+                    let featuredLabel = '—';
+                    if (inFeatured) {
+                        featuredLabel = pinned ? 'Pinned' : 'Recent';
+                        if (isHero) featuredLabel += ' ★';
+                    }
                     return `<tr class="studio-videos-row" data-video-id="${esc(rec.id)}" tabindex="0" role="button">
                         <td>${img ? `<img src="${esc(img)}" alt="" width="48" height="27" style="object-fit:cover" />` : '—'}</td>
                         <td>${esc(title)}</td>
                         <td>${esc(formatDate(rec.publishedAt))}</td>
                         <td>${rec.visible !== false ? 'Yes' : 'No'}</td>
                         <td>${media.hasPreview ? 'Preview' : '—'}${media.hasFull ? ' · Full' : ''}${media.hasPoster ? ' · Poster' : ''}</td>
-                        <td>${featured ? `Featured${isHero ? ' ★' : ''}` : '—'}</td>
+                        <td>${esc(featuredLabel)}</td>
                     </tr>`;
                 })
                 .join('');
@@ -263,15 +244,16 @@ export async function initVideosSection(mainEl) {
     const openEditor = (rec) => {
         void openVideoEditorModal(rec, {
             canEdit,
-            featured: { videoIds: draftFeaturedIds, heroVideoId: draftHeroId },
+            featured: {
+                videoIds: featuredCfg.featuredVideoIds,
+                heroVideoId: featuredCfg.heroVideoId,
+            },
             otherVideos: allVideos,
             onFeaturedChange: canEdit
                 ? async (cfg) => {
                       await setCommunityFeaturedVideosStudio(cfg);
                       featuredCfg = cfg;
-                      draftFeaturedIds = [...cfg.featuredVideoIds];
-                      draftHeroId = cfg.heroVideoId ? String(cfg.heroVideoId) : null;
-                      renderFeaturedRail();
+                      renderFeaturedGrid();
                       renderTable();
                   }
                 : undefined,
@@ -293,23 +275,23 @@ export async function initVideosSection(mainEl) {
             listCommunityVideosStudio(),
             getCommunityFeaturedVideosStudio(),
         ]);
-        syncFeaturedDraftFromCfg();
-        renderFeaturedRail();
+        renderFeaturedGrid();
         renderTable();
     };
 
     mainEl.querySelector('#studio-videos-add')?.addEventListener('click', () => {
         void openVideoEditorModal(null, {
             canEdit,
-            featured: { videoIds: draftFeaturedIds, heroVideoId: draftHeroId },
+            featured: {
+                videoIds: featuredCfg.featuredVideoIds,
+                heroVideoId: featuredCfg.heroVideoId,
+            },
             otherVideos: allVideos,
             onFeaturedChange: canEdit
                 ? async (cfg) => {
                       await setCommunityFeaturedVideosStudio(cfg);
                       featuredCfg = cfg;
-                      draftFeaturedIds = [...cfg.featuredVideoIds];
-                      draftHeroId = cfg.heroVideoId ? String(cfg.heroVideoId) : null;
-                      renderFeaturedRail();
+                      renderFeaturedGrid();
                       renderTable();
                   }
                 : undefined,
@@ -335,35 +317,6 @@ export async function initVideosSection(mainEl) {
     mainEl.querySelector('#studio-videos-next')?.addEventListener('click', () => {
         page += 1;
         renderTable();
-    });
-
-    mainEl.querySelector('#studio-videos-save-featured')?.addEventListener('click', async () => {
-        const btn = mainEl.querySelector('#studio-videos-save-featured');
-        try {
-            if (btn instanceof HTMLButtonElement) {
-                btn.disabled = true;
-                btn.textContent = 'Saving…';
-            }
-            await setCommunityFeaturedVideosStudio({
-                featuredVideoIds: draftFeaturedIds,
-                heroVideoId: draftHeroId,
-            });
-            featuredCfg = await getCommunityFeaturedVideosStudio();
-            syncFeaturedDraftFromCfg();
-            renderFeaturedRail();
-            renderTable();
-            captureStudioVideoEvent('studio_featured_updated', {
-                featured_count: draftFeaturedIds.length,
-                has_hero: Boolean(draftHeroId),
-            });
-        } catch (err) {
-            console.error(err);
-        } finally {
-            if (btn instanceof HTMLButtonElement) {
-                btn.disabled = false;
-                btn.textContent = 'Save featured';
-            }
-        }
     });
 
     await reload();

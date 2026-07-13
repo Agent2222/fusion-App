@@ -2,9 +2,37 @@
 
 Support runbook for members who paid and completed profile setup but now see **“No member account found”** on **Settings → Profile** after signing in with Internet Identity (II).
 
-Self-serve email recovery is **not** in Phase 1. Admins use **Studio → Users → Manage account → Reconnect Internet Identity**.
+Self-serve **recovery codes** (Phase 1.5) let members reconnect without admin pasting principals. Admins can still use **Studio → Users → Manage account → Reconnect Internet Identity** directly.
 
-## How accounts are keyed
+## Self-serve recovery code (Phase 1.5)
+
+### Admin (Studio)
+
+1. Open **Studio → Users** → **Manage account** on the member’s paid row (source principal).
+2. In **Reconnect Internet Identity**, click **Generate recovery code**.
+3. Copy the **8-digit code** and expiry; share securely with the member (email/DM).
+4. **Rules:** one active code per account; **7-day expiry**; **single-use**; generating a new code invalidates the previous one.
+
+Canister: `adminGenerateAccountRecoveryCode(fromPrincipal)` (admin caller).
+
+### Member (Settings → Profile)
+
+When signed in but **no member account** is linked:
+
+1. Tap **Recover account** below the notice.
+2. Enter the **8-digit recovery code** from support.
+3. Tap **Recover** — account migrates to this Internet Identity; Stripe/PayPal refresh when integration API is configured.
+4. Profile loads after reload.
+
+Canister: `redeemAccountRecoveryCode(code)` (authenticated caller, no account row yet).
+
+### When to use code vs admin reconnect
+
+| Situation | Use |
+|-----------|-----|
+| Member has new II, can sign in, support can share a code | **Generate recovery code** |
+| Admin knows both old and new principals | **Reconnect account** (admin) |
+| Same principal, missing account row only | Push subscription / create row — **no migration** |
 
 - Fusion member accounts on the canister are keyed by the member’s **Internet Identity principal** (not email).
 - Auto-created member artist ids use the format **`m-{principal}`** (for example `m-p33kj-dlbip-…`). That prefix is **not** a separate login — it is derived from the same principal when `ensureMyLinkedArtistProfile` runs.
@@ -26,7 +54,7 @@ Common causes:
 ## What to collect from the member
 
 1. **Checkout email** (Stripe/PayPal receipt).
-2. **Current Internet Identity ID** — Settings → Profile shows **Copy ID** when no account is linked; or Studio can read the principal from a test sign-in.
+2. **Current Internet Identity ID** — Settings → Profile shows **User ID** above the no-account notice (or in the sidebar above Overview when the profile loads normally).
 3. Whether they believe they used a **different** II before (optional but helpful).
 
 ## Studio workflow (after Phase 1 deploy)
@@ -52,6 +80,8 @@ Canister methods (after backend deploy + `dfx generate`):
 
 - `adminReconnectMemberPrincipal(from, to)` — admin caller
 - `integrationReconnectMemberPrincipal(from, to)` — integration service PEM
+- `adminGenerateAccountRecoveryCode(fromPrincipal)` — admin; returns 8-digit code + expiry
+- `redeemAccountRecoveryCode(code)` — member caller; migrates source account to current II
 
 ## Manual fix before / without Studio reconnect UI
 
@@ -93,11 +123,11 @@ Always compare **checkout email** in Studio, **Stripe metadata.principal**, and 
 
 ## Member support script
 
-> You’re signed in, but this Internet Identity isn’t linked to your Fusion member account yet. Please reply with the **email used at checkout** and tap **Copy ID** on Settings → Profile (or paste your Internet Identity ID). We’ll reconnect your membership and artist profile to this login. You do not need to pay again.
+> You’re signed in, but this Internet Identity isn’t linked to your Fusion member account yet. If we sent you a recovery code, open Settings → Profile, tap **Recover account**, and enter the 8-digit code. Otherwise reply with your **checkout email** and copy **User ID** from Settings → Profile. We’ll reconnect your membership — you do not need to pay again.
 
 ## Deploy checklist
 
-1. Deploy **fusion-app-backend** with `adminReconnectMemberPrincipal` / `integrationReconnectMemberPrincipal`.
+1. Deploy **fusion-app-backend** with reconnect + recovery code methods.
 2. Run **`dfx generate fusion-app-backend`** (or frontend `prebuild`) so Studio bindings include the new methods.
 3. Redeploy **fusion-integration-api** with account reconnect routes and updated IDL.
 4. Confirm `adminSetIntegrationServicePrincipal` matches the integration PEM.
@@ -105,6 +135,5 @@ Always compare **checkout email** in Studio, **Stripe metadata.principal**, and 
 
 ## Phase 2 (deferred)
 
-- Public reconnect wizard on Settings → Profile
-- Email OTP verification (Resend)
+- Email OTP verification (Resend) instead of admin-issued codes
 - PayPal sync-by-email without subscription id

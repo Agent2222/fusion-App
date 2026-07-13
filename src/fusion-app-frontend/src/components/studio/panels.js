@@ -91,6 +91,7 @@ import {
     migrateStudioArtistsFirebaseIntroGalleries,
     upsertContentPageStudio,
     generateAndUpsertArtistWorldFromBio,
+    adminGenerateAccountRecoveryCodeStudio,
 } from '../../utils/database.js';
 import { renderTeamSection, initTeamSection } from './teamSection.js';
 import { STUDIO_WORLD_BATCH_MAX, buildMergedLocalesWithGeneratedWorldFromIdentity, hasUsableIdentityLlmSourceInput, translateManageFormWorldToNewWorld } from '../../utils/studioArtistWorldLlm.js';
@@ -6629,8 +6630,10 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
             <button type="button" class="studio-btn-ghost" id="studio-user-reconnect-lookup">Lookup by email</button>
             <button type="button" class="studio-btn-ghost" id="studio-user-reconnect-preview">Preview reconnect</button>
             <button type="button" class="studio-btn-primary" id="studio-user-reconnect-complete">Reconnect account</button>
+            <button type="button" class="studio-btn-ghost" id="studio-user-generate-recovery-code">Generate recovery code</button>
           </div>
           <p id="studio-user-reconnect-result" class="studio-muted studio-user-manage-push-result" hidden></p>
+          <div id="studio-user-recovery-code-result" class="studio-user-manage-recovery-code" hidden></div>
         </section>
 
         <p id="studio-user-sync-warn" class="studio-banner studio-banner--warn studio-user-manage-warn" hidden></p>
@@ -6674,6 +6677,7 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
     const stripeIdsEl = root.querySelector('#studio-user-stripe-ids');
     const reconnectResultEl = root.querySelector('#studio-user-reconnect-result');
     const reconnectToInput = root.querySelector('#studio-user-reconnect-to');
+    const recoveryCodeResultEl = root.querySelector('#studio-user-recovery-code-result');
     const CHECK_LABEL = 'Check Stripe';
     const stripeCheckEmailLsKey = studioStripeCheckEmailStorageKey(principal);
 
@@ -6952,6 +6956,29 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
             const { refreshErr } = await refetchUserRowAndRefreshTable();
             if (refreshErr) {
                 setSyncWarn(`Reconnect succeeded but table refresh failed: ${refreshErr}`);
+            }
+        } catch (e) {
+            setReconnectResult(e instanceof Error ? e.message : String(e), true);
+        }
+    });
+
+    root.querySelector('#studio-user-generate-recovery-code')?.addEventListener('click', async () => {
+        setReconnectResult('Generating recovery code…', true);
+        if (recoveryCodeResultEl instanceof HTMLElement) {
+            recoveryCodeResultEl.hidden = true;
+            recoveryCodeResultEl.innerHTML = '';
+        }
+        try {
+            const { code, expiresAtSec } = await adminGenerateAccountRecoveryCodeStudio(principal);
+            const expiryLabel =
+                Number.isFinite(expiresAtSec) && expiresAtSec > 0
+                    ? formatStudioDateWithTitle(new Date(expiresAtSec * 1000).toISOString())
+                    : '—';
+            setReconnectResult('Recovery code generated. Share it with the member.', true);
+            if (recoveryCodeResultEl instanceof HTMLElement) {
+                recoveryCodeResultEl.hidden = false;
+                recoveryCodeResultEl.innerHTML = `<p class="studio-muted">Valid until <strong>${escapeHtml(expiryLabel)}</strong>. Single-use — member enters this on Settings → Profile → Recover account.</p>
+                    <div class="studio-user-manage-id-row"><span class="studio-muted">Code</span> <code>${escapeHtml(code)}</code> <button type="button" class="studio-btn-ghost studio-btn-tiny" data-studio-copy="${escapeHtml(code)}">Copy</button></div>`;
             }
         } catch (e) {
             setReconnectResult(e instanceof Error ? e.message : String(e), true);

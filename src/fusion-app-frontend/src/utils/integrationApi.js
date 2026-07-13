@@ -510,6 +510,34 @@ export async function syncSubscriptionFromStripeByEmail(email, principalText) {
 }
 
 /**
+ * After canister account recovery / reconnect, refresh Stripe + PayPal to the new principal.
+ * @param {{ principal: string, email?: string, paypalSubscriptionId?: string }} opts
+ */
+export async function syncMembershipAfterAccountRecovery(opts) {
+    const pr = String(opts?.principal ?? '').trim();
+    const em = String(opts?.email ?? '').trim();
+    const paypalId = String(opts?.paypalSubscriptionId ?? '').trim();
+    /** @type {{ stripe: unknown, paypal: unknown }} */
+    const out = { stripe: null, paypal: null };
+    if (em.includes('@')) {
+        out.stripe = await syncSubscriptionFromStripeByEmail(em, pr);
+    } else if (pr) {
+        out.stripe = await syncSubscriptionFromStripe(pr);
+    }
+    if (paypalId && pr) {
+        try {
+            out.paypal = await syncPayPalSubscription({ principal: pr, subscriptionId: paypalId });
+        } catch (e) {
+            out.paypal = {
+                synced: false,
+                error: e instanceof Error ? e.message : String(e),
+            };
+        }
+    }
+    return out;
+}
+
+/**
  * Studio admin: lookup paid membership hints by checkout email.
  * @param {string} email
  * @param {string} [paypalSubscriptionId]

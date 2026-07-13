@@ -3,13 +3,18 @@
  */
 import { Principal } from '@dfinity/principal';
 import { getIntegrationActor } from '../canisterActor.js';
+import {
+    deletePendingPayPalMetadata,
+    getPendingPayPalMetadata,
+} from './pendingPaymentStore.js';
 import { parsePayPalCustomId, safePayPalMetaValue } from './providers/paypalProvider.js';
 
 /**
  * @param {object} order PayPal order after capture (COMPLETED)
  * @param {{ sendProgramPaymentConfirmationEmails?: (d: object) => Promise<void>; markProgramPaymentEmailsSent?: (id: string) => Promise<void>; cancelPlatformSubscriptionImmediately?: (principal: string) => Promise<void>; addConfirmedArtistToProgram?: (actor: unknown, principal: string, programId: string, createdAt: string) => Promise<{ ok: boolean; reason?: string }> }} deps
+ * @param {Record<string, string>} [metaOverride]
  */
-export async function recordVerifiedPayPalOrder(order, deps = {}) {
+export async function recordVerifiedPayPalOrder(order, deps = {}, metaOverride = {}) {
     const actor = await getIntegrationActor();
     if (!actor) {
         throw new Error('Canister integration not configured');
@@ -22,7 +27,14 @@ export async function recordVerifiedPayPalOrder(order, deps = {}) {
     if (!capture || capture.status !== 'COMPLETED') {
         throw new Error(`PayPal capture not completed: ${capture?.status || 'missing'}`);
     }
-    const meta = parsePayPalCustomId(pu.custom_id || '');
+    const metaRef = safePayPalMetaValue(pu.custom_id, 127);
+    let meta = metaRef ? await getPendingPayPalMetadata(metaRef) : {};
+    if (!meta.principal && !meta.programId && metaRef) {
+        meta = parsePayPalCustomId(metaRef);
+    }
+    if (metaOverride && typeof metaOverride === 'object') {
+        meta = { ...meta, ...metaOverride };
+    }
     const principalText = safePayPalMetaValue(meta.principal);
     const programId = safePayPalMetaValue(meta.programId, 120);
     const applicationId = safePayPalMetaValue(meta.applicationId, 240);
@@ -80,6 +92,9 @@ export async function recordVerifiedPayPalOrder(order, deps = {}) {
         ownFlight,
         BigInt(flightCreditCents),
     );
+    if (metaRef) {
+        await deletePendingPayPalMetadata(metaRef);
+    }
     if (paymentType === 'deposit' || paymentType === 'full_payment') {
         await actor.integrationMarkProgramDepositAccepted(
             Principal.fromText(principalText),

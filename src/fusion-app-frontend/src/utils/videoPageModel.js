@@ -195,7 +195,22 @@ export function videoMediaStatus(rec) {
     };
 }
 
+/** Max featured videos on community strip and /videos recent row. */
+export const COMMUNITY_FEATURED_MAX = 6;
+
 /**
+ * Sort visible videos by publishedAt descending (most recently added first).
+ * @param {CommunityVideoRecord[]} visible
+ * @returns {CommunityVideoRecord[]}
+ */
+export function sortVideosByRecency(visible) {
+    return [...visible].sort((a, b) => String(b.publishedAt).localeCompare(String(a.publishedAt)));
+}
+
+/**
+ * Featured set: pinned/checked videos (featuredVideoIds) always included, then filled with
+ * most-recent visible videos up to COMMUNITY_FEATURED_MAX.
+ *
  * @param {CommunityVideoRecord[]} allVideos
  * @param {{ featuredVideoIds?: string[], heroVideoId?: string | null }} featuredConfig
  * @returns {CommunityVideoRecord[]}
@@ -203,21 +218,20 @@ export function videoMediaStatus(rec) {
 export function resolveFeaturedVideos(allVideos, featuredConfig = {}) {
     const list = Array.isArray(allVideos) ? allVideos.map(normalizeCommunityVideoRecord) : [];
     const visible = list.filter((v) => v.visible !== false);
-    const ids = Array.isArray(featuredConfig.featuredVideoIds)
+    const byId = new Map(visible.map((v) => [String(v.id), v]));
+    const pinnedIds = Array.isArray(featuredConfig.featuredVideoIds)
         ? featuredConfig.featuredVideoIds.map(String).filter(Boolean)
         : [];
-    if (ids.length) {
-        const byId = new Map(visible.map((v) => [String(v.id), v]));
-        return ids.map((id) => byId.get(id)).filter(Boolean).slice(0, 6);
+    const pinned = pinnedIds.map((id) => byId.get(id)).filter(Boolean);
+    const pinnedSet = new Set(pinned.map((v) => String(v.id)));
+    const recentFill = sortVideosByRecency(visible).filter((v) => !pinnedSet.has(String(v.id)));
+    const cap = Math.max(COMMUNITY_FEATURED_MAX, pinned.length);
+    const result = [...pinned];
+    for (const v of recentFill) {
+        if (result.length >= cap) break;
+        result.push(v);
     }
-    return [...visible]
-        .sort((a, b) => {
-            const sa = Number(a.sortOrder) || 0;
-            const sb = Number(b.sortOrder) || 0;
-            if (sa !== sb) return sa - sb;
-            return String(b.publishedAt).localeCompare(String(a.publishedAt));
-        })
-        .slice(0, 6);
+    return result.slice(0, cap);
 }
 
 /**

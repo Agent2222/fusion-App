@@ -63,6 +63,18 @@ function clampDurationSec(sec) {
     return Math.min(120, Math.max(0.5, n));
 }
 
+/**
+ * @param {string} s
+ * @returns {string}
+ */
+function escAttr(s) {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
 class ProgramFadeGalleryElement extends HTMLElement {
     constructor() {
         super();
@@ -86,6 +98,8 @@ class ProgramFadeGalleryElement extends HTMLElement {
         this._progressTrack = null;
         /** @type {HTMLElement | null} */
         this._wrap = null;
+        /** @type {HTMLElement | null} */
+        this._thumbs = null;
         this._busy = false;
         this._reducedMotion = false;
         /** `setImages` from program view has not run yet — show shared loader, not “empty”. */
@@ -101,6 +115,17 @@ class ProgramFadeGalleryElement extends HTMLElement {
                 e.preventDefault();
                 this._onUserAdvance();
             }
+        };
+        /** @type {(e: Event) => void} */
+        this._onThumbClick = (e) => {
+            const t = e.target;
+            if (!(t instanceof Element)) return;
+            const btn = t.closest('.pfade-thumb');
+            if (!btn || !this._thumbs || !this._thumbs.contains(btn)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const idx = Number(btn.getAttribute('data-idx'));
+            if (Number.isFinite(idx)) this._onUserSelectThumb(idx);
         };
     }
 
@@ -127,6 +152,82 @@ class ProgramFadeGalleryElement extends HTMLElement {
         return withSeoImageAlt(`${base} gallery slide ${slideIndex + 1}`);
     }
 
+    /**
+     * Small overlay strip of clickable thumbnails (only when there is more than one image).
+     * @returns {string}
+     */
+    _thumbsHtml() {
+        if (this._urls.length < 2) return '';
+        const items = this._urls
+            .map(
+                (u, i) =>
+                    `<button type="button" class="pfade-thumb" data-idx="${i}" aria-label="Go to image ${i + 1}"><img src="${escAttr(u)}" alt="" loading="lazy" decoding="async" /></button>`,
+            )
+            .join('');
+        return `<div class="pfade-thumbs" part="thumbs" role="tablist" aria-label="Gallery thumbnails">${items}</div>`;
+    }
+
+    _updateActiveThumb() {
+        if (!this._thumbs) return;
+        const btns = this._thumbs.querySelectorAll('.pfade-thumb');
+        btns.forEach((b, i) => {
+            const active = i === this._idx;
+            b.classList.toggle('is-active', active);
+            b.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+    }
+
+    /**
+     * @param {number} idx
+     */
+    _onUserSelectThumb(idx) {
+        if (this._busy || !this._urls.length) return;
+        const target = ((Math.floor(idx) % this._urls.length) + this._urls.length) % this._urls.length;
+        if (target === this._idx) return;
+        this._clearHoldTimer();
+        this._resetProgressBar();
+        void this._goToSlide(target);
+    }
+
+    /**
+     * Fade to a specific slide, then restart hold timer + progress.
+     * @param {number} targetIdx
+     */
+    async _goToSlide(targetIdx) {
+        const img = this._img;
+        if (!img || this._busy || this._urls.length < 2) return;
+        const target = ((Math.floor(targetIdx) % this._urls.length) + this._urls.length) % this._urls.length;
+        if (target === this._idx) return;
+        const runId = this._runId;
+        this._busy = true;
+        this._clearHoldTimer();
+        this._resetProgressBar();
+        try {
+            img.style.opacity = '0';
+            await waitTransitionEnd(img, FADE_MS);
+            if (!this.isConnected || this._runId !== runId) return;
+
+            this._idx = target;
+            try {
+                await assignImageWhenLoaded(img, this._urls[this._idx]);
+                img.alt = this._altForSlide(this._idx);
+            } catch {
+                /* keep previous frame on load failure */
+            }
+            if (!this.isConnected || this._runId !== runId) return;
+
+            this._updateActiveThumb();
+            requestAnimationFrame(() => {
+                img.style.opacity = '1';
+            });
+            await waitTransitionEnd(img, FADE_MS);
+        } finally {
+            this._busy = false;
+        }
+        if (!this.isConnected || this._runId !== runId || this._reducedMotion) return;
+        this._startHold();
+    }
+
     connectedCallback() {
         if (!this._settled) {
             this._renderPending();
@@ -148,6 +249,7 @@ class ProgramFadeGalleryElement extends HTMLElement {
         this._progressFill = null;
         this._progressTrack = null;
         this._wrap = null;
+        this._thumbs = null;
     }
 
     disconnectedCallback() {
@@ -247,6 +349,7 @@ class ProgramFadeGalleryElement extends HTMLElement {
             }
             if (!this.isConnected || this._runId !== runId) return;
 
+            this._updateActiveThumb();
             requestAnimationFrame(() => {
                 img.style.opacity = '1';
             });
@@ -277,6 +380,7 @@ class ProgramFadeGalleryElement extends HTMLElement {
             this._progressFill = null;
             this._progressTrack = null;
             this._wrap = null;
+            this._thumbs = null;
             return;
         }
 
@@ -337,6 +441,73 @@ class ProgramFadeGalleryElement extends HTMLElement {
                     opacity: 0;
                     transition: opacity ${FADE_MS}ms ease;
                 }
+                .pfade-thumbs {
+                    position: absolute;
+                    left: 50%;
+                    bottom: 24px;
+                    transform: translateX(-50%);
+                    z-index: 3;
+                    display: flex;
+                    gap: 5px;
+                    max-width: calc(100% - 24px);
+                    padding: 4px 5px;
+                    border-radius: 4px;
+                    background: rgba(0, 0, 0, 0.14);
+                    backdrop-filter: blur(2px);
+                    -webkit-backdrop-filter: blur(2px);
+                    overflow-x: auto;
+                    scrollbar-width: none;
+                    opacity: 0.72;
+                    transition: opacity 0.25s ease;
+                }
+                .pfade-thumbs::-webkit-scrollbar {
+                    display: none;
+                }
+                .pfade-wrap:hover .pfade-thumbs,
+                .pfade-wrap:focus-within .pfade-thumbs {
+                    opacity: 1;
+                }
+                .pfade-thumb {
+                    flex: 0 0 auto;
+                    width: 38px;
+                    height: 30px;
+                    padding: 0;
+                    border: 1px solid rgba(255, 255, 255, 0.55);
+                    border-radius: 2px;
+                    overflow: hidden;
+                    background: none;
+                    cursor: pointer;
+                    opacity: 0.6;
+                    transition: opacity 0.2s ease, border-color 0.2s ease;
+                }
+                .pfade-thumb img {
+                    display: block;
+                    width: 100%;
+                    height: 100%;
+                    object-fit: cover;
+                    pointer-events: none;
+                }
+                .pfade-thumb:hover {
+                    opacity: 0.9;
+                }
+                .pfade-thumb.is-active {
+                    opacity: 1;
+                    border-color: #fff;
+                }
+                .pfade-thumb:focus-visible {
+                    outline: 2px solid #fff;
+                    outline-offset: 1px;
+                }
+                @media (max-width: 520px) {
+                    .pfade-thumbs {
+                        bottom: 20px;
+                        gap: 4px;
+                    }
+                    .pfade-thumb {
+                        width: 30px;
+                        height: 24px;
+                    }
+                }
                 .pfade-progress-track {
                     position: absolute;
                     bottom: 0;
@@ -358,6 +529,7 @@ class ProgramFadeGalleryElement extends HTMLElement {
             </style>
             <div class="pfade-wrap" part="frame" role="button" tabindex="0" aria-label="Advance gallery image">
                 <img class="pfade-img" alt="${SEO_MEDIA_DEFAULT}" decoding="async" loading="eager" />
+                ${this._thumbsHtml()}
                 <div class="pfade-progress-track" part="progress-track">
                     <div class="pfade-progress-fill" part="progress-fill"></div>
                 </div>
@@ -368,6 +540,7 @@ class ProgramFadeGalleryElement extends HTMLElement {
         this._img = this.shadowRoot.querySelector('.pfade-img');
         this._progressTrack = this.shadowRoot.querySelector('.pfade-progress-track');
         this._progressFill = this.shadowRoot.querySelector('.pfade-progress-fill');
+        this._thumbs = this.shadowRoot.querySelector('.pfade-thumbs');
 
         const img = this._img;
         if (!(img instanceof HTMLImageElement) || !this._wrap) return;
@@ -378,11 +551,16 @@ class ProgramFadeGalleryElement extends HTMLElement {
 
         this._wrap.addEventListener('click', this._onWrapClick);
         this._wrap.addEventListener('keydown', this._onWrapKey);
+        if (this._thumbs) {
+            this._thumbs.addEventListener('click', this._onThumbClick);
+        }
+        this._updateActiveThumb();
 
         void assignImageWhenLoaded(img, this._urls[0])
             .then(() => {
                 if (this._runId !== runId || !this.isConnected) return;
                 img.alt = this._altForSlide(0);
+                this._updateActiveThumb();
                 requestAnimationFrame(() => {
                     img.style.opacity = '1';
                 });
