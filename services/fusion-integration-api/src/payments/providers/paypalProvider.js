@@ -135,6 +135,57 @@ export async function getPayPalOrder(orderId) {
 }
 
 /**
+ * @param {string} captureId
+ */
+export async function getPayPalCapture(captureId) {
+    return paypalRequest(`/v2/payments/captures/${encodeURIComponent(captureId)}`, {
+        method: 'GET',
+    });
+}
+
+/**
+ * Resolve a completed PayPal order for repair/backfill.
+ * Accepts order id directly, or a capture/transaction id (looks up related order).
+ * @param {{ orderId?: string, captureId?: string, transactionId?: string }} refs
+ */
+export async function resolvePayPalOrderForRepair(refs = {}) {
+    const orderRef = safePayPalMetaValue(refs.orderId, 120);
+    const captureRef = safePayPalMetaValue(refs.captureId || refs.transactionId, 120);
+    const tryOrder = async (id) => {
+        const order = await getPayPalOrder(id);
+        return { order, resolvedFrom: 'orderId', orderId: order.id };
+    };
+    const tryCapture = async (id) => {
+        const capture = await getPayPalCapture(id);
+        const relatedOrderId = safePayPalMetaValue(
+            capture?.supplementary_data?.related_ids?.order_id,
+            120,
+        );
+        if (!relatedOrderId) {
+            throw new Error(`PayPal capture ${id} has no related order_id`);
+        }
+        const order = await getPayPalOrder(relatedOrderId);
+        return { order, resolvedFrom: 'captureId', orderId: order.id, captureId: id };
+    };
+
+    if (orderRef) {
+        try {
+            return await tryOrder(orderRef);
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (/404/.test(msg)) {
+                return tryCapture(orderRef);
+            }
+            throw e;
+        }
+    }
+    if (captureRef) {
+        return tryCapture(captureRef);
+    }
+    throw new Error('orderId or captureId required');
+}
+
+/**
  * @param {string} subscriptionId
  */
 export async function getPayPalSubscription(subscriptionId) {

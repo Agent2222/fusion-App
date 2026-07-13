@@ -17,6 +17,7 @@ import {
     getPayPalOrder,
     getPayPalSubscription,
     parsePayPalCustomId,
+    resolvePayPalOrderForRepair,
     safePayPalMetaValue,
     subscriptionCustomId,
 } from './providers/paypalProvider.js';
@@ -114,8 +115,12 @@ export function registerPaymentRoutes(app, opts) {
                 return res.status(503).json({ error: 'PayPal not configured' });
             }
             const orderId = safePayPalMetaValue(req.body?.orderId, 120);
-            if (!orderId) {
-                return res.status(400).json({ error: 'orderId required' });
+            const captureId = safePayPalMetaValue(
+                req.body?.captureId || req.body?.transactionId,
+                120,
+            );
+            if (!orderId && !captureId) {
+                return res.status(400).json({ error: 'orderId or captureId required' });
             }
             const principal = safePayPalMetaValue(req.body?.principal, 500);
             const programId = safePayPalMetaValue(req.body?.programId, 120);
@@ -145,12 +150,24 @@ export function registerPaymentRoutes(app, opts) {
                 applicantEmail: safePayPalMetaValue(req.body?.applicantEmail || req.body?.email, 320),
                 applicantName: safePayPalMetaValue(req.body?.applicantName || req.body?.fullName, 160),
             };
-            const order = await getPayPalOrder(orderId);
+            const resolved = await resolvePayPalOrderForRepair({
+                orderId,
+                captureId,
+                transactionId: captureId,
+            });
+            const order = resolved.order;
             if (order.status !== 'COMPLETED') {
                 return res.status(409).json({ error: `Order not completed: ${order.status}` });
             }
             const recorded = await recordVerifiedPayPalOrder(order, programPaymentDeps, metaOverride);
-            return res.json({ ok: true, orderId, repaired: true, ...recorded });
+            return res.json({
+                ok: true,
+                orderId: resolved.orderId,
+                resolvedFrom: resolved.resolvedFrom,
+                captureId: resolved.captureId || captureId || '',
+                repaired: true,
+                ...recorded,
+            });
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             return res.status(500).json({ error: msg });
