@@ -144,9 +144,10 @@ function uploadError(err, status) {
  *
  * @param {File} file
  * @param {HTMLInputElement | null} [inputEl]
- * @param {{ area?: string, entityType?: string, entityId?: string, fieldKey?: string }} [options]
+ * @param {{ area?: string, entityType?: string, entityId?: string, fieldKey?: string, timeoutMs?: number }} [options]
  * `area` should be one of {@link S3_UPLOAD_AREAS}; unknown values fall back to `studio/misc`.
  * When `entityType`, `entityId`, and `fieldKey` are provided, upload uses a deterministic key and overwrites existing asset.
+ * When `timeoutMs` is set, aborts the PUT after that many milliseconds.
  * @returns {Promise<string>}
  */
 export async function uploadBlobToS3(file, inputEl, options = {}) {
@@ -166,11 +167,36 @@ export async function uploadBlobToS3(file, inputEl, options = {}) {
     if (DEV_MODE) {
         console.debug('[uploadBlobToS3] presigned', { key, contentType: ct, area });
     }
-    const res = await fetch(putUrl, {
-        method: 'PUT',
-        body: file,
-        headers: { 'Content-Type': ct },
-    });
+    const timeoutMs =
+        typeof options.timeoutMs === 'number' && options.timeoutMs > 0
+            ? Math.round(options.timeoutMs)
+            : 0;
+    /** @type {AbortController | null} */
+    let abortController = null;
+    /** @type {ReturnType<typeof setTimeout> | null} */
+    let timeoutId = null;
+    if (timeoutMs > 0) {
+        abortController = new AbortController();
+        timeoutId = setTimeout(() => abortController?.abort(), timeoutMs);
+    }
+    let res;
+    try {
+        res = await fetch(putUrl, {
+            method: 'PUT',
+            body: file,
+            headers: { 'Content-Type': ct },
+            signal: abortController?.signal,
+        });
+    } catch (err) {
+        if (abortController?.signal.aborted) {
+            throw uploadError(
+                new Error('Upload timed out — check your connection and try a smaller image.'),
+            );
+        }
+        throw uploadError(err);
+    } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+    }
     if (!res.ok) {
         if (DEV_MODE) {
             console.debug('[uploadBlobToS3] PUT failed', { key, status: res.status });

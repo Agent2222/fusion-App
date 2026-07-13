@@ -3879,6 +3879,8 @@ export default function initSettingsProfile() {
   let localesState = null;
   let heroImageUrl = "";
   let heroProfileImageUrl = "";
+  let heroImageCleared = false;
+  let heroProfileImageCleared = false;
   let profileAudioUrl = "";
   let adminPreviewBypassEnabled = false;
   /** @type {string} */
@@ -4675,13 +4677,17 @@ export default function initSettingsProfile() {
       const audioTitle = getVal("mpd_audio_title").trim();
       const optionalSaveWarnings = [];
       await updateMyArtistLocalesJson(JSON.stringify(merged), ts);
-      await updateMyArtistProfilePatch(heroUrl, ts);
-      try {
-        await updateMyArtistHeroProfileImagePatch(heroProfileUrl, ts);
-      } catch (mediaErr) {
-        optionalSaveWarnings.push(
-          `Profile image metadata was not saved: ${mediaErr instanceof Error ? mediaErr.message : String(mediaErr)}`,
-        );
+      if (heroUrl || heroImageCleared) {
+        await updateMyArtistProfilePatch(heroUrl, ts);
+      }
+      if (heroProfileUrl || heroProfileImageCleared) {
+        try {
+          await updateMyArtistHeroProfileImagePatch(heroProfileUrl, ts);
+        } catch (mediaErr) {
+          optionalSaveWarnings.push(
+            `Profile image metadata was not saved: ${mediaErr instanceof Error ? mediaErr.message : String(mediaErr)}`,
+          );
+        }
       }
       try {
         await updateMyArtistQuoteAudioPatch(
@@ -4709,6 +4715,8 @@ export default function initSettingsProfile() {
       }
       heroImageUrl = heroUrl;
       heroProfileImageUrl = heroProfileUrl;
+      heroImageCleared = false;
+      heroProfileImageCleared = false;
       profileAudioUrl = audioUrl;
       const en = merged.en && typeof merged.en === "object" ? merged.en : {};
       const prefSlug = publicSlugFromEnglishFirstLast(
@@ -4869,6 +4877,7 @@ export default function initSettingsProfile() {
     if (key === "hero") {
       setVal("mpd_hero_url", "");
       heroImageUrl = "";
+      heroImageCleared = true;
       mediaUploadRevision += 1;
       updateHeroPreview();
       updateHeroProfilePreview();
@@ -4878,6 +4887,7 @@ export default function initSettingsProfile() {
     if (key === "heroProfile") {
       setVal("mpd_hero_profile_url", "");
       heroProfileImageUrl = "";
+      heroProfileImageCleared = true;
       mediaUploadRevision += 1;
       updateHeroProfilePreview();
       setStatus("Profile image removed. Save to apply this change.");
@@ -5111,7 +5121,7 @@ export default function initSettingsProfile() {
         try {
           f = await mpdPrepareImageFile(raw);
         } catch (err) {
-          setStatus(err instanceof Error ? err.message : String(err));
+          mpdNotifyStatus(err instanceof Error ? err.message : String(err));
           t.value = "";
           return;
         }
@@ -5137,9 +5147,11 @@ export default function initSettingsProfile() {
             entityType: "artist",
             entityId: currentArtistId || profileSlug || "me",
             fieldKey: "hero",
+            timeoutMs: 60000,
           });
           setVal("mpd_hero_url", url);
           heroImageUrl = url;
+          heroImageCleared = false;
           mediaUploadRevision += 1;
           mpdRevokeLocalPreview("hero");
           updateHeroPreview(true);
@@ -5174,7 +5186,7 @@ export default function initSettingsProfile() {
         try {
           f = await mpdPrepareImageFile(raw);
         } catch (err) {
-          setStatus(err instanceof Error ? err.message : String(err));
+          mpdNotifyStatus(err instanceof Error ? err.message : String(err));
           t.value = "";
           return;
         }
@@ -5200,9 +5212,11 @@ export default function initSettingsProfile() {
             entityType: "artist",
             entityId: currentArtistId || profileSlug || "me",
             fieldKey: "heroProfile",
+            timeoutMs: 60000,
           });
           setVal("mpd_hero_profile_url", url);
           heroProfileImageUrl = url;
+          heroProfileImageCleared = false;
           mediaUploadRevision += 1;
           mpdRevokeLocalPreview("heroProfile");
           updateHeroProfilePreview(true);
@@ -5278,7 +5292,7 @@ export default function initSettingsProfile() {
         try {
           f = await mpdPrepareImageFile(raw);
         } catch (err) {
-          setStatus(err instanceof Error ? err.message : String(err));
+          mpdNotifyStatus(err instanceof Error ? err.message : String(err));
           t.value = "";
           return;
         }
@@ -5307,6 +5321,7 @@ export default function initSettingsProfile() {
             entityType: "artist",
             entityId: currentArtistId || profileSlug || "me",
             fieldKey: `intro-${i}`,
+            timeoutMs: 60000,
           });
           setVal(`mpd_intro_${i}_src`, url);
           mediaUploadRevision += 1;
@@ -5741,6 +5756,8 @@ export default function initSettingsProfile() {
     );
 
     heroImageUrl = String(p.image ?? "");
+    heroImageCleared = false;
+    heroProfileImageCleared = false;
     {
       const rawHero = /** @type {Record<string, unknown>} */ (p).heroProfileImage ?? p.hero_profile_image;
       heroProfileImageUrl = (() => {
