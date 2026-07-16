@@ -177,8 +177,8 @@ class VeteranBannerComponent extends HTMLElement {
 
         const lead =
             locale === 'ja'
-                ? 'プログラム卒業生 — '
-                : 'Program Alumni — ';
+                ? 'プログラム卒業生'
+                : 'Program Alumni';
 
         const badgesHtml = entries
             .map((e, i) => {
@@ -243,14 +243,6 @@ class VeteranBannerComponent extends HTMLElement {
                     gap: 0.65rem;
                     padding: 0.75rem 0 0.75rem 1.5rem;
                     box-sizing: border-box;
-                }
-
-                .veteran-banner__lead {
-                    font-size: clamp(0.8rem, 1.5vw, 1rem);
-                    font-variation-settings: var(--fv-emphasis);
-                    color: var(--c2);
-                    letter-spacing: 0.06em;
-                    margin: 0;
                 }
 
                 .veteran-banner__badge-stack {
@@ -335,7 +327,7 @@ class VeteranBannerComponent extends HTMLElement {
                     flex-direction: column;
                     align-items: flex-end;
                     justify-content: center;
-                    gap: 0.5rem;
+                    gap: 0.35rem;
                     text-align: right;
                     padding: 0.75rem 2.5rem 0.75rem 0.75rem;
                     font-size: clamp(0.75rem, 1.6vw, 1.35rem);
@@ -346,8 +338,12 @@ class VeteranBannerComponent extends HTMLElement {
                 }
 
                 .veteran-banner__text-lead {
-                    margin: 0 0 0.15rem;
+                    margin: 0;
                     padding: 0;
+                    font-size: clamp(0.8rem, 1.5vw, 1rem);
+                    font-variation-settings: var(--fv-emphasis);
+                    letter-spacing: 0.06em;
+                    color: var(--c2);
                 }
 
                 .veteran-banner__line {
@@ -397,12 +393,12 @@ class VeteranBannerComponent extends HTMLElement {
             </style>
             <div class="veteran-banner" part="veteran-banner">
                 <div class="veteran-banner__col veteran-banner__col--badges">
-                    <p class="veteran-banner__lead">${escapeHtml(lead)}</p>
                     <div class="veteran-banner__badge-stack">
                         ${badgesHtml}
                     </div>
                 </div>
                 <div class="veteran-banner__col veteran-banner__col--text">
+                    <p class="veteran-banner__text-lead">${escapeHtml(lead)}</p>
                     ${linesHtml}
                 </div>
             </div>

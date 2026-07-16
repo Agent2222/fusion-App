@@ -474,6 +474,25 @@ body {
   align-items: center;
 }
 
+.profile-audio-container {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding-left: clamp(0.75rem, 4vw, 3rem);
+  padding-right: clamp(0.75rem, 4vw, 3rem);
+  margin-top: 4rem;
+  margin-bottom: 2rem;
+}
+
+.profile-audio-container[hidden] {
+  display: none;
+}
+
+.profile-audio-container app-audio-row {
+  display: block;
+  width: 100%;
+}
+
 .profile-gallery-access-modal {
   position: fixed;
   inset: 0;

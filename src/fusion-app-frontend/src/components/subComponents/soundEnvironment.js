@@ -3,6 +3,7 @@ import { artistLocaleBlock, artistDisplayName } from '../../utils/artistSlug.js'
 import { escapeHtml } from '../../utils/textPreview.js';
 import { navigate } from '../../router.js';
 import { assetUrlCandidates } from '../../utils/assetDistribution.js';
+import { artistHasPublicPlayableAudio } from '../../utils/artistCardImageMode.js';
 
 const LS = 'fusion-sound-env-v1';
 const DUCK = 0.45;
@@ -89,11 +90,19 @@ class SoundEnvironment extends HTMLElement {
         /** Fires when `#header[active]` is set after this component mounts (SPA remount; `fusion-site-entered` already ran). */
         this._headerActiveObserver = null;
         this._boundRouteSync = () => this._syncRouteSuppression();
+        /** @type {boolean} */
+        this._previewSuspended = false;
+        /** @type {boolean} */
+        this._previewResumeAtmo = false;
+        this._onPreviewSuspend = () => this._suspendForPreview();
+        this._onPreviewResume = () => this._resumeFromPreview();
     }
 
     connectedCallback() {
         this._renderShell();
         window.addEventListener('routeChange', this._boundRouteSync);
+        window.addEventListener('fusion-preview-audio-suspend', this._onPreviewSuspend);
+        window.addEventListener('fusion-preview-audio-resume', this._onPreviewResume);
         void this._boot();
         this._syncRouteSuppression();
     }
@@ -102,8 +111,50 @@ class SoundEnvironment extends HTMLElement {
         this._stopSchedule();
         window.removeEventListener('fusion-site-entered', this._boundEnter);
         window.removeEventListener('routeChange', this._boundRouteSync);
+        window.removeEventListener('fusion-preview-audio-suspend', this._onPreviewSuspend);
+        window.removeEventListener('fusion-preview-audio-resume', this._onPreviewResume);
         this._detachMediaLabelListeners();
         this._teardownHeaderActiveObserver();
+    }
+
+    /**
+     * Pause site atmo + artist voices while a card preview clip plays.
+     */
+    _suspendForPreview() {
+        if (this._previewSuspended) return;
+        this._previewSuspended = true;
+        this._previewResumeAtmo = Boolean(
+            this._atmo && !this._atmo.paused && this._masterOn && this.getAttribute('hidden') == null,
+        );
+        this._atmo?.pause();
+        this._stopVoice();
+        this._stopSchedule();
+        this._unduckAtmo();
+        this._syncSoundHeadLabel();
+        this._updateCurrentVoiceRowVisibility();
+    }
+
+    /**
+     * Resume site sound after preview clip ends or the modal closes.
+     */
+    _resumeFromPreview() {
+        if (!this._previewSuspended) return;
+        this._previewSuspended = false;
+        const shouldAtmo = this._previewResumeAtmo;
+        this._previewResumeAtmo = false;
+        if (
+            shouldAtmo &&
+            this._masterOn &&
+            this._entered &&
+            this.getAttribute('hidden') == null
+        ) {
+            void this._playAtmo();
+        }
+        if (this._masterOn && this._entered && this.getAttribute('hidden') == null) {
+            this._startVoiceSchedule();
+        }
+        this._syncSoundHeadLabel();
+        this._updateCurrentVoiceRowVisibility();
     }
 
     _stopSchedule() {
@@ -439,7 +490,9 @@ class SoundEnvironment extends HTMLElement {
             this._queueNextVoice();
             return;
         }
-        const poolRaw = (await this._artistsWithAudioForRandom()).filter((a) => String(a?.audioUrl || '').trim());
+        const poolRaw = (await this._artistsWithAudioForRandom()).filter((a) =>
+            artistHasPublicPlayableAudio(a),
+        );
         const pool = this._dedupeVoicePoolByAudioUrl(poolRaw);
         const mode = String(c.voiceSelectionMode || 'random').toLowerCase();
 
@@ -539,7 +592,7 @@ class SoundEnvironment extends HTMLElement {
     async _artistsWithAudioForRandom() {
         const { getArtists } = await import('../../utils/database.js');
         const a = await getArtists().catch(() => []);
-        return Array.isArray(a) ? a : [];
+        return (Array.isArray(a) ? a : []).filter((row) => artistHasPublicPlayableAudio(row));
     }
 
     /**

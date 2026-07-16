@@ -1,5 +1,9 @@
 import { navigate } from '../../router.js';
 import {
+    ARTIST_CARD_PREVIEW_CHIP_CSS,
+    enhanceArtistCardForPreview,
+} from '../../utils/artistCardPreviewChip.js';
+import {
     artistDisplayDiscipline,
     artistDisplayName,
     artistEnglishBlock,
@@ -188,8 +192,12 @@ class ArtistsFeedElement extends HTMLElement {
                     opacity: 0.92;
                 }
 
-                .artist-card:hover .artist-card-image img {
+                .artist-card:hover .artist-card-image > img {
                     transform: scale(1.06);
+                }
+
+                .artist-card:has(.artist-card-preview-chip:hover) .artist-card-image > img {
+                    transform: none;
                 }
 
                 .artist-card-image {
@@ -227,7 +235,7 @@ class ArtistsFeedElement extends HTMLElement {
                     color: var(--c3);
                 }
 
-                .artist-card-image img {
+                .artist-card-image > img {
                     width: 100%;
                     height: 100%;
                     object-fit: cover;
@@ -235,7 +243,7 @@ class ArtistsFeedElement extends HTMLElement {
                     transition: transform 0.35s ease;
                 }
 
-                .artist-card-image img.artist-card-img--placeholder {
+                .artist-card-image > img.artist-card-img--placeholder {
                     object-fit: contain;
                     object-position: center;
                     background: var(--c3);
@@ -366,6 +374,8 @@ class ArtistsFeedElement extends HTMLElement {
                         padding: 0.45rem 0.3rem 0.55rem;
                     }
                 }
+
+                ${ARTIST_CARD_PREVIEW_CHIP_CSS}
             </style>
             <div class="artists-feed">
                 <div class="header">All Artists</div>
@@ -480,7 +490,6 @@ class ArtistsFeedElement extends HTMLElement {
                     artist.slug || artistSlugFromName(en?.name ?? artistDisplayName(artist, 'en'));
                 navigate(`/profile/${encodeURIComponent(slug)}`);
             });
-
             card.innerHTML = `
                 <div class="artist-card-image">
                     <div class="residency-badge" hidden></div>
@@ -491,6 +500,7 @@ class ArtistsFeedElement extends HTMLElement {
                     <div class="artist-card-discipline">${escapeHtml(artistDiscipline)}</div>
                 </div>
             `;
+            enhanceArtistCardForPreview(card, artist);
             const cardImg = card.querySelector('.artist-card-image img');
             applyArtistCardImage(cardImg, getArtistCardImageUrlForCurrentMode(artist));
             const residencyBadge = card.querySelector('.residency-badge');

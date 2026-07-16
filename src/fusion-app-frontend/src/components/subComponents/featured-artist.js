@@ -1,6 +1,10 @@
 // Placeholder — structure, content, and styles TBD
 import { navigate } from '../../router.js';
 import {
+    ARTIST_CARD_PREVIEW_CHIP_CSS,
+    enhanceArtistCardForPreview,
+} from '../../utils/artistCardPreviewChip.js';
+import {
     artistDisplayDiscipline,
     artistDisplayName,
     artistEnglishBlock,
@@ -99,7 +103,6 @@ class FeaturedArtistComponent extends HTMLElement {
 
             let card = document.createElement('div');
             card.classList.add('artist-card');
-
             card.addEventListener('click', () => {
                 const en = artistEnglishBlock(artist);
                 const slug =
@@ -117,6 +120,7 @@ class FeaturedArtistComponent extends HTMLElement {
                     <div class="artist-card-discipline">${escapeHtml(artistDiscipline)}</div>
                 </div>
             `;
+            enhanceArtistCardForPreview(card, artist);
             const faImg = card.querySelector('.artist-card-image img');
             applyArtistCardImage(faImg, getArtistCardImageUrlForCurrentMode(artist));
 
@@ -239,6 +243,10 @@ class FeaturedArtistComponent extends HTMLElement {
                     animation: scaleImage 15s ease forwards;
                 }
 
+                .artist-card:has(.artist-card-preview-chip:hover) > .artist-card-image > img:not(.artist-card-img--placeholder) {
+                    animation: none;
+                }
+
                 @keyframes scaleImage {
                     from {
                         transform: scale(1);
@@ -283,14 +291,14 @@ class FeaturedArtistComponent extends HTMLElement {
                     color: var(--c3);
                 }
                 
-                .artist-card-image img {
+                .artist-card-image > img {
                     width: 100%;
                     height: 100%;
                     object-fit: cover;
                     transform-origin: center top;
                 }
 
-                .artist-card-image img.artist-card-img--placeholder {
+                .artist-card-image > img.artist-card-img--placeholder {
                     object-fit: contain;
                     object-position: center;
                     background: var(--c3);
@@ -427,6 +435,8 @@ class FeaturedArtistComponent extends HTMLElement {
                         margin-left: 0;
                     }
                 }
+
+                ${ARTIST_CARD_PREVIEW_CHIP_CSS}
             </style>
             <div class="featured-artist">
                 <div class="header">Featured Artist</div>

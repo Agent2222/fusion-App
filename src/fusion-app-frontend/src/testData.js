@@ -2249,6 +2249,30 @@ export const testData = {
                 'Fusionのプログラムを通じてつながるアーティストをご紹介します—日本国内外のスタジオ、レジデンシー、展示を横断して。',
         },
     },
+    userStudio: {
+        quotes: [
+            { en: "Clarity attracts connection. Define your voice, and the world listens.", ja: "明確さがつながりを引き寄せる。声を定義すれば、世界が耳を傾ける。" },
+            { en: "Every great exhibition began with one honest image.", ja: "すべての偉大な展覧会は、一枚の正直なイメージから始まった。" },
+            { en: "Your studio is where vision meets visibility.", ja: "あなたのスタジオは、ビジョンと可視性が出会う場所。" },
+            { en: "Art speaks loudest when the artist is prepared.", ja: "アーティストが準備を整えた時、アートは最も強く語りかける。" },
+            { en: "Build the space. The audience will follow.", ja: "空間を作れば、観客はついてくる。" },
+        ],
+        defaultBlindspots: [
+            { id: "missing-image", title: { en: "Add a profile image", ja: "プロフィール画像を追加" }, body: { en: "A strong visual identity starts with a clear profile image.", ja: "強いビジュアルアイデンティティは、明確なプロフィール画像から始まります。" }, targetPanel: "media", priority: 1 },
+            { id: "missing-bio", title: { en: "Write your bio", ja: "バイオを書く" }, body: { en: "Tell visitors who you are in a few sentences.", ja: "数文で訪問者にあなたを紹介しましょう。" }, targetPanel: "identity", targetTab: "basics", priority: 2 },
+            { id: "missing-links", title: { en: "Add social links", ja: "SNSリンクを追加" }, body: { en: "Connect your online presence — website, Instagram, or portfolio.", ja: "ウェブサイト、Instagram、ポートフォリオなどを接続しましょう。" }, targetPanel: "identity", targetTab: "basics", priority: 3 },
+            { id: "missing-audio", title: { en: "Upload an audio bite", ja: "オーディオバイトをアップロード" }, body: { en: "A short audio introduction adds personality to your profile.", ja: "短い音声紹介がプロフィールに個性を加えます。" }, targetPanel: "media", priority: 4 },
+            { id: "missing-location", title: { en: "Set your location", ja: "ロケーションを設定" }, body: { en: "Let curators and galleries know where you are based.", ja: "キュレーターやギャラリーにあなたの拠点を知らせましょう。" }, targetPanel: "identity", targetTab: "status", priority: 5 },
+        ],
+        sidebarGuidance: {
+            en: "Your Fusion team is here to support your journey. Reach out anytime.",
+            ja: "Fusionチームはあなたの旅を支えます。いつでもご連絡ください。",
+        },
+        audioInspirationText: {
+            en: '\u201CWords mean more than what is set down on paper. It takes the human voice to infuse them with deeper meaning.\u201D \u2014 Maya Angelou',
+            ja: '\u300C\u7D19\u306B\u66F8\u304B\u308C\u305F\u4EE5\u4E0A\u306E\u610F\u5473\u3092\u8A00\u8449\u306F\u6301\u3064\u3002\u4EBA\u9593\u306E\u58F0\u3053\u305D\u304C\u3001\u3088\u308A\u6DF1\u3044\u610F\u5473\u3092\u5439\u304D\u8FBC\u3080\u3002\u300D\u2014 \u30DE\u30E4\u30FB\u30A2\u30F3\u30B8\u30A7\u30ED\u30A6',
+        },
+    },
     journals: {
         order: 6,
         journals: [

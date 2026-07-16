@@ -398,6 +398,21 @@ module {
         enabled : Bool;
     };
 
+    /// Single audio collection entry for an artist (multi-bite support, max 5 per artist).
+    public type ArtistAudioEntry = {
+        url : Text;
+        title : Text;
+        addedAt : Text;
+    };
+
+    /// Staff review note attached to an asset (profile image or audio entry) for moderation.
+    public type AssetReviewNote = {
+        reason : Text;
+        imageUrl : Text;
+        reviewedAt : Text;
+        approved : Bool;
+    };
+
     /// Shared artist media metadata (not localized), stored separately from stable ArtistCore.
     public type ArtistMedia = {
         quote : Text;
@@ -758,6 +773,8 @@ module {
         artistHeroProfileImageStable : ?[(Text, Text)];
         /// Artist ids whose headshot is approved for public card display (parallel map; default not approved).
         artistHeroProfileImageApprovedIdsStable : ?[Text];
+        /// Artist ids whose audio bite is approved for public play (parallel map; default not approved).
+        artistAudioApprovedIdsStable : ?[Text];
         artistsStable : [(Text, ArtistRecord)];
         programsStable : [(Text, ProgramRecord)];
         journalsStable : [(Text, JournalRecord)];
@@ -789,5 +806,15 @@ module {
         programPaymentFlightPreferencesStable : ?[(Text, ProgramPaymentFlightPreference)];
         /// Applicant id → JSON array of outreach entries; optional for backups before this field existed.
         applicantEmailOutreachStable : ?[(Text, Text)];
+        /// Multi-bite audio collection per artist (max 5 entries each).
+        artistAudioCollectionStable : ?[(Text, [ArtistAudioEntry])];
+        /// Artist id → highlight audio URL (synced to ArtistMedia.audioUrl for backward compat).
+        artistAudioHighlightStable : ?[(Text, Text)];
+        /// Artist id → list of staff-approved audio URLs (per-bite approval).
+        artistAudioApprovedUrlsStable : ?[(Text, [Text])];
+        /// Staff review notes for hero profile images (keyed by artist id).
+        heroProfileImageReviewNotesStable : ?[(Text, AssetReviewNote)];
+        /// Staff review notes for audio entries (keyed by "artistId|audioUrl").
+        audioEntryReviewNotesStable : ?[(Text, AssetReviewNote)];
     };
 };

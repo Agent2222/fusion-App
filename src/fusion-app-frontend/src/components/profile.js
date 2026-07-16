@@ -22,6 +22,40 @@ import {
 import posthog from "posthog-js";
 import { introSlotsFromWorld } from "../utils/memberProfileForm.js";
 import { probeImageSrc } from "../utils/imageProbe.js";
+import { artistHasPublicPlayableAudio, getApprovedAudioEntries } from "../utils/artistCardImageMode.js";
+
+/**
+ * Mount `app-audio-row` when the artist has an approved audio URL.
+ * @param {HTMLElement | null} container
+ * @param {unknown} artist
+ * @param {string} [fallbackTitle]
+ */
+function populateProfileAudio(container, artist, fallbackTitle = "") {
+  if (!(container instanceof HTMLElement)) return;
+  container.replaceChildren();
+  const a = /** @type {Record<string, unknown> | null} */ (artist);
+  if (!artistHasPublicPlayableAudio(a)) {
+    container.setAttribute("hidden", "");
+    return;
+  }
+  const entries = getApprovedAudioEntries(a);
+  const row = document.createElement("app-audio-row");
+  row.setAttribute("active", "true");
+  row.setAttribute("data-layout", "profile");
+  if (entries.length > 1) {
+    row.setAttribute("data-audio-sources", JSON.stringify(entries));
+  } else if (entries.length === 1) {
+    row.setAttribute("data-audio-src", entries[0].url);
+    row.setAttribute("data-audio-title", entries[0].title || fallbackTitle || "Artist audio");
+  } else {
+    const url = String(a?.audioUrl ?? "").trim();
+    const title = String(a?.audioTitle ?? "").trim() || fallbackTitle || "Artist audio";
+    row.setAttribute("data-audio-src", url);
+    row.setAttribute("data-audio-title", title);
+  }
+  container.appendChild(row);
+  container.removeAttribute("hidden");
+}
 
 /**
  * @param {HTMLElement | null} container
@@ -263,6 +297,7 @@ export function generateProfileContent() {
                             <p><a href="/artists">Browse artists</a></p>
                         </div>
                         <div id="profileImagesContainer" class="profile-images-container"></div>
+                        <div id="profileAudioContainer" class="profile-audio-container" hidden></div>
                         <div id="profileGalleryAccessButtonContainer" class="profile-gallery-access-button-container">
                             <div class="galleryAccessButton">Gallery Access</div>
                         </div>
@@ -319,6 +354,7 @@ export default function initProfile() {
   const notFound = document.getElementById("artistProfileNotFound");
   const indexHint = document.getElementById("artistProfileIndex");
   const imagesContainer = document.getElementById("profileImagesContainer");
+  const audioContainer = document.getElementById("profileAudioContainer");
   const loadingEl = document.getElementById("artistProfileLoading");
 
   const show = (el, on) => {
@@ -345,6 +381,7 @@ export default function initProfile() {
   const setProfileLoading = (loading) => {
     show(loadingEl, loading);
     for (const el of loadedContentEls) show(el, !loading);
+    if (loading) show(audioContainer, false);
     show(article, false);
     show(notFound, false);
     show(indexHint, false);
@@ -361,6 +398,7 @@ export default function initProfile() {
       veteranBannerEl.removeAttribute("data-residency-year");
     }
     void populateIntroGallery(imagesContainer, null);
+    populateProfileAudio(audioContainer, null);
     show(article, false);
     show(notFound, false);
     show(indexHint, true);
@@ -386,6 +424,7 @@ export default function initProfile() {
         veteranBannerEl.removeAttribute("data-residency-year");
       }
       void populateIntroGallery(imagesContainer, null);
+      populateProfileAudio(audioContainer, null);
       show(article, false);
       show(notFound, true);
       show(indexHint, false);
@@ -419,6 +458,7 @@ export default function initProfile() {
     if (!loc) {
       if (contextContentEl) contextContentEl.replaceChildren();
       populateArtistLinks(artistLinksEl, null);
+      populateProfileAudio(audioContainer, null);
       show(article, false);
       show(notFound, true);
       applyDocumentSeo({
@@ -591,6 +631,7 @@ export default function initProfile() {
       /** @type {unknown} */ (pickWorld("introGallery")),
       displayName,
     );
+    populateProfileAudio(audioContainer, artist, displayName);
 
     const programsBlock = await getAllProgramsBlock();
     const enrolledProgramIds = artistProgramIds(artist);

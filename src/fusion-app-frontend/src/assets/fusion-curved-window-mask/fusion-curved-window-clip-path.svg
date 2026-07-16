@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 540">
+  <defs>
+    <clipPath id="fusion-curved-window-clip" clipPathUnits="userSpaceOnUse">
+      <path d="M120 0 H340 Q600 0 600 260 V480 Q600 540 540 540 H140 C90 540 45 520 20 485 C-10 440 5 380 25 320 C50 245 55 180 45 115 C35 55 65 10 120 0 Z"/>
+    </clipPath>
+  </defs>
+  <rect width="600" height="540" clip-path="url(#fusion-curved-window-clip)" fill="#111"/>
+</svg>

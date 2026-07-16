@@ -150,6 +150,20 @@ persistent actor {
   stable var artistHeroProfileImageStable : [(Text, Text)] = [];
   /// Artist ids with staff-approved headshots for public cards (parallel map; default not approved).
   stable var artistHeroProfileImageApprovedIdsStable : [Text] = [];
+  /// Artist ids whose audio bite is approved for public play (sound env / profile / journal).
+  stable var artistAudioApprovedIdsStable : [Text] = [];
+
+  /// Multi-bite audio collection per artist (max 5 entries each).
+  stable var artistAudioCollectionStable : [(Text, [Types.ArtistAudioEntry])] = [];
+  /// Artist id → highlight audio URL (synced to ArtistMedia.audioUrl for backward compat).
+  stable var artistAudioHighlightStable : [(Text, Text)] = [];
+  /// Artist id → list of staff-approved audio URLs (per-bite approval).
+  stable var artistAudioApprovedUrlsStable : [(Text, [Text])] = [];
+
+  /// Staff review notes for hero profile images (keyed by artist id).
+  stable var heroProfileImageReviewNotesStable : [(Text, Types.AssetReviewNote)] = [];
+  /// Staff review notes for audio entries (keyed by "artistId|audioUrl").
+  stable var audioEntryReviewNotesStable : [(Text, Types.AssetReviewNote)] = [];
 
   // In-memory hashmap for fast lookups/updates.
   transient var subscribersByEmail : _HashMap.HashMap<Text, Types.Subscriber> =
@@ -213,6 +227,28 @@ persistent actor {
       Text.equal,
       Text.hash
     );
+
+  transient var artistAudioApprovedById : _HashMap.HashMap<Text, Bool> =
+    _HashMap.HashMap<Text, Bool>(
+      artistAudioApprovedIdsStable.size(),
+      Text.equal,
+      Text.hash
+    );
+
+  transient var artistAudioCollectionById : _HashMap.HashMap<Text, [Types.ArtistAudioEntry]> =
+    _HashMap.HashMap<Text, [Types.ArtistAudioEntry]>(0, Text.equal, Text.hash);
+
+  transient var artistAudioHighlightById : _HashMap.HashMap<Text, Text> =
+    _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
+
+  transient var artistAudioApprovedUrlsById : _HashMap.HashMap<Text, [Text]> =
+    _HashMap.HashMap<Text, [Text]>(0, Text.equal, Text.hash);
+
+  transient var heroProfileImageReviewNotesById : _HashMap.HashMap<Text, Types.AssetReviewNote> =
+    _HashMap.HashMap<Text, Types.AssetReviewNote>(0, Text.equal, Text.hash);
+
+  transient var audioEntryReviewNotesByKey : _HashMap.HashMap<Text, Types.AssetReviewNote> =
+    _HashMap.HashMap<Text, Types.AssetReviewNote>(0, Text.equal, Text.hash);
 
   /// slug -> artist id
   transient var artistSlugToId : _HashMap.HashMap<Text, Text> =
@@ -445,6 +481,10 @@ persistent actor {
 
   for (id in artistHeroProfileImageApprovedIdsStable.vals()) {
     artistHeroProfileImageApprovedById.put(id, true);
+  };
+
+  for (id in artistAudioApprovedIdsStable.vals()) {
+    artistAudioApprovedById.put(id, true);
   };
 
   for (entry in programsStable.vals()) {
@@ -900,11 +940,116 @@ persistent actor {
     Array.sort(keys, Text.compare);
   };
 
+  private func approvedAudioIdsSorted() : [Text] {
+    let pairs = _Iter.toArray(artistAudioApprovedById.entries());
+    let keys = Array.map<(Text, Bool), Text>(pairs, func((k, _) : (Text, Bool)) : Text { k });
+    Array.sort(keys, Text.compare);
+  };
+
   private func heroProfileImageApprovedForArtist(artistId : Text) : Bool {
     switch (artistHeroProfileImageApprovedById.get(artistId)) {
       case (?true) { true };
       case _ { false };
     };
+  };
+
+  private func audioApprovedForArtist(artistId : Text) : Bool {
+    switch (artistAudioApprovedById.get(artistId)) {
+      case (?true) { true };
+      case _ { false };
+    };
+  };
+
+  private func setAudioApprovedForArtist(artistId : Text, approved : Bool) {
+    if (approved) {
+      artistAudioApprovedById.put(artistId, true);
+    } else {
+      ignore artistAudioApprovedById.remove(artistId);
+    };
+  };
+
+  private let maxAudioEntries : Nat = 5;
+
+  private func getAudioCollection(artistId : Text) : [Types.ArtistAudioEntry] {
+    switch (artistAudioCollectionById.get(artistId)) {
+      case (?entries) { entries };
+      case null { [] };
+    };
+  };
+
+  private func getAudioHighlight(artistId : Text) : Text {
+    switch (artistAudioHighlightById.get(artistId)) {
+      case (?url) { url };
+      case null { "" };
+    };
+  };
+
+  private func getApprovedAudioUrls(artistId : Text) : [Text] {
+    switch (artistAudioApprovedUrlsById.get(artistId)) {
+      case (?urls) { urls };
+      case null { [] };
+    };
+  };
+
+  private func isAudioUrlApproved(artistId : Text, url : Text) : Bool {
+    let urls = getApprovedAudioUrls(artistId);
+    for (u in urls.vals()) {
+      if (u == url) return true;
+    };
+    false;
+  };
+
+  private func setAudioUrlApproved(artistId : Text, url : Text, approved : Bool) {
+    let current = getApprovedAudioUrls(artistId);
+    if (approved) {
+      for (u in current.vals()) {
+        if (u == url) return;
+      };
+      artistAudioApprovedUrlsById.put(artistId, Array.append(current, [url]));
+    } else {
+      let filtered = Array.filter<Text>(current, func(u : Text) : Bool { u != url });
+      if (filtered.size() == 0) {
+        ignore artistAudioApprovedUrlsById.remove(artistId);
+      } else {
+        artistAudioApprovedUrlsById.put(artistId, filtered);
+      };
+    };
+    syncArtistLevelAudioApproval(artistId);
+  };
+
+  private func syncArtistLevelAudioApproval(artistId : Text) {
+    let hl = getAudioHighlight(artistId);
+    if (hl.size() > 0 and isAudioUrlApproved(artistId, hl)) {
+      setAudioApprovedForArtist(artistId, true);
+    } else {
+      setAudioApprovedForArtist(artistId, false);
+    };
+  };
+
+  private func syncHighlightToArtistMedia(artistId : Text) {
+    let hl = getAudioHighlight(artistId);
+    switch (artistMediaByArtistId.get(artistId)) {
+      case (?media) {
+        let updated : Types.ArtistMedia = {
+          quote = media.quote;
+          audioUrl = hl;
+          audioTitle = media.audioTitle;
+          updatedAt = media.updatedAt;
+        };
+        artistMediaByArtistId.put(artistId, updated);
+      };
+      case null {
+        if (hl.size() > 0) {
+          artistMediaByArtistId.put(artistId, {
+            quote = "";
+            audioUrl = hl;
+            audioTitle = "";
+            updatedAt = "";
+          });
+        };
+      };
+    };
+    syncArtistLevelAudioApproval(artistId);
   };
 
   private func manualFeaturedIdsAsArray() : [Text] {
@@ -1548,6 +1693,12 @@ persistent actor {
     accountContactStable := _Iter.toArray(accountContactByPrincipal.entries());
     artistHeroProfileImageStable := _Iter.toArray(artistHeroProfileImageById.entries());
     artistHeroProfileImageApprovedIdsStable := approvedHeroProfileImageIdsSorted();
+    artistAudioApprovedIdsStable := approvedAudioIdsSorted();
+    artistAudioCollectionStable := _Iter.toArray(artistAudioCollectionById.entries());
+    artistAudioHighlightStable := _Iter.toArray(artistAudioHighlightById.entries());
+    artistAudioApprovedUrlsStable := _Iter.toArray(artistAudioApprovedUrlsById.entries());
+    heroProfileImageReviewNotesStable := _Iter.toArray(heroProfileImageReviewNotesById.entries());
+    audioEntryReviewNotesStable := _Iter.toArray(audioEntryReviewNotesByKey.entries());
     emailCampaignsStable := _Iter.toArray(emailCampaignsById.entries());
     applicantEmailOutreachStable := _Iter.toArray(applicantEmailOutreachById.entries());
   };
@@ -1697,6 +1848,52 @@ persistent actor {
       artistHeroProfileImageApprovedById.put(id, true);
     };
     artistHeroProfileImageApprovedIdsStable := [];
+
+    artistAudioApprovedById := _HashMap.HashMap<Text, Bool>(0, Text.equal, Text.hash);
+    for (id in artistAudioApprovedIdsStable.vals()) {
+      artistAudioApprovedById.put(id, true);
+    };
+    artistAudioApprovedIdsStable := [];
+
+    artistAudioCollectionById := _HashMap.HashMap<Text, [Types.ArtistAudioEntry]>(
+      artistAudioCollectionStable.size(), Text.equal, Text.hash
+    );
+    for (entry in artistAudioCollectionStable.vals()) {
+      artistAudioCollectionById.put(entry.0, entry.1);
+    };
+    artistAudioCollectionStable := [];
+
+    artistAudioHighlightById := _HashMap.HashMap<Text, Text>(
+      artistAudioHighlightStable.size(), Text.equal, Text.hash
+    );
+    for (entry in artistAudioHighlightStable.vals()) {
+      artistAudioHighlightById.put(entry.0, entry.1);
+    };
+    artistAudioHighlightStable := [];
+
+    artistAudioApprovedUrlsById := _HashMap.HashMap<Text, [Text]>(
+      artistAudioApprovedUrlsStable.size(), Text.equal, Text.hash
+    );
+    for (entry in artistAudioApprovedUrlsStable.vals()) {
+      artistAudioApprovedUrlsById.put(entry.0, entry.1);
+    };
+    artistAudioApprovedUrlsStable := [];
+
+    heroProfileImageReviewNotesById := _HashMap.HashMap<Text, Types.AssetReviewNote>(
+      heroProfileImageReviewNotesStable.size(), Text.equal, Text.hash
+    );
+    for (entry in heroProfileImageReviewNotesStable.vals()) {
+      heroProfileImageReviewNotesById.put(entry.0, entry.1);
+    };
+    heroProfileImageReviewNotesStable := [];
+
+    audioEntryReviewNotesByKey := _HashMap.HashMap<Text, Types.AssetReviewNote>(
+      audioEntryReviewNotesStable.size(), Text.equal, Text.hash
+    );
+    for (entry in audioEntryReviewNotesStable.vals()) {
+      audioEntryReviewNotesByKey.put(entry.0, entry.1);
+    };
+    audioEntryReviewNotesStable := [];
 
     programsById := _HashMap.HashMap<Text, Types.ProgramRecord>(0, Text.equal, Text.hash);
     for (entry in programsStable.vals()) {
@@ -1916,6 +2113,50 @@ persistent actor {
       artistHeroProfileImageApprovedById.put(id, true);
     };
 
+    artistAudioApprovedById := _HashMap.HashMap<Text, Bool>(
+      artistAudioApprovedIdsStable.size(),
+      Text.equal,
+      Text.hash
+    );
+    for (id in artistAudioApprovedIdsStable.vals()) {
+      artistAudioApprovedById.put(id, true);
+    };
+
+    artistAudioCollectionById := _HashMap.HashMap<Text, [Types.ArtistAudioEntry]>(
+      artistAudioCollectionStable.size(), Text.equal, Text.hash
+    );
+    for (entry in artistAudioCollectionStable.vals()) {
+      artistAudioCollectionById.put(entry.0, entry.1);
+    };
+
+    artistAudioHighlightById := _HashMap.HashMap<Text, Text>(
+      artistAudioHighlightStable.size(), Text.equal, Text.hash
+    );
+    for (entry in artistAudioHighlightStable.vals()) {
+      artistAudioHighlightById.put(entry.0, entry.1);
+    };
+
+    artistAudioApprovedUrlsById := _HashMap.HashMap<Text, [Text]>(
+      artistAudioApprovedUrlsStable.size(), Text.equal, Text.hash
+    );
+    for (entry in artistAudioApprovedUrlsStable.vals()) {
+      artistAudioApprovedUrlsById.put(entry.0, entry.1);
+    };
+
+    heroProfileImageReviewNotesById := _HashMap.HashMap<Text, Types.AssetReviewNote>(
+      heroProfileImageReviewNotesStable.size(), Text.equal, Text.hash
+    );
+    for (entry in heroProfileImageReviewNotesStable.vals()) {
+      heroProfileImageReviewNotesById.put(entry.0, entry.1);
+    };
+
+    audioEntryReviewNotesByKey := _HashMap.HashMap<Text, Types.AssetReviewNote>(
+      audioEntryReviewNotesStable.size(), Text.equal, Text.hash
+    );
+    for (entry in audioEntryReviewNotesStable.vals()) {
+      audioEntryReviewNotesByKey.put(entry.0, entry.1);
+    };
+
     programsById := _HashMap.HashMap<Text, Types.ProgramRecord>(0, Text.equal, Text.hash);
     for (entry in programsStable.vals()) {
       programsById.put(entry.0, entry.1);
@@ -2045,6 +2286,7 @@ persistent actor {
       artistFilterCohortYearsStable = _Iter.toArray(artistFilterCohortYearsById.entries());
       artistHeroProfileImageStable = ?(_Iter.toArray(artistHeroProfileImageById.entries()));
       artistHeroProfileImageApprovedIdsStable = ?approvedHeroProfileImageIdsSorted();
+      artistAudioApprovedIdsStable = ?approvedAudioIdsSorted();
       artistsStable = _Iter.toArray(artistsById.entries());
       programsStable = _Iter.toArray(programsById.entries());
       journalsStable = _Iter.toArray(journalsById.entries());
@@ -2069,6 +2311,11 @@ persistent actor {
       superStaffPrincipalsStable = superStaffPrincipalsAsArray();
       accountContactStable = ?_Iter.toArray(accountContactByPrincipal.entries());
       applicantEmailOutreachStable = ?(_Iter.toArray(applicantEmailOutreachById.entries()));
+      artistAudioCollectionStable = ?(_Iter.toArray(artistAudioCollectionById.entries()));
+      artistAudioHighlightStable = ?(_Iter.toArray(artistAudioHighlightById.entries()));
+      artistAudioApprovedUrlsStable = ?(_Iter.toArray(artistAudioApprovedUrlsById.entries()));
+      heroProfileImageReviewNotesStable = ?(_Iter.toArray(heroProfileImageReviewNotesById.entries()));
+      audioEntryReviewNotesStable = ?(_Iter.toArray(audioEntryReviewNotesByKey.entries()));
     };
   };
 
@@ -2097,6 +2344,10 @@ persistent actor {
       case (?rows) { rows };
     };
     artistHeroProfileImageApprovedIdsStable := switch (snapshot.artistHeroProfileImageApprovedIdsStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    artistAudioApprovedIdsStable := switch (snapshot.artistAudioApprovedIdsStable) {
       case null { [] };
       case (?rows) { rows };
     };
@@ -2152,6 +2403,26 @@ persistent actor {
       case (?rows) { rows };
     };
     applicantEmailOutreachStable := switch (snapshot.applicantEmailOutreachStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    artistAudioCollectionStable := switch (snapshot.artistAudioCollectionStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    artistAudioHighlightStable := switch (snapshot.artistAudioHighlightStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    artistAudioApprovedUrlsStable := switch (snapshot.artistAudioApprovedUrlsStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    heroProfileImageReviewNotesStable := switch (snapshot.heroProfileImageReviewNotesStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    audioEntryReviewNotesStable := switch (snapshot.audioEntryReviewNotesStable) {
       case null { [] };
       case (?rows) { rows };
     };
@@ -3402,6 +3673,10 @@ persistent actor {
       # ",\"dueAt\":" # optJsonText(row.dueAt)
       # ",\"feeCents\":" # Nat.toText(row.feeCents)
       # ",\"staffNote\":" # jsonText(row.staffNote)
+      # ",\"paymentProvider\":" # jsonText(row.paymentProvider)
+      # ",\"externalPaymentId\":" # jsonText(row.externalPaymentId)
+      # ",\"externalChargeId\":" # jsonText(row.externalChargeId)
+      # ",\"externalReceiptUrl\":" # jsonText(row.externalReceiptUrl)
       # "}";
   };
 
@@ -3603,6 +3878,58 @@ persistent actor {
       externalPaymentId = "";
       externalChargeId = "";
       externalReceiptUrl = "";
+    };
+    let totalDueCents = effectiveTotalDueForStaffLedger(principal, programId, applicantId);
+    let depositAmountCents = switch (programPaymentSummariesByKey.get(programPaymentKey(principal, programId))) {
+      case (?s) {
+        if (s.depositAmountCents > 0) { s.depositAmountCents } else { 100000 };
+      };
+      case null { 100000 };
+    };
+    programPaymentLedgerById.put(rowId, row);
+    putProgramPaymentSummaryFromLedger(row, totalDueCents, depositAmountCents, 0);
+  };
+
+  /// Staff Finance: re-link an existing ledger row (e.g. an orphaned PayPal payment)
+  /// to a specific applicant so it surfaces on their finance + member payment views.
+  public shared (msg) func staffReassignProgramLedgerEntry(
+    rowId : Text,
+    applicantId : Text,
+    programId : Text,
+  ) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "financePrograms");
+    if (rowId.size() == 0 or applicantId.size() == 0 or programId.size() == 0) {
+      Debug.trap("rowId, applicantId, and programId required");
+    };
+    let existing = switch (programPaymentLedgerById.get(rowId)) {
+      case null { Debug.trap("Ledger row not found") };
+      case (?r) { r };
+    };
+    let principal = switch (principalForApplicantId(applicantId)) {
+      case null { Debug.trap("Linked member account required for applicant") };
+      case (?p) { p };
+    };
+    let row : Types.ProgramPaymentLedgerRow = {
+      id = existing.id;
+      principal = principal;
+      programId = programId;
+      applicationId = applicantId;
+      paymentType = existing.paymentType;
+      amountCents = existing.amountCents;
+      currency = existing.currency;
+      stripePaymentIntentId = existing.stripePaymentIntentId;
+      stripeChargeId = existing.stripeChargeId;
+      stripeReceiptUrl = existing.stripeReceiptUrl;
+      status = existing.status;
+      createdAt = existing.createdAt;
+      dueAt = existing.dueAt;
+      feeCents = existing.feeCents;
+      staffNote = existing.staffNote;
+      paymentProvider = existing.paymentProvider;
+      externalPaymentId = existing.externalPaymentId;
+      externalChargeId = existing.externalChargeId;
+      externalReceiptUrl = existing.externalReceiptUrl;
     };
     let totalDueCents = effectiveTotalDueForStaffLedger(principal, programId, applicantId);
     let depositAmountCents = switch (programPaymentSummariesByKey.get(programPaymentKey(principal, programId))) {
@@ -4260,6 +4587,10 @@ persistent actor {
                 } else {
                   rec.profile.updatedAt;
                 };
+                let prevUrl = switch (artistMediaByArtistId.get(aid)) {
+                  case null { "" };
+                  case (?prev) { prev.audioUrl };
+                };
                 let m : Types.ArtistMedia = {
                   quote = quote;
                   audioUrl = audioUrl;
@@ -4267,6 +4598,9 @@ persistent actor {
                   updatedAt = newUpdated;
                 };
                 artistMediaByArtistId.put(aid, m);
+                if (audioUrl != prevUrl) {
+                  setAudioApprovedForArtist(aid, false);
+                };
               };
             };
           };
@@ -4562,6 +4896,154 @@ persistent actor {
     };
   };
 
+  /// Public: artist ids whose audio bite is approved for sound env / profile / journal.
+  public query func listArtistAudioApprovedPublic() : async [Text] {
+    approvedAudioIdsSorted();
+  };
+
+  /// Staff/admin: approve or revoke artist audio for public playback surfaces.
+  public shared (msg) func staffSetArtistAudioApproved(artistId : Text, approved : Bool) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "artists");
+    switch (artistsById.get(artistId)) {
+      case null { Debug.trap("Unknown artist id") };
+      case (?_) { setAudioApprovedForArtist(artistId, approved) };
+    };
+  };
+
+  // ── Multi-bite audio collection API ──
+
+  public query func listArtistAudioCollections() : async [(Text, [Types.ArtistAudioEntry])] {
+    _Iter.toArray(artistAudioCollectionById.entries());
+  };
+
+  public query func listArtistAudioHighlights() : async [(Text, Text)] {
+    _Iter.toArray(artistAudioHighlightById.entries());
+  };
+
+  public query func listArtistAudioApprovedUrls() : async [(Text, [Text])] {
+    _Iter.toArray(artistAudioApprovedUrlsById.entries());
+  };
+
+  public shared query (msg) func getMyArtistAudioCollection() : async ?{
+    entries : [Types.ArtistAudioEntry];
+    highlightUrl : Text;
+    approvedUrls : [Text];
+  } {
+    if (Principal.equal(msg.caller, anonPrincipal)) return null;
+    switch (accountsByPrincipal.get(msg.caller)) {
+      case null { null };
+      case (?acc) {
+        switch (acc.linkedArtistId) {
+          case null { null };
+          case (?aid) {
+            ?{
+              entries = getAudioCollection(aid);
+              highlightUrl = getAudioHighlight(aid);
+              approvedUrls = getApprovedAudioUrls(aid);
+            };
+          };
+        };
+      };
+    };
+  };
+
+  public shared (msg) func addMyArtistAudioEntry(url : Text, title : Text, updatedAt : Text) : async () {
+    if (Principal.equal(msg.caller, anonPrincipal)) Debug.trap("Anonymous caller");
+    if (url.size() > maxProfileImageUrlLen) Debug.trap("Audio URL too long");
+    switch (accountsByPrincipal.get(msg.caller)) {
+      case null { Debug.trap("No account for caller") };
+      case (?acc) {
+        switch (acc.linkedArtistId) {
+          case null { Debug.trap("No linked artist on account") };
+          case (?aid) {
+            switch (artistsById.get(aid)) {
+              case null { Debug.trap("Linked artist not found") };
+              case (?_) {
+                let existing = getAudioCollection(aid);
+                if (existing.size() >= maxAudioEntries) {
+                  Debug.trap("Maximum of 5 audio bites reached");
+                };
+                for (e in existing.vals()) {
+                  if (e.url == url) Debug.trap("Audio URL already exists in collection");
+                };
+                let ts = if (updatedAt.size() > 0) updatedAt else "";
+                let entry : Types.ArtistAudioEntry = { url = url; title = title; addedAt = ts };
+                artistAudioCollectionById.put(aid, Array.append(existing, [entry]));
+                if (getAudioHighlight(aid).size() == 0) {
+                  artistAudioHighlightById.put(aid, url);
+                  syncHighlightToArtistMedia(aid);
+                };
+              };
+            };
+          };
+        };
+      };
+    };
+  };
+
+  public shared (msg) func removeMyArtistAudioEntry(url : Text) : async () {
+    if (Principal.equal(msg.caller, anonPrincipal)) Debug.trap("Anonymous caller");
+    switch (accountsByPrincipal.get(msg.caller)) {
+      case null { Debug.trap("No account for caller") };
+      case (?acc) {
+        switch (acc.linkedArtistId) {
+          case null { Debug.trap("No linked artist on account") };
+          case (?aid) {
+            let existing = getAudioCollection(aid);
+            let filtered = Array.filter<Types.ArtistAudioEntry>(existing, func(e : Types.ArtistAudioEntry) : Bool { e.url != url });
+            if (filtered.size() == existing.size()) Debug.trap("Audio URL not found in collection");
+            if (filtered.size() == 0) {
+              ignore artistAudioCollectionById.remove(aid);
+            } else {
+              artistAudioCollectionById.put(aid, filtered);
+            };
+            setAudioUrlApproved(aid, url, false);
+            if (getAudioHighlight(aid) == url) {
+              if (filtered.size() > 0) {
+                artistAudioHighlightById.put(aid, filtered[0].url);
+              } else {
+                ignore artistAudioHighlightById.remove(aid);
+              };
+              syncHighlightToArtistMedia(aid);
+            };
+          };
+        };
+      };
+    };
+  };
+
+  public shared (msg) func setMyArtistHighlightAudio(url : Text) : async () {
+    if (Principal.equal(msg.caller, anonPrincipal)) Debug.trap("Anonymous caller");
+    switch (accountsByPrincipal.get(msg.caller)) {
+      case null { Debug.trap("No account for caller") };
+      case (?acc) {
+        switch (acc.linkedArtistId) {
+          case null { Debug.trap("No linked artist on account") };
+          case (?aid) {
+            let entries = getAudioCollection(aid);
+            var found = false;
+            for (e in entries.vals()) {
+              if (e.url == url) found := true;
+            };
+            if (not found) Debug.trap("Audio URL not in collection");
+            artistAudioHighlightById.put(aid, url);
+            syncHighlightToArtistMedia(aid);
+          };
+        };
+      };
+    };
+  };
+
+  public shared (msg) func staffSetArtistAudioEntryApproved(artistId : Text, url : Text, approved : Bool) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "artists");
+    switch (artistsById.get(artistId)) {
+      case null { Debug.trap("Unknown artist id") };
+      case (?_) { setAudioUrlApproved(artistId, url, approved) };
+    };
+  };
+
   /// Staff/admin: approve profile headshots for every roster artist (bulk).
   public shared (msg) func staffApproveAllHeroProfileImages() : async Nat {
     assertStaffOrAdmin(msg.caller);
@@ -4572,6 +5054,85 @@ persistent actor {
       n += 1;
     };
     n;
+  };
+
+  public shared (msg) func staffSetHeroProfileImageReviewNote(
+    artistId : Text, approved : Bool, reason : Text, imageUrl : Text
+  ) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "artists");
+    switch (artistsById.get(artistId)) {
+      case null { Debug.trap("Unknown artist id") };
+      case (?_) {
+        setHeroProfileImageApprovedForArtist(artistId, approved);
+        let note : Types.AssetReviewNote = {
+          reason = reason;
+          imageUrl = imageUrl;
+          reviewedAt = Int.toText(Time.now());
+          approved = approved;
+        };
+        heroProfileImageReviewNotesById.put(artistId, note);
+      };
+    };
+  };
+
+  public shared (msg) func staffSetAudioEntryReviewNote(
+    artistId : Text, url : Text, approved : Bool, reason : Text, imageUrl : Text
+  ) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "artists");
+    switch (artistsById.get(artistId)) {
+      case null { Debug.trap("Unknown artist id") };
+      case (?_) {
+        setAudioUrlApproved(artistId, url, approved);
+        let compositeKey = artistId # "|" # url;
+        let note : Types.AssetReviewNote = {
+          reason = reason;
+          imageUrl = imageUrl;
+          reviewedAt = Int.toText(Time.now());
+          approved = approved;
+        };
+        audioEntryReviewNotesByKey.put(compositeKey, note);
+      };
+    };
+  };
+
+  public query func listHeroProfileImageReviewNotes() : async [(Text, Types.AssetReviewNote)] {
+    _Iter.toArray(heroProfileImageReviewNotesById.entries());
+  };
+
+  public query func listAudioEntryReviewNotes() : async [(Text, Types.AssetReviewNote)] {
+    _Iter.toArray(audioEntryReviewNotesByKey.entries());
+  };
+
+  public shared query (msg) func getMyAssetReviewNotes() : async {
+    heroProfileImage : ?Types.AssetReviewNote;
+    audioEntries : [(Text, Types.AssetReviewNote)];
+  } {
+    let artistIdOpt : ?Text = switch (accountsByPrincipal.get(msg.caller)) {
+      case null { null };
+      case (?acc) { acc.linkedArtistId };
+    };
+    switch (artistIdOpt) {
+      case null {{
+        heroProfileImage = null;
+        audioEntries = [];
+      }};
+      case (?artistId) {
+        let heroNote = heroProfileImageReviewNotesById.get(artistId);
+        let prefix = artistId # "|";
+        let buf = Buffer.Buffer<(Text, Types.AssetReviewNote)>(0);
+        for ((k, v) in audioEntryReviewNotesByKey.entries()) {
+          if (Text.startsWith(k, #text prefix)) {
+            buf.add((k, v));
+          };
+        };
+        {
+          heroProfileImage = heroNote;
+          audioEntries = Buffer.toArray(buf);
+        };
+      };
+    };
   };
 
   public shared (msg) func deleteArtistById(artistId : Text) : async Bool {
@@ -4599,6 +5160,21 @@ persistent actor {
         ignore artistFilterCohortYearsById.remove(artistId);
         ignore artistHeroProfileImageById.remove(artistId);
         ignore artistHeroProfileImageApprovedById.remove(artistId);
+        ignore artistAudioApprovedById.remove(artistId);
+        ignore artistAudioCollectionById.remove(artistId);
+        ignore artistAudioHighlightById.remove(artistId);
+        ignore artistAudioApprovedUrlsById.remove(artistId);
+        ignore heroProfileImageReviewNotesById.remove(artistId);
+        let prefix = artistId # "|";
+        let keysToRemove = Buffer.Buffer<Text>(0);
+        for ((k, _) in audioEntryReviewNotesByKey.entries()) {
+          if (Text.startsWith(k, #text prefix)) {
+            keysToRemove.add(k);
+          };
+        };
+        for (k in keysToRemove.vals()) {
+          ignore audioEntryReviewNotesByKey.remove(k);
+        };
         true;
       };
     };
@@ -4701,6 +5277,10 @@ persistent actor {
       Debug.trap("Audio URL too long");
     };
     let now = if (updatedAt.size() > 0) updatedAt else nowText();
+    let prevUrl = switch (artistMediaByArtistId.get(artistId)) {
+      case null { "" };
+      case (?prev) { prev.audioUrl };
+    };
     let m : Types.ArtistMedia = {
       quote = quote;
       audioUrl = audioUrl;
@@ -4708,6 +5288,9 @@ persistent actor {
       updatedAt = now;
     };
     artistMediaByArtistId.put(artistId, m);
+    if (audioUrl != prevUrl) {
+      setAudioApprovedForArtist(artistId, false);
+    };
   };
 
   public shared query (msg) func adminGetJournalLayout() : async [Types.JournalLayoutRow] {

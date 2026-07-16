@@ -34,6 +34,7 @@ if (faviconLink) faviconLink.href = faviconUrl;
 // Import and register custom elements
 import "./components/shared/header.js";
 import "./components/shared/footer.js";
+import "./components/shared/newsletterSubscribe.js";
 import "./components/shared/feed-filter.js";
 
 // Subcomponents
@@ -71,6 +72,8 @@ import "./components/subComponents/community-network-cards.js";
 import "./components/subComponents/community-upcoming-sessions.js";
 import "./components/subComponents/community-promo-block.js";
 import "./components/subComponents/signInModal.js";
+import "./components/subComponents/artistPreviewModal.js";
+import "./components/subComponents/authBrowserHelp.js";
 import { initIcAuth } from "./utils/icAuth.js";
 /** Warm Stripe.js so the join-network payment step does not wait on first dynamic import. */
 void import("@stripe/stripe-js");

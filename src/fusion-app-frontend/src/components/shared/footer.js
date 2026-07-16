@@ -2,6 +2,7 @@
 import gsap from 'gsap';
 import SymbolLogo from '../../assets/Fusion-X-SymbolLogo.png';
 import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
+import './newsletterSubscribe.js';
 
 /** Pixels from bottom to treat as "at bottom" (0 = flush with scroll end; avoids early reveal on mobile). */
 const BOTTOM_THRESHOLD_PX = 0;
@@ -335,6 +336,20 @@ class FooterComponent extends HTMLElement {
                     text-align: center;
                 }
 
+                #footerNewsletter {
+                    width: 100%;
+                    max-width: 22rem;
+                    margin-inline: auto;
+                    align-items: center;
+                    justify-content: flex-start;
+                    padding: 0 1rem;
+                    box-sizing: border-box;
+                }
+
+                #footerNewsletter app-newsletter-subscribe {
+                    width: 100%;
+                }
+
                 #footerEmailLocations {
                     width: 100%;
                     display: flex;
@@ -445,6 +460,11 @@ class FooterComponent extends HTMLElement {
                         align-items: center;
                         text-align: center;
                     }
+
+                    #footerNewsletter {
+                        max-width: min(18rem, 100%);
+                        margin-inline: auto;
+                    }
                 }
 
                 @media (max-width: 768px) {
@@ -524,7 +544,9 @@ class FooterComponent extends HTMLElement {
                         </div>
                     </div>
                     <div id="footerc2" class="fcColumn">
-                        <div class="fcTop"></div>
+                        <div class="fcTop" id="footerNewsletter">
+                            <app-newsletter-subscribe variant="footer"></app-newsletter-subscribe>
+                        </div>
                         <div class="fcBottom">
                             <div id="footerCookies">Cookies</div>
                             <div id="footerPrivacy">Privacy</div>

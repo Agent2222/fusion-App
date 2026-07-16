@@ -22,6 +22,15 @@ import {
     getPublicWorldSourceFromLocales,
     localesHaveUsableWorldNew,
 } from './worldPublicPick.js';
+import {
+    getArtistPreviewConfig,
+    normalizePreviewConfigForSave,
+    previewImageUrlForKey,
+    PREVIEW_IMAGE_KEYS,
+    defaultPreviewImageKeys,
+} from './artistPreviewModel.js';
+import { isArtistHeroProfileImageApproved } from './artistCardImageMode.js';
+import { ensureArtistPreviewModalHost } from '../components/subComponents/artistPreviewModal.js';
 
 /** Used by Studio “Translate to New World” to map `world.*` → `worldNew.*` via LLM. */
 export const STUDIO_WORLD_TO_NEW_PATHS = [
@@ -287,6 +296,141 @@ function renderIntroSlot(escapeHtml, loc, world, slotIndex) {
 }
 
 /**
+ * Candidate keys for Studio Preview image sequence (available media only).
+ * @param {object} artist
+ * @returns {{ key: string, label: string, src: string }[]}
+ */
+function previewImageCandidates(artist) {
+    /** @type {{ key: string, label: string, src: string }[]} */
+    const out = [];
+    for (const key of PREVIEW_IMAGE_KEYS) {
+        if (key === 'heroProfile') {
+            const url = String(
+                /** @type {Record<string, unknown>} */ (artist || {}).heroProfileImage ??
+                    /** @type {Record<string, unknown>} */ (artist || {}).hero_profile_image ??
+                    '',
+            ).trim();
+            if (!url || !isArtistHeroProfileImageApproved(artist)) continue;
+            out.push({ key, label: 'Hero profile', src: url });
+            continue;
+        }
+        const m = /^intro:([0-2])$/.exec(key);
+        if (!m) continue;
+        const src = previewImageUrlForKey(artist, /** @type {import('./artistPreviewModel.js').PreviewImageKey} */ (key));
+        if (!src) continue;
+        out.push({ key, label: `Intro gallery ${Number(m[1]) + 1}`, src });
+    }
+    return out;
+}
+
+/**
+ * Ordered list for Preview tab: curated keys first (when still available), then remaining candidates.
+ * @param {object} artist
+ */
+function orderedPreviewImageCandidates(artist) {
+    const available = previewImageCandidates(artist);
+    const byKey = new Map(available.map((c) => [c.key, c]));
+    const cfg = getArtistPreviewConfig(artist, 'en');
+    const curated = Array.isArray(cfg.imageKeys) ? cfg.imageKeys.map((k) => String(k)) : [];
+    /** @type {{ key: string, label: string, src: string, checked: boolean }[]} */
+    const ordered = [];
+    const seen = new Set();
+    const hasCurated = curated.some((k) => byKey.has(k));
+    if (hasCurated) {
+        for (const k of curated) {
+            const c = byKey.get(k);
+            if (!c || seen.has(k)) continue;
+            seen.add(k);
+            ordered.push({ ...c, checked: true });
+        }
+        for (const c of available) {
+            if (seen.has(c.key)) continue;
+            ordered.push({ ...c, checked: false });
+        }
+    } else {
+        const defaults = new Set(defaultPreviewImageKeys(artist));
+        for (const c of available) {
+            ordered.push({ ...c, checked: defaults.has(/** @type {any} */ (c.key)) });
+        }
+    }
+    return ordered;
+}
+
+/**
+ * @param {(s: string) => string} escapeHtml
+ * @param {object} artist
+ */
+function renderPreviewPanelHtml(escapeHtml, artist) {
+    const localesRaw =
+        artist?.locales && typeof artist.locales === 'object' ? artist.locales : {};
+    const enPrev = asObj(asObj(localesRaw.en).preview);
+    const jaPrev = asObj(asObj(localesRaw.ja).preview);
+    const cfg = getArtistPreviewConfig(artist, 'en');
+    const blurbEn = String(enPrev.blurb ?? '').trim();
+    const blurbJa = String(jaPrev.blurb ?? '').trim();
+    const audioUrl = String(/** @type {Record<string, unknown>} */ (artist || {}).audioUrl ?? '').trim();
+    const audioTitle = String(/** @type {Record<string, unknown>} */ (artist || {}).audioTitle ?? '').trim();
+    const showAudio = cfg.showAudio !== false;
+    const candidates = orderedPreviewImageCandidates(artist);
+    const rows = candidates
+        .map(
+            (c) => `
+      <li class="studio-art-preview-image-row" data-preview-image-key="${esc(escapeHtml, c.key)}">
+        <label class="studio-field studio-field--checkbox studio-art-preview-image-check">
+          <input type="checkbox" class="studio-art-preview-image-cb" ${c.checked ? 'checked' : ''} />
+          <span>${esc(escapeHtml, c.label)}</span>
+        </label>
+        <figure class="studio-asset-thumb studio-art-preview-thumb${c.src ? '' : ' is-empty'}">
+          ${c.src ? `<img src="${esc(escapeHtml, c.src)}" alt="" loading="lazy" />` : ''}
+        </figure>
+        <div class="studio-art-preview-image-actions">
+          <button type="button" class="studio-btn-ghost studio-art-preview-img-up" aria-label="Move up">↑</button>
+          <button type="button" class="studio-btn-ghost studio-art-preview-img-down" aria-label="Move down">↓</button>
+        </div>
+      </li>`,
+        )
+        .join('');
+
+    return `
+        <p class="studio-modal-hint">Controls the public card Preview modal. Defaults to shortened practice, then bio, when blurb is empty. Empty image selection uses all filled intro slots + approved profile.</p>
+        <h4 class="studio-prog-subhead">Curated blurb</h4>
+        <div class="studio-prog-locale-form">
+          <div class="studio-prog-col-headers" aria-hidden="true">
+            <span class="studio-prog-grid-label"></span>
+            <span class="studio-prog-col-title">English</span>
+            <span class="studio-prog-col-title">日本語</span>
+          </div>
+          <div class="studio-prog-row studio-prog-row--textarea">
+            <span class="studio-prog-grid-label">Preview blurb</span>
+            <textarea class="studio-textarea" name="art-preview-blurb-en" id="studio-art-preview-blurb-en" rows="3" placeholder="Defaults to shortened practice, then bio, if left empty.">${esc(escapeHtml, blurbEn)}</textarea>
+            <textarea class="studio-textarea" name="art-preview-blurb-ja" id="studio-art-preview-blurb-ja" rows="3" placeholder="空欄の場合は練習内容または略歴を短縮表示します。">${esc(escapeHtml, blurbJa)}</textarea>
+          </div>
+        </div>
+        <h4 class="studio-prog-subhead">Image sequence</h4>
+        <p class="studio-modal-hint">Check images to include and reorder with ↑/↓. At least one is recommended.</p>
+        <ul id="studio-art-preview-images" class="studio-art-preview-images">${
+            rows ||
+            '<li class="studio-muted">No intro gallery or approved profile image yet — add media first.</li>'
+        }</ul>
+        <h4 class="studio-prog-subhead">Audio</h4>
+        <label class="studio-field studio-field--checkbox studio-field--full" ${audioUrl ? '' : 'title="Add an audio URL on the Media tab first."'}>
+          <input type="checkbox" name="art-preview-show-audio" id="studio-art-preview-show-audio" ${
+              audioUrl && showAudio ? 'checked' : ''
+          } ${audioUrl ? '' : 'disabled'} />
+          <span>Include audio in preview</span>
+        </label>
+        <p class="studio-muted">${
+            audioUrl
+                ? `Current track: ${esc(escapeHtml, audioTitle || '(untitled)')} — edit URL/title on Media.`
+                : 'No audio URL set. Edit on the Media tab.'
+        }</p>
+        <h4 class="studio-prog-subhead">Live preview</h4>
+        <p class="studio-modal-hint">Opens the public modal with unsaved form state.</p>
+        <button type="button" class="studio-btn-primary" id="studio-art-preview-open">Open preview</button>
+        <p class="studio-muted" style="margin-top:0.75rem">Future: video clips and richer framing.</p>`;
+}
+
+/**
  * @param {object} artist
  * @param {{ isTest?: boolean }} [opts]
  */
@@ -322,8 +466,10 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
       <button type="button" class="studio-tabs__tab" role="tab" aria-selected="false" aria-controls="studio-art-panel-world" id="studio-art-tab-world">World</button>
       <button type="button" class="studio-tabs__tab" role="tab" aria-selected="false" aria-controls="studio-art-panel-new-world" id="studio-art-tab-new-world">New World</button>
       <button type="button" class="studio-tabs__tab" role="tab" aria-selected="false" aria-controls="studio-art-panel-media" id="studio-art-tab-media">Media</button>
+      <button type="button" class="studio-tabs__tab" role="tab" aria-selected="false" aria-controls="studio-art-panel-preview" id="studio-art-tab-preview">Preview</button>
       <button type="button" class="studio-tabs__tab" role="tab" aria-selected="false" aria-controls="studio-art-panel-links" id="studio-art-tab-links">Links &amp; SEO</button>
       <button type="button" class="studio-tabs__tab" role="tab" aria-selected="false" aria-controls="studio-art-panel-programs" id="studio-art-tab-programs">Programs</button>
+      <button type="button" class="studio-tabs__tab" role="tab" aria-selected="false" aria-controls="studio-art-panel-blindspots" id="studio-art-tab-blindspots">Blindspots</button>
       <button type="button" class="studio-tabs__tab" role="tab" aria-selected="false" aria-controls="studio-art-panel-advanced" id="studio-art-tab-advanced">Advanced</button>
     </div>
     <div class="studio-tabs__panels">
@@ -507,6 +653,10 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
         <div class="studio-modal-fields-row">
           <label class="studio-field studio-field--grow"><span>Audio title</span><input type="text" class="studio-input" name="art-audio-title" value="${esc(escapeHtml, String(a.audioTitle ?? ''))}" /></label>
         </div>
+        <label class="studio-field studio-field--checkbox studio-field--full" style="margin-bottom:0.75rem">
+          <input type="checkbox" name="art-audio-approved" id="studio-art-audio-approved" ${a.audioApproved ? 'checked' : ''} />
+          <span>Approved for public playback (sound environment, profile, journal audio rows)</span>
+        </label>
         <h4 class="studio-prog-subhead">English</h4>
         ${renderIntroSlot(escapeHtml, 'en', enW, 0)}
         ${renderIntroSlot(escapeHtml, 'en', enW, 1)}
@@ -515,6 +665,10 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
         ${renderIntroSlot(escapeHtml, 'ja', jaW, 0)}
         ${renderIntroSlot(escapeHtml, 'ja', jaW, 1)}
         ${renderIntroSlot(escapeHtml, 'ja', jaW, 2)}
+      </div>
+
+      <div id="studio-art-panel-preview" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-art-tab-preview" hidden>
+        ${renderPreviewPanelHtml(escapeHtml, a)}
       </div>
 
       <div id="studio-art-panel-programs" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-art-tab-programs" hidden>
@@ -553,6 +707,12 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
         ${renderLinkRows(escapeHtml, 'en', enLinks)}
         <h4 class="studio-prog-subhead">Links — 日本語</h4>
         ${renderLinkRows(escapeHtml, 'ja', jaLinks)}
+      </div>
+
+      <div id="studio-art-panel-blindspots" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-art-tab-blindspots" hidden>
+        <p class="studio-modal-hint">Per-artist blindspot cards shown in their <strong>Your Studio</strong> Overview. When present, these override the default blindspot list. Stored in <code>locales.*.studio.blindspots[]</code>.</p>
+        <div id="studio-art-blindspots-list" class="studio-us-list"></div>
+        <button type="button" class="studio-btn-ghost" id="studio-art-blindspot-add">+ Add blindspot</button>
       </div>
 
       <div id="studio-art-panel-advanced" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-art-tab-advanced" hidden>
@@ -599,6 +759,100 @@ function collectLinksFromForm(root, locale) {
         out.push({ type: type || 'other', url, label: label || url });
     });
     return out;
+}
+
+/**
+ * @param {HTMLElement} root
+ * @returns {{ id: string, title_en: string, title_ja: string, body_en: string, body_ja: string, targetPanel: string, targetTab: string, priority: number }[]}
+ */
+function collectArtistBlindspots(root) {
+    const rows = root.querySelectorAll('[data-art-bs-idx]');
+    return [...rows].map((row) => {
+        const f = (sel) => /** @type {HTMLInputElement} */ (row.querySelector(`[data-art-bs="${sel}"]`))?.value || '';
+        return {
+            id: f('id'), title_en: f('title-en'), title_ja: f('title-ja'),
+            body_en: f('body-en'), body_ja: f('body-ja'),
+            targetPanel: f('panel'), targetTab: f('tab'),
+            priority: parseInt(f('priority'), 10) || 0,
+        };
+    }).filter((b) => b.id.trim());
+}
+
+function _esc(s) {
+    return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/**
+ * @param {HTMLElement} root
+ * @param {object} baseArtist
+ */
+export function initArtistBlindspotsTab(root, baseArtist) {
+    const list = root.querySelector('#studio-art-blindspots-list');
+    if (!list) return;
+    const loc = baseArtist?.locales;
+    const enBs = loc?.en?.studio?.blindspots;
+    const jaBs = loc?.ja?.studio?.blindspots;
+    const items = (Array.isArray(enBs) ? enBs : []).map((b, i) => {
+        const jaItem = Array.isArray(jaBs) && jaBs[i] ? jaBs[i] : {};
+        return {
+            id: b.id || '', title_en: b.title || '', title_ja: jaItem.title || '',
+            body_en: b.body || '', body_ja: jaItem.body || '',
+            targetPanel: b.targetPanel || '', targetTab: b.targetTab || '',
+            priority: b.priority ?? 0,
+        };
+    });
+
+    const panels = ['identity', 'work', 'programs', 'media', 'journal', 'preview', 'settings'];
+    const tabs = ['basics', 'status', 'story'];
+
+    const renderRow = (b, idx) => `<div class="studio-us-row" data-art-bs-idx="${idx}">
+        <div class="studio-us-bs-grid">
+            <label class="studio-field studio-field--stack studio-field--compact"><span>ID</span>
+                <input class="studio-input" data-art-bs="id" value="${_esc(b.id)}" placeholder="unique-id" /></label>
+            <label class="studio-field studio-field--stack studio-field--compact"><span>Title EN</span>
+                <input class="studio-input" data-art-bs="title-en" value="${_esc(b.title_en)}" /></label>
+            <label class="studio-field studio-field--stack studio-field--compact"><span>Title JA</span>
+                <input class="studio-input" data-art-bs="title-ja" value="${_esc(b.title_ja)}" /></label>
+            <label class="studio-field studio-field--stack studio-field--compact"><span>Body EN</span>
+                <input class="studio-input" data-art-bs="body-en" value="${_esc(b.body_en)}" /></label>
+            <label class="studio-field studio-field--stack studio-field--compact"><span>Body JA</span>
+                <input class="studio-input" data-art-bs="body-ja" value="${_esc(b.body_ja)}" /></label>
+            <label class="studio-field studio-field--stack studio-field--compact"><span>Panel</span>
+                <select class="studio-input" data-art-bs="panel">
+                    <option value="">—</option>
+                    ${panels.map((p) => `<option value="${p}"${b.targetPanel === p ? ' selected' : ''}>${p}</option>`).join('')}
+                </select></label>
+            <label class="studio-field studio-field--stack studio-field--compact"><span>Tab</span>
+                <select class="studio-input" data-art-bs="tab">
+                    <option value="">—</option>
+                    ${tabs.map((t) => `<option value="${t}"${b.targetTab === t ? ' selected' : ''}>${t}</option>`).join('')}
+                </select></label>
+            <label class="studio-field studio-field--stack studio-field--compact"><span>Priority</span>
+                <input type="number" class="studio-input" data-art-bs="priority" value="${b.priority}" min="0" /></label>
+            <button type="button" class="studio-btn-ghost studio-btn-icon" data-art-bs-remove title="Remove">&times;</button>
+        </div>
+    </div>`;
+
+    const render = () => {
+        list.innerHTML = items.length
+            ? items.map(renderRow).join('')
+            : '<p class="studio-muted">No artist-specific blindspots. Default blindspots from User Studio will be shown.</p>';
+    };
+    render();
+
+    list.closest('#studio-art-panel-blindspots')?.addEventListener('click', (e) => {
+        const t = /** @type {Element} */ (e.target);
+        if (t.closest('#studio-art-blindspot-add')) {
+            items.push({ id: '', title_en: '', title_ja: '', body_en: '', body_ja: '', targetPanel: '', targetTab: '', priority: 0 });
+            render();
+            return;
+        }
+        if (t.closest('[data-art-bs-remove]')) {
+            const row = t.closest('[data-art-bs-idx]');
+            const idx = parseInt(row?.getAttribute('data-art-bs-idx') || '-1', 10);
+            if (idx >= 0) { items.splice(idx, 1); render(); }
+        }
+    });
 }
 
 /**
@@ -661,10 +915,60 @@ export function collectArtistRecordFromForm(root, baseArtist) {
         block.world = { ...asObj(w), introGallery: gallery };
     }
 
+    /** Preview curation (shared imageKeys/showAudio mirrored EN/JA) */
+    /** @type {string[]} */
+    const previewImageKeys = [];
+    root.querySelectorAll('#studio-art-preview-images .studio-art-preview-image-row').forEach((row) => {
+        if (!(row instanceof HTMLElement)) return;
+        const key = String(row.getAttribute('data-preview-image-key') ?? '').trim();
+        const cb = row.querySelector('.studio-art-preview-image-cb');
+        if (!key || !(cb instanceof HTMLInputElement) || !cb.checked) return;
+        previewImageKeys.push(key);
+    });
+    const showAudioEl = form.querySelector('#studio-art-preview-show-audio');
+    const showAudio =
+        !(showAudioEl instanceof HTMLInputElement) ||
+        showAudioEl.disabled ||
+        showAudioEl.checked;
+    const previewNorm = normalizePreviewConfigForSave({
+        blurbEn: String(fd.get('art-preview-blurb-en') ?? ''),
+        blurbJa: String(fd.get('art-preview-blurb-ja') ?? ''),
+        imageKeys: previewImageKeys,
+        showAudio,
+    });
+    en.preview = previewNorm.en;
+    ja.preview = previewNorm.ja;
+
     locales.en = en;
     locales.ja = ja;
 
     const normalized = normalizeLocalesWorldForStorage(/** @type {Record<string, unknown>} */ (locales));
+
+    const blindspotsFromForm = collectArtistBlindspots(root);
+    if (blindspotsFromForm.length > 0) {
+        if (!normalized.en || typeof normalized.en !== 'object') normalized.en = {};
+        if (!normalized.ja || typeof normalized.ja !== 'object') normalized.ja = {};
+        const nEn = /** @type {Record<string, unknown>} */ (normalized.en);
+        const nJa = /** @type {Record<string, unknown>} */ (normalized.ja);
+        if (!nEn.studio || typeof nEn.studio !== 'object') nEn.studio = {};
+        if (!nJa.studio || typeof nJa.studio !== 'object') nJa.studio = {};
+        /** @type {Record<string, unknown>} */ (nEn.studio).blindspots = blindspotsFromForm.map((b) => ({
+            id: b.id, title: b.title_en, body: b.body_en, targetPanel: b.targetPanel, targetTab: b.targetTab, priority: b.priority, enabled: true,
+        }));
+        /** @type {Record<string, unknown>} */ (nJa.studio).blindspots = blindspotsFromForm.map((b) => ({
+            id: b.id, title: b.title_ja || b.title_en, body: b.body_ja || b.body_en, targetPanel: b.targetPanel, targetTab: b.targetTab, priority: b.priority, enabled: true,
+        }));
+    } else {
+        if (normalized.en && typeof normalized.en === 'object') {
+            const nEn = /** @type {Record<string, unknown>} */ (normalized.en);
+            if (nEn.studio && typeof nEn.studio === 'object') /** @type {Record<string, unknown>} */ (nEn.studio).blindspots = [];
+        }
+        if (normalized.ja && typeof normalized.ja === 'object') {
+            const nJa = /** @type {Record<string, unknown>} */ (normalized.ja);
+            if (nJa.studio && typeof nJa.studio === 'object') /** @type {Record<string, unknown>} */ (nJa.studio).blindspots = [];
+        }
+    }
+
     const audioDisplayCb = form.querySelector('#studio-art-audio-display-for-artist');
     normalized.audioDisplayForArtist =
         audioDisplayCb instanceof HTMLInputElement && audioDisplayCb.checked;
@@ -694,6 +998,8 @@ export function collectArtistRecordFromForm(root, baseArtist) {
         featured: featuredCb instanceof HTMLInputElement && featuredCb.checked,
         featurable: featurableCb instanceof HTMLInputElement && featurableCb.checked,
     };
+    const audioApprovedCb = form.querySelector('#studio-art-audio-approved');
+    const audioApproved = audioApprovedCb instanceof HTMLInputElement && audioApprovedCb.checked;
     const featuredOrder = 0;
     const updatedAt = new Date().toISOString();
 
@@ -719,6 +1025,7 @@ export function collectArtistRecordFromForm(root, baseArtist) {
         quote: String(fd.get('art-profile-quote') ?? '').trim(),
         audioUrl: String(fd.get('art-audio-url') ?? '').trim(),
         audioTitle: String(fd.get('art-audio-title') ?? '').trim(),
+        audioApproved,
         featuredOrder,
         visibility,
         updatedAt,
@@ -760,6 +1067,48 @@ export function initArtistManageTabs(root) {
     };
     tabs.forEach((tab) => {
         tab.addEventListener('click', () => activate(tab));
+    });
+}
+
+/**
+ * Preview tab: image reorder + live draft Open preview.
+ * @param {HTMLElement} root
+ * @param {object} baseArtist
+ */
+export function initArtistPreviewTab(root, baseArtist) {
+    const list = root.querySelector('#studio-art-preview-images');
+    if (list) {
+        list.addEventListener('click', (e) => {
+            const t = e.target;
+            if (!(t instanceof Element)) return;
+            const row = t.closest('.studio-art-preview-image-row');
+            if (!(row instanceof HTMLElement) || !list.contains(row)) return;
+            if (t.closest('.studio-art-preview-img-up')) {
+                e.preventDefault();
+                const prev = row.previousElementSibling;
+                if (prev) list.insertBefore(row, prev);
+                return;
+            }
+            if (t.closest('.studio-art-preview-img-down')) {
+                e.preventDefault();
+                const next = row.nextElementSibling;
+                if (next) list.insertBefore(next, row);
+            }
+        });
+    }
+
+    root.querySelector('#studio-art-preview-open')?.addEventListener('click', () => {
+        try {
+            ensureArtistPreviewModalHost();
+            const draft = artistRowForLlmFromManageForm(root, baseArtist);
+            window.dispatchEvent(
+                new CustomEvent('fusion-open-artist-preview', {
+                    detail: { artist: draft },
+                }),
+            );
+        } catch (err) {
+            alert(err instanceof Error ? err.message : String(err));
+        }
     });
 }
 

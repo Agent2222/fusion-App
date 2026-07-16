@@ -37,24 +37,48 @@ class AudioRowComponent extends HTMLElement {
         this._unsubData = null;
         /** True while CMS `audio` bundle loads (skipped when `data-audio-src` provides URL). */
         this._audioListPending = false;
+        /** Multi-source pagination state */
+        this._pageIdx = 0;
+        /** @type {{ url: string, title: string }[] | null} */
+        this._sources = null;
     }
 
     _needsAudioList() {
+        if (this._sources && this._sources.length > 0) return false;
         return !String(this.getAttribute('data-audio-src') || '').trim();
     }
 
     static get observedAttributes() {
-        return ['active', 'data-audio-id', 'data-audio-src', 'data-audio-title'];
+        return ['active', 'data-audio-id', 'data-audio-src', 'data-audio-title', 'data-audio-sources'];
     }
 
     attributeChangedCallback(prop, oldVal, newVal) {
-        if (prop === 'active' || prop === 'data-audio-id') {
-            if (oldVal === newVal) return;
-            this.render();
+        if (oldVal === newVal) return;
+        if (prop === 'data-audio-sources') {
+            this._parseSources();
+            this._pageIdx = 0;
         }
+        this.render();
+    }
+
+    _parseSources() {
+        const raw = this.getAttribute('data-audio-sources');
+        if (!raw) { this._sources = null; return; }
+        try {
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr) && arr.length > 0) {
+                this._sources = arr.map((e) => ({
+                    url: String(e?.url ?? ''),
+                    title: String(e?.title ?? 'Audio'),
+                })).filter((e) => e.url);
+            } else {
+                this._sources = null;
+            }
+        } catch { this._sources = null; }
     }
 
     connectedCallback() {
+        this._parseSources();
         if (this._unsubData) this._unsubData();
         this._unsubData = subscribeDataSource(() => {
             if (this._needsAudioList()) {
@@ -115,6 +139,11 @@ class AudioRowComponent extends HTMLElement {
     }
 
     _resolveEntry() {
+        if (this._sources && this._sources.length > 0) {
+            const idx = Math.max(0, Math.min(this._pageIdx, this._sources.length - 1));
+            const s = this._sources[idx];
+            return { id: 'multi-' + idx, link: s.url, title: s.title || 'Audio' };
+        }
         const srcOverride = String(this.getAttribute('data-audio-src') || '').trim();
         if (srcOverride) {
             return {
@@ -249,6 +278,12 @@ class AudioRowComponent extends HTMLElement {
                     margin: 10% auto;
                 }
 
+                :host([data-layout="profile"]) .audio-row {
+                    margin: 0 auto;
+                    padding: 0.5rem 0;
+                    max-width: 36rem;
+                }
+
                 .audio-row-inner {
                     width: 100%;
                     padding: 0.75rem 1rem;
@@ -348,6 +383,42 @@ class AudioRowComponent extends HTMLElement {
                         min-width: 120px;
                     }
                 }
+
+                .audio-row-pagination {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 0.75rem;
+                    margin-top: 0.5rem;
+                }
+
+                .audio-row-page-btn {
+                    width: 1.75rem;
+                    height: 1.75rem;
+                    border: 1px solid var(--c2);
+                    border-radius: 50%;
+                    background: transparent;
+                    color: var(--c2);
+                    font-size: 0.85rem;
+                    line-height: 1;
+                    cursor: pointer;
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 0;
+                    transition: background 0.2s ease;
+                }
+
+                .audio-row-page-btn:hover { background: var(--c5); }
+                .audio-row-page-btn:disabled { opacity: 0.3; cursor: default; }
+
+                .audio-row-page-info {
+                    font-size: clamp(0.65rem, 0.9vw, 0.8rem);
+                    font-variation-settings: var(--fv-label);
+                    color: var(--c2);
+                    opacity: 0.85;
+                    user-select: none;
+                }
             </style>
             <div class="audio-row" part="audio-row">
                 <div class="audio-row-inner">
@@ -364,6 +435,12 @@ class AudioRowComponent extends HTMLElement {
                             <span class="player-time-dur">0:00</span>
                         </div>
                     </div>
+                    ${this._sources && this._sources.length > 1 ? `
+                    <div class="audio-row-pagination">
+                        <button type="button" class="audio-row-page-btn" data-page-dir="prev" aria-label="Previous"${this._pageIdx <= 0 ? ' disabled' : ''}>\u2039</button>
+                        <span class="audio-row-page-info">${this._pageIdx + 1} / ${this._sources.length}</span>
+                        <button type="button" class="audio-row-page-btn" data-page-dir="next" aria-label="Next"${this._pageIdx >= this._sources.length - 1 ? ' disabled' : ''}>\u203A</button>
+                    </div>` : ''}
                 </div>
             </div>
         `;
@@ -372,6 +449,20 @@ class AudioRowComponent extends HTMLElement {
         if (audioEl) {
             audioEl.src = src;
             this._wireCustomPlayer(audioEl);
+        }
+
+        if (this._sources && this._sources.length > 1) {
+            this.shadowRoot.querySelectorAll('[data-page-dir]').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    const dir = btn.getAttribute('data-page-dir');
+                    if (dir === 'prev' && this._pageIdx > 0) {
+                        this._pageIdx--;
+                    } else if (dir === 'next' && this._pageIdx < this._sources.length - 1) {
+                        this._pageIdx++;
+                    }
+                    this.render();
+                });
+            });
         }
     }
 }

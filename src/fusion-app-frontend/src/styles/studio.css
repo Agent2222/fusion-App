@@ -148,6 +148,7 @@ button.studio-wordmark-btn:hover {
   gap: 0.62rem;
   width: 100%;
   text-align: left;
+  text-decoration: none;
   padding: 0.44rem 0.62rem;
   border: none;
   border-radius: 8px;
@@ -7326,3 +7327,268 @@ a.studio-app-payload-link:hover {
   margin-top: 0.5rem;
 }
 
+/* Artist Preview tab — image sequence */
+.studio-art-preview-images {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.studio-art-preview-image-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid #e3ddd5;
+  border-radius: 8px;
+  background: #faf8f5;
+}
+
+.studio-art-preview-image-check {
+  flex: 1 1 10rem;
+  margin: 0;
+}
+
+.studio-art-preview-thumb {
+  flex: 0 0 56px;
+  width: 56px;
+  height: 56px;
+}
+
+.studio-art-preview-image-actions {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+
+.studio-art-preview-image-actions .studio-btn-ghost {
+  min-width: 2rem;
+  padding: 0.25rem 0.4rem;
+}
+
+/* ── User Studio / Blindspots editor grid ── */
+.studio-us-list { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 0.75rem; }
+.studio-us-row { border: 1px solid var(--studio-border, #333); border-radius: 6px; padding: 0.75rem; }
+.studio-us-bs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.5rem;
+  align-items: end;
+}
+.studio-us-bs-grid .studio-btn-icon { align-self: end; justify-self: end; font-size: 1.25rem; }
+
+/* ─── Moderation: Profile Images & Audio Files ─── */
+
+.studio-mod-hidden-label {
+    display: inline-block;
+    margin-left: 0.35rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    color: #dc2626;
+    background: color-mix(in srgb, #dc2626 12%, transparent);
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    vertical-align: middle;
+}
+
+.studio-mod-thumb-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    display: inline-block;
+    border-radius: 6px;
+    overflow: hidden;
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+.studio-mod-thumb-btn:hover {
+    box-shadow: 0 0 0 2px var(--c4, #4ade80);
+    transform: scale(1.04);
+}
+
+.studio-mod-thumb {
+    display: block;
+    width: 64px;
+    height: 64px;
+    object-fit: cover;
+    border-radius: 6px;
+}
+
+.studio-mod-audio {
+    max-width: 200px;
+    height: 32px;
+}
+
+.studio-mod-approve-cb {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--c4, #4ade80);
+    cursor: pointer;
+}
+
+/* Lightbox overlay */
+.studio-lightbox-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: rgba(0, 0, 0, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    animation: studio-lightbox-fadein 0.2s ease;
+}
+@keyframes studio-lightbox-fadein {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+.studio-lightbox-img {
+    max-width: 90vw;
+    max-height: 90vh;
+    object-fit: contain;
+    border-radius: 8px;
+    box-shadow: 0 4px 40px rgba(0, 0, 0, 0.6);
+    cursor: default;
+}
+
+/* ─── Moderation: Status badges & Manage popup ─── */
+
+.studio-mod-status-badge {
+    display: inline-block;
+    padding: 0.15rem 0.55rem;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    line-height: 1.4;
+    white-space: nowrap;
+}
+.studio-mod-status-badge--approved {
+    color: #16a34a;
+    background: color-mix(in srgb, #16a34a 12%, transparent);
+}
+.studio-mod-status-badge--pending {
+    color: #d97706;
+    background: color-mix(in srgb, #d97706 12%, transparent);
+}
+.studio-mod-status-badge--rejected {
+    color: #dc2626;
+    background: color-mix(in srgb, #dc2626 12%, transparent);
+}
+
+.studio-mod-manage-btn {
+    padding: 0.3rem 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    border: 1px solid color-mix(in srgb, var(--c4, #4ade80) 40%, transparent);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--c4, #4ade80);
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+    white-space: nowrap;
+}
+.studio-mod-manage-btn:hover {
+    background: color-mix(in srgb, var(--c4, #4ade80) 10%, transparent);
+}
+
+.studio-mod-manage-modal {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    min-width: 340px;
+    max-width: 420px;
+}
+
+.studio-mod-manage-preview {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    min-height: 80px;
+}
+.studio-mod-manage-preview img {
+    max-width: 100%;
+    max-height: 200px;
+    object-fit: contain;
+    border-radius: 6px;
+}
+.studio-mod-manage-preview audio {
+    width: 100%;
+    max-width: 320px;
+    height: 36px;
+}
+
+.studio-mod-manage-status {
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.studio-mod-manage-status--approved {
+    color: #16a34a;
+    background: color-mix(in srgb, #16a34a 8%, transparent);
+    border: 1px solid color-mix(in srgb, #16a34a 25%, transparent);
+}
+.studio-mod-manage-status--pending {
+    color: #d97706;
+    background: color-mix(in srgb, #d97706 8%, transparent);
+    border: 1px solid color-mix(in srgb, #d97706 25%, transparent);
+}
+
+.studio-mod-manage-modal .studio-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+.studio-mod-manage-modal .studio-field > span {
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.6);
+    font-weight: 500;
+}
+.studio-mod-manage-modal textarea,
+.studio-mod-manage-modal input[type="text"] {
+    width: 100%;
+    padding: 0.5rem 0.6rem;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.05);
+    color: #fff;
+    font-size: 0.82rem;
+    font-family: inherit;
+    resize: vertical;
+    transition: border-color 0.2s;
+}
+.studio-mod-manage-modal textarea:focus,
+.studio-mod-manage-modal input[type="text"]:focus {
+    outline: none;
+    border-color: var(--c4, #4ade80);
+}
+
+.studio-mod-manage-modal .studio-field--checkbox {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+}
+.studio-mod-manage-modal .studio-field--checkbox input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--c4, #4ade80);
+    cursor: pointer;
+}
+.studio-mod-manage-modal .studio-field--checkbox label {
+    font-size: 0.82rem;
+    color: rgba(255, 255, 255, 0.85);
+    cursor: pointer;
+}

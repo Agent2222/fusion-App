@@ -7,6 +7,7 @@ import {
     isJournalEntryPublished,
     resolveJournalEntryByRef,
 } from '../utils/journalPublicVisibility.js';
+import { artistHasPublicPlayableAudio, getApprovedAudioEntries } from '../utils/artistCardImageMode.js';
 
 function escAttr(v) {
     return String(v ?? '')
@@ -62,8 +63,10 @@ function sortJournalLayoutRows(rows) {
 
 function pickArtistForRow(row, artists, type) {
     const mode = String(row?.selectionMode || '').toLowerCase();
-    const key = type === 'audio' ? 'audioUrl' : 'quote';
-    const pool = artists.filter((a) => String(a?.[key] ?? '').trim());
+    const pool =
+        type === 'audio'
+            ? artists.filter((a) => artistHasPublicPlayableAudio(a))
+            : artists.filter((a) => String(a?.quote ?? '').trim());
     if (!pool.length) return null;
     if (mode === 'manual' && row?.artistId) {
         const m = pool.find((a) => String(a?.id ?? '') === String(row.artistId));
@@ -122,15 +125,26 @@ export default async function initJournal() {
             } else if (type === 'audio') {
                 const artist = pickArtistForRow(row, Array.isArray(artists) ? artists : [], 'audio');
                 if (!artist) continue;
-                const src = String(artist.audioUrl ?? '').trim();
-                if (!src) continue;
-                const title =
-                    String(artist.audioTitle ?? '').trim() ||
-                    String(artist?.locales?.en?.name ?? '').trim() ||
-                    'Artist audio';
-                html.push(
-                    `<app-audio-row active="true" data-audio-src="${escAttr(src)}" data-audio-title="${escAttr(title)}"></app-audio-row>`,
-                );
+                const entries = getApprovedAudioEntries(artist);
+                if (entries.length > 1) {
+                    html.push(
+                        `<app-audio-row active="true" data-audio-sources='${escAttr(JSON.stringify(entries))}'></app-audio-row>`,
+                    );
+                } else if (entries.length === 1) {
+                    html.push(
+                        `<app-audio-row active="true" data-audio-src="${escAttr(entries[0].url)}" data-audio-title="${escAttr(entries[0].title)}"></app-audio-row>`,
+                    );
+                } else {
+                    const src = String(artist.audioUrl ?? '').trim();
+                    if (!src) continue;
+                    const title =
+                        String(artist.audioTitle ?? '').trim() ||
+                        String(artist?.locales?.en?.name ?? '').trim() ||
+                        'Artist audio';
+                    html.push(
+                        `<app-audio-row active="true" data-audio-src="${escAttr(src)}" data-audio-title="${escAttr(title)}"></app-audio-row>`,
+                    );
+                }
             }
         }
         mount.innerHTML = html.join('');

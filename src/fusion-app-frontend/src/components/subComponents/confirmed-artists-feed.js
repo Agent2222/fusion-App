@@ -1,14 +1,14 @@
 import { navigate } from '../../router.js';
-
-/** Open artist profile in a new tab (program page stays open). */
-function openArtistProfileInNewTab(slug) {
-    const s = String(slug ?? '').trim();
-    if (!s || typeof window === 'undefined') return;
-    const url = new URL(`/profile/${encodeURIComponent(s)}`, window.location.origin).href;
-    const win = window.open(url, '_blank');
-    if (win) win.opener = null;
-}
-import { artistDisplayDiscipline, artistDisplayName } from '../../utils/artistSlug.js';
+import {
+    ARTIST_CARD_PREVIEW_CHIP_CSS,
+    enhanceArtistCardForPreview,
+} from '../../utils/artistCardPreviewChip.js';
+import {
+    artistDisplayDiscipline,
+    artistDisplayName,
+    artistEnglishBlock,
+    artistSlugFromName,
+} from '../../utils/artistSlug.js';
 import { applyArtistCardImage } from '../../utils/artistCardPlaceholder.js';
 import { resolveArtistPublicCardImageUrl } from '../../utils/artistCardImageMode.js';
 import {
@@ -99,11 +99,13 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
 
         const card = document.createElement('div');
         card.classList.add('artist-card');
-
         card.addEventListener('click', (e) => {
             e.stopPropagation();
-            const slug = String(artist?.slug ?? '').trim();
-            if (slug) openArtistProfileInNewTab(slug);
+            const en = artistEnglishBlock(artist);
+            const slug =
+                String(artist?.slug ?? '').trim() ||
+                artistSlugFromName(en?.name ?? artistDisplayName(artist, 'en'));
+            if (slug) navigate(`/profile/${encodeURIComponent(slug)}`);
         });
 
         card.innerHTML = `
@@ -115,6 +117,7 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
                 <div class="artist-card-discipline">${artistDiscipline}</div>
             </div>
         `;
+        enhanceArtistCardForPreview(card, artist);
         const cfImg = card.querySelector('.artist-card-image img');
         /* Program confirmed strip: profile when staff-approved, otherwise artwork. */
         applyArtistCardImage(cfImg, resolveArtistPublicCardImageUrl(artist));
@@ -533,8 +536,12 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
                     opacity: 0.96;
                 }
 
-                .artist-card:hover .artist-card-image img {
+                .artist-card:hover .artist-card-image > img {
                     transform: scale(1.06);
+                }
+
+                .artist-card:has(.artist-card-preview-chip:hover) .artist-card-image > img {
+                    transform: none;
                 }
 
                 .artist-card-image {
@@ -544,7 +551,7 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
                     background: var(--c3);
                 }
 
-                .artist-card-image img {
+                .artist-card-image > img {
                     width: 100%;
                     height: 100%;
                     object-fit: cover;
@@ -553,7 +560,7 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
                     transition: transform 12s ease;
                 }
 
-                .artist-card-image img.artist-card-img--placeholder {
+                .artist-card-image > img.artist-card-img--placeholder {
                     object-fit: contain;
                     object-position: center;
                     background: var(--c3);
@@ -716,6 +723,8 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
                         max-width: none;
                     }
                 }
+
+                ${ARTIST_CARD_PREVIEW_CHIP_CSS}
             </style>
             <div class="confirmed-wrap">
                 <div class="header-band">

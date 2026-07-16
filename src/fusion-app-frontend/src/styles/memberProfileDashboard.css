@@ -27,15 +27,6 @@
   color: var(--c2, #0f172a);
 }
 
-.settings-profile-page .settings-profile-slug-line {
-  font-size: 0.75rem;
-  margin: 0;
-  padding: 0 1.25rem 0.75rem;
-  line-height: 1.35;
-  word-break: break-word;
-  color: #e2e8f0;
-}
-
 .settings-profile-page .settings-profile-studio .studio-nav-item {
   color: #e2e8f0;
 }
@@ -65,14 +56,18 @@
   padding-right: 0.7rem;
 }
 
-.settings-profile-page .settings-profile-studio .studio-sidebar .studio-wordmark,
-.settings-profile-page .settings-profile-studio .studio-sidebar .settings-profile-slug-line,
 .settings-profile-page .settings-profile-studio .studio-sidebar .studio-sidebar-footer {
   margin-right: -0.7rem;
 }
 
 .settings-profile-page .settings-profile-studio .studio-sidebar .studio-nav {
   padding-right: 0;
+  padding-top: 1rem;
+}
+
+.settings-profile-page .settings-profile-studio .studio-sidebar .mpd-user-id--sidebar {
+  margin-top: auto;
+  padding: 0.75rem 1rem;
 }
 
 .settings-profile-page .settings-profile-studio .studio-user-meta span:first-child {
@@ -115,6 +110,29 @@
   min-height: 0;
   height: auto;
   max-height: none;
+}
+
+/* Remove white topbar stripe; large Studio title in the workspace */
+.settings-profile-page .settings-profile-studio .studio-topbar {
+  background: transparent;
+  border-bottom: none;
+  padding: 0.85rem clamp(1rem, 4vw, 2rem) 0.15rem;
+}
+
+.settings-profile-page .settings-profile-studio .studio-topbar h1 {
+  font-size: clamp(1.85rem, 3.2vw, 2.65rem);
+  font-variation-settings: var(--fv-title);
+  letter-spacing: -0.01em;
+  color: var(--c2, #0f172a);
+  line-height: 1.1;
+}
+
+.settings-profile-page .settings-profile-studio .studio-main .mpd-settings-shout {
+  margin-top: 0.15rem;
+  margin-bottom: 1.25rem;
+  font-size: clamp(0.92rem, 1.4vw, 1.05rem);
+  line-height: 1.45;
+  opacity: 0.78;
 }
 
 @media (max-width: 768px) {
@@ -354,6 +372,28 @@
 .settings-profile-page .mpd-user-id--sidebar {
   margin: 0 0 1rem;
   padding: 0 0.25rem;
+}
+.settings-profile-page .mpd-user-id--sidebar .mpd-user-id__label {
+  color: rgba(255, 255, 255, 0.45);
+}
+.settings-profile-page .mpd-user-id--sidebar .mpd-user-id__value {
+  color: rgba(255, 255, 255, 0.75);
+}
+.settings-profile-page .mpd-user-id--sidebar .mpd-user-id__value:focus-visible {
+  outline-color: rgba(255, 255, 255, 0.35);
+}
+.settings-profile-page .mpd-user-id--sidebar .mpd-user-id__copy-btn {
+  color: rgba(255, 255, 255, 0.5);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+.settings-profile-page .mpd-user-id--sidebar .mpd-user-id__copy-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: rgba(255, 255, 255, 0.8);
+}
+.settings-profile-page .mpd-user-id--sidebar .mpd-user-id__copy-btn.is-copied {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.3);
 }
 
 .settings-profile-page .mpd-user-id--main {
@@ -889,6 +929,30 @@
 
 .settings-profile-page .mpd-media-upload-surface.has-preview .mpd-media-placeholder {
   display: none;
+}
+
+.settings-profile-page .mpd-media-placeholder--detailed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  text-transform: none;
+  letter-spacing: normal;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+}
+.settings-profile-page .mpd-media-placeholder--detailed strong {
+  font-size: 0.88rem;
+  color: rgba(255, 255, 255, 0.55);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.settings-profile-page .mpd-media-placeholder--detailed small {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.32);
+  line-height: 1.45;
+  font-weight: 400;
 }
 
 .settings-profile-page .mpd-media-overlay {
@@ -3679,5 +3743,1040 @@
     border-radius: 10px;
     padding: 0.75rem;
   }
+}
+
+/* ═══════════════════════════════════════════
+   STUDIO OVERVIEW — three-column layout
+   ═══════════════════════════════════════════ */
+
+.settings-profile-page .mpd-overview-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  gap: clamp(1.25rem, 2.5vw, 2rem);
+  align-items: start;
+}
+
+.settings-profile-page .mpd-overview-middle {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.settings-profile-page .mpd-overview-right {
+  position: sticky;
+  top: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 280px;
+  width: 100%;
+  justify-self: end;
+}
+
+.settings-profile-page .mpd-section-label {
+  display: block;
+  font-size: 0.68rem;
+  font-variation-settings: var(--fv-label);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--c2) 55%, transparent);
+  margin-bottom: 0.65rem;
+}
+
+/* — Completion card — */
+.settings-profile-page .mpd-completion-card {
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--c2) 14%, transparent);
+  border-radius: 4px;
+  padding: 1.15rem 1.25rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.settings-profile-page .mpd-completion-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.settings-profile-page .mpd-completion-label {
+  font-size: 0.68rem;
+  font-variation-settings: var(--fv-label);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--c2) 55%, transparent);
+}
+
+.settings-profile-page .mpd-completion-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: fit-content;
+  padding: 0.28rem 0.7rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c4, #a2b792) 22%, transparent);
+  color: var(--c2);
+  font-size: 0.72rem;
+  font-variation-settings: var(--fv-label);
+}
+
+.settings-profile-page .mpd-completion-pill::before {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--c4, #a2b792);
+}
+
+.settings-profile-page .mpd-completion-pill--complete {
+  background: color-mix(in srgb, var(--c4, #a2b792) 32%, transparent);
+}
+
+.settings-profile-page .mpd-completion-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.settings-profile-page .mpd-completion-bar {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 8px;
+  background: color-mix(in srgb, var(--c2) 10%, transparent);
+  border-radius: 0;
+  overflow: hidden;
+}
+
+.settings-profile-page .mpd-completion-bar__fill {
+  height: 100%;
+  background: var(--c2);
+  border-radius: 0;
+  transition: width 0.4s ease;
+}
+
+.settings-profile-page .mpd-completion-pct {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  font-variation-settings: var(--fv-label);
+  color: color-mix(in srgb, var(--c2) 62%, transparent);
+  white-space: nowrap;
+}
+
+.settings-profile-page .mpd-completion-steps {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.settings-profile-page .mpd-completion-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 1;
+  text-align: center;
+  min-width: 0;
+}
+
+.settings-profile-page .mpd-completion-step__marker {
+  width: 1.65rem;
+  height: 1.65rem;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--c2) 22%, transparent);
+  background: transparent;
+  display: grid;
+  place-items: center;
+  font-size: 0.68rem;
+  font-variation-settings: var(--fv-label);
+  color: color-mix(in srgb, var(--c2) 50%, transparent);
+}
+
+.settings-profile-page .mpd-completion-step.is-complete .mpd-completion-step__marker {
+  background: var(--c2);
+  border-color: var(--c2);
+  color: var(--c3, #fff);
+  font-size: 0.75rem;
+}
+
+.settings-profile-page .mpd-completion-step.is-active .mpd-completion-step__marker {
+  border-color: var(--c2);
+  border-width: 2px;
+  color: var(--c2);
+  font-variation-settings: var(--fv-nav-active);
+}
+
+.settings-profile-page .mpd-completion-step__label {
+  font-size: 0.62rem;
+  font-variation-settings: var(--fv-label);
+  color: var(--c2);
+  line-height: 1.25;
+}
+
+.settings-profile-page .mpd-completion-step__status {
+  font-size: 0.58rem;
+  font-variation-settings: var(--fv-label);
+  color: color-mix(in srgb, var(--c2) 48%, transparent);
+  letter-spacing: 0.02em;
+}
+
+.settings-profile-page .mpd-completion-step.is-complete .mpd-completion-step__status {
+  color: color-mix(in srgb, var(--c2) 62%, transparent);
+}
+
+.settings-profile-page .mpd-completion-step.is-active .mpd-completion-step__status {
+  color: var(--c2);
+}
+
+/* — Blindspots — */
+.settings-profile-page .mpd-blindspots-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.65rem;
+}
+
+.settings-profile-page .mpd-blindspot-card {
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--c2) 14%, transparent);
+  border-radius: 4px;
+  padding: 0.85rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.settings-profile-page .mpd-blindspot-card:hover {
+  border-color: color-mix(in srgb, var(--c2) 28%, transparent);
+  background: color-mix(in srgb, var(--c2) 3%, transparent);
+}
+
+.settings-profile-page .mpd-blindspot-card__icon {
+  width: 1.15rem;
+  height: 1.15rem;
+  opacity: 0.6;
+}
+
+.settings-profile-page .mpd-blindspot-card__title {
+  font-size: 0.76rem;
+  font-variation-settings: var(--fv-subtitle);
+  color: var(--c2);
+}
+
+.settings-profile-page .mpd-blindspot-card__link {
+  font-size: 0.62rem;
+  font-variation-settings: var(--fv-label);
+  letter-spacing: 0.06em;
+  color: var(--c2);
+  margin-top: auto;
+}
+
+/* — Studio Sections grid — */
+.settings-profile-page .mpd-sections-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.85rem;
+}
+
+.settings-profile-page .mpd-section-card {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--c2) 14%, transparent);
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.settings-profile-page .mpd-section-card:hover {
+  border-color: color-mix(in srgb, var(--c2) 28%, transparent);
+  background: color-mix(in srgb, var(--c2) 2.5%, transparent);
+}
+a.mpd-section-card,
+a.mpd-section-card:hover {
+  text-decoration: none;
+  color: inherit;
+}
+
+.settings-profile-page .mpd-section-card__text {
+  padding: 0.85rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.settings-profile-page .mpd-section-card__text .studio-nav-item__icon {
+  width: 1.1rem;
+  height: 1.1rem;
+  margin-bottom: 0.15rem;
+}
+
+.settings-profile-page .mpd-section-card__text .studio-nav-item__icon img {
+  width: 100%;
+  height: 100%;
+}
+
+.settings-profile-page .mpd-section-card__text strong {
+  font-size: 0.82rem;
+  font-variation-settings: var(--fv-subtitle);
+  color: var(--c2);
+}
+
+.settings-profile-page .mpd-section-card__text p {
+  margin: 0;
+  font-size: 0.7rem;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--c2) 65%, transparent);
+}
+
+.settings-profile-page .mpd-section-card__link {
+  font-size: 0.62rem;
+  font-variation-settings: var(--fv-label);
+  letter-spacing: 0.06em;
+  color: var(--c2);
+  margin-top: auto;
+  padding-top: 0.35rem;
+}
+
+.settings-profile-page .mpd-section-card__img {
+  overflow: hidden;
+}
+
+.settings-profile-page .mpd-section-card__img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* — Right column: Preview card — */
+.settings-profile-page .mpd-preview-card {
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--c2) 14%, transparent);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.settings-profile-page .mpd-preview-card__image {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  background: color-mix(in srgb, var(--bg, #f6f1e9) 76%, #fff);
+  overflow: hidden;
+}
+
+.settings-profile-page .mpd-preview-card__image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.settings-profile-page .mpd-preview-card__body {
+  padding: 0.75rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.settings-profile-page .mpd-preview-card__body strong {
+  font-size: 0.92rem;
+  font-variation-settings: var(--fv-subtitle);
+  color: var(--c2);
+}
+
+.settings-profile-page .mpd-preview-card__role {
+  font-size: 0.68rem;
+  font-variation-settings: var(--fv-label);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--c2) 55%, transparent);
+}
+
+.settings-profile-page .mpd-preview-card__location {
+  font-size: 0.72rem;
+  color: color-mix(in srgb, var(--c2) 55%, transparent);
+}
+
+.settings-profile-page .mpd-preview-card__link {
+  display: block;
+  padding: 0.55rem 0.85rem;
+  border-top: 1px solid color-mix(in srgb, var(--c2) 8%, transparent);
+  font-size: 0.62rem;
+  font-variation-settings: var(--fv-label);
+  letter-spacing: 0.06em;
+  color: var(--c2);
+  text-decoration: none;
+}
+
+.settings-profile-page .mpd-preview-card__link:hover {
+  text-decoration: underline;
+}
+
+/* — Right column: Publish card — */
+.settings-profile-page .mpd-publish-card {
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--c2) 14%, transparent);
+  border-radius: 4px;
+  padding: 1rem 1rem 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.settings-profile-page .mpd-publish-select-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.settings-profile-page .mpd-publish-select-label {
+  font-size: 0.68rem;
+  font-variation-settings: var(--fv-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--c2) 55%, transparent);
+}
+
+.settings-profile-page .mpd-publish-select {
+  min-height: 2.5rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--c2) 18%, transparent);
+  padding: 0.45rem 0.65rem;
+  background: #fff;
+  color: var(--c2);
+}
+
+.settings-profile-page .mpd-publish-save {
+  width: 100%;
+  min-height: 2.65rem;
+  padding: 0.6rem 1rem;
+  background: var(--c2);
+  color: var(--c3, #fff);
+  border: none;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  font-variation-settings: var(--fv-nav-active);
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.settings-profile-page .mpd-publish-save:hover {
+  opacity: 0.88;
+}
+
+/* — Right column: Quote card — */
+.settings-profile-page .mpd-quote-card {
+  background: var(--c5, #d9ceb8);
+  border-radius: 6px;
+  padding: 1.15rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.settings-profile-page .mpd-quote-card__text {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.settings-profile-page .mpd-quote-card__text em {
+  font-style: italic;
+  font-size: 1rem;
+  line-height: 1.35;
+  font-variation-settings: var(--fv-subtitle);
+  color: var(--c2);
+}
+
+.settings-profile-page .mpd-quote-card__text span {
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--c2) 72%, transparent);
+}
+
+.settings-profile-page .mpd-quote-card__attr {
+  font-size: 0.68rem;
+  font-variation-settings: var(--fv-label);
+  letter-spacing: 0.08em;
+  color: color-mix(in srgb, var(--c2) 55%, transparent);
+}
+
+/* — Identity & Presence tabs — */
+.settings-profile-page .mpd-identity-tabs {
+  display: flex;
+  align-items: center;
+  gap: clamp(1rem, 2.5vw, 2rem);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  margin-bottom: 1.25rem;
+  padding-bottom: 0;
+}
+
+.settings-profile-page .mpd-identity-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  padding: 0.3rem 0.15rem 0.55rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.92rem;
+  font-variation-settings: var(--fv-label);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.settings-profile-page .mpd-identity-tab:hover {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.settings-profile-page .mpd-identity-tab::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 1px;
+  background: transparent;
+  transition: background 0.2s;
+}
+
+.settings-profile-page .mpd-identity-tab.is-active {
+  color: #fff;
+  font-variation-settings: var(--fv-nav-active);
+}
+
+.settings-profile-page .mpd-identity-tab.is-active::after {
+  background: var(--c4, #4ade80);
+}
+
+.settings-profile-page .mpd-identity-tab:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--c2) 48%, transparent);
+  outline-offset: 3px;
+}
+
+.settings-profile-page .mpd-identity-tab-panel[hidden] {
+  display: none;
+}
+
+/* — Coming soon shell — */
+.settings-profile-page .mpd-coming-soon {
+  padding: 2rem 1rem;
+  text-align: center;
+  color: color-mix(in srgb, var(--c2) 65%, transparent);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.settings-profile-page .mpd-coming-soon p {
+  margin: 0;
+}
+
+.settings-profile-page .mpd-inline-link {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--c2);
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+
+/* — Responsive: overview layout — */
+@media (max-width: 1100px) {
+  .settings-profile-page .mpd-overview-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-profile-page .mpd-overview-right {
+    position: static;
+    max-width: none;
+    justify-self: stretch;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .settings-profile-page .mpd-sections-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-profile-page .mpd-section-card {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-profile-page .mpd-section-card__img {
+    aspect-ratio: 16 / 9;
+  }
+
+  .settings-profile-page .mpd-blindspots-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .settings-profile-page .mpd-completion-steps {
+    gap: 0.15rem;
+  }
+
+  .settings-profile-page .mpd-completion-step__label {
+    font-size: 0.55rem;
+  }
+}
+
+/* — Media Library audio section — */
+.settings-profile-page .mpd-audio-section {
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid color-mix(in srgb, var(--c2) 12%, transparent);
+}
+
+/* — Media Library audio actions + capture modal — */
+.settings-profile-page .mpd-audio-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin: 0.65rem 0 0.75rem;
+}
+
+.settings-profile-page .mpd-audio-record-btn {
+  background: transparent;
+  color: var(--c2);
+  border: 1px solid var(--c2);
+}
+
+.settings-profile-page .mpd-audio-record-btn:hover {
+  background: color-mix(in srgb, var(--c2) 6%, transparent);
+}
+
+.settings-profile-page .mpd-audio-approval-status {
+  margin: 0 0 0.75rem;
+  font-size: 0.74rem;
+  font-variation-settings: var(--fv-label);
+  letter-spacing: 0.04em;
+}
+
+.settings-profile-page .mpd-audio-approval-status.is-pending {
+  color: #854d0e;
+}
+
+.settings-profile-page .mpd-audio-approval-status.is-approved {
+  color: #166534;
+}
+
+.mpd-audio-capture-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.mpd-audio-capture-modal__scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.mpd-audio-capture-modal__panel {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 28rem);
+  background: var(--bg, #faf3f4);
+  border: 1px solid var(--c2);
+  border-radius: 4px;
+  padding: 1.25rem 1.2rem 1.35rem;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
+  color: var(--c2);
+  font-family: 'momochidori', system-ui, sans-serif;
+}
+
+.mpd-audio-capture-modal__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.65rem;
+}
+
+.mpd-audio-capture-modal__head h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-variation-settings: var(--fv-subtitle);
+}
+
+.mpd-audio-capture-modal__x {
+  border: 0;
+  background: transparent;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--c2);
+  padding: 0.1rem 0.25rem;
+}
+
+.mpd-audio-capture-modal__lead {
+  margin: 0 0 1rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  opacity: 0.82;
+}
+
+.mpd-audio-capture-modal__meter {
+  height: 4px;
+  background: color-mix(in srgb, var(--c2) 12%, transparent);
+  margin-bottom: 0.65rem;
+  overflow: hidden;
+}
+
+.mpd-audio-capture-modal__meter-bar {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: var(--c2);
+  transition: width 0.08s linear;
+}
+
+.mpd-audio-capture-modal__time {
+  font-size: 0.92rem;
+  font-variation-settings: var(--fv-label);
+  letter-spacing: 0.04em;
+  margin-bottom: 0.5rem;
+}
+
+.mpd-audio-capture-modal__status {
+  min-height: 1.25em;
+  font-size: 0.78rem;
+  margin-bottom: 0.75rem;
+  opacity: 0.85;
+}
+
+.mpd-audio-capture-modal__preview {
+  width: 100%;
+  margin-bottom: 0.85rem;
+  accent-color: var(--c2);
+}
+
+.mpd-audio-capture-modal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+/* ── Audio inspiration blockquote ── */
+
+.settings-profile-page .mpd-audio-inspiration {
+  margin: 0.75rem 0 1rem;
+  padding: 0.65rem 0 0.65rem 1rem;
+  border-left: 3px solid var(--c2);
+  font-style: italic;
+  font-size: clamp(0.8rem, 1vw, 0.9rem);
+  color: var(--c2);
+  opacity: 0.85;
+  line-height: 1.5;
+}
+
+/* ── Audio collection entries ── */
+
+.settings-profile-page .mpd-audio-collection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.settings-profile-page .mpd-audio-entry {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--c2) 20%, transparent);
+  border-radius: 4px;
+  transition: border-color 0.2s ease;
+}
+
+.settings-profile-page .mpd-audio-entry.is-highlight {
+  border-color: var(--c2);
+}
+
+.settings-profile-page .mpd-audio-entry app-audio-row {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.settings-profile-page .mpd-audio-entry-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.settings-profile-page .mpd-audio-highlight-btn {
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 1px solid color-mix(in srgb, var(--c2) 30%, transparent);
+  border-radius: 50%;
+  background: transparent;
+  color: color-mix(in srgb, var(--c2) 40%, transparent);
+  font-size: 0.9rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.settings-profile-page .mpd-audio-highlight-btn:hover {
+  color: var(--c2);
+  border-color: var(--c2);
+}
+
+.settings-profile-page .mpd-audio-highlight-btn.active {
+  color: var(--c2);
+  border-color: var(--c2);
+}
+
+.settings-profile-page .mpd-audio-delete-btn {
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 1px solid color-mix(in srgb, var(--c2) 20%, transparent);
+  border-radius: 50%;
+  background: transparent;
+  color: color-mix(in srgb, var(--c2) 50%, transparent);
+  font-size: 1rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+
+.settings-profile-page .mpd-audio-delete-btn:hover {
+  color: #c00;
+  border-color: #c00;
+  background: color-mix(in srgb, #c00 8%, transparent);
+}
+
+.settings-profile-page .mpd-audio-entry-status {
+  font-size: clamp(0.6rem, 0.8vw, 0.7rem);
+  font-variation-settings: var(--fv-label);
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.settings-profile-page .mpd-audio-entry-status.is-pending {
+  color: #c90;
+  border: 1px solid #c90;
+}
+
+.settings-profile-page .mpd-audio-entry-status.is-approved {
+  color: #2a7;
+  border: 1px solid #2a7;
+}
+
+.settings-profile-page .mpd-audio-count {
+  font-size: clamp(0.7rem, 0.9vw, 0.8rem);
+  margin-top: 0.5rem;
+}
+
+/* ── Mic permission help block ── */
+
+.mpd-audio-capture-modal__help {
+  margin: 0.75rem 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--c2) 25%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--c2) 5%, transparent);
+  font-size: clamp(0.75rem, 1vw, 0.85rem);
+  line-height: 1.55;
+  color: var(--c2);
+}
+
+.mpd-audio-capture-modal__help p {
+  margin: 0 0 0.35rem;
+}
+
+.mpd-audio-capture-modal__help ol {
+  margin: 0.35rem 0 0.5rem 1.25rem;
+  padding: 0;
+}
+
+.mpd-audio-capture-modal__help ol li {
+  margin-bottom: 0.3rem;
+}
+
+.mpd-audio-capture-modal__help-note {
+  font-size: 0.75rem;
+  opacity: 0.75;
+  margin-top: 0.5rem;
+}
+
+/* ─── Asset Review Banners (member-facing) ─── */
+
+.mpd-asset-review-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  border-left: 3px solid;
+  font-size: 0.78rem;
+  font-weight: 500;
+  margin-bottom: 0.6rem;
+}
+.mpd-asset-review-banner--approved {
+  border-left-color: #16a34a;
+  background: color-mix(in srgb, #16a34a 6%, transparent);
+  color: #4ade80;
+}
+.mpd-asset-review-banner--pending {
+  border-left-color: #d97706;
+  background: color-mix(in srgb, #d97706 6%, transparent);
+  color: #fbbf24;
+}
+.mpd-asset-review-banner--rejected {
+  border-left-color: #dc2626;
+  background: color-mix(in srgb, #dc2626 6%, transparent);
+  color: #f87171;
+}
+.mpd-asset-review-banner__text {
+  flex: 1;
+}
+.mpd-asset-review-banner__info-btn {
+  background: none;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  color: inherit;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  cursor: pointer;
+  white-space: nowrap;
+  opacity: 0.85;
+  transition: opacity 0.2s;
+}
+.mpd-asset-review-banner__info-btn:hover {
+  opacity: 1;
+}
+
+/* ─── Review Note Modal (member-facing) ─── */
+
+.mpd-review-note-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mpd-review-note-modal__scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  animation: mpd-rn-fadein 0.2s ease;
+}
+@keyframes mpd-rn-fadein { from { opacity: 0; } to { opacity: 1; } }
+
+.mpd-review-note-modal__panel {
+  position: relative;
+  z-index: 1;
+  width: 90vw;
+  max-width: 400px;
+  padding: 1.5rem;
+  border-radius: 12px;
+  background: var(--bg, #1a1a2e);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+  animation: mpd-rn-slidein 0.25s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+@keyframes mpd-rn-slidein {
+  from { opacity: 0; transform: translateY(16px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+
+.mpd-review-note-modal__panel h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #fff;
+}
+
+.mpd-review-note-modal__x {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 1.25rem;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0.2rem;
+  transition: color 0.2s;
+}
+.mpd-review-note-modal__x:hover {
+  color: #fff;
+}
+
+.mpd-review-note-modal__status {
+  display: inline-block;
+  padding: 0.25rem 0.65rem;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  align-self: flex-start;
+}
+.mpd-review-note-modal__status.approved {
+  color: #16a34a;
+  background: color-mix(in srgb, #16a34a 12%, transparent);
+}
+.mpd-review-note-modal__status.pending {
+  color: #d97706;
+  background: color-mix(in srgb, #d97706 12%, transparent);
+}
+.mpd-review-note-modal__status.rejected {
+  color: #dc2626;
+  background: color-mix(in srgb, #dc2626 12%, transparent);
+}
+
+.mpd-review-note-modal__reason {
+  margin: 0;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.85);
+  line-height: 1.5;
+}
+
+.mpd-review-note-modal__image {
+  max-width: 100%;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+}
+
+.mpd-review-note-modal__date {
+  margin: 0;
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.4);
 }
 

@@ -10,6 +10,7 @@ import {
     getProgramDisplayNameFromRow,
     getPrograms,
     getStaffProgramPaymentsFinanceStudio,
+    reassignProgramLedgerEntryStudio,
     recordStaffManualProgramLedgerStudio,
     upsertApplicantStudio,
 } from '../../utils/database.js';
@@ -20,6 +21,7 @@ import {
     computeFinancePanelTotals,
     computeProgramExpectedRevenueCents,
     formatUsdFromCents,
+    isApplicantSlotSecured,
     isLedgerPaymentRow,
     isLedgerRowSucceeded,
     ledgerRowSource,
@@ -36,6 +38,7 @@ import {
 } from '../../utils/studioMembershipPresentation.js';
 import {
     applicantCategoryPillHtml,
+    applicantDisplayNamesFromPayload,
     getApplicantCategory,
     getApplicantFlightCostCents,
     getApplicantIsTester,
@@ -123,6 +126,14 @@ const FINANCE_DOMAINS = [
         modifier: 'promotions',
         category: 'Promotions',
     },
+    {
+        id: 'diagnostics',
+        label: 'Diagnostics',
+        tab: 'diagnostics',
+        chip: '',
+        icon: 'nav-programs',
+        modifier: 'diagnostics',
+    },
 ];
 
 /**
@@ -137,6 +148,19 @@ function escapeHtml(s) {
 }
 
 /**
+ * @param {unknown} bundle
+ * @returns {{ summaries: object[], ledger: object[], plans: object[] }}
+ */
+function normalizeFinanceBundle(bundle) {
+    const b = bundle && typeof bundle === 'object' ? bundle : {};
+    return {
+        summaries: Array.isArray(b.summaries) ? b.summaries : [],
+        ledger: Array.isArray(b.ledger) ? b.ledger : [],
+        plans: Array.isArray(b.plans) ? b.plans : [],
+    };
+}
+
+/**
  * @param {string} iconKey
  */
 function financeTabIconStyle(iconKey) {
@@ -148,7 +172,9 @@ function financeTabIconStyle(iconKey) {
  * @param {{ id: string, label: string, tab: string, modifier: string, icon: string, category?: string }} d
  */
 function domainTabVisible(d) {
-    if (d.tab === 'overview') return studioFeatureAccess('finance').visible;
+    if (d.tab === 'overview' || d.tab === 'diagnostics') {
+        return studioFeatureAccess('finance').visible;
+    }
     if (!d.category) return false;
     return studioFinanceCategoryAccess(d.category).visible;
 }
@@ -269,6 +295,16 @@ export function renderFinance() {
                         'Advertising and promotional spend tracking is planned for a later release.',
                         ['Campaign budgets and spend', 'Attribution to programs or products', 'Coupon / promo code redemption (optional)'],
                     )}
+                </div>
+                <div class="mpd-program-tab-panel" id="studio-finance-panel-diagnostics" role="tabpanel" aria-labelledby="studio-finance-tab-diagnostics" data-finance-panel="diagnostics" hidden>
+                    <section class="member-profile-dashboard__card">
+                        <div class="mpd-payments-section-head">
+                            <h2>Payment diagnostics</h2>
+                            <button type="button" class="studio-btn-ghost" id="studio-finance-diagnostics-refresh">Refresh</button>
+                        </div>
+                        <p class="studio-muted">Temporary tool. Cross-checks every recorded ledger payment (Stripe, PayPal, staff) against applicant records so you can see why a payment may not appear in the Programs table. A payment only shows in Programs when it matches an applicant on an <strong>active/open/full</strong> program and that applicant is <strong>slot-secured</strong>.</p>
+                        <div id="studio-finance-diagnostics-body" aria-live="polite"></div>
+                    </section>
                 </div>
             </div>
         </div>
@@ -541,6 +577,8 @@ export async function initFinance(mainEl) {
     const programRevenueStat = mainEl.querySelector('#studio-finance-program-revenue-stat');
     const programCardsUnified = mainEl.querySelector('#studio-finance-program-cards-unified');
     const programTableWrap = mainEl.querySelector('#studio-finance-program-table-wrap');
+    const diagnosticsBody = mainEl.querySelector('#studio-finance-diagnostics-body');
+    const diagnosticsRefreshBtn = mainEl.querySelector('#studio-finance-diagnostics-refresh');
 
     const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || '';
@@ -555,7 +593,9 @@ export async function initFinance(mainEl) {
 
     const visibleDomains = FINANCE_DOMAINS.filter(domainTabVisible);
     const visibleCategories = studioFinanceVisibleCategories();
-    const categoryTabs = visibleDomains.filter((d) => d.tab !== 'overview');
+    const categoryTabs = visibleDomains.filter(
+        (d) => d.tab !== 'overview' && d.tab !== 'diagnostics',
+    );
 
     if (!studioFeatureAccess('finance').visible) {
         setLoadingVisible(false);
@@ -582,6 +622,8 @@ export async function initFinance(mainEl) {
     let selectedProgramId = null;
     /** @type {ReturnType<typeof buildProgramPaymentIndex>} */
     let paymentIndex = buildProgramPaymentIndex({});
+    /** @type {{ summaries: object[], ledger: object[], plans: object[] }} */
+    let financeBundle = { summaries: [], ledger: [], plans: [] };
     /** @type {Map<string, ReturnType<typeof buildStudioProgramFinanceRows>[number]>} */
     let financeRowByApplicantId = new Map();
     /** @type {Map<string, object>} */
@@ -828,12 +870,119 @@ export async function initFinance(mainEl) {
         renderProgramRevenueStat();
     };
 
+    const renderDiagnostics = () => {
+        if (!diagnosticsBody) return;
+        /** @type {Map<string, object>} */
+        const programById = new Map();
+        for (const p of allPrograms) {
+            programById.set(String(p?.id || '').trim(), p);
+        }
+
+        const ledger = financeBundle.ledger;
+        const summaries = financeBundle.summaries;
+        const succeeded = ledger.filter((r) => isLedgerRowSucceeded(r));
+
+        const counts = `
+            <div class="mpd-payments-overview-grid" style="margin-bottom:0.9rem">
+                ${metricCard('Ledger rows', ledger.length, `${succeeded.length} succeeded`)}
+                ${metricCard('Summaries', summaries.length, 'Payment summaries')}
+                ${metricCard('Applicants', allApplicants.length, `${applicantById.size} with id`)}
+                ${metricCard('Programs', allPrograms.length, 'Loaded programs')}
+            </div>`;
+
+        const rowsHtml = ledger.length
+            ? ledger
+                  .map((row) => {
+                      const appId = String(row?.applicationId || '').trim();
+                      const applicant = appId ? applicantById.get(appId) : null;
+                      const programId = String(
+                          applicant?.programId || row?.programId || '',
+                      ).trim();
+                      const program = programId ? programById.get(programId) : null;
+                      const studioStatus = String(program?.studioStatus || '');
+                      const programActive =
+                          studioStatus === 'active' ||
+                          studioStatus === 'open' ||
+                          studioStatus === 'full';
+                      const isTester = applicant
+                          ? getApplicantIsTester(String(applicant.payloadJson || ''))
+                          : false;
+                      const slotSecured = applicant
+                          ? isApplicantSlotSecured(applicant, paymentIndex)
+                          : false;
+                      const succeededRow = isLedgerRowSucceeded(row);
+                      const source = ledgerRowSource(row);
+
+                      /** @type {string[]} */
+                      const reasons = [];
+                      if (!succeededRow) reasons.push('status not succeeded/paid');
+                      if (!applicant) reasons.push('no matching applicant id');
+                      if (applicant && !program) reasons.push('program not found');
+                      if (applicant && program && !programActive) {
+                          reasons.push(`program status "${studioStatus || '—'}" not active`);
+                      }
+                      if (isTester) reasons.push('applicant flagged as tester');
+                      if (applicant && !slotSecured) reasons.push('applicant not slot-secured');
+                      const wouldShow = reasons.length === 0;
+
+                      const statusPill = wouldShow
+                          ? '<span class="mpd-payments-pill mpd-payments-pill--paid">Shows</span>'
+                          : `<span class="mpd-payments-pill mpd-payments-pill--muted" title="${escapeHtml(reasons.join('; '))}">Hidden</span>`;
+                      const rowId = String(row?.id || '');
+                      const assignBtn = programsCanEdit && rowId
+                          ? `<button type="button" class="studio-btn-ghost" data-finance-assign-row="${escapeHtml(rowId)}">Assign…</button>`
+                          : '<span class="studio-muted">—</span>';
+                      return `<tr>
+                        <td>${escapeHtml(source)}</td>
+                        <td>${escapeHtml(String(row?.paymentType || '—'))}</td>
+                        <td>${escapeHtml(String(row?.status || '—'))}</td>
+                        <td>${escapeHtml(formatUsdFromCents(row?.amountCents))}</td>
+                        <td><code>${escapeHtml(appId || '—')}</code></td>
+                        <td>${escapeHtml(programId || '—')}${program ? '' : ' <span class="studio-muted">(no program)</span>'}</td>
+                        <td>${applicant ? 'Yes' : '<span class="studio-muted">No</span>'}</td>
+                        <td>${statusPill}${wouldShow ? '' : `<div class="studio-muted" style="font-size:0.8em;margin-top:2px">${escapeHtml(reasons.join('; '))}</div>`}</td>
+                        <td>${assignBtn}</td>
+                      </tr>`;
+                  })
+                  .join('')
+            : '<tr><td colspan="9">No ledger rows recorded on the canister.</td></tr>';
+
+        const rawJson = escapeHtml(JSON.stringify(financeBundle, null, 2));
+
+        diagnosticsBody.innerHTML = `
+            ${counts}
+            <div class="studio-table-wrap studio-table-wrap--sticky-head">
+                <table class="studio-table studio-table--dense">
+                    <thead>
+                        <tr>
+                            <th>Source</th>
+                            <th>Type</th>
+                            <th>Status</th>
+                            <th>Amount</th>
+                            <th>Application ID</th>
+                            <th>Program</th>
+                            <th>Applicant?</th>
+                            <th>In Programs table?</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rowsHtml}</tbody>
+                </table>
+            </div>
+            <details style="margin-top:1rem">
+                <summary class="studio-muted" style="cursor:pointer">Raw finance bundle JSON</summary>
+                <pre style="max-height:360px;overflow:auto;background:rgba(0,0,0,0.25);padding:0.75rem;border-radius:8px;font-size:0.78rem;white-space:pre-wrap;word-break:break-word">${rawJson}</pre>
+            </details>
+        `;
+    };
+
     const reloadAllFinanceData = async () => {
         const [applicants, bundle] = await Promise.all([
             getApplicants(),
             getStaffProgramPaymentsFinanceStudio(),
         ]);
         allApplicants = Array.isArray(applicants) ? applicants : [];
+        financeBundle = normalizeFinanceBundle(bundle);
         paymentIndex = buildProgramPaymentIndex(bundle);
         applicantsByProgramId = new Map();
         applicantById = new Map();
@@ -848,12 +997,15 @@ export async function initFinance(mainEl) {
             applicantsByProgramId.get(programId).push(applicant);
         }
         renderProgramCards();
+        renderDiagnostics();
     };
 
     const reloadFinancePayments = async () => {
         const bundle = await getStaffProgramPaymentsFinanceStudio();
+        financeBundle = normalizeFinanceBundle(bundle);
         paymentIndex = buildProgramPaymentIndex(bundle);
         renderProgramCards();
+        renderDiagnostics();
     };
 
     const reloadApplicantsAndFinance = async () => {
@@ -1154,6 +1306,94 @@ export async function initFinance(mainEl) {
         });
     };
 
+    /**
+     * @param {string} rowId
+     */
+    const openAssignLedgerModal = (rowId) => {
+        const ledgerRow = financeBundle.ledger.find((r) => String(r?.id || '') === rowId);
+        if (!ledgerRow) return;
+        /** @type {Map<string, object>} */
+        const programById = new Map();
+        for (const p of allPrograms) programById.set(String(p?.id || '').trim(), p);
+
+        const options = [...allApplicants]
+            .map((applicant) => {
+                const id = String(applicant?.id || '').trim();
+                const programId = String(applicant?.programId || '').trim();
+                const names = applicantDisplayNamesFromPayload(
+                    String(applicant?.payloadJson || ''),
+                    String(applicant?.fullName || ''),
+                );
+                const program = programById.get(programId) || null;
+                const programLabel = program
+                    ? getProgramDisplayNameFromRow(program)
+                    : programId || '—';
+                const name = `${names.firstName} ${names.lastName}`.trim() || id;
+                return { id, programId, label: `${name} — ${programLabel}` };
+            })
+            .filter((o) => o.id)
+            .sort((a, b) => a.label.localeCompare(b.label));
+
+        const optionsHtml = options
+            .map(
+                (o) =>
+                    `<option value="${escapeHtml(o.id)}" data-program-id="${escapeHtml(o.programId)}">${escapeHtml(o.label)}</option>`,
+            )
+            .join('');
+
+        const amount = escapeHtml(formatUsdFromCents(ledgerRow.amountCents));
+        const provider = escapeHtml(ledgerRowSource(ledgerRow));
+        const inner = `
+            <div class="studio-finance-ledger-modal">
+                <p class="studio-muted">Re-link this ${provider} payment (<strong>${amount}</strong>, type <code>${escapeHtml(String(ledgerRow.paymentType || ''))}</code>) to an applicant. This updates the payment's applicant, program, and member account so it appears on their finance row and their member payments page.</p>
+                <form id="studio-finance-assign-form">
+                    <label class="studio-field studio-field--full"><span>Applicant</span>
+                        <select class="studio-select" id="studio-finance-assign-applicant" required>
+                            <option value="" disabled selected>Select an applicant…</option>
+                            ${optionsHtml}
+                        </select>
+                    </label>
+                    <div class="studio-modal-actions">
+                        <button type="submit" class="studio-btn-primary">Assign payment</button>
+                        <button type="button" class="studio-btn-ghost" data-studio-modal-close="1">Cancel</button>
+                    </div>
+                    <p class="studio-muted mpd-field-hint" id="studio-finance-assign-status" role="status"></p>
+                </form>
+            </div>`;
+        const { close, root } = openStudioModal(inner, {
+            title: 'Assign payment to applicant',
+            wide: true,
+        });
+        const form = root.querySelector('#studio-finance-assign-form');
+        if (!(form instanceof HTMLFormElement)) return;
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const statusEl = root.querySelector('#studio-finance-assign-status');
+            const select = root.querySelector('#studio-finance-assign-applicant');
+            const applicantId = select instanceof HTMLSelectElement ? select.value : '';
+            const selectedOption =
+                select instanceof HTMLSelectElement ? select.selectedOptions[0] : null;
+            const programId = selectedOption?.getAttribute('data-program-id') || '';
+            if (!applicantId || !programId) {
+                if (statusEl) statusEl.textContent = 'Select an applicant.';
+                return;
+            }
+            const submitBtn = form.querySelector('button[type="submit"]');
+            if (submitBtn instanceof HTMLButtonElement) submitBtn.disabled = true;
+            if (statusEl) statusEl.textContent = 'Assigning…';
+            try {
+                await reassignProgramLedgerEntryStudio({ rowId, applicantId, programId });
+                close();
+                await reloadAllFinanceData();
+            } catch (err) {
+                if (statusEl) {
+                    statusEl.textContent = err instanceof Error ? err.message : String(err);
+                }
+                if (submitBtn instanceof HTMLButtonElement) submitBtn.disabled = false;
+            }
+        });
+    };
+
     const toggleProgramFilter = (programId) => {
         const id = String(programId || '').trim();
         if (!id || !programCardById.has(id)) return;
@@ -1214,6 +1454,13 @@ export async function initFinance(mainEl) {
     };
 
     mainEl.addEventListener('click', (e) => {
+        const assignBtn =
+            e.target instanceof Element ? e.target.closest('[data-finance-assign-row]') : null;
+        if (assignBtn) {
+            const rowId = assignBtn.getAttribute('data-finance-assign-row');
+            if (rowId) openAssignLedgerModal(rowId);
+            return;
+        }
         const emailBtn =
             e.target instanceof Element ? e.target.closest('[data-finance-email-applicant]') : null;
         if (emailBtn) {
@@ -1272,6 +1519,26 @@ export async function initFinance(mainEl) {
 
     membershipFilter?.addEventListener('change', renderUsersTable);
     usersSearch?.addEventListener('input', renderUsersTable);
+
+    diagnosticsRefreshBtn?.addEventListener('click', async () => {
+        if (diagnosticsRefreshBtn instanceof HTMLButtonElement) {
+            diagnosticsRefreshBtn.disabled = true;
+        }
+        if (diagnosticsBody) {
+            diagnosticsBody.innerHTML = '<p class="studio-muted">Refreshing…</p>';
+        }
+        try {
+            await reloadAllFinanceData();
+        } catch (err) {
+            if (diagnosticsBody) {
+                diagnosticsBody.innerHTML = `<p class="studio-banner studio-banner--warn">${escapeHtml(err instanceof Error ? err.message : String(err))}</p>`;
+            }
+        } finally {
+            if (diagnosticsRefreshBtn instanceof HTMLButtonElement) {
+                diagnosticsRefreshBtn.disabled = false;
+            }
+        }
+    });
 
     const programsVisible = studioFinanceCategoryAccess('Programs').visible;
     const usersVisible = studioFinanceCategoryAccess('Users').visible;
@@ -1334,6 +1601,7 @@ export async function initFinance(mainEl) {
             ]);
             allPrograms = Array.isArray(programs) ? programs : [];
             allApplicants = Array.isArray(applicants) ? applicants : [];
+            financeBundle = normalizeFinanceBundle(paymentsBundle);
             paymentIndex = buildProgramPaymentIndex(paymentsBundle);
             applicantsByProgramId = new Map();
             applicantById = new Map();
@@ -1372,6 +1640,7 @@ export async function initFinance(mainEl) {
     } else if (programTableWrap) {
         programTableWrap.innerHTML = '';
     }
+    renderDiagnostics();
     setFinanceTab(defaultTab());
 
     if (!visibleCategories.length) {

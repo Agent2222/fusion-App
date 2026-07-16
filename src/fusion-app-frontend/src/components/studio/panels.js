@@ -52,6 +52,14 @@ import {
     setArtistMostRecentProgram,
     applyFeaturedFlagsFromStudioSaveLive,
     applyHeroProfileImageApprovedFromStudioSaveLive,
+    applyArtistAudioApprovedFromStudioSaveLive,
+    fetchArtistAudioCollectionsMap,
+    fetchArtistAudioApprovedUrlsMap,
+    applyArtistAudioEntryApprovedFromStudioSaveLive,
+    staffSetHeroProfileImageReviewNote,
+    staffSetAudioEntryReviewNote,
+    fetchHeroProfileImageReviewNotesMap,
+    fetchAudioEntryReviewNotesMap,
     approveAllHeroProfileImagesStudio,
     setManualFeaturedForArtistStudio,
     setFeaturableForArtistStudio,
@@ -160,6 +168,7 @@ import {
     persistStudioContentPage,
     attachStudioContentFileUpload,
 } from './sections/contentSection.js';
+import { renderUserStudio, initUserStudio } from './sections/userStudioSection.js';
 import { getFieldKind, getFieldKindBadgeLabel } from '../../utils/studioFieldRegistry.js';
 import { appendContentLocalePairRow } from './studioFieldRender.js';
 import { shoutHtmlToPlain } from '../../utils/shoutHeadlineText.js';
@@ -181,6 +190,8 @@ import {
     artistRowForLlmFromManageForm,
     collectArtistRecordFromForm,
     initArtistManageTabs,
+    initArtistPreviewTab,
+    initArtistBlindspotsTab,
     patchManageFormWorldFields,
     renderArtistManageModalHtml,
     syncStudioPublicWorldSource,
@@ -267,14 +278,22 @@ export const STUDIO_NAV_GROUPS = [
             { id: 'community', label: 'Community' },
             { id: 'videos', label: 'Videos' },
             { id: 'content', label: 'Content' },
+            { id: 'user-studio', label: 'User Studio' },
             { id: 'email', label: 'Email' },
             { id: 'ai', label: 'Assistance' },
         ],
     },
     {
-        label: 'Accounts',
+        label: 'Moderation',
         items: [
             { id: 'pending-approval', label: 'Status' },
+            { id: 'profile-images', label: 'Profile Images' },
+            { id: 'audio-files', label: 'Audio Files' },
+        ],
+    },
+    {
+        label: 'Accounts',
+        items: [
             { id: 'artists', label: 'Artists' },
             { id: 'curators', label: 'Curators' },
             { id: 'collectors', label: 'Collectors' },
@@ -344,6 +363,10 @@ export function renderStudioMain(sectionId) {
             return renderArtists();
         case 'pending-approval':
             return renderPendingApproval();
+        case 'profile-images':
+            return renderProfileImages();
+        case 'audio-files':
+            return renderAudioFiles();
         case 'programs':
             return renderPrograms();
         case 'products':
@@ -362,6 +385,8 @@ export function renderStudioMain(sectionId) {
             return renderHome();
         case 'content':
             return renderContent();
+        case 'user-studio':
+            return renderUserStudio();
         case 'email':
             return renderEmail();
         case 'ai':
@@ -1921,6 +1946,8 @@ function openStudioArtistManageFromRow(tableRow, afterSave, hostEl, listSurface 
         root.querySelector('#studio-art-exit-manage')?.addEventListener('click', () => close());
         root.querySelector('#studio-art-cancel')?.addEventListener('click', () => close());
         initArtistManageTabs(root);
+        initArtistPreviewTab(root, full);
+        initArtistBlindspotsTab(root, full);
         void initArtistProgramsTab(root, full);
         initAssetPreviews();
         syncStudioPublicWorldSource(
@@ -2149,6 +2176,10 @@ function openStudioArtistManageFromRow(tableRow, afterSave, hostEl, listSurface 
                     await applyHeroProfileImageApprovedFromStudioSaveLive(
                         String(full.id),
                         Boolean(raw.heroProfileImageApproved),
+                    );
+                    await applyArtistAudioApprovedFromStudioSaveLive(
+                        String(full.id),
+                        Boolean(raw.audioApproved),
                     );
                 } catch (err) {
                     alert(err instanceof Error ? err.message : String(err));
@@ -2803,6 +2834,8 @@ const STUDIO_INIT = {
     finance: initFinance,
     artists: initArtists,
     'pending-approval': initPendingApproval,
+    'profile-images': initProfileImages,
+    'audio-files': initAudioFiles,
     programs: initPrograms,
     products: initProducts,
     'gallery-access': initGalleryAccess,
@@ -2811,6 +2844,7 @@ const STUDIO_INIT = {
     community: initCommunitySection,
     videos: initVideosSection,
     content: initContent,
+    'user-studio': initUserStudio,
     email: initEmail,
     ai: initAi,
     galleries: (el) => initAudience(el, 'galleries'),
@@ -4581,6 +4615,433 @@ async function initPendingApproval(mainEl) {
     };
 
     searchInput?.addEventListener('input', () => applyPendingFilter());
+    await runLoad();
+}
+
+/* ─── Profile Images moderation ─── */
+
+function renderProfileImages() {
+    return `
+        <div class="studio-section-stack studio-category-page">
+            ${studioPageHeaderHtml({
+                title: 'Profile Images',
+                subtitle: 'Review and approve hero profile images submitted by artists',
+                countId: 'studio-profile-images-header-count',
+                countLabel: 'with images',
+            })}
+            ${studioFilterBarHtml({
+                searchId: 'studio-profile-images-search',
+                searchPlaceholder: 'Filter slug or name…',
+            })}
+            <div class="studio-table-wrap studio-table-wrap--sticky-head">
+                <table class="studio-table studio-table--dense">
+                    <thead>
+                        <tr>
+                            <th>Slug</th>
+                            <th>Name</th>
+                            <th>Profile Image</th>
+                            <th>Status</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="studio-profile-images-tbody"><tr><td colspan="5">Loading…</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    `;
+}
+
+async function initProfileImages(mainEl) {
+    const tbody = mainEl.querySelector('#studio-profile-images-tbody');
+    const searchInput = mainEl.querySelector('#studio-profile-images-search');
+    const countEl = mainEl.querySelector('#studio-profile-images-header-count');
+
+    const perm = studioFeatureAccess('profile-images');
+    if (!perm.visible) {
+        if (tbody) {
+            tbody.innerHTML =
+                '<tr><td colspan="5"><p class="studio-banner studio-banner--warn">You do not have access to this section.</p></td></tr>';
+        }
+        return;
+    }
+
+    const canEdit = perm.canEdit;
+    /** @type {object[]} */
+    let allRows = [];
+    /** @type {Map<string, {reason:string, imageUrl:string, reviewedAt:string, approved:boolean}>} */
+    let reviewNotesMap = new Map();
+
+    const runLoad = async () => {
+        const [all, notes] = await Promise.all([
+            getArtistsForStudio(),
+            fetchHeroProfileImageReviewNotesMap()
+        ]);
+        reviewNotesMap = notes;
+        allRows = all.filter((a) => {
+            const img = a.heroProfileImage ?? a.heroProfileImageUrl ?? '';
+            return typeof img === 'string' && img.trim().length > 0;
+        });
+        applyFilter();
+    };
+
+    const statusBadgeHtml = (artistId, approved) => {
+        const note = reviewNotesMap.get(artistId);
+        if (approved) {
+            return '<span class="studio-mod-status-badge studio-mod-status-badge--approved">Approved</span>';
+        }
+        if (note && !note.approved && note.reason) {
+            return '<span class="studio-mod-status-badge studio-mod-status-badge--rejected">Changes requested</span>';
+        }
+        return '<span class="studio-mod-status-badge studio-mod-status-badge--pending">Pending review</span>';
+    };
+
+    const applyFilter = () => {
+        if (!tbody) return;
+        const q = (searchInput instanceof HTMLInputElement ? searchInput.value : '').trim().toLowerCase();
+        const list = allRows.filter((a) => {
+            if (!q) return true;
+            const hay = `${a.slug ?? ''} ${a.firstName ?? ''} ${a.lastName ?? ''}`.toLowerCase();
+            return hay.includes(q);
+        });
+        if (countEl) countEl.textContent = String(list.length);
+        if (!list.length) {
+            tbody.innerHTML = `<tr><td colspan="5">${
+                allRows.length ? 'No rows match search.' : 'No artists with profile images.'
+            }</td></tr>`;
+            return;
+        }
+        tbody.innerHTML = list
+            .map((a) => {
+                const slug = escapeHtml(String(a.slug || ''));
+                const name = escapeHtml(`${a.firstName ?? ''} ${a.lastName ?? ''}`.trim() || slug);
+                const imgUrl = String(a.heroProfileImage ?? a.heroProfileImageUrl ?? '');
+                const approved = Boolean(a.heroProfileImageApproved);
+                const idEsc = escapeHtml(String(a.id || ''));
+                const manageDisabled = canEdit ? '' : ' disabled';
+                return `<tr data-artist-id="${idEsc}">
+                    <td>${slug}</td>
+                    <td>${name}</td>
+                    <td>
+                        <button type="button" class="studio-mod-thumb-btn" data-img="${escapeHtml(imgUrl)}" data-alt="${name}">
+                            <img src="${escapeHtml(imgUrl)}" alt="${name}" class="studio-mod-thumb" loading="lazy" />
+                        </button>
+                    </td>
+                    <td class="studio-mod-status-cell">${statusBadgeHtml(a.id, approved)}</td>
+                    <td>
+                        <button type="button" class="studio-mod-manage-btn" data-artist-id="${idEsc}" data-img="${escapeHtml(imgUrl)}" data-name="${name}"${manageDisabled}>Manage</button>
+                    </td>
+                </tr>`;
+            })
+            .join('');
+    };
+
+    const openManagePopup = (artistId, imgUrl, name) => {
+        const note = reviewNotesMap.get(artistId) || null;
+        const row = allRows.find((a) => a.id === artistId);
+        const approved = Boolean(row?.heroProfileImageApproved);
+        const statusClass = approved ? 'studio-mod-manage-status--approved' : 'studio-mod-manage-status--pending';
+        const statusLabel = approved ? 'Approved' : 'Pending review';
+
+        const body = `
+            <div class="studio-mod-manage-modal">
+                <div class="studio-mod-manage-preview">
+                    <img src="${escapeHtml(imgUrl)}" alt="${escapeHtml(name)}" />
+                </div>
+                <div class="studio-mod-manage-status ${statusClass}">${statusLabel}</div>
+                <div class="studio-field studio-field--checkbox">
+                    <input type="checkbox" id="studio-mod-manage-approved" ${approved ? 'checked' : ''} />
+                    <label for="studio-mod-manage-approved">Approved for public display</label>
+                </div>
+                <div class="studio-field">
+                    <span>Review note (visible to artist)</span>
+                    <textarea id="studio-mod-manage-reason" rows="3" placeholder="Optional reason or feedback…">${escapeHtml(note?.reason || '')}</textarea>
+                </div>
+                <div class="studio-field">
+                    <span>Reference image (optional)</span>
+                    <input type="text" id="studio-mod-manage-image" placeholder="Image URL" value="${escapeHtml(note?.imageUrl || '')}" />
+                </div>
+                <div class="studio-modal-actions">
+                    <button data-studio-modal-close="1" class="studio-btn-ghost">Cancel</button>
+                    <button id="studio-mod-manage-save" class="studio-btn-primary">Save</button>
+                </div>
+            </div>
+        `;
+
+        const { close, root } = openStudioModal(body, { title: `Profile Image — ${escapeHtml(name)}`, compact: true });
+
+        root.querySelector('#studio-mod-manage-save')?.addEventListener('click', async () => {
+            const cb = root.querySelector('#studio-mod-manage-approved');
+            const reasonEl = root.querySelector('#studio-mod-manage-reason');
+            const imageEl = root.querySelector('#studio-mod-manage-image');
+            const newApproved = cb instanceof HTMLInputElement ? cb.checked : approved;
+            const reason = reasonEl instanceof HTMLTextAreaElement ? reasonEl.value.trim() : '';
+            const image = imageEl instanceof HTMLInputElement ? imageEl.value.trim() : '';
+
+            const saveBtn = root.querySelector('#studio-mod-manage-save');
+            if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = true;
+
+            try {
+                await staffSetHeroProfileImageReviewNote(artistId, newApproved, reason, image);
+                reviewNotesMap.set(artistId, { reason, imageUrl: image, reviewedAt: new Date().toISOString(), approved: newApproved });
+                const r = allRows.find((a) => a.id === artistId);
+                if (r) r.heroProfileImageApproved = newApproved;
+                applyFilter();
+                close();
+            } catch (err) {
+                console.error('Profile image review note save failed', err);
+                if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = false;
+            }
+        });
+    };
+
+    tbody?.addEventListener('click', (e) => {
+        const thumbBtn = /** @type {HTMLElement} */ (e.target)?.closest('.studio-mod-thumb-btn');
+        if (thumbBtn) {
+            const url = thumbBtn.getAttribute('data-img') || '';
+            const alt = thumbBtn.getAttribute('data-alt') || '';
+            if (url) openImageLightbox(url, alt);
+            return;
+        }
+        const manageBtn = /** @type {HTMLElement} */ (e.target)?.closest('.studio-mod-manage-btn');
+        if (manageBtn) {
+            const id = manageBtn.getAttribute('data-artist-id') || '';
+            const img = manageBtn.getAttribute('data-img') || '';
+            const name = manageBtn.getAttribute('data-name') || '';
+            if (id) openManagePopup(id, img, name);
+        }
+    });
+
+    searchInput?.addEventListener('input', () => applyFilter());
+    await runLoad();
+}
+
+function openImageLightbox(url, altText) {
+    const overlay = document.createElement('div');
+    overlay.className = 'studio-lightbox-scrim';
+    overlay.innerHTML = `
+        <img src="${url}" alt="${escapeHtml(altText)}" class="studio-lightbox-img" />
+    `;
+    overlay.addEventListener('click', () => overlay.remove());
+    document.addEventListener('keydown', function onKey(e) {
+        if (e.key === 'Escape') {
+            overlay.remove();
+            document.removeEventListener('keydown', onKey);
+        }
+    });
+    document.body.appendChild(overlay);
+}
+
+/* ─── Audio Files moderation ─── */
+
+function renderAudioFiles() {
+    return `
+        <div class="studio-section-stack studio-category-page">
+            ${studioPageHeaderHtml({
+                title: 'Audio Files',
+                subtitle: 'Review and approve individual audio bites submitted by artists',
+                countId: 'studio-audio-files-header-count',
+                countLabel: 'audio entries',
+            })}
+            ${studioFilterBarHtml({
+                searchId: 'studio-audio-files-search',
+                searchPlaceholder: 'Filter slug or name…',
+            })}
+            <div class="studio-table-wrap studio-table-wrap--sticky-head">
+                <table class="studio-table studio-table--dense">
+                    <thead>
+                        <tr>
+                            <th>Slug</th>
+                            <th>Name</th>
+                            <th>Audio</th>
+                            <th>Status</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="studio-audio-files-tbody"><tr><td colspan="5">Loading…</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    `;
+}
+
+async function initAudioFiles(mainEl) {
+    const tbody = mainEl.querySelector('#studio-audio-files-tbody');
+    const searchInput = mainEl.querySelector('#studio-audio-files-search');
+    const countEl = mainEl.querySelector('#studio-audio-files-header-count');
+
+    const perm = studioFeatureAccess('audio-files');
+    if (!perm.visible) {
+        if (tbody) {
+            tbody.innerHTML =
+                '<tr><td colspan="5"><p class="studio-banner studio-banner--warn">You do not have access to this section.</p></td></tr>';
+        }
+        return;
+    }
+
+    const canEdit = perm.canEdit;
+    /** @type {{ artistId: string, slug: string, name: string, url: string, title: string, approved: boolean }[]} */
+    let allRows = [];
+    /** @type {Map<string, {reason:string, imageUrl:string, reviewedAt:string, approved:boolean}>} */
+    let reviewNotesMap = new Map();
+
+    const runLoad = async () => {
+        const [all, collectionsMap, approvedUrlsMap, notes] = await Promise.all([
+            getArtistsForStudio(),
+            fetchArtistAudioCollectionsMap(),
+            fetchArtistAudioApprovedUrlsMap(),
+            fetchAudioEntryReviewNotesMap(),
+        ]);
+        reviewNotesMap = notes;
+        allRows = [];
+        for (const a of all) {
+            const id = String(a.id ?? '');
+            const slug = String(a.slug ?? '');
+            const name = `${a.firstName ?? ''} ${a.lastName ?? ''}`.trim() || slug;
+            const entries = collectionsMap.get(id) || [];
+            const approvedUrls = new Set(approvedUrlsMap.get(id) || []);
+            if (entries.length > 0) {
+                for (const entry of entries) {
+                    allRows.push({
+                        artistId: id, slug, name,
+                        url: entry.url, title: entry.title || 'Audio bite',
+                        approved: approvedUrls.has(entry.url),
+                    });
+                }
+            } else {
+                const legacyUrl = String(a.audioUrl ?? '').trim();
+                if (legacyUrl) {
+                    allRows.push({
+                        artistId: id, slug, name,
+                        url: legacyUrl, title: String(a.audioTitle ?? 'Audio bite'),
+                        approved: Boolean(a.audioApproved),
+                    });
+                }
+            }
+        }
+        applyFilter();
+    };
+
+    const audioStatusBadgeHtml = (artistId, url, approved) => {
+        const compositeKey = `${artistId}|${url}`;
+        const note = reviewNotesMap.get(compositeKey);
+        if (approved) {
+            return '<span class="studio-mod-status-badge studio-mod-status-badge--approved">Approved</span>';
+        }
+        if (note && !note.approved && note.reason) {
+            return '<span class="studio-mod-status-badge studio-mod-status-badge--rejected">Changes requested</span>';
+        }
+        return '<span class="studio-mod-status-badge studio-mod-status-badge--pending">Pending review</span>';
+    };
+
+    const applyFilter = () => {
+        if (!tbody) return;
+        const q = (searchInput instanceof HTMLInputElement ? searchInput.value : '').trim().toLowerCase();
+        const list = allRows.filter((r) => {
+            if (!q) return true;
+            const hay = `${r.slug} ${r.name}`.toLowerCase();
+            return hay.includes(q);
+        });
+        if (countEl) countEl.textContent = String(list.length);
+        if (!list.length) {
+            tbody.innerHTML = `<tr><td colspan="5">${
+                allRows.length ? 'No rows match search.' : 'No artists with audio files.'
+            }</td></tr>`;
+            return;
+        }
+        tbody.innerHTML = list
+            .map((r) => {
+                const manageDisabled = canEdit ? '' : ' disabled';
+                return `<tr>
+                    <td>${escapeHtml(r.slug)}</td>
+                    <td>${escapeHtml(r.name)}</td>
+                    <td>
+                        <audio controls preload="none" class="studio-mod-audio" src="${escapeHtml(r.url)}"></audio>
+                        <div class="studio-muted" style="font-size:0.75rem;margin-top:2px">${escapeHtml(r.title)}</div>
+                    </td>
+                    <td class="studio-mod-status-cell">${audioStatusBadgeHtml(r.artistId, r.url, r.approved)}</td>
+                    <td>
+                        <button type="button" class="studio-mod-manage-btn"
+                                data-artist-id="${escapeHtml(r.artistId)}" data-audio-url="${escapeHtml(r.url)}"
+                                data-name="${escapeHtml(r.name)}" data-title="${escapeHtml(r.title)}"${manageDisabled}>Manage</button>
+                    </td>
+                </tr>`;
+            })
+            .join('');
+    };
+
+    const openAudioManagePopup = (artistId, url, name, title) => {
+        const compositeKey = `${artistId}|${url}`;
+        const note = reviewNotesMap.get(compositeKey) || null;
+        const row = allRows.find((r) => r.artistId === artistId && r.url === url);
+        const approved = Boolean(row?.approved);
+        const statusClass = approved ? 'studio-mod-manage-status--approved' : 'studio-mod-manage-status--pending';
+        const statusLabel = approved ? 'Approved' : 'Pending review';
+
+        const body = `
+            <div class="studio-mod-manage-modal">
+                <div class="studio-mod-manage-preview">
+                    <audio controls preload="metadata" src="${escapeHtml(url)}" style="width:100%;max-width:320px;height:36px"></audio>
+                    <div class="studio-muted" style="font-size:0.78rem;margin-top:4px;text-align:center">${escapeHtml(title)}</div>
+                </div>
+                <div class="studio-mod-manage-status ${statusClass}">${statusLabel}</div>
+                <div class="studio-field studio-field--checkbox">
+                    <input type="checkbox" id="studio-mod-manage-approved" ${approved ? 'checked' : ''} />
+                    <label for="studio-mod-manage-approved">Approved for public playback</label>
+                </div>
+                <div class="studio-field">
+                    <span>Review note (visible to artist)</span>
+                    <textarea id="studio-mod-manage-reason" rows="3" placeholder="Optional reason or feedback…">${escapeHtml(note?.reason || '')}</textarea>
+                </div>
+                <div class="studio-field">
+                    <span>Reference image (optional)</span>
+                    <input type="text" id="studio-mod-manage-image" placeholder="Image URL" value="${escapeHtml(note?.imageUrl || '')}" />
+                </div>
+                <div class="studio-modal-actions">
+                    <button data-studio-modal-close="1" class="studio-btn-ghost">Cancel</button>
+                    <button id="studio-mod-manage-save" class="studio-btn-primary">Save</button>
+                </div>
+            </div>
+        `;
+
+        const { close, root } = openStudioModal(body, { title: `Audio — ${escapeHtml(name)}`, compact: true });
+
+        root.querySelector('#studio-mod-manage-save')?.addEventListener('click', async () => {
+            const cb = root.querySelector('#studio-mod-manage-approved');
+            const reasonEl = root.querySelector('#studio-mod-manage-reason');
+            const imageEl = root.querySelector('#studio-mod-manage-image');
+            const newApproved = cb instanceof HTMLInputElement ? cb.checked : approved;
+            const reason = reasonEl instanceof HTMLTextAreaElement ? reasonEl.value.trim() : '';
+            const image = imageEl instanceof HTMLInputElement ? imageEl.value.trim() : '';
+
+            const saveBtn = root.querySelector('#studio-mod-manage-save');
+            if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = true;
+
+            try {
+                await staffSetAudioEntryReviewNote(artistId, url, newApproved, reason, image);
+                reviewNotesMap.set(compositeKey, { reason, imageUrl: image, reviewedAt: new Date().toISOString(), approved: newApproved });
+                const r = allRows.find((x) => x.artistId === artistId && x.url === url);
+                if (r) r.approved = newApproved;
+                applyFilter();
+                close();
+            } catch (err) {
+                console.error('Audio entry review note save failed', err);
+                if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = false;
+            }
+        });
+    };
+
+    tbody?.addEventListener('click', (e) => {
+        const manageBtn = /** @type {HTMLElement} */ (e.target)?.closest('.studio-mod-manage-btn');
+        if (manageBtn) {
+            const id = manageBtn.getAttribute('data-artist-id') || '';
+            const url = manageBtn.getAttribute('data-audio-url') || '';
+            const name = manageBtn.getAttribute('data-name') || '';
+            const title = manageBtn.getAttribute('data-title') || '';
+            if (id && url) openAudioManagePopup(id, url, name, title);
+        }
+    });
+
+    searchInput?.addEventListener('input', () => applyFilter());
     await runLoad();
 }
 

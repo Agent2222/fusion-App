@@ -27,6 +27,7 @@ import {
   prefetchFusionBackendActor,
   submitEarlyAccessToCanister,
 } from "../../utils/earlyAccessSubscribe.js";
+import "./authBrowserHelp.js";
 import {
   clearJoinPendingMembershipStorage,
   clearPendingMembershipPayload,
@@ -3090,6 +3091,7 @@ class JoinNetworkComponent extends HTMLElement {
                             <p id="jnRenewHint"></p>
                             <button type="button" class="jn-btn-primary" id="jnEntryContinue">Continue</button>
                             <p id="jnEntryFooter"></p>
+                            <app-auth-browser-help></app-auth-browser-help>
                             <p id="jnEntryErr" class="jn-live" aria-live="polite"></p>
                         </div>
 

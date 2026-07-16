@@ -373,7 +373,7 @@ export async function setApplicationPaymentGlobal(value) {
 
 /**
  * Where this slug is primarily edited in Fusion Studio (Content tab lists only `content`).
- * @typedef {'home' | 'programs' | 'products' | 'journal' | 'content'} StudioSurface
+ * @typedef {'home' | 'programs' | 'products' | 'journal' | 'content' | 'user-studio'} StudioSurface
  */
 
 /**
@@ -574,6 +574,15 @@ export const CONTENT_PAGE_REGISTRY = [
         editorMode: 'locales',
         primaryStudioSurface: 'content',
         studioSurfaces: ['content'],
+    },
+    {
+        key: 'userStudio',
+        slug: 'user-studio',
+        testKey: 'userStudio',
+        label: 'User Studio — quotes, blindspots, guidance',
+        editorMode: 'full',
+        primaryStudioSurface: 'user-studio',
+        studioSurfaces: ['user-studio'],
     },
 ];
 
@@ -863,6 +872,8 @@ async function fetchArtistHeroProfileMap(actor) {
 
 /** Studio session cache so bulk/single approve reflects in UI before refetch. */
 const studioHeroProfileApprovedKnown = new Set();
+/** Session-known audio approvals after Studio saves (before public list refreshes). */
+const studioAudioApprovedKnown = new Set();
 
 /**
  * @param {string} id
@@ -876,10 +887,28 @@ function noteStudioHeroProfileApproved(id, approved) {
 }
 
 /**
+ * @param {string} id
+ * @param {boolean} approved
+ */
+function noteStudioAudioApproved(id, approved) {
+    const sid = String(id || '').trim();
+    if (!sid) return;
+    if (approved) studioAudioApprovedKnown.add(sid);
+    else studioAudioApprovedKnown.delete(sid);
+}
+
+/**
  * @param {Map<string, boolean>} m
  */
 function mergeStudioHeroProfileApprovedKnown(m) {
     for (const id of studioHeroProfileApprovedKnown) {
+        m.set(id, true);
+    }
+    return m;
+}
+
+function mergeStudioAudioApprovedKnown(m) {
+    for (const id of studioAudioApprovedKnown) {
         m.set(id, true);
     }
     return m;
@@ -943,6 +972,50 @@ function mergeHeroProfileImageApproved(base, id, approvedByArtistId) {
         return { ...base, heroProfileImageApproved: true };
     }
     return { ...base, heroProfileImageApproved: fromBase };
+}
+
+/**
+ * @param {object} base
+ * @param {string} id
+ * @param {Map<string, boolean> | undefined} audioApprovedByArtistId
+ */
+function mergeAudioApproved(base, id, audioApprovedByArtistId) {
+    if (!id) return base;
+    const fromBase = Boolean(
+        /** @type {Record<string, unknown>} */ (base).audioApproved ??
+            /** @type {Record<string, unknown>} */ (base).audio_approved,
+    );
+    if (audioApprovedByArtistId instanceof Map) {
+        return { ...base, audioApproved: audioApprovedByArtistId.has(id) };
+    }
+    if (studioAudioApprovedKnown.has(id)) {
+        return { ...base, audioApproved: true };
+    }
+    return { ...base, audioApproved: fromBase };
+}
+
+/**
+ * @param {import('@dfinity/agent').ActorSubclass} actor
+ * @returns {Promise<Map<string, boolean>>}
+ */
+async function fetchArtistAudioApprovedMap(actor) {
+    const m = new Map();
+    if (!actor) return mergeStudioAudioApprovedKnown(m);
+    try {
+        if (typeof actor.listArtistAudioApprovedPublic === 'function') {
+            const ids = await actor.listArtistAudioApprovedPublic();
+            if (Array.isArray(ids)) {
+                for (const id of ids) {
+                    const sid = String(id ?? '').trim();
+                    if (sid) m.set(sid, true);
+                }
+            }
+            return mergeStudioAudioApprovedKnown(m);
+        }
+    } catch {
+        /* older canister — treat as none approved until generate+deploy */
+    }
+    return mergeStudioAudioApprovedKnown(m);
 }
 
 /**
@@ -1044,6 +1117,10 @@ function normalizeArtistDefaults(a) {
             /** @type {Record<string, unknown>} */ (a).heroProfileImageApproved ??
                 /** @type {Record<string, unknown>} */ (a).hero_profile_image_approved,
         ),
+        audioApproved: Boolean(
+            /** @type {Record<string, unknown>} */ (a).audioApproved ??
+                /** @type {Record<string, unknown>} */ (a).audio_approved,
+        ),
     };
 }
 
@@ -1053,8 +1130,9 @@ function normalizeArtistDefaults(a) {
  * @param {Map<string, number[]>} [cohortByArtistId]
  * @param {Map<string, string>} [heroByArtistId]
  * @param {Map<string, boolean>} [approvedByArtistId]
+ * @param {Map<string, boolean>} [audioApprovedByArtistId]
  */
-function artistFromRecord(rec, cohortByArtistId, mediaByArtistId, heroByArtistId, approvedByArtistId) {
+function artistFromRecord(rec, cohortByArtistId, mediaByArtistId, heroByArtistId, approvedByArtistId, audioApprovedByArtistId) {
     if (!rec || typeof rec !== 'object') return null;
     const prof = rec.profile;
     if (!prof || typeof prof !== 'object') return null;
@@ -1079,7 +1157,11 @@ function artistFromRecord(rec, cohortByArtistId, mediaByArtistId, heroByArtistId
             /* ignore invalid JSON */
         }
     }
-    return mergeHeroProfileImageApproved(out, id, approvedByArtistId);
+    return mergeAudioApproved(
+        mergeHeroProfileImageApproved(out, id, approvedByArtistId),
+        id,
+        audioApprovedByArtistId,
+    );
 }
 
 /**
@@ -1310,6 +1392,34 @@ export async function applyHeroProfileImageApprovedFromStudioSaveLive(id, approv
 }
 
 /**
+ * Live: persist audio approval (staff). Test: writes to artists overlay.
+ * @param {string} id
+ * @param {boolean} approved
+ */
+export async function applyArtistAudioApprovedFromStudioSaveLive(id, approved) {
+    const sid = String(id || '').trim();
+    if (!sid) return;
+    if (getDataSource() === 'test') {
+        const overlay = readStudioLs(LS_ARTISTS_OVERLAY) || {};
+        const base = overlay[sid] && typeof overlay[sid] === 'object' ? overlay[sid] : {};
+        overlay[sid] = normalizeArtistDefaults({
+            ...base,
+            audioApproved: Boolean(approved),
+        });
+        writeStudioLs(LS_ARTISTS_OVERLAY, overlay);
+        noteStudioAudioApproved(sid, Boolean(approved));
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.staffSetArtistAudioApproved !== 'function') {
+        noteStudioAudioApproved(sid, Boolean(approved));
+        return;
+    }
+    await actor.staffSetArtistAudioApproved(sid, Boolean(approved));
+    noteStudioAudioApproved(sid, Boolean(approved));
+}
+
+/**
  * Staff: approve profile headshots for every roster artist.
  * @returns {Promise<number>}
  */
@@ -1461,17 +1571,18 @@ async function getLivePublicArtists() {
         if (typeof actor.listArtistRecordsPublic === 'function') {
             const metaForMerge = await fetchFeaturedMergeMetaLive();
             _lastFeaturedMergeMeta = metaForMerge;
-            const [rows, cohortMap, mediaMap, heroMap, approvedMap] = await Promise.all([
+            const [rows, cohortMap, mediaMap, heroMap, approvedMap, audioApprovedMap] = await Promise.all([
                 actor.listArtistRecordsPublic(),
                 fetchArtistCohortMap(actor),
                 fetchArtistMediaMap(actor),
                 fetchArtistHeroProfileMap(actor),
                 fetchArtistHeroProfileApprovedMap(actor),
+                fetchArtistAudioApprovedMap(actor),
             ]);
             if (!Array.isArray(rows)) return [];
             const out = [];
             for (const r of rows) {
-                const a = artistFromRecord(r, cohortMap, mediaMap, heroMap, approvedMap);
+                const a = artistFromRecord(r, cohortMap, mediaMap, heroMap, approvedMap, audioApprovedMap);
                 if (a) out.push(a);
             }
             await mergeMostRecentProgramsFromCanister(actor, out);
@@ -1520,7 +1631,7 @@ export async function getCommunityArtistsPublic() {
  * @param {Map<string, string>} [heroByArtistId]
  * @param {Map<string, boolean>} [approvedByArtistId]
  */
-function mapStudioArtistFromFullRecord(rec, cohortByArtistId, mediaByArtistId, heroByArtistId, approvedByArtistId) {
+function mapStudioArtistFromFullRecord(rec, cohortByArtistId, mediaByArtistId, heroByArtistId, approvedByArtistId, audioApprovedByArtistId) {
     const prof = rec.profile;
     if (!prof || typeof prof !== 'object') {
         return { id: '', slug: '', imported: false, accessCode: '' };
@@ -1547,15 +1658,19 @@ function mapStudioArtistFromFullRecord(rec, cohortByArtistId, mediaByArtistId, h
             /* ignore invalid JSON */
         }
     }
-    return mergeHeroProfileImageApproved(
-        {
-            ...base,
-            imported: Boolean(rec.imported),
-            accessCode: String(rec.access_code ?? rec.accessCode ?? ''),
-            ...(locales ? { locales } : {}),
-        },
+    return mergeAudioApproved(
+        mergeHeroProfileImageApproved(
+            {
+                ...base,
+                imported: Boolean(rec.imported),
+                accessCode: String(rec.access_code ?? rec.accessCode ?? ''),
+                ...(locales ? { locales } : {}),
+            },
+            bid,
+            approvedByArtistId,
+        ),
         bid,
-        approvedByArtistId,
+        audioApprovedByArtistId,
     );
 }
 
@@ -1572,17 +1687,18 @@ export async function getArtistsForStudio() {
         if (typeof actor.listArtistRecordsForStudio === 'function') {
             const metaForMerge = await fetchFeaturedMergeMetaLive();
             _lastFeaturedMergeMeta = metaForMerge;
-            const [rows, cohortMap, mediaMap, heroMap, approvedMap] = await Promise.all([
+            const [rows, cohortMap, mediaMap, heroMap, approvedMap, audioApprovedMap] = await Promise.all([
                 actor.listArtistRecordsForStudio(),
                 fetchArtistCohortMap(actor),
                 fetchArtistMediaMap(actor),
                 fetchArtistHeroProfileMap(actor),
                 fetchArtistHeroProfileApprovedMap(actor),
+                fetchArtistAudioApprovedMap(actor),
             ]);
             if (!Array.isArray(rows)) return [];
             const mapped = rows.map((r) =>
                 mergeArtistFeaturedExtension(
-                    mapStudioArtistFromFullRecord(r, cohortMap, mediaMap, heroMap, approvedMap),
+                    mapStudioArtistFromFullRecord(r, cohortMap, mediaMap, heroMap, approvedMap, audioApprovedMap),
                     metaForMerge
                 )
             );
@@ -1923,13 +2039,14 @@ export async function getArtistBySlug(slug) {
             const recOpt = await actor.getArtistRecordBySlug(slug);
             const rec = unwrapOpt(recOpt);
             if (rec) {
-                const [cohortMap, mediaMap, heroMap, approvedMap] = await Promise.all([
+                const [cohortMap, mediaMap, heroMap, approvedMap, audioApprovedMap] = await Promise.all([
                     fetchArtistCohortMap(actor),
                     fetchArtistMediaMap(actor),
                     fetchArtistHeroProfileMap(actor),
                     fetchArtistHeroProfileApprovedMap(actor),
+                    fetchArtistAudioApprovedMap(actor),
                 ]);
-                const merged = artistFromRecord(rec, cohortMap, mediaMap, heroMap, approvedMap);
+                const merged = artistFromRecord(rec, cohortMap, mediaMap, heroMap, approvedMap, audioApprovedMap);
                 if (merged) {
                     if (typeof actor.getArtistBySlug === 'function') {
                         const profOpt = await actor.getArtistBySlug(slug);
@@ -1954,12 +2071,16 @@ export async function getArtistBySlug(slug) {
             const profOpt = await actor.getArtistBySlug(slug);
             const p = unwrapOpt(profOpt);
             if (p) {
-                const approvedMap = await fetchArtistHeroProfileApprovedMap(actor);
-                const row = mapCanisterArtistRow(p);
-                const withApproval = mergeHeroProfileImageApproved(
-                    row,
+                const [approvedMap, audioApprovedMap, mediaMap] = await Promise.all([
+                    fetchArtistHeroProfileApprovedMap(actor),
+                    fetchArtistAudioApprovedMap(actor),
+                    fetchArtistMediaMap(actor),
+                ]);
+                const row = mapCanisterArtistRow(p, undefined, mediaMap);
+                const withApproval = mergeAudioApproved(
+                    mergeHeroProfileImageApproved(row, String(row.id ?? ''), approvedMap),
                     String(row.id ?? ''),
-                    approvedMap,
+                    audioApprovedMap,
                 );
                 return mergeArtistFeaturedExtension(withApproval, meta);
             }
@@ -2763,6 +2884,25 @@ export async function getMyArtistRecord() {
             /* older canister */
         }
     }
+    if (recWithMedia.profile && typeof actor.listArtistAudioApprovedPublic === 'function') {
+        try {
+            const ids = await actor.listArtistAudioApprovedPublic();
+            const approved = new Set(
+                (Array.isArray(ids) ? ids : []).map((id) => String(id ?? '').trim()).filter(Boolean),
+            );
+            const p0 = recWithMedia.profile;
+            if (p0 && typeof p0 === 'object') {
+                const p = /** @type {Record<string, unknown>} */ (p0);
+                const id = String(p.id ?? '');
+                recWithMedia = {
+                    ...recWithMedia,
+                    profile: { ...p, audioApproved: approved.has(id) },
+                };
+            }
+        } catch {
+            /* older canister */
+        }
+    }
     /** Applications live in a separate canister map; merge for the same shape as test mode. */
     if (typeof actor.getMyArtistApplicationsJson === 'function') {
         try {
@@ -2919,6 +3059,235 @@ export async function updateMyArtistQuoteAudioPatch(patch, updatedAt) {
         throw new Error('updateMyArtistQuoteAudioPatch unavailable — sign in and run dfx generate fusion-app-backend.');
     }
     await actor.updateMyArtistQuoteAudioPatch(quote, audioUrl, audioTitle, ts);
+}
+
+// ── Multi-bite audio collection ──
+
+/**
+ * @returns {Promise<{ entries: { url: string, title: string, addedAt: string }[], highlightUrl: string, approvedUrls: string[] } | null>}
+ */
+export async function getMyArtistAudioCollection() {
+    if (getDataSource() === 'test') {
+        const id = getProfileSettingsDevArtistId();
+        const raw = readStudioLs('audioCollection_' + id);
+        if (raw && typeof raw === 'object') return raw;
+        return { entries: [], highlightUrl: '', approvedUrls: [] };
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.getMyArtistAudioCollection !== 'function') return null;
+    const opt = await actor.getMyArtistAudioCollection();
+    const rec = unwrapOpt(opt);
+    if (!rec) return { entries: [], highlightUrl: '', approvedUrls: [] };
+    return {
+        entries: Array.isArray(rec.entries) ? rec.entries.map((e) => ({
+            url: String(e.url ?? ''),
+            title: String(e.title ?? ''),
+            addedAt: String(e.addedAt ?? e.added_at ?? ''),
+        })) : [],
+        highlightUrl: String(rec.highlightUrl ?? rec.highlight_url ?? ''),
+        approvedUrls: Array.isArray(rec.approvedUrls ?? rec.approved_urls)
+            ? (rec.approvedUrls ?? rec.approved_urls).map((u) => String(u))
+            : [],
+    };
+}
+
+/** @param {string} url @param {string} title */
+export async function addMyArtistAudioEntry(url, title) {
+    const ts = new Date().toISOString();
+    if (getDataSource() === 'test') {
+        const id = getProfileSettingsDevArtistId();
+        if (!id) throw new Error('Select which artist profile to edit (test mode).');
+        const col = (readStudioLs('audioCollection_' + id)) || { entries: [], highlightUrl: '', approvedUrls: [] };
+        if (col.entries.length >= 5) throw new Error('Maximum of 5 audio bites reached');
+        col.entries.push({ url, title, addedAt: ts });
+        if (!col.highlightUrl) col.highlightUrl = url;
+        writeStudioLs('audioCollection_' + id, col);
+        return;
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    await actor.addMyArtistAudioEntry(url, title, ts);
+}
+
+/** @param {string} url */
+export async function removeMyArtistAudioEntry(url) {
+    if (getDataSource() === 'test') {
+        const id = getProfileSettingsDevArtistId();
+        if (!id) throw new Error('Select which artist profile to edit (test mode).');
+        const col = (readStudioLs('audioCollection_' + id)) || { entries: [], highlightUrl: '', approvedUrls: [] };
+        col.entries = col.entries.filter((e) => e.url !== url);
+        col.approvedUrls = (col.approvedUrls || []).filter((u) => u !== url);
+        if (col.highlightUrl === url) col.highlightUrl = col.entries[0]?.url || '';
+        writeStudioLs('audioCollection_' + id, col);
+        return;
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    await actor.removeMyArtistAudioEntry(url);
+}
+
+/** @param {string} url */
+export async function setMyArtistHighlightAudio(url) {
+    if (getDataSource() === 'test') {
+        const id = getProfileSettingsDevArtistId();
+        if (!id) throw new Error('Select which artist profile to edit (test mode).');
+        const col = (readStudioLs('audioCollection_' + id)) || { entries: [], highlightUrl: '', approvedUrls: [] };
+        col.highlightUrl = url;
+        writeStudioLs('audioCollection_' + id, col);
+        return;
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    await actor.setMyArtistHighlightAudio(url);
+}
+
+/**
+ * Staff: fetch per-artist approved audio URL lists.
+ * @returns {Promise<Map<string, string[]>>}
+ */
+export async function fetchArtistAudioApprovedUrlsMap() {
+    const m = new Map();
+    try {
+        const actor = await getFusionBackendActor();
+        if (typeof actor.listArtistAudioApprovedUrls !== 'function') return m;
+        const rows = await actor.listArtistAudioApprovedUrls();
+        if (!Array.isArray(rows)) return m;
+        for (const row of rows) {
+            if (!Array.isArray(row) || row.length < 2) continue;
+            m.set(String(row[0] ?? ''), (row[1] || []).map((u) => String(u)));
+        }
+    } catch { /* older canister */ }
+    return m;
+}
+
+/**
+ * Staff: fetch per-artist audio collections.
+ * @returns {Promise<Map<string, { url: string, title: string, addedAt: string }[]>>}
+ */
+export async function fetchArtistAudioCollectionsMap() {
+    const m = new Map();
+    try {
+        const actor = await getFusionBackendActor();
+        if (typeof actor.listArtistAudioCollections !== 'function') return m;
+        const rows = await actor.listArtistAudioCollections();
+        if (!Array.isArray(rows)) return m;
+        for (const row of rows) {
+            if (!Array.isArray(row) || row.length < 2) continue;
+            const entries = (row[1] || []).map((e) => ({
+                url: String(e.url ?? ''),
+                title: String(e.title ?? ''),
+                addedAt: String(e.addedAt ?? e.added_at ?? ''),
+            }));
+            m.set(String(row[0] ?? ''), entries);
+        }
+    } catch { /* older canister */ }
+    return m;
+}
+
+/**
+ * Staff: toggle per-entry audio approval.
+ * @param {string} artistId
+ * @param {string} url
+ * @param {boolean} approved
+ */
+export async function applyArtistAudioEntryApprovedFromStudioSaveLive(artistId, url, approved) {
+    if (getDataSource() === 'test') {
+        noteStudioAudioApproved(artistId, approved);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    await actor.staffSetArtistAudioEntryApproved(artistId, url, approved);
+    noteStudioAudioApproved(artistId, approved);
+}
+
+// ── Asset Review Notes ─────────────────────────────────────────
+
+/**
+ * Staff: set hero profile image approval + review note.
+ * @param {string} artistId
+ * @param {boolean} approved
+ * @param {string} reason
+ * @param {string} imageUrl
+ */
+export async function staffSetHeroProfileImageReviewNote(artistId, approved, reason, imageUrl) {
+    if (getDataSource() === 'test') return;
+    const actor = await getStudioAuthenticatedActor();
+    await actor.staffSetHeroProfileImageReviewNote(artistId, approved, reason ?? '', imageUrl ?? '');
+}
+
+/**
+ * Staff: set audio entry approval + review note.
+ * @param {string} artistId
+ * @param {string} url
+ * @param {boolean} approved
+ * @param {string} reason
+ * @param {string} imageUrl
+ */
+export async function staffSetAudioEntryReviewNote(artistId, url, approved, reason, imageUrl) {
+    if (getDataSource() === 'test') return;
+    const actor = await getStudioAuthenticatedActor();
+    await actor.staffSetAudioEntryReviewNote(artistId, url, approved, reason ?? '', imageUrl ?? '');
+}
+
+/**
+ * Fetch hero profile image review notes for all artists.
+ * @returns {Promise<Map<string, {reason:string, imageUrl:string, reviewedAt:string, approved:boolean}>>}
+ */
+export async function fetchHeroProfileImageReviewNotesMap() {
+    const m = new Map();
+    try {
+        if (getDataSource() === 'test') return m;
+        const actor = await getStudioAuthenticatedActor();
+        const rows = await actor.listHeroProfileImageReviewNotes();
+        for (const [k, v] of rows) {
+            m.set(k, { reason: v.reason, imageUrl: v.imageUrl, reviewedAt: v.reviewedAt, approved: v.approved });
+        }
+    } catch (e) {
+        console.warn('fetchHeroProfileImageReviewNotesMap failed:', e);
+    }
+    return m;
+}
+
+/**
+ * Fetch audio entry review notes for all artists.
+ * @returns {Promise<Map<string, {reason:string, imageUrl:string, reviewedAt:string, approved:boolean}>>}
+ */
+export async function fetchAudioEntryReviewNotesMap() {
+    const m = new Map();
+    try {
+        if (getDataSource() === 'test') return m;
+        const actor = await getStudioAuthenticatedActor();
+        const rows = await actor.listAudioEntryReviewNotes();
+        for (const [k, v] of rows) {
+            m.set(k, { reason: v.reason, imageUrl: v.imageUrl, reviewedAt: v.reviewedAt, approved: v.approved });
+        }
+    } catch (e) {
+        console.warn('fetchAudioEntryReviewNotesMap failed:', e);
+    }
+    return m;
+}
+
+/**
+ * Member: get review notes for own assets (hero image + audio entries).
+ * @returns {Promise<{heroProfileImage: ?object, audioEntries: Array<[string, object]>}>}
+ */
+export async function getMyAssetReviewNotes() {
+    try {
+        if (getDataSource() === 'test') return { heroProfileImage: null, audioEntries: [] };
+        const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+        const actor = await getAuthenticatedFusionBackendActor();
+        const result = await actor.getMyAssetReviewNotes();
+        return {
+            heroProfileImage: result.heroProfileImage?.[0] ?? null,
+            audioEntries: (result.audioEntries ?? []).map(([k, v]) => [k, {
+                reason: v.reason, imageUrl: v.imageUrl, reviewedAt: v.reviewedAt, approved: v.approved
+            }])
+        };
+    } catch (e) {
+        console.warn('getMyAssetReviewNotes failed:', e);
+        return { heroProfileImage: null, audioEntries: [] };
+    }
 }
 
 /**
@@ -6093,6 +6462,40 @@ export async function recordStaffManualProgramLedgerStudio(opts) {
         recordedAt,
         entryKind,
     );
+}
+
+/**
+ * Re-link an existing ledger row (e.g. an orphaned PayPal payment) to a specific
+ * applicant so it appears on their finance + member payment views.
+ * @param {{ rowId: string, applicantId: string, programId: string }} opts
+ */
+export async function reassignProgramLedgerEntryStudio(opts) {
+    const rowId = String(opts.rowId || '').trim();
+    const applicantId = String(opts.applicantId || '').trim();
+    const programId = String(opts.programId || '').trim();
+    if (!rowId || !applicantId || !programId) {
+        throw new Error('rowId, applicantId, and programId required');
+    }
+    if (getDataSource() === 'test') {
+        const stored = readStudioLs(LS_STAFF_FINANCE_PAYMENTS) || {
+            summaries: [],
+            ledger: [],
+            plans: [],
+        };
+        stored.ledger = Array.isArray(stored.ledger) ? stored.ledger : [];
+        const row = stored.ledger.find((r) => String(r?.id || '') === rowId);
+        if (!row) throw new Error('Ledger row not found');
+        row.applicationId = applicantId;
+        row.programId = programId;
+        row.principal = 'test-principal';
+        writeStudioLs(LS_STAFF_FINANCE_PAYMENTS, stored);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.staffReassignProgramLedgerEntry !== 'function') {
+        throw new Error('staffReassignProgramLedgerEntry missing — run dfx generate');
+    }
+    await actor.staffReassignProgramLedgerEntry(rowId, applicantId, programId);
 }
 
 /**

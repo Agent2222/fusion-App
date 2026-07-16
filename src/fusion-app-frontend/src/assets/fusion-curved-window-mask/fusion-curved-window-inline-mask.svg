@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 540">
+  <defs>
+    <mask id="fusion-curved-window-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="600" height="540">
+      <rect width="600" height="540" fill="#000"/>
+      <path d="M120 0 H340 Q600 0 600 260 V480 Q600 540 540 540 H140 C90 540 45 520 20 485 C-10 440 5 380 25 320 C50 245 55 180 45 115 C35 55 65 10 120 0 Z" fill="#fff"/>
+    </mask>
+  </defs>
+  <g mask="url(#fusion-curved-window-mask)">
+    <rect width="600" height="540" fill="#111"/>
+  </g>
+</svg>

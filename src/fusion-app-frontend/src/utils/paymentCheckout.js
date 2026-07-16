@@ -12,15 +12,45 @@ let _sdkSubLoadPromise = null;
 
 const PAYPAL_SUB_NS = 'paypalSubscription';
 
-/** @type {Record<string, string>} */
+/**
+ * PayPal Buttons `style` — only official SDK values are allowed.
+ * Prefer black + rect to match Fusion CTAs (`--c2` / sharp edges) instead of default gold/blue.
+ * @see https://developer.paypal.com/studio/checkout/advanced/integrate
+ * @see https://developer.paypal.com/sdk/js/reference/#style
+ *
+ * @param {'paypal' | 'checkout' | 'pay' | 'buynow' | 'subscribe'} [label]
+ */
+function paypalButtonStyle(label = 'paypal') {
+    return {
+        layout: 'vertical',
+        color: 'black',
+        shape: 'rect',
+        label,
+        height: 44,
+        tagline: false,
+    };
+}
+
+/** Hosted Card Fields input styles (iframe — only PayPal-supported properties; no CSS vars / custom fonts). */
 const PAYPAL_CARD_FIELD_STYLES = {
-    body: { padding: '12px 10px' },
     input: {
         'font-size': '16px',
-        'font-family': 'inherit',
-        color: '#111111',
+        'font-family': "'Helvetica Neue', Helvetica, Arial, sans-serif",
+        'font-weight': '400',
+        'letter-spacing': '0.02em',
+        'line-height': '1.35',
+        color: '#000000',
+        padding: '0.55rem 0.65rem',
     },
-    '.invalid': { color: '#b00020' },
+    '::placeholder': {
+        color: 'rgba(0, 0, 0, 0.38)',
+    },
+    ':focus': {
+        color: '#000000',
+    },
+    '.invalid': {
+        color: '#c12525',
+    },
 };
 
 /**
@@ -100,7 +130,7 @@ export async function mountPayPalOrderButtons(mountEl, opts) {
     mountEl.appendChild(container);
     await window.paypal
         .Buttons({
-            style: { layout: 'vertical', color: 'gold', shape: 'rect', label: 'paypal' },
+            style: paypalButtonStyle('paypal'),
             createOrder: () => opts.orderId,
             onApprove: async (data) => {
                 await opts.onApproved(data.orderID || opts.orderId);
@@ -171,29 +201,48 @@ export async function mountPayPalAdvancedOneTimeCheckout(mountEl, opts) {
     cardSection.className = 'paypal-card-fields-section';
     root.appendChild(cardSection);
 
-    const nameHost = document.createElement('div');
-    nameHost.className = 'paypal-card-field-host';
-    nameHost.id = `paypal-card-name-${Math.random().toString(36).slice(2, 9)}`;
-    cardSection.appendChild(nameHost);
+    /**
+     * @param {string} labelText
+     * @param {string} hostClassExtra
+     */
+    const makeLabeledHost = (labelText, hostClassExtra = '') => {
+        const wrap = document.createElement('label');
+        wrap.className = 'paypal-card-field';
+        if (hostClassExtra) wrap.classList.add(hostClassExtra);
+        const label = document.createElement('span');
+        label.className = 'paypal-card-field__label';
+        label.textContent = labelText;
+        const host = document.createElement('div');
+        host.className = 'paypal-card-field-host';
+        host.id = `paypal-card-${Math.random().toString(36).slice(2, 9)}`;
+        wrap.appendChild(label);
+        wrap.appendChild(host);
+        return { wrap, host };
+    };
 
-    const numberHost = document.createElement('div');
-    numberHost.className = 'paypal-card-field-host';
-    numberHost.id = `paypal-card-number-${Math.random().toString(36).slice(2, 9)}`;
-    cardSection.appendChild(numberHost);
+    const nameField = makeLabeledHost('Name on card');
+    cardSection.appendChild(nameField.wrap);
+
+    const numberField = makeLabeledHost('Card number');
+    cardSection.appendChild(numberField.wrap);
 
     const grid = document.createElement('div');
     grid.className = 'paypal-card-fields-grid';
     cardSection.appendChild(grid);
 
-    const expiryHost = document.createElement('div');
-    expiryHost.className = 'paypal-card-field-host';
-    expiryHost.id = `paypal-card-expiry-${Math.random().toString(36).slice(2, 9)}`;
-    grid.appendChild(expiryHost);
+    const expiryField = makeLabeledHost('Expiry');
+    grid.appendChild(expiryField.wrap);
 
-    const cvvHost = document.createElement('div');
-    cvvHost.className = 'paypal-card-field-host';
-    cvvHost.id = `paypal-card-cvv-${Math.random().toString(36).slice(2, 9)}`;
-    grid.appendChild(cvvHost);
+    const cvvField = makeLabeledHost('CVV');
+    grid.appendChild(cvvField.wrap);
+
+    if (opts.showPayNowButton) {
+        payNowBtn = document.createElement('button');
+        payNowBtn.type = 'button';
+        payNowBtn.className = 'paypal-card-pay-now';
+        payNowBtn.textContent = opts.payNowLabel || 'Pay now';
+        cardSection.appendChild(payNowBtn);
+    }
 
     const divider = document.createElement('div');
     divider.className = 'paypal-pay-divider';
@@ -204,14 +253,6 @@ export async function mountPayPalAdvancedOneTimeCheckout(mountEl, opts) {
     const walletSection = document.createElement('div');
     walletSection.className = 'paypal-wallet-section';
     root.appendChild(walletSection);
-
-    if (opts.showPayNowButton) {
-        payNowBtn = document.createElement('button');
-        payNowBtn.type = 'button';
-        payNowBtn.className = 'paypal-card-pay-now';
-        payNowBtn.textContent = opts.payNowLabel || 'Pay now';
-        root.appendChild(payNowBtn);
-    }
 
     cardFields = paypal.CardFields({
         style: PAYPAL_CARD_FIELD_STYLES,
@@ -225,10 +266,10 @@ export async function mountPayPalAdvancedOneTimeCheckout(mountEl, opts) {
         usesCardFields = true;
         divider.hidden = false;
         await Promise.all([
-            cardFields.NameField().render(`#${nameHost.id}`),
-            cardFields.NumberField().render(`#${numberHost.id}`),
-            cardFields.ExpiryField().render(`#${expiryHost.id}`),
-            cardFields.CVVField().render(`#${cvvHost.id}`),
+            cardFields.NameField({ placeholder: 'Name on card' }).render(`#${nameField.host.id}`),
+            cardFields.NumberField({ placeholder: 'Card number' }).render(`#${numberField.host.id}`),
+            cardFields.ExpiryField({ placeholder: 'MM / YY' }).render(`#${expiryField.host.id}`),
+            cardFields.CVVField({ placeholder: 'CVV' }).render(`#${cvvField.host.id}`),
         ]);
     } else {
         cardSection.hidden = true;
@@ -237,7 +278,7 @@ export async function mountPayPalAdvancedOneTimeCheckout(mountEl, opts) {
 
     await paypal
         .Buttons({
-            style: { layout: 'vertical', color: 'gold', shape: 'rect', label: usesCardFields ? 'paypal' : 'pay' },
+            style: paypalButtonStyle(usesCardFields ? 'paypal' : 'pay'),
             createOrder: createOrderId,
             onApprove: handleApprove,
             onError: (err) => opts.onError?.(err),
@@ -300,7 +341,7 @@ export async function mountPayPalSubscriptionButtons(mountEl, opts) {
     const customId = JSON.stringify(opts.customData || {}).slice(0, 127);
     await paypal
         .Buttons({
-            style: { layout: 'vertical', color: 'gold', shape: 'rect', label: 'subscribe' },
+            style: paypalButtonStyle('subscribe'),
             createSubscription: (_data, actions) =>
                 actions.subscription.create({
                     plan_id: opts.planId,

@@ -1,5 +1,9 @@
 import { navigate } from '../../router.js';
 import {
+    ARTIST_CARD_PREVIEW_CHIP_CSS,
+    enhanceArtistCardForPreview,
+} from '../../utils/artistCardPreviewChip.js';
+import {
     artistDisplayDiscipline,
     artistDisplayName,
     artistEnglishBlock,
@@ -105,8 +109,12 @@ class ArtistsGAFeedElement extends HTMLElement {
                     opacity: 0.92;
                 }
 
-                .artist-card:hover .artist-card-image img {
+                .artist-card:hover .artist-card-image > img {
                     transform: scale(1.06);
+                }
+
+                .artist-card:has(.artist-card-preview-chip:hover) .artist-card-image > img {
+                    transform: none;
                 }
 
                 .artist-card-image {
@@ -116,7 +124,7 @@ class ArtistsGAFeedElement extends HTMLElement {
                     background: var(--c3);
                 }
 
-                .artist-card-image img {
+                .artist-card-image > img {
                     width: 100%;
                     height: 100%;
                     object-fit: cover;
@@ -125,7 +133,7 @@ class ArtistsGAFeedElement extends HTMLElement {
                     transition: transform 0.35s ease;
                 }
 
-                .artist-card-image img.artist-card-img--placeholder {
+                .artist-card-image > img.artist-card-img--placeholder {
                     object-fit: contain;
                     object-position: center;
                     background: var(--c3);
@@ -346,6 +354,8 @@ class ArtistsGAFeedElement extends HTMLElement {
                         padding: 0.55rem 6% 0.7rem;
                     }
                 }
+
+                ${ARTIST_CARD_PREVIEW_CHIP_CSS}
             </style>
             <div class="artists-ga-feed">
                 <div class="feed-nav-row feed-nav-row--top">
@@ -470,6 +480,7 @@ class ArtistsGAFeedElement extends HTMLElement {
                     <div class="artist-card-status ${category}"><div class="bgBlock ${category}-bg"></div>${statusIcon} <span class="status-text">${statusText}</span></div>
                 </div>
             `;
+            enhanceArtistCardForPreview(card, artist);
             const gaImg = card.querySelector('.artist-card-image img');
             applyArtistCardImage(gaImg, getArtistCardImageUrlForCurrentMode(artist));
             grid.appendChild(card);

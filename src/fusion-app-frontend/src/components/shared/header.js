@@ -16,6 +16,7 @@ import {
     ensureSoundEnvironmentPositionListeners,
     syncSoundEnvironmentPosition,
 } from '../../utils/soundEnvironmentMount.js';
+import './newsletterSubscribe.js';
 
 const MENU_IDLE_MS = 2000;
 const SCROLL_DELTA_PX = 4;
@@ -622,13 +623,13 @@ class HeaderComponent extends HTMLElement {
         if (ui.kind === 'member') {
             const profLabel = ui.pending
                 ? en
-                    ? 'PROFILE (PENDING)'
-                    : 'プロフィール（審査中）'
+                    ? 'STUDIO (PENDING)'
+                    : 'スタジオ（審査中）'
                 : en
-                  ? 'PROFILE'
-                  : 'プロフィール';
+                  ? 'STUDIO'
+                  : 'スタジオ';
             const href = esc(ui.profileHref || '/register');
-            const completeProfileLabel = en ? 'COMPLETE PROFILE' : 'プロフィールを完成';
+            const completeProfileLabel = en ? 'FUSION STUDIO' : 'FUSION スタジオ';
             slot.innerHTML = `
                         <button type="button" class="headerRectBtn" data-action="sign-out">${en ? 'SIGN OUT' : 'サインアウト'}</button>
                         ${perspectiveHtml}
@@ -1432,6 +1433,10 @@ class HeaderComponent extends HTMLElement {
                     display: contents;
                 }
 
+                .header-newsletter-slot {
+                    display: none;
+                }
+
                 #headerMenuToggle {
                     display: none;
                     box-sizing: border-box;
@@ -1922,6 +1927,15 @@ class HeaderComponent extends HTMLElement {
                         row-gap: 0;
                     }
 
+                    .header-newsletter-slot {
+                        display: block;
+                        width: 100%;
+                        margin-top: 0.25rem;
+                        padding-top: 1rem;
+                        border-top: 1px solid color-mix(in srgb, var(--c2) 18%, transparent);
+                        box-sizing: border-box;
+                    }
+
                     #headerCtas #headerAuthPair {
                         grid-column: 1;
                         min-width: 0;
@@ -2055,6 +2069,7 @@ class HeaderComponent extends HTMLElement {
                         <div id="headerAuthPair" class="header-auth-pair"></div>
                         <button type="button" id="headerLangBtn" class="headerLangBtn" aria-label="Language: English. Click to switch to Japanese.">${en ? 'EN' : 'JP'}</button>
                     </div>
+                    <app-newsletter-subscribe variant="drawer" class="header-newsletter-slot"></app-newsletter-subscribe>
                     <div id="headerSoundEnvSlot" class="header-sound-env-slot" aria-label="${en ? 'Sound environment' : 'サウンド環境'}"></div>
                 </div>
             </header>

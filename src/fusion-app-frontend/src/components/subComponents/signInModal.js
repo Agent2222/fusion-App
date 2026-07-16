@@ -5,6 +5,7 @@
 import { ERROR_USER_INTERRUPT } from '@dfinity/auth-client';
 import { loginInternetIdentity } from '../../utils/icAuth.js';
 import posthog from 'posthog-js';
+import './authBrowserHelp.js';
 
 class SignInModal extends HTMLElement {
     constructor() {
@@ -225,6 +226,7 @@ class SignInModal extends HTMLElement {
                     <div class="si-actions">
                         <button type="button" class="si-btn si-btn--primary" id="siPrimary">${en ? 'Continue with Internet Identity' : 'Internet Identityで続行'}</button>
                     </div>
+                    <app-auth-browser-help></app-auth-browser-help>
                 </div>
             </dialog>
         `;
