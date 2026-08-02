@@ -21,6 +21,22 @@ export function studioMembershipStatusLabel(st) {
 }
 
 /**
+ * Prefer PayPal status when that provider is active, else Stripe.
+ * @param {unknown} row
+ * @returns {string}
+ */
+export function studioEffectiveMembershipStatus(row) {
+    const r = row && typeof row === 'object' ? /** @type {Record<string, unknown>} */ (row) : {};
+    const paypalId = String(r.paypalSubscriptionId || '').trim();
+    const provider = String(r.paymentProvider || '').toLowerCase();
+    const paypalStatus = String(r.paypalSubscriptionStatus || '').trim();
+    const stripeStatus = String(r.stripeSubscriptionStatus || '').trim();
+    if ((provider === 'paypal' || paypalId) && paypalStatus) return paypalStatus;
+    if (paypalStatus && !stripeStatus) return paypalStatus;
+    return stripeStatus;
+}
+
+/**
  * @param {{ trialEndsAtSec?: string | number }} row
  * @returns {'active' | 'expired' | 'none'}
  */
@@ -32,12 +48,12 @@ export function studioTrialState(row) {
     return nowSec <= endsAtSec ? 'active' : 'expired';
 }
 
-/** @param {{ membershipExemptManual?: boolean, stripeSubscriptionStatus?: string }} row */
+/** @param {{ membershipExemptManual?: boolean, stripeSubscriptionStatus?: string, paypalSubscriptionStatus?: string, paypalSubscriptionId?: string, paymentProvider?: string }} row */
 export function studioMembershipDotClass(row) {
     if (row.membershipExemptManual) return 'studio-user-sub-dot--ok';
     const trialState = studioTrialState(row);
     if (trialState === 'active') return 'studio-user-sub-dot--ok';
-    const s = String(row.stripeSubscriptionStatus || '').toLowerCase();
+    const s = studioEffectiveMembershipStatus(row).toLowerCase();
     if (s === 'active' || s === 'trialing') return 'studio-user-sub-dot--ok';
     return 'studio-user-sub-dot--err';
 }
@@ -50,7 +66,7 @@ export function studioMembershipBadgeVariant(row) {
     const r = row && typeof row === 'object' ? /** @type {Record<string, unknown>} */ (row) : {};
     if (r.membershipExemptManual) return 'muted';
     if (studioTrialState(row) === 'active') return 'ok';
-    const s = String(r.stripeSubscriptionStatus || '').toLowerCase();
+    const s = studioEffectiveMembershipStatus(row).toLowerCase();
     if (s === 'active' || s === 'trialing') return 'ok';
     if (s === 'past_due' || s === 'unpaid') return 'warn';
     return 'muted';
@@ -65,7 +81,7 @@ export function studioMembershipBadgeHtml(row, escapeHtml = (s) => String(s)) {
     const variant = studioMembershipBadgeVariant(row);
     const label = r.membershipExemptManual
         ? 'Exempt (manual)'
-        : studioMembershipStatusLabel(String(r.stripeSubscriptionStatus || ''));
+        : studioMembershipStatusLabel(studioEffectiveMembershipStatus(row));
     return `<span class="mpd-membership-badge mpd-membership-badge--${variant}"><span class="mpd-membership-badge__icon" aria-hidden="true"></span><span class="mpd-membership-badge__text"><strong>${escapeHtml(label)}</strong></span></span>`;
 }
 
@@ -81,15 +97,15 @@ export function studioMembershipFilterMatch(row, wantMembership) {
     const trial = studioTrialState(row);
     if (want === 'trial_active') return trial === 'active';
     if (want === 'trial_expired') return trial === 'expired';
-    const stripeStatus = String(r.stripeSubscriptionStatus || '').toLowerCase();
-    if (want === 'active') return !r.membershipExemptManual && stripeStatus === 'active';
-    if (want === 'trialing') return !r.membershipExemptManual && stripeStatus === 'trialing';
-    if (want === 'past_due') return !r.membershipExemptManual && stripeStatus === 'past_due';
-    if (want === 'canceled') return !r.membershipExemptManual && stripeStatus === 'canceled';
+    const status = studioEffectiveMembershipStatus(row).toLowerCase();
+    if (want === 'active') return !r.membershipExemptManual && status === 'active';
+    if (want === 'trialing') return !r.membershipExemptManual && status === 'trialing';
+    if (want === 'past_due') return !r.membershipExemptManual && status === 'past_due';
+    if (want === 'canceled') return !r.membershipExemptManual && status === 'canceled';
     if (want === 'none') {
         if (r.membershipExemptManual) return false;
         if (trial !== 'none') return false;
-        return !stripeStatus;
+        return !status;
     }
     return true;
 }

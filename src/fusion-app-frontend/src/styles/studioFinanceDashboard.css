@@ -363,7 +363,7 @@
 }
 
 .studio-finance-page .studio-finance-program-card {
-  flex: 0 0 min(14.5rem, 78vw);
+  flex: 0 0 min(26rem, 94vw);
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -472,6 +472,12 @@
   border-color: #fde68a;
 }
 
+.studio-finance-page .studio-finance-program-card__metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
 .studio-finance-page .studio-finance-program-card__revenue {
   margin: 0;
   display: flex;
@@ -516,6 +522,185 @@
 
 .studio-finance-page .studio-finance-program-table-section {
   margin-top: 0;
+}
+
+.studio-finance-page .studio-finance-program-promotions-wrap,
+.studio-finance-page .studio-finance-disbursements-wrap {
+  margin-top: 1rem;
+}
+
+.studio-finance-page .studio-finance-disb-person {
+  min-width: 9rem;
+}
+
+.studio-finance-page .studio-finance-disb-person-name {
+  display: block;
+  font-weight: 600;
+}
+
+.studio-finance-page .studio-finance-disb-person-meta {
+  display: block;
+  font-size: 0.78rem;
+  margin-top: 0.15rem;
+}
+
+.studio-finance-disb-ledger-modal .studio-table-wrap {
+  margin: 0.75rem 0;
+  max-height: 14rem;
+  overflow: auto;
+}
+
+.studio-finance-page .studio-finance-disb-payout-th {
+  white-space: nowrap;
+}
+
+.studio-finance-page .studio-finance-disb-payout-th > span {
+  margin-right: 0.25rem;
+}
+
+.studio-finance-page .studio-finance-disb-info-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--c2) 28%, transparent);
+  background: color-mix(in srgb, var(--c2) 6%, #fff);
+  color: var(--studio-muted, #666);
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-style: italic;
+  line-height: 1;
+  cursor: help;
+  vertical-align: middle;
+}
+
+.studio-finance-page .studio-finance-disb-info-btn:hover,
+.studio-finance-page .studio-finance-disb-info-btn:focus-visible {
+  border-color: color-mix(in srgb, var(--c2) 45%, transparent);
+  color: var(--c2, #333);
+}
+
+.studio-finance-page .studio-finance-disb-payout-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.studio-finance-page .studio-finance-disb-payout-pill--active {
+  background: color-mix(in srgb, #e6b800 22%, #fff);
+  color: #6b5300;
+  border: 1px solid color-mix(in srgb, #e6b800 45%, transparent);
+}
+
+.studio-finance-page .studio-finance-disb-payout-pill--complete {
+  background: color-mix(in srgb, #2f8f4e 18%, #fff);
+  color: #145c2c;
+  border: 1px solid color-mix(in srgb, #2f8f4e 40%, transparent);
+}
+
+.studio-finance-page .studio-finance-disb-payout-pill--btn {
+  cursor: pointer;
+  font: inherit;
+}
+
+.studio-finance-page .studio-finance-disb-payout-pill--btn:hover,
+.studio-finance-page .studio-finance-disb-payout-pill--btn:focus-visible {
+  filter: brightness(0.97);
+  outline: 2px solid color-mix(in srgb, var(--c2) 35%, transparent);
+  outline-offset: 2px;
+}
+
+.studio-finance-admin-payout-modal .studio-table-wrap {
+  margin: 0.5rem 0 1rem;
+  max-height: 14rem;
+  overflow: auto;
+}
+
+.studio-finance-admin-payout-modal .studio-subheading {
+  margin: 0.75rem 0 0.35rem;
+}
+
+.studio-finance-page .studio-finance-disb-payout-pct {
+  font-weight: 500;
+  opacity: 0.75;
+  font-size: 0.75rem;
+}
+
+.studio-finance-page .studio-finance-disb-include {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  cursor: pointer;
+}
+
+.studio-finance-page .studio-finance-disb-include input {
+  width: 1rem;
+  height: 1rem;
+}
+
+.studio-finance-page .studio-finance-disbursements-section {
+  position: relative;
+}
+
+.studio-finance-page .studio-finance-disb-info-popover {
+  position: absolute;
+  top: 3.25rem;
+  right: 1rem;
+  z-index: 5;
+  max-width: min(22rem, calc(100% - 2rem));
+  padding: 0.85rem 1rem;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--c2) 18%, transparent);
+  background: #fff;
+  box-shadow: 0 8px 24px color-mix(in srgb, #000 12%, transparent);
+  font-size: 0.85rem;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--c2, #222);
+}
+
+.studio-finance-page .studio-finance-disb-info-popover p {
+  margin: 0 0 0.65rem;
+  font-weight: 500;
+  color: inherit;
+}
+
+.studio-finance-page .studio-finance-program-promotions-section .mpd-field-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+}
+
+.studio-finance-page .studio-finance-disbursements-section .mpd-field-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+}
+
+.studio-finance-page .studio-field--inline-check,
+.studio-modal .studio-field--inline-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.35rem 0 0.75rem;
+  cursor: pointer;
+  font-size: 0.88rem;
+}
+
+.studio-finance-page .studio-field--inline-check .studio-checkbox,
+.studio-modal .studio-field--inline-check .studio-checkbox {
+  flex-shrink: 0;
+}
+
+.studio-finance-page .studio-finance-team-row td {
+  background: color-mix(in srgb, var(--c2) 4%, transparent);
 }
 
 .studio-finance-page .studio-finance-program-cards-rail--unified {

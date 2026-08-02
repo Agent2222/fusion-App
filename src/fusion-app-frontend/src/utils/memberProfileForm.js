@@ -65,21 +65,30 @@ export function introSlotsFromWorld(world) {
 }
 
 /**
- * @param {{ src: string, alt: string, caption: string }[]} slots
+ * Persist a fixed-length 3-slot gallery. Empty slots are stored as `null` so
+ * delete/replace does not shift later images into earlier indices on reload.
+ *
+ * @param {{ src?: string, alt?: string, caption?: string }[] | null | undefined} slots
  * @returns {unknown[]}
  */
 export function introSlotsToGallery(slots) {
+    const list = Array.isArray(slots) ? slots : [];
+    /** @type {unknown[]} */
     const out = [];
-    for (const s of slots) {
-        const src = String(s.src ?? '').trim();
-        if (!src) continue;
+    for (let i = 0; i < 3; i++) {
+        const s = list[i];
+        const src = String(s?.src ?? '').trim();
+        if (!src) {
+            out.push(null);
+            continue;
+        }
+        /** @type {{ src: string, alt?: string, caption?: string }} */
         const o = { src };
-        const alt = String(s.alt ?? '').trim();
+        const alt = String(s?.alt ?? '').trim();
         if (alt) o.alt = alt;
-        const cap = String(s.caption ?? '').trim();
+        const cap = String(s?.caption ?? '').trim();
         if (cap) o.caption = cap;
         out.push(o);
-        if (out.length >= 3) break;
     }
     return out;
 }

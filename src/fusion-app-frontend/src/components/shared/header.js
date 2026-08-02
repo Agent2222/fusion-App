@@ -1208,6 +1208,13 @@ class HeaderComponent extends HTMLElement {
                 return;
             }
 
+            const profileSetupOverlay = e.target.closest('.header-profile-setup-overlay');
+            if (profileSetupOverlay) {
+                e.preventDefault();
+                this._closeProfileSetupPrompt();
+                return;
+            }
+
             const langBtn = e.target.closest('.headerLangBtn');
             if (langBtn) {
                 e.preventDefault();
@@ -1268,7 +1275,8 @@ class HeaderComponent extends HTMLElement {
                 const href = rectBtn.getAttribute('data-href');
                 if (action === 'register' || href === '/register') {
                     this.closeMobileMenu();
-                    window.dispatchEvent(new CustomEvent('fusion-open-join-network'));
+                    activateDeactivate('/join-network');
+                    navigate('/join-network');
                     return;
                 }
                 if (href) {
@@ -1611,19 +1619,24 @@ class HeaderComponent extends HTMLElement {
                 }
 
                 .header-profile-setup-host[hidden] {
-                    display: none;
+                    display: none !important;
                 }
 
                 .header-profile-setup-host {
                     position: fixed;
                     inset: 0;
-                    z-index: 199;
+                    width: 100vw;
+                    height: 100vh;
+                    height: 100dvh;
+                    z-index: 400;
+                    pointer-events: auto;
                 }
 
                 .header-profile-setup-overlay {
                     position: absolute;
                     inset: 0;
                     background: rgba(0, 0, 0, 0.28);
+                    cursor: pointer;
                 }
 
                 .header-profile-setup-modal {
@@ -1636,6 +1649,8 @@ class HeaderComponent extends HTMLElement {
                     border: 1px solid var(--c2);
                     box-sizing: border-box;
                     padding: 1rem;
+                    z-index: 1;
+                    pointer-events: auto;
                 }
 
                 .header-profile-setup-modal--top-right {
@@ -2080,13 +2095,15 @@ class HeaderComponent extends HTMLElement {
                 </div>
             </div>
             <div id="headerDrawerBackdrop" class="header-drawer-backdrop" aria-hidden="true"></div>
-            <div id="headerProfileSetupPrompt" class="header-profile-setup-host" hidden></div>
             </div>
             <div id="logoHeader" class="floating-logo-header">
                 <div id="logoHeaderInner">
                     <img id="headerSymbolLogo" src="${SymbolLogo}" alt="${withSeoImageAlt('Fusion logo')}" loading="lazy">
                 </div>
             </div>
+            <!-- Outside .header-surface: that node is GSAP-transformed / opacity-hidden on scroll,
+                 which would otherwise trap this "fixed" overlay to the header strip only. -->
+            <div id="headerProfileSetupPrompt" class="header-profile-setup-host" hidden></div>
         `;
     }
 }

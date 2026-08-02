@@ -76,6 +76,21 @@ persistent actor {
   stable var programPaymentPlansStableV2 : [(Text, Types.ProgramPaymentPlan)] = [];
   var programPaymentFlightPreferencesStable : [(Text, Types.ProgramPaymentFlightPreference)] = [];
   stable var siteSettingsStable : [(Text, Text)] = [];
+  /// Studio Finance → Promotions.
+  stable var financePromotionsStable : [(Text, Types.FinancePromotion)] = [];
+  /// Studio Finance → Program team members (disbursements / expenses).
+  stable var programTeamMembersStable : [(Text, Types.ProgramTeamMember)] = [];
+  stable var programTeamOwedEntriesStable : [(Text, Types.ProgramTeamOwedEntry)] = [];
+  stable var programTeamPaidEntriesStable : [(Text, Types.ProgramTeamPaidEntry)] = [];
+  /// Paid entry id → "admin" | "program" (parallel map keeps ProgramTeamPaidEntry upgrade-safe).
+  stable var programTeamPaidFundedByStable : [(Text, Text)] = [];
+
+  /// Membership billing tier: monthly | quarterly | annual | bimonthly (legacy).
+  stable var membershipTierStable : [(Principal, Text)] = [];
+  /// Stackable quarterly application credits (unused roll over).
+  stable var quarterlyAppCreditBalanceStable : [(Principal, Nat)] = [];
+  /// Last accrued calendar quarter key (`YYYY-Qn`) per principal.
+  stable var quarterlyAppCreditLastAccruedStable : [(Principal, Text)] = [];
 
   /// Join invite codes (8-digit) — admin-generated; deactivated after first successful redemption.
   stable var joinInvitesStable : [(Text, Types.JoinInviteRecord)] = [];
@@ -290,6 +305,30 @@ persistent actor {
   transient var programPaymentFlightPreferencesByKey : _HashMap.HashMap<Text, Types.ProgramPaymentFlightPreference> =
     _HashMap.HashMap<Text, Types.ProgramPaymentFlightPreference>(0, Text.equal, Text.hash);
 
+  transient var financePromotionsById : _HashMap.HashMap<Text, Types.FinancePromotion> =
+    _HashMap.HashMap<Text, Types.FinancePromotion>(0, Text.equal, Text.hash);
+
+  transient var programTeamMembersById : _HashMap.HashMap<Text, Types.ProgramTeamMember> =
+    _HashMap.HashMap<Text, Types.ProgramTeamMember>(0, Text.equal, Text.hash);
+
+  transient var programTeamOwedEntriesById : _HashMap.HashMap<Text, Types.ProgramTeamOwedEntry> =
+    _HashMap.HashMap<Text, Types.ProgramTeamOwedEntry>(0, Text.equal, Text.hash);
+
+  transient var programTeamPaidEntriesById : _HashMap.HashMap<Text, Types.ProgramTeamPaidEntry> =
+    _HashMap.HashMap<Text, Types.ProgramTeamPaidEntry>(0, Text.equal, Text.hash);
+
+  transient var programTeamPaidFundedByById : _HashMap.HashMap<Text, Text> =
+    _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
+
+  transient var membershipTierByPrincipal : _HashMap.HashMap<Principal, Text> =
+    _HashMap.HashMap<Principal, Text>(0, Principal.equal, Principal.hash);
+
+  transient var quarterlyAppCreditBalanceByPrincipal : _HashMap.HashMap<Principal, Nat> =
+    _HashMap.HashMap<Principal, Nat>(0, Principal.equal, Principal.hash);
+
+  transient var quarterlyAppCreditLastAccruedByPrincipal : _HashMap.HashMap<Principal, Text> =
+    _HashMap.HashMap<Principal, Text>(0, Principal.equal, Principal.hash);
+
   transient var siteSettingsByKey : _HashMap.HashMap<Text, Text> =
     _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
 
@@ -462,6 +501,30 @@ persistent actor {
   reloadProgramPaymentPlansFromStables();
   for (entry in programPaymentFlightPreferencesStable.vals()) {
     programPaymentFlightPreferencesByKey.put(entry.0, entry.1);
+  };
+  for (entry in financePromotionsStable.vals()) {
+    financePromotionsById.put(entry.0, entry.1);
+  };
+  for (entry in programTeamMembersStable.vals()) {
+    programTeamMembersById.put(entry.0, entry.1);
+  };
+  for (entry in programTeamOwedEntriesStable.vals()) {
+    programTeamOwedEntriesById.put(entry.0, entry.1);
+  };
+  for (entry in programTeamPaidEntriesStable.vals()) {
+    programTeamPaidEntriesById.put(entry.0, entry.1);
+  };
+  for (entry in programTeamPaidFundedByStable.vals()) {
+    programTeamPaidFundedByById.put(entry.0, entry.1);
+  };
+  for (entry in membershipTierStable.vals()) {
+    membershipTierByPrincipal.put(entry.0, entry.1);
+  };
+  for (entry in quarterlyAppCreditBalanceStable.vals()) {
+    quarterlyAppCreditBalanceByPrincipal.put(entry.0, entry.1);
+  };
+  for (entry in quarterlyAppCreditLastAccruedStable.vals()) {
+    quarterlyAppCreditLastAccruedByPrincipal.put(entry.0, entry.1);
   };
 
   for (entry in artistsStable.vals()) {
@@ -1672,6 +1735,14 @@ persistent actor {
     programPaymentSummariesStable := _Iter.toArray(programPaymentSummariesByKey.entries());
     programPaymentLedgerStableV2 := _Iter.toArray(programPaymentLedgerById.entries());
     programPaymentLedgerStableV1 := [];
+    financePromotionsStable := _Iter.toArray(financePromotionsById.entries());
+    programTeamMembersStable := _Iter.toArray(programTeamMembersById.entries());
+    programTeamOwedEntriesStable := _Iter.toArray(programTeamOwedEntriesById.entries());
+    programTeamPaidEntriesStable := _Iter.toArray(programTeamPaidEntriesById.entries());
+    programTeamPaidFundedByStable := _Iter.toArray(programTeamPaidFundedByById.entries());
+    membershipTierStable := _Iter.toArray(membershipTierByPrincipal.entries());
+    quarterlyAppCreditBalanceStable := _Iter.toArray(quarterlyAppCreditBalanceByPrincipal.entries());
+    quarterlyAppCreditLastAccruedStable := _Iter.toArray(quarterlyAppCreditLastAccruedByPrincipal.entries());
     programPaymentLedgerStable := [];
     programPaymentPlansStableV2 := _Iter.toArray(programPaymentPlansById.entries());
     programPaymentPlansStable := [];
@@ -1962,6 +2033,86 @@ persistent actor {
     programPaymentLedgerStable := [];
     programPaymentLedgerStableV1 := [];
     programPaymentLedgerStableV2 := [];
+
+    financePromotionsById := _HashMap.HashMap<Text, Types.FinancePromotion>(
+      financePromotionsStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in financePromotionsStable.vals()) {
+      financePromotionsById.put(entry.0, entry.1);
+    };
+    financePromotionsStable := [];
+
+    programTeamMembersById := _HashMap.HashMap<Text, Types.ProgramTeamMember>(
+      programTeamMembersStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in programTeamMembersStable.vals()) {
+      programTeamMembersById.put(entry.0, entry.1);
+    };
+    programTeamMembersStable := [];
+
+    programTeamOwedEntriesById := _HashMap.HashMap<Text, Types.ProgramTeamOwedEntry>(
+      programTeamOwedEntriesStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in programTeamOwedEntriesStable.vals()) {
+      programTeamOwedEntriesById.put(entry.0, entry.1);
+    };
+    programTeamOwedEntriesStable := [];
+
+    programTeamPaidEntriesById := _HashMap.HashMap<Text, Types.ProgramTeamPaidEntry>(
+      programTeamPaidEntriesStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in programTeamPaidEntriesStable.vals()) {
+      programTeamPaidEntriesById.put(entry.0, entry.1);
+    };
+    programTeamPaidEntriesStable := [];
+
+    programTeamPaidFundedByById := _HashMap.HashMap<Text, Text>(
+      programTeamPaidFundedByStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in programTeamPaidFundedByStable.vals()) {
+      programTeamPaidFundedByById.put(entry.0, entry.1);
+    };
+    programTeamPaidFundedByStable := [];
+
+    membershipTierByPrincipal := _HashMap.HashMap<Principal, Text>(
+      membershipTierStable.size(),
+      Principal.equal,
+      Principal.hash,
+    );
+    for (entry in membershipTierStable.vals()) {
+      membershipTierByPrincipal.put(entry.0, entry.1);
+    };
+    membershipTierStable := [];
+
+    quarterlyAppCreditBalanceByPrincipal := _HashMap.HashMap<Principal, Nat>(
+      quarterlyAppCreditBalanceStable.size(),
+      Principal.equal,
+      Principal.hash,
+    );
+    for (entry in quarterlyAppCreditBalanceStable.vals()) {
+      quarterlyAppCreditBalanceByPrincipal.put(entry.0, entry.1);
+    };
+    quarterlyAppCreditBalanceStable := [];
+
+    quarterlyAppCreditLastAccruedByPrincipal := _HashMap.HashMap<Principal, Text>(
+      quarterlyAppCreditLastAccruedStable.size(),
+      Principal.equal,
+      Principal.hash,
+    );
+    for (entry in quarterlyAppCreditLastAccruedStable.vals()) {
+      quarterlyAppCreditLastAccruedByPrincipal.put(entry.0, entry.1);
+    };
+    quarterlyAppCreditLastAccruedStable := [];
 
     programPaymentPlansById := _HashMap.HashMap<Text, Types.ProgramPaymentPlan>(0, Text.equal, Text.hash);
     reloadProgramPaymentPlansFromStables();
@@ -2451,6 +2602,180 @@ persistent actor {
   public shared query (msg) func integrationGetMembershipAccessForPrincipal(p : Principal) : async Types.MembershipAccessResult {
     assertIntegrationCaller(msg.caller);
     membershipAccessForPrincipal(p);
+  };
+
+  private let APP_FEE_GUEST_CENTS : Nat = 5000;
+  private let APP_FEE_MEMBER_CENTS : Nat = 3500;
+
+  private func normalizeMembershipTierText(raw : Text) : Text {
+    let t = Text.toLowercase(Text.trim(raw, #char ' '));
+    if (t == "monthly" or t == "quarterly" or t == "annual" or t == "bimonthly") { t }
+    else if (t == "bi_monthly" or t == "bi-monthly") { "bimonthly" }
+    else { "" }
+  };
+
+  private func membershipTierOf(p : Principal) : Text {
+    switch (membershipTierByPrincipal.get(p)) {
+      case (?t) { normalizeMembershipTierText(t) };
+      case null { "" };
+    }
+  };
+
+  private func digChar(c : Char) : ?Nat {
+    if (c >= '0' and c <= '9') { Nat.fromText(Char.toText(c)) } else { null }
+  };
+
+  /// Parse `YYYY-Qn` → absolute quarter index (year*4 + q-1).
+  private func quarterKeyToIndex(key : Text) : ?Nat {
+    let chars = Text.toArray(key);
+    if (chars.size() != 7) { return null };
+    if (chars[4] != '-' or chars[5] != 'Q') { return null };
+    let y0 = digChar(chars[0]);
+    let y1 = digChar(chars[1]);
+    let y2 = digChar(chars[2]);
+    let y3 = digChar(chars[3]);
+    let qDig = digChar(chars[6]);
+    switch (y0, y1, y2, y3, qDig) {
+      case (?a, ?b, ?c, ?d, ?q) {
+        if (q < 1 or q > 4) { null }
+        else {
+          let year = a * 1000 + b * 100 + c * 10 + d;
+          ?(year * 4 + (q - 1))
+        }
+      };
+      case _ { null };
+    }
+  };
+
+  private func quarterIndexToKey(index : Nat) : Text {
+    let year = index / 4;
+    let q = (index % 4) + 1;
+    Nat.toText(year) # "-Q" # Nat.toText(q)
+  };
+
+  /// Accrue stackable quarterly application credits up through `currentQuarterKey`.
+  private func accrueQuarterlyAppCredits(p : Principal, currentQuarterKey : Text) {
+    let tier = membershipTierOf(p);
+    if (tier != "quarterly") { return };
+    switch (membershipAccessForPrincipal(p)) {
+      case (#ok) {};
+      case _ { return };
+    };
+    let curKey = Text.trim(currentQuarterKey, #char ' ');
+    let curIdx = switch (quarterKeyToIndex(curKey)) {
+      case null { return };
+      case (?i) { i };
+    };
+    let bal0 = switch (quarterlyAppCreditBalanceByPrincipal.get(p)) {
+      case (?n) { n };
+      case null { 0 };
+    };
+    let lastKey = switch (quarterlyAppCreditLastAccruedByPrincipal.get(p)) {
+      case (?k) { k };
+      case null { "" };
+    };
+    if (lastKey.size() == 0) {
+      quarterlyAppCreditBalanceByPrincipal.put(p, bal0 + 1);
+      quarterlyAppCreditLastAccruedByPrincipal.put(p, curKey);
+      return;
+    };
+    let lastIdx = switch (quarterKeyToIndex(lastKey)) {
+      case null {
+        quarterlyAppCreditBalanceByPrincipal.put(p, bal0 + 1);
+        quarterlyAppCreditLastAccruedByPrincipal.put(p, curKey);
+        return;
+      };
+      case (?i) { i };
+    };
+    if (lastIdx >= curIdx) { return };
+    var gap = curIdx - lastIdx;
+    if (gap > 40) { gap := 40 };
+    quarterlyAppCreditBalanceByPrincipal.put(p, bal0 + gap);
+    quarterlyAppCreditLastAccruedByPrincipal.put(p, curKey);
+  };
+
+  private func applicationFeeDueForPrincipal(p : Principal, currentQuarterKey : Text) : Types.ApplicationFeeDue {
+    switch (membershipAccessForPrincipal(p)) {
+      case (#exempt) {
+        {
+          dueCents = 0;
+          reason = "exempt";
+          membershipTier = membershipTierOf(p);
+          appCreditBalance = switch (quarterlyAppCreditBalanceByPrincipal.get(p)) {
+            case (?n) { n };
+            case null { 0 };
+          };
+        }
+      };
+      case (#ok) {
+        accrueQuarterlyAppCredits(p, currentQuarterKey);
+        let tier = membershipTierOf(p);
+        let bal = switch (quarterlyAppCreditBalanceByPrincipal.get(p)) {
+          case (?n) { n };
+          case null { 0 };
+        };
+        if (tier == "annual") {
+          { dueCents = 0; reason = "annual"; membershipTier = "annual"; appCreditBalance = bal }
+        } else if (tier == "quarterly") {
+          if (bal >= 1) {
+            { dueCents = 0; reason = "credit"; membershipTier = "quarterly"; appCreditBalance = bal }
+          } else {
+            { dueCents = APP_FEE_MEMBER_CENTS; reason = "member_fee"; membershipTier = "quarterly"; appCreditBalance = 0 }
+          }
+        } else {
+          let t = if (tier.size() > 0) { tier } else { "monthly" };
+          { dueCents = APP_FEE_MEMBER_CENTS; reason = "member_fee"; membershipTier = t; appCreditBalance = bal }
+        }
+      };
+      case _ {
+        {
+          dueCents = APP_FEE_GUEST_CENTS;
+          reason = "application_only";
+          membershipTier = "";
+          appCreditBalance = 0;
+        }
+      };
+    }
+  };
+
+  /// Caller: application fee due for program apply (`currentQuarterKey` = `YYYY-Qn`, UTC).
+  public shared (msg) func applicationFeeDueForCaller(programId : Text, currentQuarterKey : Text) : async Types.ApplicationFeeDue {
+    ignore programId;
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      return {
+        dueCents = APP_FEE_GUEST_CENTS;
+        reason = "application_only";
+        membershipTier = "";
+        appCreditBalance = 0;
+      };
+    };
+    applicationFeeDueForPrincipal(msg.caller, currentQuarterKey)
+  };
+
+  public shared query (msg) func getMembershipTierForCaller() : async Text {
+    if (Principal.equal(msg.caller, anonPrincipal)) { return "" };
+    membershipTierOf(msg.caller)
+  };
+
+  public shared query (msg) func getQuarterlyAppCreditBalanceForCaller() : async Nat {
+    if (Principal.equal(msg.caller, anonPrincipal)) { return 0 };
+    switch (quarterlyAppCreditBalanceByPrincipal.get(msg.caller)) {
+      case (?n) { n };
+      case null { 0 };
+    }
+  };
+
+  /// Integration API: set membership billing tier after PayPal sync / revise.
+  public shared (msg) func integrationSetMembershipTier(memberPrincipal : Principal, tier : Text) : async () {
+    assertIntegrationCaller(msg.caller);
+    let t = normalizeMembershipTierText(tier);
+    if (t.size() == 0) { Debug.trap("Invalid membership tier") };
+    membershipTierByPrincipal.put(memberPrincipal, t);
+    if (t == "quarterly") {
+      // Grant first credit for current period when first becoming quarterly (key from FE on next fee-due).
+      // If lastAccrued empty and balance 0, leave accrual to applicationFeeDue / explicit call.
+      ignore t;
+    };
   };
 
   /// Admin-only: set full account for any principal (e.g. promote staff).
@@ -3634,7 +3959,11 @@ persistent actor {
     let category = applicantCategoryForApplicationId(s.applicationId);
     let categoryDiscountCents = if (category == "veteran") { PROGRAM_VETERAN_DISCOUNT_CENTS } else { 0 };
     let flightCreditCents = if (ownFlight) { PROGRAM_OWN_FLIGHT_CREDIT_CENTS } else { 0 };
-    let effectiveTotalDueCents = memberProgramTotalDueCents(category, ownFlight);
+    let effectiveTotalDueCents = applicantEffectiveTotalDueFromPayload(
+      applicantPayloadJsonForApplicationId(s.applicationId),
+      category,
+      ownFlight,
+    );
     let effectiveOutstandingCents = natSubFloor(effectiveTotalDueCents, s.totalPaidCents);
     "{"
       # "\"key\":" # jsonText(s.key)
@@ -3797,31 +4126,80 @@ persistent actor {
     "{\"summaries\":" # summaries # ",\"ledger\":" # ledger # ",\"plans\":" # plans # "}";
   };
 
+  private func extractJsonNatField(json : Text, key : Text) : Nat {
+    let marker = "\"" # key # "\":";
+    let parts = _Iter.toArray(Text.split(json, #text(marker)));
+    if (parts.size() < 2) {
+      return 0;
+    };
+    let tail = parts[1];
+    var digits : Text = "";
+    for (c in tail.chars()) {
+      if (c >= '0' and c <= '9') {
+        digits := digits # Text.fromChar(c);
+      } else if (digits.size() > 0) {
+        // stop after first number token
+        // (Motoko has no break — use return after parse)
+        return switch (Nat.fromText(digits)) {
+          case null { 0 };
+          case (?n) { n };
+        };
+      } else if (c != ' ' and c != '\t' and c != '\n' and c != '\r') {
+        return 0;
+      };
+    };
+    switch (Nat.fromText(digits)) {
+      case null { 0 };
+      case (?n) { n };
+    };
+  };
+
+  private func applicantEffectiveTotalDueFromPayload(payloadJson : Text, category : Text, ownFlight : Bool) : Nat {
+    let sponsorshipMode = extractJsonStringField(payloadJson, "sponsorshipMode");
+    if (sponsorshipMode == "full") {
+      return 0;
+    };
+    let special = extractJsonNatField(payloadJson, "specialProgramTotalCents");
+    let base =
+      if (special > 0) { special } else { memberProgramTotalDueCents(category, ownFlight) };
+    if (sponsorshipMode == "partial") {
+      var credit = extractJsonNatField(payloadJson, "sponsoredCreditCents");
+      if (credit == 0) {
+        let pct = extractJsonNatField(payloadJson, "sponsoredPercent");
+        if (pct > 0 and pct <= 100) {
+          credit := (base * pct) / 100;
+        };
+      };
+      if (base > credit) { base - credit } else { 0 };
+    } else {
+      base
+    };
+  };
+
+  private func applicantPayloadJsonForApplicationId(applicationId : Text) : Text {
+    let recOpt = switch (applicantsById.get(applicationId)) {
+      case (?rec) { ?rec };
+      case null { archivedApplicantsById.get(applicationId) };
+    };
+    switch (recOpt) {
+      case null { "{}" };
+      case (?rec) { rec.payloadJson };
+    };
+  };
+
   private func effectiveTotalDueForStaffLedger(
     principal : Principal,
     programId : Text,
     applicationId : Text,
   ) : Nat {
-    let key = programPaymentKey(principal, programId);
     let category = applicantCategoryForApplicationId(applicationId);
-    let flightPref = programPaymentFlightPreferencesByKey.get(key);
+    let flightPref = programPaymentFlightPreferencesByKey.get(programPaymentKey(principal, programId));
     let ownFlight = switch (flightPref) {
       case null { false };
       case (?pref) { pref.ownFlight };
     };
-    switch (flightPref) {
-      case (?pref) {
-        if (pref.totalDueCents > 0) { pref.totalDueCents } else { memberProgramTotalDueCents(category, ownFlight) };
-      };
-      case null {
-        switch (programPaymentSummariesByKey.get(key)) {
-          case (?s) {
-            if (s.totalDueCents > 0) { s.totalDueCents } else { memberProgramTotalDueCents(category, ownFlight) };
-          };
-          case null { memberProgramTotalDueCents(category, ownFlight) };
-        };
-      };
-    };
+    let payloadJson = applicantPayloadJsonForApplicationId(applicationId);
+    applicantEffectiveTotalDueFromPayload(payloadJson, category, ownFlight);
   };
 
   public shared (msg) func staffRecordManualProgramLedgerEntry(
@@ -3888,6 +4266,833 @@ persistent actor {
     };
     programPaymentLedgerById.put(rowId, row);
     putProgramPaymentSummaryFromLedger(row, totalDueCents, depositAmountCents, 0);
+  };
+
+  /// Staff Finance: edit or soft-void a staff-provider ledger row (not PayPal/Stripe).
+  public shared (msg) func staffUpdateManualProgramLedgerEntry(
+    paymentId : Text,
+    amountCents : Nat,
+    feeCents : Nat,
+    staffNote : Text,
+    status : Text,
+  ) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "financePrograms");
+    if (paymentId.size() == 0) {
+      Debug.trap("paymentId required");
+    };
+    let existing = switch (programPaymentLedgerById.get(paymentId)) {
+      case null { Debug.trap("Ledger row not found") };
+      case (?r) { r };
+    };
+    if (existing.paymentProvider != "staff") {
+      Debug.trap("Only staff ledger rows can be edited");
+    };
+    let nextStatus =
+      if (status == "voided" or status == "canceled" or status == "cancelled") { "voided" }
+      else if (status == "succeeded" or status == "paid" or status == "") { "succeeded" }
+      else { Debug.trap("Invalid status") };
+    if (nextStatus == "succeeded" and amountCents == 0 and feeCents == 0) {
+      Debug.trap("amountCents or feeCents required");
+    };
+    let editedNote =
+      if (Text.contains(staffNote, #text "[edited ")) { staffNote }
+      else if (staffNote.size() > 0) { staffNote # " [edited]" }
+      else { "[edited]" };
+    let row : Types.ProgramPaymentLedgerRow = {
+      id = existing.id;
+      principal = existing.principal;
+      programId = existing.programId;
+      applicationId = existing.applicationId;
+      paymentType = existing.paymentType;
+      amountCents = amountCents;
+      currency = existing.currency;
+      stripePaymentIntentId = existing.stripePaymentIntentId;
+      stripeChargeId = existing.stripeChargeId;
+      stripeReceiptUrl = existing.stripeReceiptUrl;
+      status = nextStatus;
+      createdAt = existing.createdAt;
+      dueAt = existing.dueAt;
+      feeCents = feeCents;
+      staffNote = editedNote;
+      paymentProvider = existing.paymentProvider;
+      externalPaymentId = existing.externalPaymentId;
+      externalChargeId = existing.externalChargeId;
+      externalReceiptUrl = existing.externalReceiptUrl;
+    };
+    let totalDueCents = effectiveTotalDueForStaffLedger(existing.principal, existing.programId, existing.applicationId);
+    let depositAmountCents = switch (programPaymentSummariesByKey.get(programPaymentKey(existing.principal, existing.programId))) {
+      case (?s) {
+        if (s.depositAmountCents > 0) { s.depositAmountCents } else { 100000 };
+      };
+      case null { 100000 };
+    };
+    let oldPaidContribution =
+      if ((existing.status == "succeeded" or existing.status == "paid") and existing.paymentType != "refund") {
+        existing.amountCents
+      } else { 0 };
+    let newPaidContribution =
+      if ((nextStatus == "succeeded" or nextStatus == "paid") and row.paymentType != "refund") {
+        amountCents
+      } else { 0 };
+    programPaymentLedgerById.put(paymentId, row);
+    let key = programPaymentKey(existing.principal, existing.programId);
+    let prior = programPaymentSummariesByKey.get(key);
+    let priorPaid = switch (prior) {
+      case null { 0 };
+      case (?s) { s.totalPaidCents };
+    };
+    let priorPlan = switch (prior) {
+      case null { null };
+      case (?s) { s.activePlanId };
+    };
+    let nextPaid = natSubFloor(priorPaid + newPaidContribution, oldPaidContribution);
+    let outstanding = natSubFloor(totalDueCents, nextPaid);
+    let depositStatus =
+      if (nextPaid >= totalDueCents and totalDueCents > 0) {
+        "paid_full"
+      } else if (nextPaid >= depositAmountCents and depositAmountCents > 0) {
+        "paid"
+      } else if (nextPaid == 0) {
+        "due"
+      } else {
+        switch (prior) {
+          case null { "due" };
+          case (?s) { s.depositStatus };
+        };
+      };
+    let summary : Types.ProgramPaymentSummary = {
+      key = key;
+      principal = existing.principal;
+      programId = existing.programId;
+      applicationId = existing.applicationId;
+      depositStatus = depositStatus;
+      totalDueCents = totalDueCents;
+      depositAmountCents = depositAmountCents;
+      totalPaidCents = nextPaid;
+      outstandingCents = outstanding;
+      refundedCents = switch (prior) {
+        case null { 0 };
+        case (?s) { s.refundedCents };
+      };
+      activePlanId = priorPlan;
+      updatedAt = Int.toText(Time.now());
+    };
+    programPaymentSummariesByKey.put(key, summary);
+  };
+
+  private func financePromotionJson(p : Types.FinancePromotion) : Text {
+    "{"
+      # "\"id\":" # jsonText(p.id)
+      # ",\"name\":" # jsonText(p.name)
+      # ",\"company\":" # jsonText(p.company)
+      # ",\"startIso\":" # jsonText(p.startIso)
+      # ",\"endIso\":" # jsonText(p.endIso)
+      # ",\"target\":" # jsonText(p.target)
+      # ",\"programId\":" # jsonText(p.programId)
+      # ",\"costCents\":" # Nat.toText(p.costCents)
+      # ",\"status\":" # jsonText(p.status)
+      # ",\"createdAt\":" # jsonText(p.createdAt)
+      # ",\"updatedAt\":" # jsonText(p.updatedAt)
+      # ",\"createdBy\":" # jsonText(p.createdBy)
+      # "}"
+  };
+
+  public shared query (msg) func staffListPromotionsJson() : async Text {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisibleEither(msg.caller, "financePrograms", "financePromotions");
+    var out : Text = "[";
+    var first = true;
+    for ((_, p) in financePromotionsById.entries()) {
+      if (p.status != "archived") {
+        if (not first) { out := out # "," };
+        first := false;
+        out := out # financePromotionJson(p);
+      };
+    };
+    out # "]"
+  };
+
+  public shared (msg) func staffUpsertPromotion(
+    id : Text,
+    name : Text,
+    company : Text,
+    startIso : Text,
+    endIso : Text,
+    target : Text,
+    programId : Text,
+    costCents : Nat,
+  ) : async Text {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "financePromotions");
+    let trimmedName = Text.trim(name, #char ' ');
+    if (trimmedName.size() == 0) {
+      Debug.trap("name required");
+    };
+    let targetNorm =
+      if (target == "program") { "program" }
+      else { "platform" };
+    if (targetNorm == "program" and Text.trim(programId, #char ' ').size() == 0) {
+      Debug.trap("programId required for program target");
+    };
+    let now = Int.toText(Time.now());
+    let existingId = Text.trim(id, #char ' ');
+    let rowId =
+      if (existingId.size() > 0) { existingId }
+      else { "promo-" # Principal.toText(msg.caller) # "-" # now };
+    let prior = financePromotionsById.get(rowId);
+    let createdAt = switch (prior) {
+      case (?p) { p.createdAt };
+      case null { now };
+    };
+    let createdBy = switch (prior) {
+      case (?p) { p.createdBy };
+      case null { Principal.toText(msg.caller) };
+    };
+    let row : Types.FinancePromotion = {
+      id = rowId;
+      name = trimmedName;
+      company = Text.trim(company, #char ' ');
+      startIso = Text.trim(startIso, #char ' ');
+      endIso = Text.trim(endIso, #char ' ');
+      target = targetNorm;
+      programId = if (targetNorm == "program") { Text.trim(programId, #char ' ') } else { "" };
+      costCents = costCents;
+      status = "active";
+      createdAt = createdAt;
+      updatedAt = now;
+      createdBy = createdBy;
+    };
+    financePromotionsById.put(rowId, row);
+    rowId
+  };
+
+  public shared (msg) func staffArchivePromotion(id : Text) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "financePromotions");
+    let rowId = Text.trim(id, #char ' ');
+    if (rowId.size() == 0) {
+      Debug.trap("id required");
+    };
+    switch (financePromotionsById.get(rowId)) {
+      case null { Debug.trap("Promotion not found") };
+      case (?p) {
+        financePromotionsById.put(rowId, {
+          p with
+          status = "archived";
+          updatedAt = Int.toText(Time.now());
+        });
+      };
+    };
+  };
+
+  private func programTeamOwedEntryJson(e : Types.ProgramTeamOwedEntry) : Text {
+    "{"
+      # "\"id\":" # jsonText(e.id)
+      # ",\"teamMemberId\":" # jsonText(e.teamMemberId)
+      # ",\"programId\":" # jsonText(e.programId)
+      # ",\"name\":" # jsonText(e.name)
+      # ",\"description\":" # jsonText(e.description)
+      # ",\"dateIso\":" # jsonText(e.dateIso)
+      # ",\"amountCents\":" # Nat.toText(e.amountCents)
+      # ",\"createdAt\":" # jsonText(e.createdAt)
+      # ",\"updatedAt\":" # jsonText(e.updatedAt)
+      # ",\"createdBy\":" # jsonText(e.createdBy)
+      # ",\"status\":" # jsonText(e.status)
+      # "}"
+  };
+
+  private func normalizePaymentService(raw : Text) : Text {
+    let t = Text.toLowercase(Text.trim(raw, #char ' '));
+    if (t == "stripe" or t == "paypal" or t == "wire" or t == "cash" or t == "other") {
+      t
+    } else {
+      "other"
+    }
+  };
+
+  /// "admin" (default) | "program"
+  private func normalizePaidFundedBy(raw : Text) : Text {
+    let t = Text.toLowercase(Text.trim(raw, #char ' '));
+    if (t == "program") { "program" } else { "admin" }
+  };
+
+  private func paidEntryFundedBy(entryId : Text) : Text {
+    switch (programTeamPaidFundedByById.get(entryId)) {
+      case (?v) { normalizePaidFundedBy(v) };
+      case null { "admin" };
+    }
+  };
+
+  private func programTeamPaidEntryJson(e : Types.ProgramTeamPaidEntry) : Text {
+    "{"
+      # "\"id\":" # jsonText(e.id)
+      # ",\"teamMemberId\":" # jsonText(e.teamMemberId)
+      # ",\"programId\":" # jsonText(e.programId)
+      # ",\"name\":" # jsonText(e.name)
+      # ",\"description\":" # jsonText(e.description)
+      # ",\"dateIso\":" # jsonText(e.dateIso)
+      # ",\"amountCents\":" # Nat.toText(e.amountCents)
+      # ",\"paymentService\":" # jsonText(e.paymentService)
+      # ",\"fundedBy\":" # jsonText(paidEntryFundedBy(e.id))
+      # ",\"createdAt\":" # jsonText(e.createdAt)
+      # ",\"updatedAt\":" # jsonText(e.updatedAt)
+      # ",\"createdBy\":" # jsonText(e.createdBy)
+      # ",\"status\":" # jsonText(e.status)
+      # "}"
+  };
+
+  private func sumActiveOwedCentsForMember(teamMemberId : Text) : Nat {
+    var total : Nat = 0;
+    for ((_, e) in programTeamOwedEntriesById.entries()) {
+      if (e.teamMemberId == teamMemberId and e.status == "active") {
+        total += e.amountCents;
+      };
+    };
+    total
+  };
+
+  private func sumActivePaidCentsForMember(teamMemberId : Text) : Nat {
+    var total : Nat = 0;
+    for ((_, e) in programTeamPaidEntriesById.entries()) {
+      if (e.teamMemberId == teamMemberId and e.status == "active") {
+        total += e.amountCents;
+      };
+    };
+    total
+  };
+
+  private func countActiveOwedEntries(teamMemberId : Text) : Nat {
+    var n : Nat = 0;
+    for ((_, e) in programTeamOwedEntriesById.entries()) {
+      if (e.teamMemberId == teamMemberId and e.status == "active") {
+        n += 1;
+      };
+    };
+    n
+  };
+
+  private func countActivePaidEntries(teamMemberId : Text) : Nat {
+    var n : Nat = 0;
+    for ((_, e) in programTeamPaidEntriesById.entries()) {
+      if (e.teamMemberId == teamMemberId and e.status == "active") {
+        n += 1;
+      };
+    };
+    n
+  };
+
+  private func recomputeProgramTeamMemberDisbursementTotals(teamMemberId : Text) {
+    switch (programTeamMembersById.get(teamMemberId)) {
+      case null {};
+      case (?m) {
+        programTeamMembersById.put(teamMemberId, {
+          m with
+          amountOwedCents = sumActiveOwedCentsForMember(teamMemberId);
+          amountPaidCents = sumActivePaidCentsForMember(teamMemberId);
+          updatedAt = Int.toText(Time.now());
+        });
+      };
+    };
+  };
+
+  /// Migrate scalar owed/paid caches into ledger rows when no active entries exist.
+  private func migrateLegacyDisbursementTotals(m : Types.ProgramTeamMember, createdBy : Text) {
+    let now = Int.toText(Time.now());
+    if (m.amountOwedCents > 0 and countActiveOwedEntries(m.id) == 0) {
+      let oid = "owed-" # m.id # "-legacy";
+      programTeamOwedEntriesById.put(oid, {
+        id = oid;
+        teamMemberId = m.id;
+        programId = m.programId;
+        name = "Prior balance";
+        description = "Migrated from previous amount owed";
+        dateIso = "";
+        amountCents = m.amountOwedCents;
+        createdAt = now;
+        updatedAt = now;
+        createdBy = createdBy;
+        status = "active";
+      });
+    };
+    if (m.amountPaidCents > 0 and countActivePaidEntries(m.id) == 0) {
+      let pid = "paid-" # m.id # "-legacy";
+      programTeamPaidEntriesById.put(pid, {
+        id = pid;
+        teamMemberId = m.id;
+        programId = m.programId;
+        name = "Prior balance";
+        description = "Migrated from previous amount paid";
+        dateIso = "";
+        amountCents = m.amountPaidCents;
+        paymentService = "other";
+        createdAt = now;
+        updatedAt = now;
+        createdBy = createdBy;
+        status = "active";
+      });
+    };
+    recomputeProgramTeamMemberDisbursementTotals(m.id);
+  };
+
+  private func owedEntriesJsonForMember(teamMemberId : Text) : Text {
+    var out : Text = "[";
+    var first = true;
+    for ((_, e) in programTeamOwedEntriesById.entries()) {
+      if (e.teamMemberId == teamMemberId and e.status == "active") {
+        if (not first) { out := out # "," };
+        first := false;
+        out := out # programTeamOwedEntryJson(e);
+      };
+    };
+    out # "]"
+  };
+
+  private func paidEntriesJsonForMember(teamMemberId : Text) : Text {
+    var out : Text = "[";
+    var first = true;
+    for ((_, e) in programTeamPaidEntriesById.entries()) {
+      if (e.teamMemberId == teamMemberId and e.status == "active") {
+        if (not first) { out := out # "," };
+        first := false;
+        out := out # programTeamPaidEntryJson(e);
+      };
+    };
+    out # "]"
+  };
+
+  private func programTeamMemberJson(m : Types.ProgramTeamMember) : Text {
+    "{"
+      # "\"id\":" # jsonText(m.id)
+      # ",\"programId\":" # jsonText(m.programId)
+      # ",\"principalText\":" # jsonText(m.principalText)
+      # ",\"kind\":" # jsonText(m.kind)
+      # ",\"ticketsCents\":" # Nat.toText(m.ticketsCents)
+      # ",\"localTravelCents\":" # Nat.toText(m.localTravelCents)
+      # ",\"partner1Cents\":" # Nat.toText(m.partner1Cents)
+      # ",\"partner2Cents\":" # Nat.toText(m.partner2Cents)
+      # ",\"partner3Cents\":" # Nat.toText(m.partner3Cents)
+      # ",\"amountOwedCents\":" # Nat.toText(m.amountOwedCents)
+      # ",\"amountPaidCents\":" # Nat.toText(m.amountPaidCents)
+      # ",\"payoutPercent\":" # Nat.toText(m.payoutPercent)
+      # ",\"createdAt\":" # jsonText(m.createdAt)
+      # ",\"updatedAt\":" # jsonText(m.updatedAt)
+      # ",\"createdBy\":" # jsonText(m.createdBy)
+      # ",\"status\":" # jsonText(m.status)
+      # ",\"owedEntries\":" # owedEntriesJsonForMember(m.id)
+      # ",\"paidEntries\":" # paidEntriesJsonForMember(m.id)
+      # "}"
+  };
+
+  private func programTeamMemberId(programId : Text, principalText : Text) : Text {
+    "team-" # programId # "-" # principalText
+  };
+
+  private func kindForProgramTeamPrincipal(p : Principal) : Text {
+    if (isAdminPrincipal(p)) { return "admin" };
+    switch (accountsByPrincipal.get(p)) {
+      case (?core) {
+        switch (core.role) {
+          case (#admin) { "admin" };
+          case (#staff) { "staff" };
+          case (#collaborator) { "collaborator" };
+          case _ { "staff" };
+        };
+      };
+      case null { "staff" };
+    };
+  };
+
+  /// At most one active admin row per program team (manual assignment; not auto-seeded).
+  private func programTeamHasOtherActiveAdmin(programId : Text, excludePrincipalText : Text) : Bool {
+    for ((_, m) in programTeamMembersById.entries()) {
+      if (
+        m.programId == programId
+        and m.status == "active"
+        and m.kind == "admin"
+        and m.principalText != excludePrincipalText
+      ) {
+        return true;
+      };
+    };
+    false
+  };
+
+  /// Clear former auto-seeded admin rows (more than one active admin = seed residue).
+  private func cleanupAutoSeededProgramTeamAdmins(programId : Text) {
+    var adminIds : [Text] = [];
+    for ((id, m) in programTeamMembersById.entries()) {
+      if (m.programId == programId and m.status == "active" and m.kind == "admin") {
+        adminIds := Array.append<Text>(adminIds, [id]);
+      };
+    };
+    if (adminIds.size() <= 1) { return };
+    let now = Int.toText(Time.now());
+    for (id in adminIds.vals()) {
+      switch (programTeamMembersById.get(id)) {
+        case (?m) {
+          programTeamMembersById.put(id, {
+            m with
+            status = "removed";
+            updatedAt = now;
+          });
+        };
+        case null {};
+      };
+    };
+  };
+
+  public shared (msg) func staffListProgramTeamJson(programId : Text) : async Text {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "financePrograms");
+    let pid = Text.trim(programId, #char ' ');
+    if (pid.size() == 0) {
+      Debug.trap("programId required");
+    };
+    cleanupAutoSeededProgramTeamAdmins(pid);
+    let callerText = Principal.toText(msg.caller);
+    var out : Text = "[";
+    var first = true;
+    for ((_, m) in programTeamMembersById.entries()) {
+      if (m.programId == pid and m.status == "active") {
+        migrateLegacyDisbursementTotals(m, callerText);
+        let refreshed = switch (programTeamMembersById.get(m.id)) {
+          case (?r) { r };
+          case null { m };
+        };
+        if (not first) { out := out # "," };
+        first := false;
+        out := out # programTeamMemberJson(refreshed);
+      };
+    };
+    out # "]"
+  };
+
+  public shared (msg) func staffAddProgramTeamMember(programId : Text, principalText : Text) : async Text {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "financePrograms");
+    let pid = Text.trim(programId, #char ' ');
+    let pt = Text.trim(principalText, #char ' ');
+    if (pid.size() == 0 or pt.size() == 0) {
+      Debug.trap("programId and principalText required");
+    };
+    let p = Principal.fromText(pt);
+    let kind = kindForProgramTeamPrincipal(p);
+    if (kind != "admin" and kind != "staff" and kind != "collaborator") {
+      Debug.trap("Principal must be staff, collaborator, or admin");
+    };
+    if (not isAdminPrincipal(p)) {
+      switch (accountsByPrincipal.get(p)) {
+        case null { Debug.trap("No account for principal") };
+        case (?core) {
+          if (not roleIsPrivileged(core.role)) {
+            Debug.trap("Principal must be staff, collaborator, or admin");
+          };
+        };
+      };
+    };
+    if (kind == "admin" and programTeamHasOtherActiveAdmin(pid, pt)) {
+      Debug.trap("Only one admin can be on a program team");
+    };
+    let now = Int.toText(Time.now());
+    let rowId = programTeamMemberId(pid, pt);
+    switch (programTeamMembersById.get(rowId)) {
+      case (?existing) {
+        if (existing.status == "active") {
+          return rowId;
+        };
+        if (kind == "admin" and programTeamHasOtherActiveAdmin(pid, pt)) {
+          Debug.trap("Only one admin can be on a program team");
+        };
+        programTeamMembersById.put(rowId, {
+          existing with
+          status = "active";
+          kind = kind;
+          updatedAt = now;
+        });
+        return rowId;
+      };
+      case null {
+        programTeamMembersById.put(rowId, {
+          id = rowId;
+          programId = pid;
+          principalText = pt;
+          kind = kind;
+          ticketsCents = 0;
+          localTravelCents = 0;
+          partner1Cents = 0;
+          partner2Cents = 0;
+          partner3Cents = 0;
+          amountOwedCents = 0;
+          amountPaidCents = 0;
+          payoutPercent = 0;
+          createdAt = now;
+          updatedAt = now;
+          createdBy = Principal.toText(msg.caller);
+          status = "active";
+        });
+        rowId
+      };
+    };
+  };
+
+  public shared (msg) func staffUpdateProgramTeamMemberExpenses(
+    teamMemberId : Text,
+    ticketsCents : Nat,
+    localTravelCents : Nat,
+    partner1Cents : Nat,
+    partner2Cents : Nat,
+    partner3Cents : Nat,
+  ) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "financePrograms");
+    let rowId = Text.trim(teamMemberId, #char ' ');
+    switch (programTeamMembersById.get(rowId)) {
+      case null { Debug.trap("Team member not found") };
+      case (?m) {
+        if (m.status != "active") { Debug.trap("Team member not active") };
+        programTeamMembersById.put(rowId, {
+          m with
+          ticketsCents = ticketsCents;
+          localTravelCents = localTravelCents;
+          partner1Cents = partner1Cents;
+          partner2Cents = partner2Cents;
+          partner3Cents = partner3Cents;
+          updatedAt = Int.toText(Time.now());
+        });
+      };
+    };
+  };
+
+  /// Compatibility: set scalar totals by replacing/creating a single "Adjusted total" entry each side.
+  public shared (msg) func staffUpdateProgramTeamMemberDisbursement(
+    teamMemberId : Text,
+    amountOwedCents : Nat,
+    amountPaidCents : Nat,
+  ) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "financePrograms");
+    let rowId = Text.trim(teamMemberId, #char ' ');
+    let m = switch (programTeamMembersById.get(rowId)) {
+      case null { Debug.trap("Team member not found") };
+      case (?row) {
+        if (row.status != "active") { Debug.trap("Team member not active") };
+        row
+      };
+    };
+    let now = Int.toText(Time.now());
+    let callerText = Principal.toText(msg.caller);
+    let owedId = "owed-" # rowId # "-compat";
+    programTeamOwedEntriesById.put(owedId, {
+      id = owedId;
+      teamMemberId = rowId;
+      programId = m.programId;
+      name = "Adjusted total";
+      description = "Set via compatibility disbursement API";
+      dateIso = "";
+      amountCents = amountOwedCents;
+      createdAt = now;
+      updatedAt = now;
+      createdBy = callerText;
+      status = if (amountOwedCents == 0) { "voided" } else { "active" };
+    });
+    let paidId = "paid-" # rowId # "-compat";
+    programTeamPaidEntriesById.put(paidId, {
+      id = paidId;
+      teamMemberId = rowId;
+      programId = m.programId;
+      name = "Adjusted total";
+      description = "Set via compatibility disbursement API";
+      dateIso = "";
+      amountCents = amountPaidCents;
+      paymentService = "other";
+      createdAt = now;
+      updatedAt = now;
+      createdBy = callerText;
+      status = if (amountPaidCents == 0) { "voided" } else { "active" };
+    });
+    recomputeProgramTeamMemberDisbursementTotals(rowId);
+  };
+
+  public shared (msg) func staffUpsertProgramTeamOwedEntry(
+    teamMemberId : Text,
+    entryId : Text,
+    name : Text,
+    description : Text,
+    dateIso : Text,
+    amountCents : Nat,
+  ) : async Text {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "financePrograms");
+    let mid = Text.trim(teamMemberId, #char ' ');
+    let m = switch (programTeamMembersById.get(mid)) {
+      case null { Debug.trap("Team member not found") };
+      case (?row) {
+        if (row.status != "active") { Debug.trap("Team member not active") };
+        row
+      };
+    };
+    let trimmedName = Text.trim(name, #char ' ');
+    if (trimmedName.size() == 0) {
+      Debug.trap("name required");
+    };
+    let now = Int.toText(Time.now());
+    let existingId = Text.trim(entryId, #char ' ');
+    let rowId =
+      if (existingId.size() > 0) { existingId }
+      else { "owed-" # mid # "-" # now };
+    let prior = programTeamOwedEntriesById.get(rowId);
+    let createdAt = switch (prior) {
+      case (?e) { e.createdAt };
+      case null { now };
+    };
+    let createdBy = switch (prior) {
+      case (?e) { e.createdBy };
+      case null { Principal.toText(msg.caller) };
+    };
+    programTeamOwedEntriesById.put(rowId, {
+      id = rowId;
+      teamMemberId = mid;
+      programId = m.programId;
+      name = trimmedName;
+      description = Text.trim(description, #char ' ');
+      dateIso = Text.trim(dateIso, #char ' ');
+      amountCents = amountCents;
+      createdAt = createdAt;
+      updatedAt = now;
+      createdBy = createdBy;
+      status = "active";
+    });
+    recomputeProgramTeamMemberDisbursementTotals(mid);
+    rowId
+  };
+
+  public shared (msg) func staffVoidProgramTeamOwedEntry(entryId : Text) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "financePrograms");
+    let eid = Text.trim(entryId, #char ' ');
+    switch (programTeamOwedEntriesById.get(eid)) {
+      case null { Debug.trap("Owed entry not found") };
+      case (?e) {
+        programTeamOwedEntriesById.put(eid, {
+          e with
+          status = "voided";
+          updatedAt = Int.toText(Time.now());
+        });
+        recomputeProgramTeamMemberDisbursementTotals(e.teamMemberId);
+      };
+    };
+  };
+
+  public shared (msg) func staffUpsertProgramTeamPaidEntry(
+    teamMemberId : Text,
+    entryId : Text,
+    name : Text,
+    description : Text,
+    dateIso : Text,
+    amountCents : Nat,
+    paymentService : Text,
+    fundedBy : Text,
+  ) : async Text {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "financePrograms");
+    let mid = Text.trim(teamMemberId, #char ' ');
+    let m = switch (programTeamMembersById.get(mid)) {
+      case null { Debug.trap("Team member not found") };
+      case (?row) {
+        if (row.status != "active") { Debug.trap("Team member not active") };
+        row
+      };
+    };
+    let trimmedName = Text.trim(name, #char ' ');
+    if (trimmedName.size() == 0) {
+      Debug.trap("name required");
+    };
+    let now = Int.toText(Time.now());
+    let existingId = Text.trim(entryId, #char ' ');
+    let rowId =
+      if (existingId.size() > 0) { existingId }
+      else { "paid-" # mid # "-" # now };
+    let prior = programTeamPaidEntriesById.get(rowId);
+    let createdAt = switch (prior) {
+      case (?e) { e.createdAt };
+      case null { now };
+    };
+    let createdBy = switch (prior) {
+      case (?e) { e.createdBy };
+      case null { Principal.toText(msg.caller) };
+    };
+    programTeamPaidEntriesById.put(rowId, {
+      id = rowId;
+      teamMemberId = mid;
+      programId = m.programId;
+      name = trimmedName;
+      description = Text.trim(description, #char ' ');
+      dateIso = Text.trim(dateIso, #char ' ');
+      amountCents = amountCents;
+      paymentService = normalizePaymentService(paymentService);
+      createdAt = createdAt;
+      updatedAt = now;
+      createdBy = createdBy;
+      status = "active";
+    });
+    programTeamPaidFundedByById.put(rowId, normalizePaidFundedBy(fundedBy));
+    recomputeProgramTeamMemberDisbursementTotals(mid);
+    rowId
+  };
+
+  public shared (msg) func staffVoidProgramTeamPaidEntry(entryId : Text) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "financePrograms");
+    let eid = Text.trim(entryId, #char ' ');
+    switch (programTeamPaidEntriesById.get(eid)) {
+      case null { Debug.trap("Paid entry not found") };
+      case (?e) {
+        programTeamPaidEntriesById.put(eid, {
+          e with
+          status = "voided";
+          updatedAt = Int.toText(Time.now());
+        });
+        recomputeProgramTeamMemberDisbursementTotals(e.teamMemberId);
+      };
+    };
+  };
+
+  public shared (msg) func staffUpdateProgramTeamMemberPayoutPercent(
+    teamMemberId : Text,
+    payoutPercent : Nat,
+  ) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "financePrograms");
+    let rowId = Text.trim(teamMemberId, #char ' ');
+    let pct = if (payoutPercent > 100) { 100 } else { payoutPercent };
+    switch (programTeamMembersById.get(rowId)) {
+      case null { Debug.trap("Team member not found") };
+      case (?m) {
+        if (m.status != "active") { Debug.trap("Team member not active") };
+        programTeamMembersById.put(rowId, {
+          m with
+          payoutPercent = pct;
+          updatedAt = Int.toText(Time.now());
+        });
+      };
+    };
+  };
+
+  public shared (msg) func staffRemoveProgramTeamMember(teamMemberId : Text) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "financePrograms");
+    let rowId = Text.trim(teamMemberId, #char ' ');
+    switch (programTeamMembersById.get(rowId)) {
+      case null { Debug.trap("Team member not found") };
+      case (?m) {
+        programTeamMembersById.put(rowId, {
+          m with
+          status = "removed";
+          updatedAt = Int.toText(Time.now());
+        });
+      };
+    };
   };
 
   /// Staff Finance: re-link an existing ledger row (e.g. an orphaned PayPal payment)
@@ -4141,7 +5346,11 @@ persistent actor {
     };
     let category = applicantCategoryForApplicationId(applicationId);
     let flightCreditCents = if (ownFlight) { PROGRAM_OWN_FLIGHT_CREDIT_CENTS } else { 0 };
-    let totalDueCents = memberProgramTotalDueCents(category, ownFlight);
+    let totalDueCents = applicantEffectiveTotalDueFromPayload(
+      applicantPayloadJsonForApplicationId(applicationId),
+      category,
+      ownFlight,
+    );
     putProgramPaymentFlightPreference(msg.caller, programId, applicationId, ownFlight, flightCreditCents, totalDueCents, updatedAt, false);
   };
 
@@ -4411,6 +5620,22 @@ persistent actor {
       emailOutreachJson = "[]";
     };
     applicantsById.put(key, applicant);
+    // Consume one stacked quarterly application credit when available (fee-due path with reason=credit).
+    switch (membershipAccessForPrincipal(msg.caller)) {
+      case (#ok) {
+        if (membershipTierOf(msg.caller) == "quarterly") {
+          switch (quarterlyAppCreditBalanceByPrincipal.get(msg.caller)) {
+            case (?n) {
+              if (n >= 1) {
+                quarterlyAppCreditBalanceByPrincipal.put(msg.caller, n - 1);
+              };
+            };
+            case null {};
+          };
+        };
+      };
+      case _ {};
+    };
   };
 
   /// Authenticated artist: replace `localesJson` for the linked roster row only (staff upsert still overrides).
@@ -5866,6 +7091,20 @@ persistent actor {
     };
   };
 
+  private func ledgerSucceededPaidCentsForApplication(applicationId : Text) : Nat {
+    var paid : Nat = 0;
+    for ((_, row) in programPaymentLedgerById.entries()) {
+      if (
+        row.applicationId == applicationId
+        and (row.status == "succeeded" or row.status == "paid")
+        and row.paymentType != "refund"
+      ) {
+        paid += row.amountCents;
+      };
+    };
+    paid
+  };
+
   private func staffRecomputeApplicantCategoryPaymentSummary(
     applicantId : Text,
     programId : Text,
@@ -5882,7 +7121,9 @@ persistent actor {
       case null { false };
       case (?pref) { pref.ownFlight };
     };
-    let totalDueCents = memberProgramTotalDueCents(category, ownFlight);
+    let payloadJson = applicantPayloadJsonForApplicationId(applicantId);
+    let totalDueCents = applicantEffectiveTotalDueFromPayload(payloadJson, category, ownFlight);
+    let fullySponsored = extractJsonStringField(payloadJson, "sponsorshipMode") == "full";
     let flightCreditCents = if (ownFlight) { PROGRAM_OWN_FLIGHT_CREDIT_CENTS } else { 0 };
     switch (flightPref) {
       case (?pref) {
@@ -5896,14 +7137,45 @@ persistent actor {
       };
       case null {};
     };
+    let ledgerPaid = ledgerSucceededPaidCentsForApplication(applicantId);
     switch (programPaymentSummariesByKey.get(key)) {
-      case null { return };
+      case null {
+        if (not fullySponsored) { return };
+        // Create a $0-due waived summary so member/staff views stay consistent.
+        programPaymentSummariesByKey.put(key, {
+          key = key;
+          principal = principal;
+          programId = programId;
+          applicationId = applicantId;
+          depositStatus = "waived";
+          totalDueCents = 0;
+          depositAmountCents = 0;
+          totalPaidCents = ledgerPaid;
+          outstandingCents = 0;
+          refundedCents = 0;
+          activePlanId = null;
+          updatedAt = updatedAt;
+        });
+      };
       case (?summary) {
-        let outstanding = natSubFloor(totalDueCents, summary.totalPaidCents);
+        let nextPaid = if (fullySponsored) { ledgerPaid } else { summary.totalPaidCents };
+        let outstanding = natSubFloor(totalDueCents, nextPaid);
+        let depositAmount =
+          if (fullySponsored) { 0 }
+          else if (summary.depositAmountCents > 0) { summary.depositAmountCents }
+          else { 100000 };
+        let depositStatus =
+          if (fullySponsored) { "waived" }
+          else if (nextPaid >= totalDueCents and totalDueCents > 0) { "paid_full" }
+          else if (nextPaid >= depositAmount and depositAmount > 0) { "paid" }
+          else { summary.depositStatus };
         programPaymentSummariesByKey.put(key, {
           summary with
           applicationId = applicantId;
           totalDueCents = totalDueCents;
+          depositAmountCents = depositAmount;
+          depositStatus = depositStatus;
+          totalPaidCents = nextPaid;
           outstandingCents = outstanding;
           updatedAt = updatedAt;
         });
@@ -5924,6 +7196,10 @@ persistent actor {
       };
       case null { false };
     };
+  };
+
+  private func applicantRecordIsFullySponsored(applicantId : Text) : Bool {
+    extractJsonStringField(applicantPayloadJsonForApplicationId(applicantId), "sponsorshipMode") == "full"
   };
 
   private func staffMarkManualDepositPaymentSummary(
@@ -5980,6 +7256,7 @@ persistent actor {
     assertStaffOrAdmin(msg.caller);
     assertStudioFeatureVisible(msg.caller, "applicants");
     if (applicantRecordHasManualDepositSubmitted(applicantId)) return true;
+    if (applicantRecordIsFullySponsored(applicantId)) return true;
     let artistId = applicantArtistId(applicantId);
     let principal = switch (principalForArtistId(artistId)) {
       case null { return false };
@@ -5989,6 +7266,8 @@ persistent actor {
     switch (programPaymentSummariesByKey.get(key)) {
       case (?summary) {
         if (summary.depositStatus == "paid" or summary.depositStatus == "paid_full") return true;
+        // Fully sponsored / $0 due: no deposit required — treat as secured when outstanding is cleared.
+        if (summary.totalDueCents == 0) return true;
       };
       case null {};
     };
@@ -5996,7 +7275,7 @@ persistent actor {
       if (
         Principal.equal(row.principal, principal)
         and row.programId == programId
-        and (row.paymentType == "deposit" or row.paymentType == "full_payment")
+        and (row.paymentType == "deposit" or row.paymentType == "full_payment" or row.paymentType == "staff_manual")
         and (row.status == "succeeded" or row.status == "paid")
       ) {
         return true;

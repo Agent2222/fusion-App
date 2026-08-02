@@ -4,8 +4,8 @@ import SymbolLogo from '../../assets/Fusion-X-SymbolLogo.png';
 import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
 import './newsletterSubscribe.js';
 
-/** Pixels from bottom to treat as "at bottom" (0 = flush with scroll end; avoids early reveal on mobile). */
-const BOTTOM_THRESHOLD_PX = 0;
+/** Pixels from bottom to treat as "at bottom". */
+const BOTTOM_THRESHOLD_PX = 80;
 
 class FooterComponent extends HTMLElement {
     constructor() {
@@ -122,12 +122,15 @@ class FooterComponent extends HTMLElement {
     syncFooterVisibilityFromScroll() {
         if (this.getAttribute('active') !== 'true') return;
         const targets = this._scrollTargetsAttached;
-        if (!targets.length) {
-            this._setFooterScrollVisible(false);
-            return;
-        }
         for (const el of targets) {
             if (this._isScrolledToBottom(el)) {
+                this._setFooterScrollVisible(true);
+                return;
+            }
+        }
+        if (window.location.pathname.startsWith('/settings')) {
+            const doc = document.scrollingElement || document.documentElement;
+            if (doc instanceof HTMLElement && this._isScrolledToBottom(doc)) {
                 this._setFooterScrollVisible(true);
                 return;
             }

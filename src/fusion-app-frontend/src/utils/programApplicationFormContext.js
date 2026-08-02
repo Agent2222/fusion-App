@@ -5,7 +5,7 @@
 
 /** @typedef {{ title: string, displayPrice: string, subtext: string, subtext2: string, includedBullets: string[] }} ApplicationPaymentOptionSlice */
 
-const PLAN_KEYS = /** @type {const} */ (['one_time', 'bimonthly', 'annual']);
+const PLAN_KEYS = /** @type {const} */ (['one_time', 'monthly', 'quarterly', 'annual', 'bimonthly']);
 
 /**
  * @param {unknown} raw
@@ -26,13 +26,15 @@ function parseOnePaymentOption(raw) {
 }
 
 /**
- * @returns {Record<'one_time' | 'bimonthly' | 'annual', ApplicationPaymentOptionSlice>}
+ * @returns {Record<'one_time' | 'monthly' | 'quarterly' | 'annual' | 'bimonthly', ApplicationPaymentOptionSlice>}
  */
 export function emptyApplicationPaymentOptions() {
     return {
         one_time: parseOnePaymentOption(null),
-        bimonthly: parseOnePaymentOption(null),
+        monthly: parseOnePaymentOption(null),
+        quarterly: parseOnePaymentOption(null),
         annual: parseOnePaymentOption(null),
+        bimonthly: parseOnePaymentOption(null),
     };
 }
 
@@ -65,7 +67,7 @@ export function findApplicationDeadlineDateFromKeyDates(keyDates) {
  *   selectionProcessOverride: string,
  *   detailsSectionId: string,
  *   applicationFeeAmountCents: number | null,
- *   applicationPaymentOptions: Record<'one_time' | 'bimonthly' | 'annual', ApplicationPaymentOptionSlice>,
+ *   applicationPaymentOptions: Record<'one_time' | 'monthly' | 'quarterly' | 'annual' | 'bimonthly', ApplicationPaymentOptionSlice>,
  *   availableSlots: number | null,
  *   totalSlots: number | null,
  * }}
@@ -108,7 +110,7 @@ export function buildProgramApplicationFormContext(programPage, opts = {}) {
     const applicationFeeAmountCents = parseApplicationFeeAmountCents(af.applicationFeeAmountCents);
 
     const apoRoot = pp.applicationPaymentOptions && typeof pp.applicationPaymentOptions === 'object' ? pp.applicationPaymentOptions : {};
-    /** @type {Record<'one_time' | 'bimonthly' | 'annual', ApplicationPaymentOptionSlice>} */
+    /** @type {Record<'one_time' | 'monthly' | 'quarterly' | 'annual' | 'bimonthly', ApplicationPaymentOptionSlice>} */
     const applicationPaymentOptions = emptyApplicationPaymentOptions();
     for (const k of PLAN_KEYS) {
         applicationPaymentOptions[k] = parseOnePaymentOption(/** @type {Record<string, unknown>} */ (apoRoot)[k]);

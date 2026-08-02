@@ -63,6 +63,13 @@ describe('EMAIL_CAMPAIGN_TEMPLATES', () => {
         expect(getEmailTemplateById('tpl_featured_artist')?.contentSourceTypes).toContain('artist');
         expect(getEmailTemplateById('tpl_journal_entry')?.contentSourceTypes).toContain('journal');
         expect(getEmailTemplateById('tpl_program_update')?.contentSourceTypes).toContain('program');
+        expect(getEmailTemplateById('tpl_onboarding')?.contentSourceTypes).toContain('website');
+    });
+
+    it('onboarding template CTAs to join-network', () => {
+        const tpl = getEmailTemplateById('tpl_onboarding');
+        expect(tpl?.bodyHtml).toContain('/join-network');
+        expect(tpl?.templateGroup).toBe('campaigns');
     });
 
     it('roster blast template keeps placeholders inside branded shell', () => {

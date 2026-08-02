@@ -343,7 +343,7 @@ export function markPendingMembershipPaymentCompleted() {
 /**
  * Create a Stripe Subscription (bi-monthly Price) and return the first invoice PaymentIntent client secret.
  * Omit `principal` for **pay-first** checkout: response includes `fusionPendingId` until the user links II.
- * @param {{ principal?: string, email: string, metadata?: Record<string, string>, payFirst?: boolean, subscriptionTier?: 'bimonthly' | 'annual' }} opts
+ * @param {{ principal?: string, email: string, metadata?: Record<string, string>, payFirst?: boolean, subscriptionTier?: 'monthly' | 'quarterly' | 'annual' | 'bimonthly' }} opts
  * @returns {Promise<{ clientSecret: string, subscriptionId: string, customerId: string, fusionPendingId?: string }>}
  */
 export async function createSubscription(opts) {
@@ -364,7 +364,7 @@ export async function createSubscription(opts) {
         metadata,
     };
     const tier = opts?.subscriptionTier;
-    if (tier === 'annual' || tier === 'bimonthly') {
+    if (tier === 'annual' || tier === 'quarterly' || tier === 'monthly' || tier === 'bimonthly') {
         body.subscriptionTier = tier;
     }
     if (payFirst) {
@@ -714,9 +714,10 @@ export async function createBillingPortalSession(principalText, returnUrl) {
 
 /**
  * @param {string} principalText
+ * @param {{ subscriptionId?: string, provider?: string }} [opts]
  * @returns {Promise<Record<string, unknown>>}
  */
-export async function fetchMemberBillingSummary(principalText) {
+export async function fetchMemberBillingSummary(principalText, opts = {}) {
     if (typeof principalText !== 'string' || !principalText.trim()) {
         return { ok: false, reason: 'invalid_principal' };
     }
@@ -724,6 +725,40 @@ export async function fetchMemberBillingSummary(principalText) {
     if (!base) {
         return { ok: false, reason: 'no_integration_url' };
     }
+    const subscriptionId = String(opts.subscriptionId || '').trim();
+    const providerHint = String(opts.provider || '').toLowerCase();
+    const preferPayPal = providerHint === 'paypal' || Boolean(subscriptionId);
+
+    if (preferPayPal && subscriptionId) {
+        try {
+            const res = await fetch(`${base}/payments/member-billing-summary`, {
+                method: 'POST',
+                headers: integrationHeadersJson(),
+                body: JSON.stringify({
+                    principal: principalText.trim(),
+                    subscriptionId,
+                }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok && data && data.ok) return data;
+            if (providerHint === 'paypal') {
+                return {
+                    ok: false,
+                    reason:
+                        typeof data.reason === 'string'
+                            ? data.reason
+                            : typeof data.error === 'string'
+                              ? data.error
+                              : `HTTP ${res.status}`,
+                };
+            }
+        } catch (e) {
+            if (providerHint === 'paypal') {
+                return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+            }
+        }
+    }
+
     try {
         const res = await fetch(`${base}/stripe/member-billing-summary`, {
             method: 'POST',
@@ -739,6 +774,43 @@ export async function fetchMemberBillingSummary(principalText) {
     } catch (e) {
         return { ok: false, reason: e instanceof Error ? e.message : String(e) };
     }
+}
+
+/**
+ * PayPal subscription revise (plan change). Buyer must approve via returned URL.
+ * @param {{ principal: string, targetTier: 'monthly'|'quarterly'|'annual', subscriptionId?: string, returnUrl?: string, cancelUrl?: string }} body
+ * @returns {Promise<{ approveUrl: string, targetTier?: string, planId?: string }>}
+ */
+export async function revisePayPalSubscription(body) {
+    const principal = String(body?.principal || '').trim();
+    const targetTier = String(body?.targetTier || '').trim().toLowerCase();
+    const subscriptionId = String(body?.subscriptionId || '').trim();
+    const returnUrl = String(body?.returnUrl || '').trim();
+    const cancelUrl = String(body?.cancelUrl || '').trim();
+    if (!principal) throw new Error('principal required');
+    if (!['monthly', 'quarterly', 'annual'].includes(targetTier)) {
+        throw new Error('targetTier must be monthly, quarterly, or annual');
+    }
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const res = await fetch(`${base}/payments/subscription/revise`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify({
+            principal,
+            targetTier,
+            ...(subscriptionId ? { subscriptionId } : {}),
+            ...(returnUrl ? { returnUrl } : {}),
+            ...(cancelUrl ? { cancelUrl } : {}),
+        }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        const raw = typeof data.error === 'string' ? data.error : `Revise HTTP ${res.status}`;
+        throw new Error(mapIntegrationUserMessage(raw, res.status));
+    }
+    if (!data.approveUrl) throw new Error('PayPal revise did not return an approve URL');
+    return data;
 }
 
 /**
@@ -1012,7 +1084,7 @@ export async function confirmPayPalOneTimePayment(orderId) {
 }
 
 /**
- * @param {{ principal?: string, email: string, metadata?: Record<string, string>, payFirst?: boolean, subscriptionTier?: 'bimonthly' | 'annual' }} opts
+ * @param {{ principal?: string, email: string, metadata?: Record<string, string>, payFirst?: boolean, subscriptionTier?: 'monthly' | 'quarterly' | 'annual' | 'bimonthly' }} opts
  */
 export async function createPayPalSubscription(opts) {
     const base = getIntegrationBaseUrl();

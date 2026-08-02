@@ -71,10 +71,10 @@ export function openMpdAudioCaptureModal(opts = {}) {
     <div class="mpd-audio-capture-modal__scrim" data-mpd-ac-close></div>
     <div class="mpd-audio-capture-modal__panel">
       <header class="mpd-audio-capture-modal__head">
-        <h2 id="mpdAudioCaptureTitle">Record audio bite</h2>
+        <h2 id="mpdAudioCaptureTitle">Your voice, your art</h2>
         <button type="button" class="mpd-audio-capture-modal__x" data-mpd-ac-close aria-label="Close">&times;</button>
       </header>
-      <p class="mpd-audio-capture-modal__lead">Use your microphone to record up to 3 minutes. After you save, Fusion staff must approve the clip before it appears in the sound environment, your profile, or journal audio rows.</p>
+      <p class="mpd-audio-capture-modal__lead"><em>"Words mean more than what is set down on paper. It takes the human voice to infuse them with deeper meaning."</em> — Maya Angelou<br><br>Record up to 3 minutes. Your audio bite will live in the sound environment, your profile, and journal — once approved by Fusion staff.</p>
       <div class="mpd-audio-capture-modal__meter" aria-hidden="true">
         <span class="mpd-audio-capture-modal__meter-bar" id="mpdAcMeter"></span>
       </div>

@@ -1596,6 +1596,14 @@ html[data-fusion-object-lightbox-open] .fusion-sound-env-host {
   pointer-events: none;
 }
 
+html[data-fusion-page="join-network"] .fusion-sound-env-host,
+html[data-fusion-page="join-network"] app-sound-environment {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+
 .fusion-sound-env-host {
   position: fixed;
   top: var(--fusion-sound-env-top, 0px);

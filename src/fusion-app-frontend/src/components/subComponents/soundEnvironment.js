@@ -209,9 +209,11 @@ class SoundEnvironment extends HTMLElement {
         return (
             page === 'community' ||
             page === 'videos' ||
+            page === 'join-network' ||
             path === '/studio' ||
             path === '/community' ||
             path === '/videos' ||
+            path === '/join-network' ||
             path.startsWith('/settings') ||
             path === '/profile' ||
             path.startsWith('/profile/')

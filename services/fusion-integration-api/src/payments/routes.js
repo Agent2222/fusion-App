@@ -16,8 +16,11 @@ import {
     createPayPalSubscription,
     getPayPalOrder,
     getPayPalSubscription,
+    membershipPlanDisplay,
+    membershipTierFromPayPalPlanId,
     parsePayPalCustomId,
     resolvePayPalOrderForRepair,
+    revisePayPalSubscription,
     safePayPalMetaValue,
     subscriptionCustomId,
 } from './providers/paypalProvider.js';
@@ -43,8 +46,15 @@ export function registerPaymentRoutes(app, opts) {
             paypalClientId: getPayPalClientId(),
             mode: getPayPalMode(),
             configured: isPayPalConfigured(),
+            planMonthly: process.env.PAYPAL_SUBSCRIPTION_MONTHLY_ID || '',
+            planQuarterly: process.env.PAYPAL_SUBSCRIPTION_QUARTERLY_ID || '',
+            planAnnual:
+                process.env.PAYPAL_SUBSCRIPTION_ANNUAL_ID ||
+                process.env.PAYPAL_PLAN_ANNUAL_ID ||
+                '',
+            planBimonthlyLegacy: process.env.PAYPAL_PLAN_BIMONTHLY_ID || '',
+            /** @deprecated use planBimonthlyLegacy / planMonthly */
             planBimonthly: process.env.PAYPAL_PLAN_BIMONTHLY_ID || '',
-            planAnnual: process.env.PAYPAL_PLAN_ANNUAL_ID || '',
         });
     });
 
@@ -251,7 +261,16 @@ export function registerPaymentRoutes(app, opts) {
                     fusion_pending_id: '',
                 }),
             };
-            await pushPayPalSubscriptionToCanister(linkedSub);
+            // Soft-fail canister sync (same as Stripe link) so II join can finish
+            // even if Motoko is briefly unavailable; client can call /sync later.
+            try {
+                await pushPayPalSubscriptionToCanister(linkedSub);
+            } catch (e) {
+                console.warn(
+                    '[paypal] link-subscription canister sync (client may retry sync):',
+                    e instanceof Error ? e.message : e,
+                );
+            }
             return res.json({
                 ok: true,
                 subscriptionId: sub.id,
@@ -310,6 +329,107 @@ export function registerPaymentRoutes(app, opts) {
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             return res.status(500).json({ error: msg });
+        }
+    });
+
+    app.post('/payments/subscription/revise', requireApiKey, async (req, res) => {
+        try {
+            if (!isPayPalConfigured()) {
+                return res.status(503).json({ error: 'PayPal not configured' });
+            }
+            const principalText = safePayPalMetaValue(req.body?.principal, 500);
+            const subscriptionId = safePayPalMetaValue(req.body?.subscriptionId, 120);
+            const targetTier = safePayPalMetaValue(req.body?.targetTier, 24).toLowerCase();
+            if (!principalText) {
+                return res.status(400).json({ error: 'principal required' });
+            }
+            Principal.fromText(principalText);
+            if (!subscriptionId) {
+                return res.status(400).json({ error: 'subscriptionId required' });
+            }
+            if (!['monthly', 'quarterly', 'annual'].includes(targetTier)) {
+                return res.status(400).json({
+                    error: 'targetTier must be monthly, quarterly, or annual',
+                });
+            }
+            const sub = await getPayPalSubscription(subscriptionId);
+            const meta = parsePayPalCustomId(sub.custom_id || '');
+            if (meta.principal && meta.principal !== principalText) {
+                return res.status(403).json({ error: 'subscription principal mismatch' });
+            }
+            const returnUrl = safePayPalMetaValue(req.body?.returnUrl, 500);
+            const cancelUrl = safePayPalMetaValue(req.body?.cancelUrl, 500);
+            const revised = await revisePayPalSubscription(subscriptionId, targetTier, {
+                returnUrl: returnUrl || undefined,
+                cancelUrl: cancelUrl || undefined,
+            });
+            if (!revised.approveUrl) {
+                return res.status(502).json({
+                    error: 'PayPal revise did not return an approve URL',
+                });
+            }
+            return res.json({
+                ok: true,
+                approveUrl: revised.approveUrl,
+                targetTier: revised.targetTier,
+                planId: revised.planId,
+                subscriptionId,
+            });
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            const status = /PAYMENT_IN_PROGRESS/i.test(msg) ? 409 : 500;
+            return res.status(status).json({ error: msg });
+        }
+    });
+
+    app.post('/payments/member-billing-summary', requireApiKey, async (req, res) => {
+        try {
+            if (!isPayPalConfigured()) {
+                return res.status(503).json({ ok: false, reason: 'PayPal not configured' });
+            }
+            const principalText = safePayPalMetaValue(req.body?.principal, 500);
+            const subscriptionId = safePayPalMetaValue(req.body?.subscriptionId, 120);
+            if (!principalText) {
+                return res.status(400).json({ ok: false, reason: 'principal required' });
+            }
+            Principal.fromText(principalText);
+            if (!subscriptionId) {
+                return res.json({ ok: false, reason: 'no_subscription' });
+            }
+            const sub = await getPayPalSubscription(subscriptionId);
+            const meta = parsePayPalCustomId(sub.custom_id || '');
+            if (meta.principal && meta.principal !== principalText) {
+                return res.status(403).json({ ok: false, reason: 'subscription principal mismatch' });
+            }
+            const planId = String(sub.plan_id || '').trim();
+            const tierFromMeta = String(meta.tier || '').toLowerCase();
+            const membershipTier =
+                membershipTierFromPayPalPlanId(planId) ||
+                (['monthly', 'quarterly', 'annual', 'bimonthly'].includes(tierFromMeta)
+                    ? tierFromMeta
+                    : '');
+            const display = membershipPlanDisplay(membershipTier);
+            const status = String(sub.status || '').toLowerCase();
+            const nextBilling =
+                sub.billing_info?.next_billing_time ||
+                sub.billing_info?.final_payment_time ||
+                '';
+            return res.json({
+                ok: true,
+                provider: 'paypal',
+                subscriptionId: sub.id,
+                status,
+                cancelAtPeriodEnd: Boolean(sub.status === 'CANCELLED' || sub.status === 'SUSPENDED'),
+                currentPeriodEnd: typeof nextBilling === 'string' ? nextBilling : '',
+                planId,
+                membershipTier,
+                planLabel: display.planLabel,
+                planPriceLine: display.planPriceLine,
+                paymentMethod: null,
+            });
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            return res.status(500).json({ ok: false, reason: msg });
         }
     });
 

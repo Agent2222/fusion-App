@@ -1,17 +1,39 @@
 /**
- * Content sources for Studio email templates (artist, journal, program).
+ * Content sources for Studio email templates (artist, journal, program, website).
  */
 import { artistDisplayName, artistEnglishBlock } from './artistSlug.js';
-import { getArtistsForStudio, getJournalEntries, getPrograms, listCommunityVideosStudio } from './database.js';
+import {
+    getArtistCardArtworkUrl,
+    getArtistCardProfileUrl,
+    isArtistHeroProfileImageApproved,
+} from './artistCardImageMode.js';
+import {
+    getArtistsForStudio,
+    getContentBundleForStudio,
+    getJournalEntries,
+    getPrograms,
+    listCommunityVideosStudio,
+} from './database.js';
 import { getEmailTemplateById } from './emailCampaignTemplates.js';
 import { renderFusionEmailFromSlots, fusionEmailParagraph, FUSION_EMAIL_STYLES, normalizeFusionEmailBodyHtml, isEmailVideoUrl } from './emailFusionLayout.js';
 import { toCloudFrontAssetUrl } from './assetDistribution.js';
 import { normalizeCommunityVideoRecord, parseVideoLocales } from './videoPageModel.js';
 
 const META_PREFIX = 'FUSION_EC_META=';
+const JOIN_NETWORK_CTA_HREF = 'https://fusionart.world/join-network';
+const DEFAULT_WEBSITE_HERO =
+    'https://fusionart-bucket.s3.us-east-2.amazonaws.com/uploads/platform-assets/program_hero-1.jpg';
+
+/** Curated Website / Network items for onboarding templates. */
+export const WEBSITE_NETWORK_SOURCE_ITEMS = [
+    { id: 'why-join', label: 'Why join' },
+    { id: 'residencies', label: 'Residencies' },
+    { id: 'network', label: 'Network' },
+    { id: 'context-mission', label: 'Context mission' },
+];
 
 /**
- * @typedef {{ type: 'artist' | 'journal' | 'program' | 'video', id: string }} EmailContentSourceRef
+ * @typedef {{ type: 'artist' | 'journal' | 'program' | 'video' | 'website', id: string }} EmailContentSourceRef
  */
 
 /**
@@ -116,12 +138,22 @@ export function resolveFeaturedArtistSource(artist) {
     const en = artistEnglishBlock(artist);
     const name = artistDisplayName(artist, 'en') || 'Artist';
     const slug = String(artist?.slug ?? '').trim();
+    const approvedProfile = isArtistHeroProfileImageApproved(artist)
+        ? getArtistCardProfileUrl(artist, { fallbackToArtwork: false })
+        : '';
+    const artwork = getArtistCardArtworkUrl(artist);
+    const galleryStills = (Array.isArray(en?.introGallery) ? en.introGallery : [])
+        .map((g) => g?.src)
+        .filter(Boolean);
+    // Profile (if approved) → roster artwork → first gallery stills
     const heroPick = pickEmailHeroMedia([
-        artist?.heroProfileImage,
+        approvedProfile,
+        artwork,
         artist?.image,
-        ...(Array.isArray(en?.introGallery) ? en.introGallery.map((g) => g?.src) : []),
+        ...galleryStills,
+        artist?.heroProfileImage,
     ]);
-    const hero = heroPick.heroImageUrl;
+    const hero = heroPick.heroImageUrl || artwork || galleryStills[0] || '';
     const quote = String(en?.world?.quote ?? en?.wordsFromArtist?.body ?? '').trim();
     const bio = String(en?.bio ?? en?.bioLong ?? '').trim();
     const discipline = String(en?.discipline ?? '').trim();
@@ -297,14 +329,204 @@ export function resolveProgramSource(program) {
 }
 
 /**
+ * @param {string} id
+ * @param {{ context?: object, joinNetworkFlow?: object, programs?: object[], featureCards?: object }} [ctx]
+ * @returns {EmailLayoutSlots | null}
+ */
+export function resolveWebsiteSource(id, ctx = {}) {
+    const key = String(id ?? '').trim();
+    if (!WEBSITE_NETWORK_SOURCE_ITEMS.some((i) => i.id === key)) return null;
+
+    const context = ctx.context && typeof ctx.context === 'object' ? ctx.context : {};
+    const ctxEn =
+        context.en && typeof context.en === 'object'
+            ? context.en
+            : context;
+    const joinFlow =
+        ctx.joinNetworkFlow && typeof ctx.joinNetworkFlow === 'object' ? ctx.joinNetworkFlow : {};
+    const membership =
+        joinFlow.membership && typeof joinFlow.membership === 'object' ? joinFlow.membership : {};
+    const valueEn =
+        membership.value?.en && typeof membership.value.en === 'object'
+            ? membership.value.en
+            : {};
+    const bandEn =
+        membership.band?.en && typeof membership.band.en === 'object' ? membership.band.en : {};
+    const programs = Array.isArray(ctx.programs) ? ctx.programs : [];
+    const featureCards =
+        ctx.featureCards && typeof ctx.featureCards === 'object' ? ctx.featureCards : {};
+    const groups = Array.isArray(featureCards.groups) ? featureCards.groups : [];
+    const contextGroup = groups.find((g) => String(g?.id ?? '') === 'context') || groups[0];
+    const cards = Array.isArray(contextGroup?.cards) ? contextGroup.cards : [];
+
+    const firstProgram = programs[0];
+    const enCard =
+        firstProgram?.enCard && typeof firstProgram.enCard === 'object'
+            ? firstProgram.enCard
+            : firstProgram;
+    const programHero = normUrl(enCard?.imageSrc ?? enCard?.heroMediaSrc ?? '') || DEFAULT_WEBSITE_HERO;
+    const contextHero =
+        normUrl(ctxEn?.subImage ?? context.subImage ?? '') || programHero || DEFAULT_WEBSITE_HERO;
+
+    const includes = Array.isArray(valueEn.includes) ? valueEn.includes : [];
+    const includesHtml = includes.length
+        ? `<ul style="${FUSION_EMAIL_STYLES.bodyList}">${includes
+              .map((line) => `<li>${String(line).replace(/</g, '&lt;')}</li>`)
+              .join('')}</ul>`
+        : `<ul style="${FUSION_EMAIL_STYLES.bodyList}">
+<li>Artist profile + gallery system</li>
+<li>Residency &amp; program applications included</li>
+<li>Access to the network and platform updates</li>
+</ul>`;
+
+    const cta = { label: 'JOIN FUSION', href: JOIN_NETWORK_CTA_HREF };
+    const footnote = 'Residency applications included · Cancel anytime';
+
+    if (key === 'why-join') {
+        const lead =
+            String(valueEn.lead ?? bandEn.description ?? '').trim() ||
+            'Join a curated network connecting artists, galleries, curators, and collectors through programs rooted in Japan.';
+        const whyHero = pickEmailHeroMedia([
+            ctxEn?.subImage,
+            context.subImage,
+            enCard?.imageSrc,
+            enCard?.heroMediaSrc,
+            DEFAULT_WEBSITE_HERO,
+        ]);
+        return {
+            eyebrow: 'Join the Network',
+            heroImageUrl: whyHero.heroImageUrl || DEFAULT_WEBSITE_HERO,
+            heroPosterUrl: whyHero.heroPosterUrl,
+            heroAlt: 'Join FUSION',
+            pillLabel: 'MEMBERSHIP',
+            headlineHtml: 'Your practice<br>belongs in a<br>wider context.',
+            bodyHtml: [
+                fusionEmailParagraph(lead, 'lead'),
+                includesHtml,
+                fusionEmailParagraph(
+                    'Create your membership in under two minutes. Secure payment by PayPal or card — cancel anytime.',
+                    'last',
+                ),
+            ].join('\n'),
+            cta,
+            footnote,
+            subject: 'Your practice belongs in a wider context — Join FUSION',
+            previewText: lead.slice(0, 160),
+        };
+    }
+
+    if (key === 'residencies') {
+        const visible = programs.slice(0, 3);
+        const lines = visible.map((p) => {
+            const card = p?.enCard && typeof p.enCard === 'object' ? p.enCard : p;
+            const focus = String(card?.focus ?? card?.location ?? p?.id ?? 'Program').trim();
+            const loc = String(card?.location ?? '').trim();
+            const brief = String(card?.briefDescription ?? '').trim();
+            return brief || (loc ? `${focus} — ${loc}` : focus);
+        });
+        const listHtml = lines.length
+            ? `<ul style="${FUSION_EMAIL_STYLES.bodyList}">${lines
+                  .map((line) => `<li>${String(line).replace(/</g, '&lt;')}</li>`)
+                  .join('')}</ul>`
+            : includesHtml;
+        return {
+            eyebrow: 'Join the Network',
+            heroImageUrl: programHero,
+            heroAlt: String(enCard?.focus ?? 'Fusion residencies'),
+            pillLabel: 'JAPAN PROGRAMS',
+            headlineHtml: 'Programs<br>rooted in<br>Japan.',
+            bodyHtml: [
+                fusionEmailParagraph(
+                    'Membership includes residency and program applications — place, process, and exchange across Japan.',
+                    'lead',
+                ),
+                listHtml,
+                fusionEmailParagraph(
+                    'Join FUSION to apply and stay connected to what comes next.',
+                    'last',
+                ),
+            ].join('\n'),
+            cta,
+            footnote,
+            subject: 'Programs rooted in Japan — Join FUSION',
+            previewText: 'Membership includes residency and program applications.',
+        };
+    }
+
+    if (key === 'network') {
+        const cardLines = cards.slice(0, 4).map((c) => {
+            const en = c?.en && typeof c.en === 'object' ? c.en : c;
+            return String(en?.title ?? en?.name ?? c?.title ?? '').trim();
+        }).filter(Boolean);
+        const networkList = cardLines.length
+            ? `<ul style="${FUSION_EMAIL_STYLES.bodyList}">${cardLines
+                  .map((line) => `<li>${String(line).replace(/</g, '&lt;')}</li>`)
+                  .join('')}</ul>`
+            : includesHtml;
+        return {
+            eyebrow: 'Join the Network',
+            heroImageUrl: contextHero,
+            heroAlt: 'Fusion network',
+            pillLabel: 'NETWORK',
+            headlineHtml: 'A curated<br>network.',
+            bodyHtml: [
+                fusionEmailParagraph(
+                    String(bandEn.description ?? '').trim() ||
+                        'Connect with artists, galleries, curators, and collectors through a platform built for exchange.',
+                    'lead',
+                ),
+                networkList,
+                fusionEmailParagraph('Start with membership — your profile and access grow with you.', 'last'),
+            ].join('\n'),
+            cta,
+            footnote,
+            subject: 'Join the FUSION network',
+            previewText: 'Connect with artists, galleries, curators, and collectors.',
+        };
+    }
+
+    // context-mission
+    const headline = String(ctxEn?.headline ?? context.headline ?? '').trim() || 'Context';
+    const sub = String(ctxEn?.subheadline ?? context.subheadline ?? '').trim();
+    const h2 = String(ctxEn?.headline2 ?? context.headline2 ?? '').trim();
+    const h3 = String(ctxEn?.headline3 ?? context.headline3 ?? '').trim();
+    return {
+        eyebrow: 'Join the Network',
+        heroImageUrl: contextHero,
+        heroAlt: headline,
+        pillLabel: 'CONTEXT',
+        headlineHtml: headline.replace(/\s+/g, '<br>'),
+        bodyHtml: [
+            fusionEmailParagraph(sub || h2 || 'Fusion is a curated platform rooted in Japan.', 'lead'),
+            h2 && h2 !== sub ? fusionEmailParagraph(h2) : '',
+            h3 ? fusionEmailParagraph(h3, 'last') : fusionEmailParagraph('Join the network and bring your practice into a wider context.', 'last'),
+        ]
+            .filter(Boolean)
+            .join('\n'),
+        cta,
+        footnote,
+        subject: `${headline} — Join FUSION`,
+        previewText: (sub || h2 || 'Join the FUSION network.').slice(0, 160),
+    };
+}
+
+/**
  * @param {EmailContentSourceRef} ref
  * @param {object[]} [artistRows]
  * @param {object[]} [journalRows]
  * @param {object[]} [programRows]
  * @param {object[]} [videoRows]
+ * @param {{ context?: object, joinNetworkFlow?: object, programs?: object[], featureCards?: object }} [websiteCtx]
  * @returns {EmailLayoutSlots | null}
  */
-export function resolveContentSource(ref, artistRows = [], journalRows = [], programRows = [], videoRows = []) {
+export function resolveContentSource(
+    ref,
+    artistRows = [],
+    journalRows = [],
+    programRows = [],
+    videoRows = [],
+    websiteCtx = {},
+) {
     const type = ref?.type;
     const id = String(ref?.id ?? '').trim();
     if (!type || !id) return null;
@@ -326,15 +548,33 @@ export function resolveContentSource(ref, artistRows = [], journalRows = [], pro
         const row = videoRows.find((v) => String(normalizeCommunityVideoRecord(v).id) === id);
         return row ? resolveVideoSource(row) : null;
     }
+    if (type === 'website') {
+        return resolveWebsiteSource(id, {
+            ...websiteCtx,
+            programs: websiteCtx.programs?.length ? websiteCtx.programs : programRows,
+        });
+    }
     return null;
 }
 
 /**
- * @param {'artist' | 'journal' | 'program' | 'video'} type
+ * @param {'artist' | 'journal' | 'program' | 'video' | 'website'} type
  * @param {object[]} rows
  * @returns {Array<{ id: string, label: string, thumb: string }>}
  */
 export function listContentSourceOptions(type, rows) {
+    if (type === 'website') {
+        const thumbById = new Map(
+            (Array.isArray(rows) ? rows : [])
+                .map((r) => [String(r?.id ?? ''), normUrl(r?.thumb ?? r?.imageSrc ?? '')])
+                .filter(([id]) => id),
+        );
+        return WEBSITE_NETWORK_SOURCE_ITEMS.map((item) => ({
+            id: item.id,
+            label: item.label,
+            thumb: thumbById.get(item.id) || '',
+        }));
+    }
     if (type === 'artist') {
         return rows
             .map((a) => ({
@@ -413,6 +653,12 @@ export function buildTemplateDraftFromSource(templateId, source, caches = {}) {
         caches.journals || [],
         caches.programs || [],
         caches.videos || [],
+        {
+            context: caches.context,
+            joinNetworkFlow: caches.joinNetworkFlow,
+            programs: caches.programs || [],
+            featureCards: caches.featureCards,
+        },
     );
     if (!slots) return null;
     return buildTemplateDraftFromSlots(templateId, slots);
@@ -485,6 +731,74 @@ export function collectStudioEmailMedia(artists = [], videos = []) {
     return [...seen.values()];
 }
 
+/**
+ * Broader still-image library for Social image picker (tabs by content type).
+ * @param {{
+ *   artists?: object[],
+ *   journals?: object[],
+ *   programs?: object[],
+ *   videos?: object[],
+ *   context?: object,
+ *   website?: Array<{ id?: string, thumb?: string }>,
+ * }} caches
+ * @returns {Array<{ url: string, label: string, group: string, thumb: string, kind: 'image' }>}
+ */
+export function collectStudioSocialMedia(caches = {}) {
+    /** @type {Map<string, { url: string, label: string, group: string, thumb: string, kind: 'image' }>} */
+    const seen = new Map();
+    const add = (url, label, group) => {
+        const u = normUrl(url);
+        if (!u || isEmailVideoUrl(u) || seen.has(u)) return;
+        seen.set(u, {
+            url: u,
+            label: String(label || 'Image').trim(),
+            group,
+            thumb: u,
+            kind: 'image',
+        });
+    };
+
+    for (const item of collectStudioEmailMedia(caches.artists || [], caches.videos || [])) {
+        if (item.kind !== 'image') continue;
+        const group =
+            item.group === 'Video posters' || item.group === 'Videos' ? 'Videos' : 'Artists';
+        add(item.url, item.label, group);
+    }
+
+    for (const p of caches.programs || []) {
+        const card = p?.enCard && typeof p.enCard === 'object' ? p.enCard : p;
+        const label = String(card?.focus ?? card?.location ?? p?.id ?? 'Program');
+        add(card?.imageSrc, `${label} — card`, 'Programs');
+        add(card?.heroMediaSrc, `${label} — hero`, 'Programs');
+        const page = card?.programPage || p?.programPage;
+        if (page && typeof page === 'object') {
+            for (const u of Array.isArray(page.fadeGalleryImages) ? page.fadeGalleryImages : []) {
+                add(u, `${label} — gallery`, 'Programs');
+            }
+            for (const u of Array.isArray(page.stripGalleryImages) ? page.stripGalleryImages : []) {
+                add(u, `${label} — strip`, 'Programs');
+            }
+        }
+    }
+
+    for (const j of caches.journals || []) {
+        const en = j?.en && typeof j.en === 'object' ? j.en : {};
+        const title = String(en.title ?? `Entry ${j?.id ?? ''}`);
+        add(j?.imageSrc ?? en.imageSrc, title, 'Journal');
+    }
+
+    const ctx = caches.context && typeof caches.context === 'object' ? caches.context : {};
+    const ctxEn = ctx.en && typeof ctx.en === 'object' ? ctx.en : ctx;
+    add(ctxEn?.subImage ?? ctx.subImage, 'Context — sub image', 'Website');
+    add(ctxEn?.heroImage ?? ctx.heroImage, 'Context — hero', 'Website');
+    for (const w of Array.isArray(caches.website) ? caches.website : []) {
+        add(w?.thumb, `Website — ${w?.id || 'item'}`, 'Website');
+    }
+    add(DEFAULT_WEBSITE_HERO, 'Fusion — default program hero', 'Website');
+
+    return [...seen.values()];
+}
+
 /** @deprecated Use collectStudioEmailMedia */
 export function collectStudioImageUrls(artists = [], videos = []) {
     return collectStudioEmailMedia(artists, videos).filter((item) => item.kind === 'image');
@@ -494,17 +808,50 @@ export function collectStudioImageUrls(artists = [], videos = []) {
  * Load studio caches for content sources and media picker.
  */
 export async function loadEmailStudioContentCaches() {
-    const [artists, journals, programs, videos] = await Promise.all([
-        getArtistsForStudio().catch(() => []),
-        getJournalEntries().catch(() => []),
-        getPrograms().catch(() => []),
-        listCommunityVideosStudio().catch(() => []),
-    ]);
+    const [artists, journals, programs, videos, context, joinNetworkFlow, featureCards] =
+        await Promise.all([
+            getArtistsForStudio().catch(() => []),
+            getJournalEntries().catch(() => []),
+            getPrograms().catch(() => []),
+            listCommunityVideosStudio().catch(() => []),
+            getContentBundleForStudio('context', { forStudio: true }).catch(() => ({})),
+            getContentBundleForStudio('join-network-flow', { forStudio: true }).catch(() => ({})),
+            getContentBundleForStudio('feature-cards', { forStudio: true }).catch(() => ({})),
+        ]);
+    const programRows = Array.isArray(programs) ? programs : [];
+    const firstCard =
+        programRows[0]?.enCard && typeof programRows[0].enCard === 'object'
+            ? programRows[0].enCard
+            : programRows[0];
+    const ctxObj = context && typeof context === 'object' ? context : {};
+    const ctxEn = ctxObj.en && typeof ctxObj.en === 'object' ? ctxObj.en : ctxObj;
+    const websiteThumbs = [
+        {
+            id: 'why-join',
+            thumb: normUrl(ctxEn?.subImage) || normUrl(firstCard?.imageSrc) || DEFAULT_WEBSITE_HERO,
+        },
+        {
+            id: 'residencies',
+            thumb: normUrl(firstCard?.imageSrc ?? firstCard?.heroMediaSrc) || DEFAULT_WEBSITE_HERO,
+        },
+        {
+            id: 'network',
+            thumb: normUrl(ctxEn?.subImage) || DEFAULT_WEBSITE_HERO,
+        },
+        {
+            id: 'context-mission',
+            thumb: normUrl(ctxEn?.subImage) || DEFAULT_WEBSITE_HERO,
+        },
+    ];
     return {
         artists: Array.isArray(artists) ? artists : [],
         journals: Array.isArray(journals) ? journals : [],
-        programs: Array.isArray(programs) ? programs : [],
+        programs: programRows,
         videos: Array.isArray(videos) ? videos : [],
+        context: ctxObj,
+        joinNetworkFlow: joinNetworkFlow && typeof joinNetworkFlow === 'object' ? joinNetworkFlow : {},
+        featureCards: featureCards && typeof featureCards === 'object' ? featureCards : {},
+        website: websiteThumbs,
         media: collectStudioEmailMedia(
             Array.isArray(artists) ? artists : [],
             Array.isArray(videos) ? videos : [],
@@ -513,6 +860,14 @@ export async function loadEmailStudioContentCaches() {
             Array.isArray(artists) ? artists : [],
             Array.isArray(videos) ? videos : [],
         ),
+        socialMedia: collectStudioSocialMedia({
+            artists: Array.isArray(artists) ? artists : [],
+            journals: Array.isArray(journals) ? journals : [],
+            programs: programRows,
+            videos: Array.isArray(videos) ? videos : [],
+            context: ctxObj,
+            website: websiteThumbs,
+        }),
     };
 }
 
@@ -525,6 +880,12 @@ export async function loadEmailStudioContentCaches() {
  */
 export function buildQuickDesignContext(templateId, source, userPrompt, caches = {}, editorDraft = {}) {
     const tpl = getEmailTemplateById(templateId);
+    const websiteCtx = {
+        context: caches.context,
+        joinNetworkFlow: caches.joinNetworkFlow,
+        programs: caches.programs || [],
+        featureCards: caches.featureCards,
+    };
     let sourceSlots = null;
     if (source) {
         sourceSlots = resolveContentSource(
@@ -533,6 +894,7 @@ export function buildQuickDesignContext(templateId, source, userPrompt, caches =
             caches.journals || [],
             caches.programs || [],
             caches.videos || [],
+            websiteCtx,
         );
     }
     const subject = String(editorDraft.subject ?? '').trim();
@@ -540,12 +902,15 @@ export function buildQuickDesignContext(templateId, source, userPrompt, caches =
     const isBranded = Boolean(editorDraft.isBranded);
     const layoutSlots = editorDraft.layoutSlots || null;
     const bodyHtml = String(editorDraft.rawBodyHtml ?? '').trim();
+    const isOnboarding = templateId === 'tpl_onboarding';
     return {
         templateId,
         templateName: tpl?.name ?? '',
         defaultEyebrow: tpl?.defaultEyebrow ?? 'Program Update',
         userPrompt: String(userPrompt ?? '').trim().slice(0, 2000),
-        task: 'Reformat existingDraft into layout JSON slots. The app applies the Fusion email shell (logo, hero, borders, footer) using styleGuide — return text slots only. Preserve factual names, dates, and URLs from sourceFacts when present.',
+        task: isOnboarding
+            ? 'Write onboarding email copy inviting readers to join the FUSION membership network (Japan-rooted programs). Reformat existingDraft into layout JSON slots. CTA href must remain https://fusionart.world/join-network. Return text slots only; app applies the Fusion shell.'
+            : 'Reformat existingDraft into layout JSON slots. The app applies the Fusion email shell (logo, hero, borders, footer) using styleGuide — return text slots only. Preserve factual names, dates, and URLs from sourceFacts when present.',
         styleGuide: {
             canvas: FUSION_EMAIL_STYLES.canvas,
             textColor: FUSION_EMAIL_STYLES.text,
@@ -558,6 +923,12 @@ export function buildQuickDesignContext(templateId, source, userPrompt, caches =
                 'Use headlineHtml for the h1 slot only (shell renders 44px black). Use pillLabel for the black pill.',
             bodyNote:
                 'bodyHtml: <p> paragraphs only inside the bordered content block. First p lead, middle body, last bodyLast. Black text only. Links black underline. No CTA button in bodyHtml — use layout.cta.',
+            ...(isOnboarding
+                ? {
+                      onboardingNote:
+                          'Emphasize membership value, Japan positioning, residency applications included, cancel anytime. Primary CTA label like JOIN FUSION linking to /join-network.',
+                  }
+                : {}),
         },
         existingDraft: {
             subject,
@@ -623,12 +994,14 @@ export function finalizeQuickDesignSlots(templateId, llmSlots, opts = {}) {
                 str(sourceSlots?.cta?.label) ||
                 str(llmSlots.cta?.label) ||
                 str(editor.cta?.label) ||
-                '',
+                (templateId === 'tpl_onboarding' ? 'JOIN FUSION' : ''),
             href:
-                str(sourceSlots?.cta?.href) ||
-                str(llmSlots.cta?.href) ||
-                str(editor.cta?.href) ||
-                'https://www.fusionart.world',
+                templateId === 'tpl_onboarding'
+                    ? JOIN_NETWORK_CTA_HREF
+                    : str(sourceSlots?.cta?.href) ||
+                      str(llmSlots.cta?.href) ||
+                      str(editor.cta?.href) ||
+                      'https://www.fusionart.world',
         },
         subject:
             str(llmSlots.subject) ||

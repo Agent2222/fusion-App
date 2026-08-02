@@ -1,9 +1,11 @@
 /**
  * Audio row — custom control bar (no native `<audio controls>`), so no ⋮ menu / playback-speed UI.
  * Source: CMS `audio` list + `data-audio-id`.
+ * Optional `data-artist-href` makes the label a SPA link (e.g. `/profile/:slug`).
  */
 import { getContentBundleForStudio, subscribeDataSource } from '../../utils/database.js';
 import { isJournalListingPage } from '../../utils/journalListingPage.js';
+import { navigate } from '../../router.js';
 import {
     FEED_ROW_PENDING_WRAPPER_STYLES,
     PH_LOADER_BASE_STYLES,
@@ -49,7 +51,14 @@ class AudioRowComponent extends HTMLElement {
     }
 
     static get observedAttributes() {
-        return ['active', 'data-audio-id', 'data-audio-src', 'data-audio-title', 'data-audio-sources'];
+        return [
+            'active',
+            'data-audio-id',
+            'data-audio-src',
+            'data-audio-title',
+            'data-audio-sources',
+            'data-artist-href',
+        ];
     }
 
     attributeChangedCallback(prop, oldVal, newVal) {
@@ -247,7 +256,12 @@ class AudioRowComponent extends HTMLElement {
 
         const entry = this._resolveEntry();
         const src = entry?.link ? String(entry.link).trim() : '';
-        const label = entry?.title ? String(entry.title) : 'Audio';
+        const artistHref = String(this.getAttribute('data-artist-href') || '').trim();
+        const titleOverride = String(this.getAttribute('data-audio-title') || '').trim();
+        const label =
+            (entry?.title ? String(entry.title) : '') ||
+            titleOverride ||
+            'Audio';
 
         if (!entry || !src) {
             if (isJournalListingPage()) {
@@ -284,6 +298,17 @@ class AudioRowComponent extends HTMLElement {
                     max-width: 36rem;
                 }
 
+                :host([data-layout="join-network"]) .audio-row {
+                    margin: 0;
+                    padding: 0.65rem 0 0;
+                    max-width: none;
+                    width: 100%;
+                }
+
+                :host([data-layout="join-network"]) .audio-row-inner {
+                    border-radius: 0;
+                }
+
                 .audio-row-inner {
                     width: 100%;
                     padding: 0.75rem 1rem;
@@ -311,6 +336,19 @@ class AudioRowComponent extends HTMLElement {
                     color: var(--c2);
                     opacity: 0.85;
                     margin-bottom: 0.65rem;
+                }
+
+                a.audio-label {
+                    display: inline-block;
+                    text-decoration: none;
+                    color: var(--c2);
+                    cursor: pointer;
+                }
+
+                a.audio-label:hover {
+                    text-decoration: underline;
+                    text-underline-offset: 3px;
+                    opacity: 1;
                 }
 
                 .player-controls {
@@ -422,7 +460,11 @@ class AudioRowComponent extends HTMLElement {
             </style>
             <div class="audio-row" part="audio-row">
                 <div class="audio-row-inner">
-                    <div class="audio-label">${escapeHtml(label)}</div>
+                    ${
+                        artistHref
+                            ? `<a class="audio-label" href="${escapeHtml(artistHref)}">${escapeHtml(label)}</a>`
+                            : `<div class="audio-label">${escapeHtml(label)}</div>`
+                    }
                     <audio class="media-audio" preload="metadata" playsinline tabindex="-1"></audio>
                     <div class="player-controls">
                         <div class="player-row">
@@ -449,6 +491,20 @@ class AudioRowComponent extends HTMLElement {
         if (audioEl) {
             audioEl.src = src;
             this._wireCustomPlayer(audioEl);
+        }
+
+        const labelLink = this.shadowRoot.querySelector('a.audio-label');
+        if (labelLink instanceof HTMLAnchorElement) {
+            labelLink.addEventListener('click', (e) => {
+                const href = labelLink.getAttribute('href') || '';
+                if (!href || href === '#' || e.defaultPrevented || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+                    return;
+                }
+                if (href.startsWith('/')) {
+                    e.preventDefault();
+                    navigate(href);
+                }
+            });
         }
 
         if (this._sources && this._sources.length > 1) {

@@ -4,6 +4,7 @@
 
 import {
     assertProgramApplicationSubmissionReady,
+    applicationFeeDueForCaller,
     defaultApplicationPaymentGlobal,
     ensureMyLinkedArtistProfile,
     getMembershipAccessForCaller,
@@ -12,7 +13,12 @@ import {
     submitProgramApplication,
 } from '../../utils/database.js';
 import { getAuthSnapshot } from '../../utils/icAuth.js';
+import {
+    APPLICATION_FEE_GUEST_CENTS,
+    APPLICATION_FEE_MEMBER_CENTS,
+} from '../../utils/applicationFeePolicy.js';
 import { emptyApplicationPaymentOptions } from '../../utils/programApplicationFormContext.js';
+import { MEMBERSHIP_TIER_META, planIdForTier } from '../../utils/membershipPlanChange.js';
 import {
     clearPendingPaymentEmailLocal,
     confirmPayPalOneTimePayment,
@@ -41,6 +47,11 @@ import {
     getActiveProvider,
     paymentModeMismatch,
 } from '../../utils/paymentProvider.js';
+import {
+    clearProgramApplicationDraft,
+    getProgramApplicationDraft,
+    saveProgramApplicationDraft,
+} from '../../utils/programApplicationDraft.js';
 import { getProfileSetupDraft } from '../../utils/profileSetupDraft.js';
 import {
     PROGRAM_APPLICATION_VIEWPORT_TOP_GAP_PX,
@@ -151,8 +162,14 @@ class ApplicationFormComponent extends HTMLElement {
         this._programFormContext = { ...DEFAULT_PROGRAM_FORM_CTX };
         /** Global EN/JA bullets from site settings (`applicationPaymentGlobal`). */
         this._applicationPaymentGlobal = defaultApplicationPaymentGlobal();
-        /** @type {'one_time' | 'bimonthly' | 'annual' | null} */
+        /** @type {'one_time' | 'monthly' | 'quarterly' | 'annual' | 'member_fee' | null} */
         this._paymentPlan = null;
+        /** Expand “Explore memberships” panel. */
+        this._membershipsExpanded = false;
+        /** After subscription checkout: monthly still needs member application fee. */
+        this._checkoutPhase = /** @type {'subscription' | 'application_fee' | null} */ (null);
+        /** @type {{ dueCents: number, reason: string, membershipTier: string, appCreditBalance: number } | null} */
+        this._memberApplicationFee = null;
         /** User edited the form after load — drives SPA `data-unsaved` + `beforeunload`. */
         this._dirty = false;
         this._beforeUnloadHooked = false;
@@ -180,8 +197,10 @@ class ApplicationFormComponent extends HTMLElement {
         this._wireAbort = null;
         /** User has a stored application for this `data-program-id` — hide fee UI; submit without Stripe. */
         this._alreadyApplied = false;
-        /** Active member (`ok` / `exempt`) after ensure — skip application fee Stripe. */
+        /** Active member with $0 application fee due — skip payment UI. */
         this._membershipFeeWaived = false;
+        /** Member owes member application fee only ($35) — no re-subscribe. */
+        this._memberFeeOnly = false;
         /** Last `getMembershipAccessForCaller` result for analytics. */
         this._membershipGate = 'unknown';
         /** After `program_application_started` is sent (on application reveal), avoid sending again. */
@@ -525,6 +544,82 @@ class ApplicationFormComponent extends HTMLElement {
         }
     }
 
+    /**
+     * @returns {number | null}
+     */
+    _guestApplicationFeeCents() {
+        const centsRaw = this._programFormContext.applicationFeeAmountCents;
+        if (typeof centsRaw === 'number' && Number.isFinite(centsRaw) && centsRaw >= 50) {
+            return Math.round(centsRaw);
+        }
+        return APPLICATION_FEE_GUEST_CENTS;
+    }
+
+    /**
+     * One-time cents for the current checkout step.
+     * @returns {number | null}
+     */
+    _oneTimeCheckoutCents() {
+        if (this._memberFeeOnly || this._paymentPlan === 'member_fee') {
+            return APPLICATION_FEE_MEMBER_CENTS;
+        }
+        if (this._paymentPlan === 'one_time') {
+            return this._guestApplicationFeeCents();
+        }
+        if (this._paymentPlan === 'monthly' && this._checkoutPhase === 'application_fee') {
+            return APPLICATION_FEE_MEMBER_CENTS;
+        }
+        return null;
+    }
+
+    /**
+     * Subscription-only plans skip the one-time PayPal mount until monthly phase 2.
+     * @returns {boolean}
+     */
+    _planNeedsOneTimeCheckout() {
+        const cents = this._oneTimeCheckoutCents();
+        if (cents == null) return false;
+        if (this._paymentPlan === 'monthly' && this._checkoutPhase !== 'application_fee') {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Quarterly / annual (and waived member) can submit after subscription with no second charge.
+     * @returns {boolean}
+     */
+    _planSubmitWithoutOneTime() {
+        if (this._membershipFeeWaived) return true;
+        if (this._paymentPlan === 'quarterly' || this._paymentPlan === 'annual') {
+            return !!this._fusionSubscriptionId;
+        }
+        if (this._paymentPlan === 'monthly' && this._checkoutPhase === 'application_fee') {
+            return false;
+        }
+        return false;
+    }
+
+    /**
+     * @param {'monthly' | 'quarterly' | 'annual'} tier
+     * @returns {string}
+     */
+    _membershipEntitlementCopy(tier) {
+        const L = this._labels();
+        const apo = this._programFormContext.applicationPaymentOptions;
+        const opt =
+            apo && typeof apo === 'object' && tier in apo
+                ? /** @type {{ subtext?: string, subtext2?: string }} */ (apo[tier])
+                : null;
+        const custom = [String(opt?.subtext ?? '').trim(), String(opt?.subtext2 ?? '').trim()]
+            .filter(Boolean)
+            .join(' ');
+        if (custom) return custom;
+        if (tier === 'monthly') return L.planMonthlyEntitlement;
+        if (tier === 'quarterly') return L.planQuarterlyEntitlement;
+        return L.planAnnualEntitlement;
+    }
+
     _hydratePaymentPlanCards() {
         const root = this.shadowRoot;
         if (!root) return;
@@ -533,75 +628,112 @@ class ApplicationFormComponent extends HTMLElement {
         const o =
             apo && typeof apo === 'object'
                 ? apo
-                : /** @type {Record<string, { title?: string, displayPrice?: string, subtext?: string, subtext2?: string }>} */ ({});
-        const centsRaw = this._programFormContext.applicationFeeAmountCents;
-        const cents = typeof centsRaw === 'number' && Number.isFinite(centsRaw) && centsRaw >= 50 ? centsRaw : null;
+                : /** @type {Record<string, { title?: string, displayPrice?: string, subtext?: string, subtext2?: string, includedBullets?: string[] }>} */ ({});
+        const guestCents = this._guestApplicationFeeCents();
 
+        const primaryBtn = root.querySelector('[data-app-payment-plan="one_time"]');
+        const primaryTitle = root.querySelector('#app-plan-one-time-title');
+        const primaryPrice = root.querySelector('#app-plan-one-time-price');
+        const primarySub = root.querySelector('#app-plan-one-time-sub');
         const one = o.one_time || {};
-        const oneTimeCard = root.querySelector('[data-app-payment-plan="one_time"]');
-        const oneTimeTitle = root.querySelector('#app-plan-one-time-title');
-        const oneTimePrice = root.querySelector('#app-plan-one-time-price');
-        const oneTimeSub = root.querySelector('#app-plan-one-time-sub');
-        const oneTimeBullets = root.querySelector('#app-plan-one-time-bullets');
         const dispOne = String(one.displayPrice ?? '').trim();
-        if (oneTimeTitle) oneTimeTitle.textContent = String(one.title ?? '').trim() || L.planOneTimeTitle;
-        if (oneTimePrice) {
-            if (dispOne) oneTimePrice.textContent = dispOne;
-            else oneTimePrice.textContent = cents != null ? this._formatUsdFromCents(cents) : '—';
+        if (primaryTitle) {
+            const priceStr = dispOne || this._formatUsdFromCents(guestCents);
+            const titleBase = String(one.title ?? '').trim() || L.planOneTimeTitle;
+            primaryTitle.textContent = titleBase.includes('{{price}}')
+                ? titleBase.replace('{{price}}', priceStr)
+                : `${titleBase} – ${priceStr}`;
         }
-        const oneSub = String(one.subtext ?? '').trim() || L.planOneTimeSub;
-        const oneSub2 = String(one.subtext2 ?? '').trim();
-        if (oneTimeSub) oneTimeSub.textContent = oneSub2 ? `${oneSub}\n${oneSub2}` : oneSub;
-        const oneBulletItems = [
-            ...(Array.isArray(one.includedBullets) ? one.includedBullets : []),
-            oneSub,
-            ...(oneSub2 ? [oneSub2] : []),
-        ].filter((v, i, arr) => arr.indexOf(v) === i);
-        this._fillBulletList(oneTimeBullets, oneBulletItems.length ? oneBulletItems : [L.planOneTimeSub]);
-        if (oneTimeCard instanceof HTMLElement) {
-            const unavailable = cents == null;
-            oneTimeCard.toggleAttribute('disabled', unavailable);
-            oneTimeCard.classList.toggle('is-unavailable', unavailable);
-            oneTimeCard.title = unavailable ? L.oneTimePlanUnavailable : '';
+        if (primaryPrice) {
+            primaryPrice.textContent = dispOne || this._formatUsdFromCents(guestCents);
+        }
+        if (primarySub) {
+            primarySub.textContent = String(one.subtext ?? '').trim() || L.planOneTimeSub;
+        }
+        if (primaryBtn instanceof HTMLElement) {
+            const unavailable = guestCents == null;
+            primaryBtn.toggleAttribute('disabled', unavailable);
+            primaryBtn.classList.toggle('is-unavailable', unavailable);
+            primaryBtn.title = unavailable ? L.oneTimePlanUnavailable : '';
         }
 
-        const bi = o.bimonthly || {};
-        const biTitle = root.querySelector('#app-plan-bimonthly-title');
-        const biPrice = root.querySelector('#app-plan-bimonthly-price');
-        const biEvery = root.querySelector('#app-plan-bimonthly-every');
-        const biSub1 = root.querySelector('#app-plan-bimonthly-sub1');
-        const biSub2 = root.querySelector('#app-plan-bimonthly-sub2');
-        const biBullets = root.querySelector('#app-plan-bimonthly-bullets');
-        if (biTitle) biTitle.textContent = String(bi.title ?? '').trim() || L.planBimonthlyTitle;
-        if (biPrice) biPrice.textContent = String(bi.displayPrice ?? '').trim() || L.planBimonthlyPriceLine;
-        if (biEvery) biEvery.textContent = L.planBimonthlyEvery;
-        const biSubA = String(bi.subtext ?? '').trim() || L.planBimonthlySub1;
-        const biSubB = String(bi.subtext2 ?? '').trim() || L.planBimonthlySub2;
-        if (biSub1) biSub1.textContent = biSubA;
-        if (biSub2) biSub2.textContent = biSubB;
-        const biBulletItems = Array.isArray(bi.includedBullets) && bi.includedBullets.length
-            ? bi.includedBullets
-            : [biSubA, biSubB].filter(Boolean);
-        this._fillBulletList(biBullets, biBulletItems);
+        const exploreToggle = root.querySelector('#app-explore-memberships-toggle');
+        if (exploreToggle instanceof HTMLElement) {
+            exploreToggle.textContent = this._membershipsExpanded
+                ? L.exploreMembershipsCollapse
+                : L.exploreMembershipsExpand;
+            exploreToggle.setAttribute('aria-expanded', this._membershipsExpanded ? 'true' : 'false');
+            exploreToggle.hidden = !!this._memberFeeOnly;
+        }
 
-        const an = o.annual || {};
-        const anTitle = root.querySelector('#app-plan-annual-title');
-        const anPrice = root.querySelector('#app-plan-annual-price');
-        const anDisc = root.querySelector('#app-plan-annual-discount');
-        const anSub1 = root.querySelector('#app-plan-annual-sub1');
-        const anSub2 = root.querySelector('#app-plan-annual-sub2');
-        const anBullets = root.querySelector('#app-plan-annual-bullets');
-        if (anTitle) anTitle.textContent = String(an.title ?? '').trim() || L.planAnnualTitle;
-        if (anPrice) anPrice.textContent = String(an.displayPrice ?? '').trim() || L.planAnnualPrice;
-        if (anDisc) anDisc.textContent = L.planAnnualDiscount;
-        const anSubA = String(an.subtext ?? '').trim() || L.planAnnualSub1;
-        const anSubB = String(an.subtext2 ?? '').trim() || L.planAnnualSub2;
-        if (anSub1) anSub1.textContent = anSubA;
-        if (anSub2) anSub2.textContent = anSubB;
-        const anBulletItems = Array.isArray(an.includedBullets) && an.includedBullets.length
-            ? an.includedBullets
-            : [anSubA, anSubB].filter(Boolean);
-        this._fillBulletList(anBullets, anBulletItems);
+        const membershipPanel = root.querySelector('#app-membership-plans-panel');
+        if (membershipPanel instanceof HTMLElement) {
+            membershipPanel.hidden = !this._membershipsExpanded || !!this._memberFeeOnly;
+        }
+
+        /** @type {Array<'monthly' | 'quarterly' | 'annual'>} */
+        const tiers = ['monthly', 'quarterly', 'annual'];
+        for (const tier of tiers) {
+            const legacy = tier === 'monthly' ? o.bimonthly : null;
+            const slice = o[tier] || legacy || {};
+            const meta = MEMBERSHIP_TIER_META[tier] || {};
+            const titleEl = root.querySelector(`#app-plan-${tier}-title`);
+            const priceEl = root.querySelector(`#app-plan-${tier}-price`);
+            const everyEl = root.querySelector(`#app-plan-${tier}-every`);
+            const bulletsEl = root.querySelector(`#app-plan-${tier}-bullets`);
+            if (titleEl) {
+                titleEl.textContent = String(slice.title ?? '').trim() || meta.label || tier;
+            }
+            if (priceEl) {
+                priceEl.textContent =
+                    String(slice.displayPrice ?? '').trim() ||
+                    (meta.priceLine ? meta.priceLine.replace(/ per .+$/, '') : '—');
+            }
+            if (everyEl) {
+                everyEl.textContent =
+                    tier === 'monthly'
+                        ? L.planMonthlyEvery
+                        : tier === 'quarterly'
+                          ? L.planQuarterlyEvery
+                          : L.planAnnualEvery;
+            }
+            const entitlement = this._membershipEntitlementCopy(tier);
+            const bulletItems =
+                Array.isArray(slice.includedBullets) && slice.includedBullets.length
+                    ? slice.includedBullets
+                    : [entitlement];
+            this._fillBulletList(bulletsEl, bulletItems);
+        }
+
+        const memberFeeBanner = root.querySelector('#app-member-fee-only-banner');
+        if (memberFeeBanner instanceof HTMLElement) {
+            if (this._memberFeeOnly) {
+                memberFeeBanner.removeAttribute('hidden');
+                memberFeeBanner.textContent = L.memberFeeOnlyBanner.replace(
+                    '{{fee}}',
+                    this._formatUsdFromCents(APPLICATION_FEE_MEMBER_CENTS),
+                );
+            } else {
+                memberFeeBanner.setAttribute('hidden', '');
+            }
+        }
+
+        const memberCreditEl = root.querySelector('#app-member-credit-note');
+        if (memberCreditEl instanceof HTMLElement) {
+            const bal = this._memberApplicationFee?.appCreditBalance;
+            const tier = String(this._memberApplicationFee?.membershipTier || '').toLowerCase();
+            if (
+                this._membershipFeeWaived &&
+                tier === 'quarterly' &&
+                typeof bal === 'number' &&
+                bal >= 0
+            ) {
+                memberCreditEl.removeAttribute('hidden');
+                memberCreditEl.textContent = L.memberQuarterlyCreditNote.replace('{{count}}', String(bal));
+            } else {
+                memberCreditEl.setAttribute('hidden', '');
+            }
+        }
     }
 
     /**
@@ -692,18 +824,30 @@ class ApplicationFormComponent extends HTMLElement {
                     },
                 ],
                 suggestedBadge: 'おすすめ',
-                planOneTimeTitle: '1. 一回払い（応募料のみ）',
-                planOneTimeSub: '一度だけのお支払い',
-                planBimonthlyTitle: '2. 応募料＋サブスクリプション',
-                planBimonthlyPriceLine: '$50',
-                planBimonthlyEvery: '2か月ごと',
-                planBimonthlySub1: '応募料を含みます',
-                planBimonthlySub2: '2か月ごとに更新',
-                planAnnualTitle: '3. 応募料＋年間サブスクリプション',
-                planAnnualPrice: '$260',
-                planAnnualDiscount: '（10% 割引）',
-                planAnnualSub1: '応募料を含みます',
-                planAnnualSub2: '毎年更新',
+                planOneTimeTitle: 'レジデンシー応募 – {{price}}',
+                planOneTimeSub: '応募のみ',
+                exploreMembershipsExpand: 'メンバーシップを見る',
+                exploreMembershipsCollapse: 'メンバーシップを閉じる',
+                planMonthlyTitle: '月額メンバーシップ',
+                planMonthlyPriceLine: '$30',
+                planMonthlyEvery: '月額',
+                planMonthlyEntitlement: '加入後、応募ごとに $35 の応募料',
+                planQuarterlyTitle: '四半期メンバーシップ',
+                planQuarterlyPriceLine: '$75',
+                planQuarterlyEvery: '四半期ごと',
+                planQuarterlyEntitlement:
+                    '四半期ごとに +1 積み上げ応募クレジット。残高 ≥ 1 なら無料、それ以外は $35',
+                planAnnualTitle: '年間メンバーシップ',
+                planAnnualPriceLine: '$260',
+                planAnnualEvery: '年額',
+                planAnnualEntitlement: '有効期間中は応募料込み',
+                memberFeeOnlyBanner:
+                    'メンバーシップは有効です。下記で {{fee}} の応募料をお支払いのうえ送信してください。',
+                memberQuarterlyCreditNote: '今四半期の応募クレジット: {{count}}',
+                monthlySubThenFeeHint:
+                    'サブスクリプションが承認されました。下記で $35 の応募料を完了してから送信してください。',
+                subscriptionThenSubmitHint:
+                    'サブスクリプションが承認されました。送信して応募を完了してください。',
                 oneTimePlanUnavailable:
                     '一回払いの金額がプログラムに設定されていません。Studio で「Application fee amount (cents)」を設定してください。',
                 selectPaymentPlanFirst: '支払いオプションを選んでください。',
@@ -788,11 +932,11 @@ class ApplicationFormComponent extends HTMLElement {
                 required: '必須',
                 feeInfoTrigger: '応募料に含まれるもの',
                 feeInfoP1:
-                    '応募料には、Fusion プラットフォームの2か月分のメンバーシップが含まれます。その期間中にプロフィールを整え、ギャラリー、コレクター、キュレターとのつながりを始められます。',
+                    '応募料は、レジデンシー応募の処理と審査に充てられます。ゲストとして応募するか、Fusion メンバーシップに加入してプラットフォームを継続利用できます。',
                 feeInfoP2:
-                    'メンバーシップでは、他の Fusion プログラムへの応募も、追加の応募料なしで行えます。選考が進むなかでも応募料の価値を最大限に活かし、レジデンシー以外にも、より深い関わりの選択肢を用意しています。',
+                    '月額メンバーは応募ごとに $35。四半期メンバーは四半期ごとに 1 クレジット（繰越可）。年間メンバーは有効期間中、応募料が含まれます。',
                 feeInfoP3:
-                    'お支払いが完了し応募が送信されたあと、プロフィールのダッシュボードから、いつでもサブスクリプションの内容を更新したり、解約したりできます。',
+                    'お支払いと応募送信後、プロフィールのダッシュボードからいつでもメンバーシップを管理できます。',
             };
             return /** @type {Record<string, unknown>} */ (this._mergePaymentChromeLabels(/** @type {Record<string, unknown>} */ (jaLabels)));
         }
@@ -856,19 +1000,30 @@ class ApplicationFormComponent extends HTMLElement {
                     body: 'Every dollar supports our mission to empower creative practitioners.',
                 },
             ],
-            suggestedBadge: 'Most popular',
-            planOneTimeTitle: '1. Single Application Payment',
-            planOneTimeSub: 'One-time payment',
-            planBimonthlyTitle: '2. Application + Subscription',
-            planBimonthlyPriceLine: '$50',
-            planBimonthlyEvery: 'every 2 months',
-            planBimonthlySub1: 'Includes application fee',
-            planBimonthlySub2: 'Renews every 2 months',
-            planAnnualTitle: '3. Application + Annual Subscription',
-            planAnnualPrice: '$260',
-            planAnnualDiscount: '(10% Discount)',
-            planAnnualSub1: 'Includes application fee',
-            planAnnualSub2: 'Renews every year',
+                suggestedBadge: 'Most popular',
+                planOneTimeTitle: 'Residency application – {{price}}',
+                planOneTimeSub: 'Application only',
+                exploreMembershipsExpand: 'Explore memberships',
+                exploreMembershipsCollapse: 'Hide membership options',
+                planMonthlyTitle: 'Monthly membership',
+                planMonthlyPriceLine: '$30',
+                planMonthlyEvery: 'per month',
+                planMonthlyEntitlement: '$35 application fee after subscribe',
+                planQuarterlyTitle: 'Quarterly membership',
+                planQuarterlyPriceLine: '$75',
+                planQuarterlyEvery: 'per quarter',
+                planQuarterlyEntitlement:
+                    '+1 stackable application credit per quarter; free if balance ≥ 1 else $35',
+                planAnnualTitle: 'Annual membership',
+                planAnnualPriceLine: '$260',
+                planAnnualEvery: 'per year',
+                planAnnualEntitlement: 'Applications included while membership is active',
+                memberFeeOnlyBanner:
+                    'Your membership includes platform access. Pay the {{fee}} application fee below to submit.',
+                memberQuarterlyCreditNote: 'You have {{count}} application credit(s) available this quarter.',
+                monthlySubThenFeeHint:
+                    'Subscription approved. Complete the $35 application fee below, then submit.',
+                subscriptionThenSubmitHint: 'Subscription approved. Click submit to finish your application.',
             oneTimePlanUnavailable:
                 'One-time payment amount is not set for this program. Add Application fee amount (cents) in Studio.',
             selectPaymentPlanFirst: 'Please select a payment option.',
@@ -956,12 +1111,12 @@ class ApplicationFormComponent extends HTMLElement {
                 'Your sign-in session may have expired during payment. Sign in again with Internet Identity, then retry Pay and submit, or contact support.',
             required: 'required',
             feeInfoTrigger: "What's included in the application fee?",
-            feeInfoP1:
-                'Your application fee includes a two-month membership to the Fusion platform. You can use that time to set up your profile and connect with galleries, collectors, and curators.',
-            feeInfoP2:
-                'Membership also lets you apply to other Fusion programs at no additional application fee, so you get lasting value while selection is ongoing, and a path to deeper connection beyond the residency alone.',
-            feeInfoP3:
-                'After your payment completes and your application is sent, you can use your profile dashboard to update or cancel your subscription at any time.',
+                feeInfoP1:
+                    'The application fee covers processing and review of your residency application. You can apply as a guest or join Fusion with a membership for ongoing platform access.',
+                feeInfoP2:
+                    'Members on Monthly pay a $35 application fee per submission. Quarterly members earn one stackable application credit each quarter. Annual members include applications while their membership is active.',
+                feeInfoP3:
+                    'After payment completes and your application is sent, manage your membership anytime from your profile dashboard.',
         };
         return /** @type {Record<string, unknown>} */ (this._mergePaymentChromeLabels(/** @type {Record<string, unknown>} */ (enLabels)));
     }
@@ -981,16 +1136,23 @@ class ApplicationFormComponent extends HTMLElement {
     _posthogApplicationBaseProps() {
         const programId = this.getAttribute('data-program-id') || '';
         const centsRaw = this._programFormContext.applicationFeeAmountCents;
-        const oneTimeOk = typeof centsRaw === 'number' && Number.isFinite(centsRaw) && centsRaw >= 50;
+        const guestCents = this._guestApplicationFeeCents();
+        const oneTimeOk = guestCents != null;
         return {
             program_id: programId,
             locale: this._analyticsLocale(),
             one_time_payment_available: oneTimeOk,
-            bimonthly_plan_offered: true,
+            bimonthly_plan_offered: false,
+            monthly_plan_offered: true,
+            quarterly_plan_offered: true,
             annual_plan_offered: true,
             fee_waived: !!this._membershipFeeWaived,
+            member_fee_only: !!this._memberFeeOnly,
             membership_gate: String(this._membershipGate || 'unknown'),
-            ...(oneTimeOk ? { application_fee_amount_cents: Math.round(centsRaw) } : {}),
+            ...(oneTimeOk ? { application_fee_amount_cents: guestCents } : {}),
+            ...(this._memberApplicationFee
+                ? { member_fee_due_cents: this._memberApplicationFee.dueCents }
+                : {}),
         };
     }
 
@@ -1272,6 +1434,48 @@ class ApplicationFormComponent extends HTMLElement {
         }
     }
 
+    /**
+     * @param {'monthly' | 'quarterly' | 'annual'} tier
+     * @returns {string}
+     */
+    _subscriptionTierForPaymentPlan(tier) {
+        return tier;
+    }
+
+    /**
+     * @param {'monthly' | 'quarterly' | 'annual'} tier
+     * @returns {string}
+     */
+    _subscriptionPaymentPlanMeta(tier) {
+        if (tier === 'annual') return 'subscription_annual';
+        if (tier === 'quarterly') return 'subscription_quarterly';
+        return 'subscription_monthly';
+    }
+
+    /**
+     * After PayPal subscription approval — monthly needs phase-2 application fee.
+     * @returns {Promise<void>}
+     */
+    async _onSubscriptionCheckoutApproved() {
+        const root = this.shadowRoot;
+        const L = this._labels();
+        const payBtn = root?.querySelector('#app-pay-submit');
+        if (this._paymentPlan === 'monthly') {
+            this._checkoutPhase = 'application_fee';
+            this._paypalOrderId = '';
+            this._teardownStripePayment();
+            await this._prepareStripePayment();
+            this._syncPaymentHintChrome(root, { busy: false, text: L.monthlySubThenFeeHint });
+            if (payBtn instanceof HTMLElement) payBtn.disabled = !this._stripePaymentReady;
+            return;
+        }
+        this._stripePaymentReady = true;
+        this._syncPaymentHintChrome(root, { busy: false, text: L.subscriptionThenSubmitHint });
+        if (payBtn instanceof HTMLElement) payBtn.disabled = false;
+        const ph = root?.querySelector('#app-payment-placeholder');
+        if (ph instanceof HTMLElement) ph.hidden = true;
+    }
+
     async _preparePayPalEmbeddedPayment() {
         if (this._alreadyApplied || this._membershipFeeWaived) return;
         const prepareKey = this._computeStripePrepareKey();
@@ -1328,12 +1532,8 @@ class ApplicationFormComponent extends HTMLElement {
             await new Promise((r) => requestAnimationFrame(r));
             if (myGen !== this._stripePrepareGen) return;
 
-            if (this._paymentPlan === 'one_time') {
-                const centsRaw = this._programFormContext.applicationFeeAmountCents;
-                const amountCents =
-                    typeof centsRaw === 'number' && Number.isFinite(centsRaw) && centsRaw >= 50
-                        ? Math.round(centsRaw)
-                        : null;
+            if (this._planNeedsOneTimeCheckout()) {
+                const amountCents = this._oneTimeCheckoutCents();
                 if (amountCents == null) {
                     setHint(L.oneTimePlanUnavailable, false);
                     if (payBtn) payBtn.disabled = true;
@@ -1341,6 +1541,12 @@ class ApplicationFormComponent extends HTMLElement {
                 }
                 const oneTimeConfig = await fetchPaymentConfig();
                 if (myGen !== this._stripePrepareGen) return;
+                const paymentPlanTag =
+                    this._memberFeeOnly || this._paymentPlan === 'member_fee'
+                        ? 'member_fee'
+                        : this._paymentPlan === 'monthly'
+                          ? 'member_fee'
+                          : 'one_time';
                 this._paypalCheckoutController = await mountPayPalAdvancedOneTimeCheckout(mountEl, {
                     clientId,
                     mode: oneTimeConfig.mode === 'live' ? 'live' : 'sandbox',
@@ -1348,7 +1554,7 @@ class ApplicationFormComponent extends HTMLElement {
                     metadata: {
                         programId,
                         purpose: 'program_application',
-                        payment_plan: 'one_time',
+                        payment_plan: paymentPlanTag,
                     },
                     createOrder: async (body) =>
                         createPayPalOneTimePayment({
@@ -1369,18 +1575,18 @@ class ApplicationFormComponent extends HTMLElement {
                 if (this._paypalCheckoutController.usesCardFields) {
                     setHint('Enter your card details below, then click Pay & submit application.', false);
                 }
-            } else {
+            } else if (
+                this._paymentPlan === 'monthly' ||
+                this._paymentPlan === 'quarterly' ||
+                this._paymentPlan === 'annual'
+            ) {
                 const payConfig = await fetchPaymentConfig();
                 if (myGen !== this._stripePrepareGen) return;
-                const planId =
-                    this._paymentPlan === 'annual'
-                        ? payConfig.planAnnual
-                        : payConfig.planBimonthly;
+                const tier = this._subscriptionTierForPaymentPlan(this._paymentPlan);
+                const planId = planIdForTier(tier, payConfig);
                 if (!planId) {
                     throw new Error(
-                        this._paymentPlan === 'annual'
-                            ? 'PayPal annual plan not configured on integration server.'
-                            : 'PayPal bimonthly plan not configured on integration server.',
+                        `PayPal ${tier} plan not configured on integration server.`,
                     );
                 }
                 if (paymentModeMismatch(payConfig)) {
@@ -1391,6 +1597,7 @@ class ApplicationFormComponent extends HTMLElement {
                 }
                 const fusionPendingId = crypto.randomUUID();
                 this._fusionPendingId = fusionPendingId;
+                this._checkoutPhase = 'subscription';
                 setPendingPaymentEmailLocal({
                     email,
                     source: 'application',
@@ -1404,10 +1611,7 @@ class ApplicationFormComponent extends HTMLElement {
                     pending_email: email,
                     programId,
                     purpose: 'program_application',
-                    payment_plan:
-                        this._paymentPlan === 'annual'
-                            ? 'subscription_annual'
-                            : 'subscription_bimonthly',
+                    payment_plan: this._subscriptionPaymentPlanMeta(tier),
                 };
                 const sdkMode = payConfig.mode === 'live' ? 'live' : 'sandbox';
                 await mountPayPalSubscriptionButtons(mountEl, {
@@ -1426,11 +1630,7 @@ class ApplicationFormComponent extends HTMLElement {
                             subscriptionId,
                             programId,
                         });
-                        setHint(
-                            'Subscription approved. Click Pay & submit application to continue.',
-                            false,
-                        );
-                        if (payBtn) payBtn.disabled = false;
+                        await this._onSubscriptionCheckoutApproved();
                     },
                     onError: (err) => {
                         console.warn('[application-form] PayPal subscription error', err);
@@ -1440,13 +1640,30 @@ class ApplicationFormComponent extends HTMLElement {
                         );
                     },
                 });
+            } else {
+                setHint(L.selectPaymentPlanFirst, false);
+                if (payBtn) payBtn.disabled = true;
+                return;
             }
 
             if (myGen !== this._stripePrepareGen) return;
-            this._stripePaymentReady = true;
+            this._stripePaymentReady = this._planNeedsOneTimeCheckout();
             this._stripePrepareKey = prepareKey;
+            if (this._planSubmitWithoutOneTime() && this._fusionSubscriptionId) {
+                this._stripePaymentReady = true;
+            }
             setHint('', false);
-            if (payBtn) payBtn.disabled = this._paymentPlan !== 'one_time' && !this._fusionSubscriptionId;
+            if (payBtn) {
+                const subWaiting =
+                    (this._paymentPlan === 'monthly' ||
+                        this._paymentPlan === 'quarterly' ||
+                        this._paymentPlan === 'annual') &&
+                    !this._fusionSubscriptionId &&
+                    !this._planNeedsOneTimeCheckout();
+                payBtn.disabled =
+                    subWaiting ||
+                    (this._planNeedsOneTimeCheckout() && !this._paypalCheckoutController);
+            }
             const ph = root?.querySelector('#app-payment-placeholder');
             if (ph instanceof HTMLElement) ph.hidden = true;
             try {
@@ -1538,12 +1755,8 @@ class ApplicationFormComponent extends HTMLElement {
         }
 
         let clientSecret = '';
-        if (this._paymentPlan === 'one_time') {
-            const centsRaw = this._programFormContext.applicationFeeAmountCents;
-            const amountCents =
-                typeof centsRaw === 'number' && Number.isFinite(centsRaw) && centsRaw >= 50
-                    ? Math.round(centsRaw)
-                    : null;
+        if (this._planNeedsOneTimeCheckout()) {
+            const amountCents = this._oneTimeCheckoutCents();
             if (amountCents == null) {
                 setHint(L.oneTimePlanUnavailable, false);
                 if (payBtn) payBtn.disabled = true;
@@ -1553,10 +1766,16 @@ class ApplicationFormComponent extends HTMLElement {
             setHint(L.paymentPreparing, true);
             if (myGen !== this._stripePrepareGen) return;
             try {
+                const paymentPlanTag =
+                    this._memberFeeOnly || this._paymentPlan === 'member_fee'
+                        ? 'member_fee'
+                        : this._paymentPlan === 'monthly'
+                          ? 'member_fee'
+                          : 'one_time';
                 const piRes = await createPaymentIntent(amountCents, 'usd', {
                     programId,
                     purpose: 'program_application',
-                    payment_plan: 'one_time',
+                    payment_plan: paymentPlanTag,
                 });
                 if (myGen !== this._stripePrepareGen) return;
                 clientSecret = piRes.clientSecret;
@@ -1568,28 +1787,31 @@ class ApplicationFormComponent extends HTMLElement {
                 if (payBtn) payBtn.disabled = true;
                 return;
             }
-        } else {
+        } else if (
+            this._paymentPlan === 'monthly' ||
+            this._paymentPlan === 'quarterly' ||
+            this._paymentPlan === 'annual'
+        ) {
             if (payBtn) payBtn.disabled = true;
             setHint(L.paymentPreparing, true);
             if (myGen !== this._stripePrepareGen) return;
             try {
+                const tier = this._subscriptionTierForPaymentPlan(this._paymentPlan);
                 const subRes = await createSubscription({
                     email,
                     payFirst: true,
-                    subscriptionTier: this._paymentPlan === 'annual' ? 'annual' : 'bimonthly',
+                    subscriptionTier: tier,
                     metadata: {
                         programId,
                         purpose: 'program_application',
-                        payment_plan:
-                            this._paymentPlan === 'annual'
-                                ? 'subscription_annual'
-                                : 'subscription_bimonthly',
+                        payment_plan: this._subscriptionPaymentPlanMeta(tier),
                     },
                 });
                 if (myGen !== this._stripePrepareGen) return;
                 clientSecret = subRes.clientSecret;
                 this._fusionPendingId = subRes.fusionPendingId || null;
                 this._fusionSubscriptionId = subRes.subscriptionId || null;
+                this._checkoutPhase = 'subscription';
                 setPendingPaymentEmailLocal({
                     email,
                     source: 'application',
@@ -1605,6 +1827,10 @@ class ApplicationFormComponent extends HTMLElement {
                 if (payBtn) payBtn.disabled = true;
                 return;
             }
+        } else {
+            setHint(L.selectPaymentPlanFirst, false);
+            if (payBtn) payBtn.disabled = true;
+            return;
         }
 
         setHint(L.paymentLoadingForm, true);
@@ -1698,7 +1924,31 @@ class ApplicationFormComponent extends HTMLElement {
             return;
         }
         const provider = getActiveProvider();
-        if (provider === 'paypal' && this._paymentPlan !== 'one_time' && !this._fusionSubscriptionId) {
+        if (provider === 'paypal' && !this._planNeedsOneTimeCheckout()) {
+            if (
+                (this._paymentPlan === 'monthly' ||
+                    this._paymentPlan === 'quarterly' ||
+                    this._paymentPlan === 'annual') &&
+                !this._fusionSubscriptionId
+            ) {
+                if (statusEl) {
+                    statusEl.textContent = 'Approve your subscription with PayPal below, then try again.';
+                    statusEl.classList.add('is-error');
+                }
+                return;
+            }
+        } else if (
+            provider === 'paypal' &&
+            this._planNeedsOneTimeCheckout() &&
+            !this._paypalOrderId &&
+            !this._paypalCheckoutController?.usesCardFields
+        ) {
+            if (statusEl) {
+                statusEl.textContent = 'Complete payment with PayPal below, then try again.';
+                statusEl.classList.add('is-error');
+            }
+            return;
+        } else if (provider === 'paypal' && this._paymentPlan !== 'one_time' && this._paymentPlan !== 'member_fee' && !this._fusionSubscriptionId && !this._planNeedsOneTimeCheckout()) {
             if (statusEl) {
                 statusEl.textContent = 'Approve your subscription with PayPal below, then try again.';
                 statusEl.classList.add('is-error');
@@ -1733,7 +1983,15 @@ class ApplicationFormComponent extends HTMLElement {
                     w.stripeError = error;
                     throw wrapped;
                 }
-            } else if (provider === 'paypal' && this._paymentPlan === 'one_time') {
+                if (
+                    this._paymentPlan === 'monthly' &&
+                    this._checkoutPhase !== 'application_fee'
+                ) {
+                    await this._onSubscriptionCheckoutApproved();
+                    this._setPaySubmittingState(false, '');
+                    return;
+                }
+            } else if (provider === 'paypal' && this._planNeedsOneTimeCheckout()) {
                 if (!this._paypalOrderId) {
                     if (this._paypalCheckoutController?.usesCardFields) {
                         await this._paypalCheckoutController.submit();
@@ -1758,9 +2016,9 @@ class ApplicationFormComponent extends HTMLElement {
             const lastName = String(root?.querySelector('#app-last-name')?.value ?? '').trim();
             const programId = this.getAttribute('data-program-id') || '';
             try {
-                const feeCents = this._programFormContext?.applicationFeeAmountCents;
+                const feeCents = this._oneTimeCheckoutCents();
                 const payVal =
-                    this._paymentPlan === 'one_time' &&
+                    this._planNeedsOneTimeCheckout() &&
                     typeof feeCents === 'number' &&
                     Number.isFinite(feeCents) &&
                     feeCents >= 50
@@ -2014,13 +2272,25 @@ class ApplicationFormComponent extends HTMLElement {
             (e) => {
                 const t = e.target;
                 if (!(t instanceof Element)) return;
-                if (this._alreadyApplied) return;
+                if (this._alreadyApplied || this._membershipFeeWaived) return;
+                const exploreBtn = t.closest('#app-explore-memberships-toggle');
+                if (exploreBtn && root.contains(exploreBtn)) {
+                    this._membershipsExpanded = !this._membershipsExpanded;
+                    this._hydratePaymentPlanCards();
+                    return;
+                }
                 const btn = t.closest('[data-app-payment-plan]');
                 if (!btn || !root.contains(btn)) return;
                 if (btn.hasAttribute('disabled')) return;
                 const plan = btn.getAttribute('data-app-payment-plan');
-                if (plan === 'one_time' || plan === 'bimonthly' || plan === 'annual') {
-                    this._onPaymentPlanSelected(plan);
+                if (
+                    plan === 'one_time' ||
+                    plan === 'monthly' ||
+                    plan === 'quarterly' ||
+                    plan === 'annual' ||
+                    plan === 'member_fee'
+                ) {
+                    this._onPaymentPlanSelected(/** @type {'one_time' | 'monthly' | 'quarterly' | 'annual' | 'member_fee'} */ (plan));
                 }
             },
             { signal }
@@ -2028,6 +2298,22 @@ class ApplicationFormComponent extends HTMLElement {
 
         form?.addEventListener('input', () => this._touchDirty(), { passive: true, signal });
         form?.addEventListener('change', () => this._touchDirty(), { passive: true, signal });
+        // Persist draft when leaving a field (click-away / tab-out).
+        form?.addEventListener(
+            'focusout',
+            (e) => {
+                const t = e.target;
+                if (
+                    !(t instanceof HTMLInputElement) &&
+                    !(t instanceof HTMLTextAreaElement) &&
+                    !(t instanceof HTMLSelectElement)
+                ) {
+                    return;
+                }
+                this._saveApplicationDraftFromForm();
+            },
+            { signal }
+        );
 
         root.querySelector('#app-submit-updates')?.addEventListener(
             'click',
@@ -2079,6 +2365,7 @@ class ApplicationFormComponent extends HTMLElement {
         const freeWrap = root.querySelector('#app-submit-free-wrap');
         const banner = root.querySelector('#app-membership-fee-waived-banner');
         const lead = root.querySelector('#app-portfolio-lead');
+        const ctaStack = root.querySelector('#app-payment-cta-stack');
 
         if (this._alreadyApplied) {
             if (pay instanceof HTMLElement) pay.setAttribute('hidden', '');
@@ -2095,6 +2382,7 @@ class ApplicationFormComponent extends HTMLElement {
             if (freeWrap instanceof HTMLElement) freeWrap.removeAttribute('hidden');
             if (banner instanceof HTMLElement) banner.removeAttribute('hidden');
             if (lead) lead.textContent = L.lead2MemberFeeWaived;
+            this._hydratePaymentPlanCards();
             this._teardownStripePayment();
             return;
         }
@@ -2103,6 +2391,10 @@ class ApplicationFormComponent extends HTMLElement {
         if (freeWrap instanceof HTMLElement) freeWrap.setAttribute('hidden', '');
         if (banner instanceof HTMLElement) banner.setAttribute('hidden', '');
         if (lead) lead.textContent = L.lead2;
+        if (ctaStack instanceof HTMLElement) {
+            ctaStack.toggleAttribute('hidden', !!this._memberFeeOnly);
+        }
+        this._hydratePaymentPlanCards();
     }
 
     /**
@@ -2115,6 +2407,8 @@ class ApplicationFormComponent extends HTMLElement {
 
     async _hydrateMembershipAndPrefill() {
         this._membershipFeeWaived = false;
+        this._memberFeeOnly = false;
+        this._memberApplicationFee = null;
         this._membershipGate = 'unknown';
         try {
             const snap = await getAuthSnapshot();
@@ -2144,16 +2438,31 @@ class ApplicationFormComponent extends HTMLElement {
                 if (gate === 'ok' || gate === 'exempt') {
                     const ens = await ensureMyLinkedArtistProfile();
                     if (ens === 'ok' || ens === 'alreadyLinked') {
-                        this._membershipFeeWaived = true;
+                        const programId = this.getAttribute('data-program-id') || '';
+                        this._memberApplicationFee = await applicationFeeDueForCaller(programId);
+                        const due = Number(this._memberApplicationFee?.dueCents);
+                        if (due === 0) {
+                            this._membershipFeeWaived = true;
+                        } else if (due === APPLICATION_FEE_MEMBER_CENTS) {
+                            this._memberFeeOnly = true;
+                            this._paymentPlan = 'member_fee';
+                            this._checkoutPhase = null;
+                            this._syncPaymentPlanUi();
+                        }
                     }
                 }
             }
         } catch {
             this._membershipFeeWaived = false;
+            this._memberFeeOnly = false;
+            this._memberApplicationFee = null;
         }
         this._syncApplicationFeeUi();
         await this._prefillFromArtist();
         if (this.shadowRoot) this._hydrateProgramContextInDom();
+        if (this._memberFeeOnly && this._paymentPlan === 'member_fee') {
+            void this._prepareStripePayment();
+        }
     }
 
     /**
@@ -2185,19 +2494,18 @@ class ApplicationFormComponent extends HTMLElement {
     }
 
     /**
-     * @param {'one_time' | 'bimonthly' | 'annual'} plan
+     * @param {'one_time' | 'monthly' | 'quarterly' | 'annual' | 'member_fee'} plan
      */
     _onPaymentPlanSelected(plan) {
         if (this._alreadyApplied || this._membershipFeeWaived) return;
-        if (plan === 'one_time') {
-            const centsRaw = this._programFormContext.applicationFeeAmountCents;
-            const ok = typeof centsRaw === 'number' && Number.isFinite(centsRaw) && centsRaw >= 50;
-            if (!ok) return;
-        }
+        if (plan === 'one_time' && this._guestApplicationFeeCents() == null) return;
         if (!this._ensureStep0OrPrompt()) return;
         this._paymentPlan = plan;
+        this._checkoutPhase = null;
+        this._membershipsExpanded = plan !== 'one_time' && plan !== 'member_fee';
         this._syncPaymentPlanUi();
         this._teardownStripePayment();
+        this._saveApplicationDraftFromForm();
         try {
             posthog.capture('program_application_payment_plan_selected', {
                 ...this._posthogApplicationBaseProps(),
@@ -2232,7 +2540,14 @@ class ApplicationFormComponent extends HTMLElement {
         if (payBtn instanceof HTMLElement) {
             if (!plan) payBtn.setAttribute('hidden', '');
             else payBtn.removeAttribute('hidden');
+            const L = this._labels();
+            if (this._planSubmitWithoutOneTime() && this._fusionSubscriptionId) {
+                payBtn.textContent = L.submitApplicationOnly;
+            } else {
+                payBtn.textContent = L.payAndSubmitApplication;
+            }
         }
+        this._hydratePaymentPlanCards();
         this._hydrateWhatsIncludedForPlan();
     }
 
@@ -2256,6 +2571,68 @@ class ApplicationFormComponent extends HTMLElement {
             exploration: String(get('app-exploration')).trim(),
             residencyGoals: String(get('app-goals')).trim(),
         };
+    }
+
+    _saveApplicationDraftFromForm() {
+        const programId = this.getAttribute('data-program-id') || '';
+        if (!programId || this._alreadyApplied) return;
+        const payload = this._collectPayload();
+        // Keep the typed website string in the draft (not only normalized).
+        const websiteRaw = String(
+            this.shadowRoot?.querySelector('#app-website')?.value ?? ''
+        ).trim();
+        saveProgramApplicationDraft(programId, {
+            ...payload,
+            website: websiteRaw || payload.website,
+            paymentPlan: this._paymentPlan,
+        });
+    }
+
+    /**
+     * Restore local draft after profile prefill. Server "already applied" payload wins.
+     */
+    _restoreApplicationDraft() {
+        const root = this.shadowRoot;
+        if (!root || this._alreadyApplied) return;
+        const programId = this.getAttribute('data-program-id') || '';
+        if (!programId) return;
+        const draft = getProgramApplicationDraft(programId);
+        if (!draft) return;
+
+        /** @param {string} id @param {string | undefined} v */
+        const setVal = (id, v) => {
+            if (v == null || !String(v).trim()) return;
+            const el = root.querySelector(`#${id}`);
+            if (el && 'value' in el) el.value = String(v);
+        };
+
+        setVal('app-first-name', draft.firstName);
+        setVal('app-last-name', draft.lastName);
+        setVal('app-email', draft.email);
+        setVal('app-country', draft.country);
+        setVal('app-state', draft.stateProvince);
+        setVal('app-city', draft.city);
+        setVal('app-website', draft.website);
+        setVal('app-discipline', draft.discipline);
+        setVal('app-bio', draft.bioStatement);
+        setVal('app-exploration', draft.exploration);
+        setVal('app-goals', draft.residencyGoals);
+
+        if (
+            draft.paymentPlan === 'one_time' ||
+            draft.paymentPlan === 'monthly' ||
+            draft.paymentPlan === 'quarterly' ||
+            draft.paymentPlan === 'annual' ||
+            draft.paymentPlan === 'member_fee'
+        ) {
+            if (!(this._alreadyApplied || this._membershipFeeWaived)) {
+                this._paymentPlan = draft.paymentPlan;
+                this._membershipsExpanded =
+                    draft.paymentPlan !== 'one_time' && draft.paymentPlan !== 'member_fee';
+                this._syncPaymentPlanUi();
+                void this._prepareStripePayment();
+            }
+        }
     }
 
     async _submitApplication() {
@@ -2309,6 +2686,7 @@ class ApplicationFormComponent extends HTMLElement {
             }
             if (statusEl) statusEl.classList.add('is-success');
             this._clearDirtyState();
+            clearProgramApplicationDraft(programId);
             this._showSubmitSuccess(programId);
         } catch (err) {
             const code = err && typeof err === 'object' && 'code' in err ? String(/** @type {{ code?: unknown }} */ (err).code) : '';
@@ -2397,10 +2775,12 @@ class ApplicationFormComponent extends HTMLElement {
         try {
             rec = await getMyArtistRecord();
         } catch {
+            this._restoreApplicationDraft();
             this._syncApplicationFeeUi();
             return;
         }
         if (!rec) {
+            this._restoreApplicationDraft();
             this._syncApplicationFeeUi();
             return;
         }
@@ -2483,6 +2863,7 @@ class ApplicationFormComponent extends HTMLElement {
                     statusEl.classList.remove('is-error');
                     statusEl.classList.add('is-success');
                     this._alreadyApplied = true;
+                    clearProgramApplicationDraft(programId);
                     this._syncApplicationFeeUi();
                     window.dispatchEvent(
                         new CustomEvent('fusion-program-application-submitted', {
@@ -2494,6 +2875,7 @@ class ApplicationFormComponent extends HTMLElement {
                 /* ignore */
             }
         }
+        this._restoreApplicationDraft();
         this._syncApplicationFeeUi();
     }
 
@@ -2518,8 +2900,12 @@ class ApplicationFormComponent extends HTMLElement {
 
     render() {
         this._paymentPlan = null;
+        this._membershipsExpanded = false;
+        this._checkoutPhase = null;
+        this._memberApplicationFee = null;
         this._alreadyApplied = false;
         this._membershipFeeWaived = false;
+        this._memberFeeOnly = false;
         this._membershipGate = 'unknown';
         this._hasCapturedProgramApplicationStarted = false;
         this._teardownStripePayment();
@@ -2832,18 +3218,162 @@ class ApplicationFormComponent extends HTMLElement {
                 }
 
                 .app-payment-plan-grid {
+                    display: none;
+                }
+
+                .app-payment-cta-stack {
+                    display: flex;
+                    flex-direction: column;
+                    gap: clamp(0.75rem, 1.6vw, 1rem);
+                    margin: 0 0 clamp(1.25rem, 2.5vw, 1.75rem);
+                }
+
+                .app-payment-cta-stack[hidden] {
+                    display: none !important;
+                }
+
+                .app-payment-cta {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: flex-start;
+                    justify-content: center;
+                    gap: 0.25rem;
+                    width: 100%;
+                    min-height: 3.35rem;
+                    margin: 0;
+                    padding: clamp(0.95rem, 1.8vw, 1.2rem) clamp(1.1rem, 2vw, 1.45rem);
+                    box-sizing: border-box;
+                    border: 1px solid rgba(0, 0, 0, 0.16);
+                    border-radius: 8px;
+                    background: var(--c3);
+                    color: var(--c2);
+                    text-align: left;
+                    cursor: pointer;
+                    font-family: inherit;
+                    transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+                }
+
+                .app-payment-cta:hover:not([disabled]) {
+                    border-color: var(--c4);
+                }
+
+                .app-payment-cta.is-selected {
+                    border: 2px solid var(--c4);
+                    background: color-mix(in srgb, var(--c4) 14%, var(--c3));
+                    box-shadow: 0 0 0 1px color-mix(in srgb, var(--c4) 40%, transparent);
+                }
+
+                .app-payment-cta[disabled],
+                .app-payment-cta.is-unavailable {
+                    opacity: 0.5;
+                    cursor: not-allowed;
+                }
+
+                .app-payment-cta--primary {
+                    font-size: clamp(0.98rem, 1.2vw, 1.08rem);
+                    font-variation-settings: var(--fv-title);
+                    letter-spacing: 0.02em;
+                }
+
+                .app-payment-cta--secondary {
+                    font-size: clamp(0.92rem, 1.1vw, 1rem);
+                    font-variation-settings: var(--fv-body-wide);
+                    background: color-mix(in srgb, var(--c2) 4%, var(--c3));
+                }
+
+                .app-payment-cta-sub {
+                    font-size: clamp(0.78rem, 0.95vw, 0.88rem);
+                    font-variation-settings: var(--fv-caption);
+                    opacity: 0.88;
+                    letter-spacing: 0.02em;
+                }
+
+                .app-member-fee-only-banner,
+                .app-member-credit-note {
+                    margin: 0 0 1rem;
+                    font-size: clamp(0.88rem, 1.05vw, 0.96rem);
+                    font-variation-settings: var(--fv-body-wide);
+                    line-height: 1.5;
+                    color: var(--c2);
+                }
+
+                .app-member-fee-only-banner[hidden],
+                .app-member-credit-note[hidden] {
+                    display: none !important;
+                }
+
+                .app-membership-plans-panel {
                     display: grid;
-                    grid-template-columns: repeat(3, 1fr);
-                    gap: clamp(0.85rem, 1.8vw, 1.25rem);
-                    align-items: stretch;
-                    margin: 0 0 clamp(1.5rem, 3vw, 2rem);
+                    grid-template-columns: 1fr;
+                    gap: clamp(0.75rem, 1.5vw, 1rem);
+                    margin-top: 0.15rem;
+                }
+
+                .app-membership-plans-panel[hidden] {
+                    display: none !important;
+                }
+
+                .app-payment-membership-card {
+                    position: relative;
+                    display: flex;
+                    flex-direction: row;
+                    align-items: flex-start;
+                    gap: 0.85rem;
+                    width: 100%;
+                    margin: 0;
+                    padding: clamp(1rem, 1.8vw, 1.25rem);
+                    box-sizing: border-box;
+                    border: 1px solid rgba(0, 0, 0, 0.14);
+                    border-radius: 8px;
+                    background: var(--c3);
+                    color: var(--c2);
+                    text-align: left;
+                    cursor: pointer;
+                    font-family: inherit;
+                    transition: border-color 0.2s ease, background 0.2s ease;
+                }
+
+                .app-payment-membership-card:hover:not([disabled]) {
+                    border-color: var(--c4);
+                }
+
+                .app-payment-membership-card.is-selected {
+                    border: 2px solid var(--c4);
+                    background: color-mix(in srgb, var(--c4) 12%, var(--c3));
+                }
+
+                .app-payment-membership-card-body {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0.35rem;
+                    min-width: 0;
+                    flex: 1;
+                }
+
+                .app-payment-membership-head {
+                    display: flex;
+                    flex-wrap: wrap;
+                    align-items: baseline;
+                    gap: 0.35rem 0.65rem;
+                }
+
+                .app-payment-membership-title {
+                    font-size: clamp(0.92rem, 1.1vw, 1rem);
+                    font-variation-settings: var(--fv-title);
+                }
+
+                .app-payment-membership-price {
+                    font-size: clamp(0.92rem, 1.1vw, 1rem);
+                    font-variation-settings: var(--fv-emphasis);
+                }
+
+                .app-payment-membership-every {
+                    font-size: clamp(0.78rem, 0.95vw, 0.88rem);
+                    font-variation-settings: var(--fv-caption);
+                    opacity: 0.85;
                 }
 
                 @media (max-width: 900px) {
-                    .app-payment-plan-grid {
-                        grid-template-columns: 1fr;
-                    }
-
                     .app-fee-meta-row {
                         flex-direction: column;
                         align-items: center;
@@ -3710,6 +4240,7 @@ class ApplicationFormComponent extends HTMLElement {
 
                         <div id="app-membership-fee-waived-banner" class="app-selection-intro" hidden>
                             <p>${L.memberFeeWaivedBanner}</p>
+                            <p id="app-member-credit-note" class="app-member-credit-note" hidden></p>
                         </div>
                         <div id="app-submit-free-wrap" class="app-form-card app-form-card--spaced" hidden>
                             <div class="app-form-actions">
@@ -3733,48 +4264,52 @@ class ApplicationFormComponent extends HTMLElement {
                                 <p class="app-fee-choose-sub">${escHtml(L.choosePaymentSubtext || L.paymentFeeLead)}</p>
                             </div>
 
-                            <div class="app-payment-plan-grid" role="radiogroup" aria-label="${escAttr(L.paymentPlanGroupLabel)}">
-                                <button type="button" class="app-payment-plan-card" role="radio" aria-checked="false" data-app-payment-plan="one_time" id="app-plan-one-time">
-                                    <span class="app-payment-plan-radio" aria-hidden="true"></span>
-                                    <span class="app-payment-plan-card-body">
-                                        <span class="app-payment-plan-icon-wrap">${appFeeIconHtml(I.paymentCard, 'app-fee-icon app-fee-icon--plan')}</span>
-                                        <span class="app-payment-plan-title" id="app-plan-one-time-title">${escHtml(L.planOneTimeTitle)}</span>
-                                        <span class="app-payment-plan-price" id="app-plan-one-time-price">—</span>
-                                        <ul class="app-payment-plan-bullets" id="app-plan-one-time-bullets"></ul>
-                                        <span class="app-payment-plan-sub" id="app-plan-one-time-sub" hidden>${escHtml(L.planOneTimeSub)}</span>
-                                    </span>
+                            <p id="app-member-fee-only-banner" class="app-member-fee-only-banner" hidden></p>
+
+                            <div id="app-payment-cta-stack" class="app-payment-cta-stack" role="radiogroup" aria-label="${escAttr(L.paymentPlanGroupLabel)}">
+                                <button type="button" class="app-payment-cta app-payment-cta--primary" role="radio" aria-checked="false" data-app-payment-plan="one_time" id="app-plan-one-time">
+                                    <span class="app-payment-cta-title" id="app-plan-one-time-title">${escHtml(L.planOneTimeTitle.replace('{{price}}', '$50'))}</span>
+                                    <span class="app-payment-cta-sub" id="app-plan-one-time-sub">${escHtml(L.planOneTimeSub)}</span>
+                                    <span class="app-payment-cta-price" id="app-plan-one-time-price" hidden></span>
                                 </button>
-                                <div class="app-payment-plan-wrap app-payment-plan-wrap--suggested">
-                                    <span class="app-payment-plan-suggested-badge">${escHtml(L.suggestedBadge)}</span>
-                                    <button type="button" class="app-payment-plan-card" role="radio" aria-checked="false" data-app-payment-plan="bimonthly" id="app-plan-bimonthly">
-                                        <span class="app-payment-plan-radio" aria-hidden="true"></span>
-                                        <span class="app-payment-plan-card-body">
-                                            <span class="app-payment-plan-icon-wrap">${appFeeIconHtml(I.popularCrown, 'app-fee-icon app-fee-icon--plan')}</span>
-                                            <span class="app-payment-plan-title" id="app-plan-bimonthly-title">${escHtml(L.planBimonthlyTitle)}</span>
-                                            <span class="app-payment-plan-price-row">
-                                                <span class="app-payment-plan-price" id="app-plan-bimonthly-price">${escHtml(L.planBimonthlyPriceLine)}</span>
-                                                <span class="app-payment-plan-every" id="app-plan-bimonthly-every">${escHtml(L.planBimonthlyEvery)}</span>
+                                <button type="button" class="app-payment-cta app-payment-cta--secondary" id="app-explore-memberships-toggle" aria-expanded="false">
+                                    ${escHtml(L.exploreMembershipsExpand)}
+                                </button>
+                                <div id="app-membership-plans-panel" class="app-membership-plans-panel" hidden>
+                                    <button type="button" class="app-payment-membership-card" role="radio" aria-checked="false" data-app-payment-plan="monthly" id="app-plan-monthly">
+                                        <span class="app-payment-plan-icon-wrap">${appFeeIconHtml(I.popularCrown, 'app-fee-icon app-fee-icon--plan')}</span>
+                                        <span class="app-payment-membership-card-body">
+                                            <span class="app-payment-membership-head">
+                                                <span class="app-payment-membership-title" id="app-plan-monthly-title">${escHtml(L.planMonthlyTitle)}</span>
+                                                <span class="app-payment-membership-price" id="app-plan-monthly-price">${escHtml(L.planMonthlyPriceLine)}</span>
+                                                <span class="app-payment-membership-every" id="app-plan-monthly-every">${escHtml(L.planMonthlyEvery)}</span>
                                             </span>
-                                            <ul class="app-payment-plan-bullets" id="app-plan-bimonthly-bullets"></ul>
-                                            <span class="app-payment-plan-sub" id="app-plan-bimonthly-sub1" hidden>${escHtml(L.planBimonthlySub1)}</span>
-                                            <span class="app-payment-plan-sub" id="app-plan-bimonthly-sub2" hidden>${escHtml(L.planBimonthlySub2)}</span>
+                                            <ul class="app-payment-plan-bullets" id="app-plan-monthly-bullets"></ul>
+                                        </span>
+                                    </button>
+                                    <button type="button" class="app-payment-membership-card" role="radio" aria-checked="false" data-app-payment-plan="quarterly" id="app-plan-quarterly">
+                                        <span class="app-payment-plan-icon-wrap">${appFeeIconHtml(I.paymentCard, 'app-fee-icon app-fee-icon--plan')}</span>
+                                        <span class="app-payment-membership-card-body">
+                                            <span class="app-payment-membership-head">
+                                                <span class="app-payment-membership-title" id="app-plan-quarterly-title">${escHtml(L.planQuarterlyTitle)}</span>
+                                                <span class="app-payment-membership-price" id="app-plan-quarterly-price">${escHtml(L.planQuarterlyPriceLine)}</span>
+                                                <span class="app-payment-membership-every" id="app-plan-quarterly-every">${escHtml(L.planQuarterlyEvery)}</span>
+                                            </span>
+                                            <ul class="app-payment-plan-bullets" id="app-plan-quarterly-bullets"></ul>
+                                        </span>
+                                    </button>
+                                    <button type="button" class="app-payment-membership-card" role="radio" aria-checked="false" data-app-payment-plan="annual" id="app-plan-annual">
+                                        <span class="app-payment-plan-icon-wrap">${appFeeIconHtml(I.annualDiamond, 'app-fee-icon app-fee-icon--plan')}</span>
+                                        <span class="app-payment-membership-card-body">
+                                            <span class="app-payment-membership-head">
+                                                <span class="app-payment-membership-title" id="app-plan-annual-title">${escHtml(L.planAnnualTitle)}</span>
+                                                <span class="app-payment-membership-price" id="app-plan-annual-price">${escHtml(L.planAnnualPriceLine)}</span>
+                                                <span class="app-payment-membership-every" id="app-plan-annual-every">${escHtml(L.planAnnualEvery)}</span>
+                                            </span>
+                                            <ul class="app-payment-plan-bullets" id="app-plan-annual-bullets"></ul>
                                         </span>
                                     </button>
                                 </div>
-                                <button type="button" class="app-payment-plan-card" role="radio" aria-checked="false" data-app-payment-plan="annual" id="app-plan-annual">
-                                    <span class="app-payment-plan-radio" aria-hidden="true"></span>
-                                    <span class="app-payment-plan-card-body">
-                                        <span class="app-payment-plan-icon-wrap">${appFeeIconHtml(I.annualDiamond, 'app-fee-icon app-fee-icon--plan')}</span>
-                                        <span class="app-payment-plan-title" id="app-plan-annual-title">${escHtml(L.planAnnualTitle)}</span>
-                                        <span class="app-payment-plan-price-row">
-                                            <span class="app-payment-plan-price" id="app-plan-annual-price">${escHtml(L.planAnnualPrice)}</span>
-                                            <span class="app-payment-plan-discount" id="app-plan-annual-discount">${escHtml(L.planAnnualDiscount)}</span>
-                                        </span>
-                                        <ul class="app-payment-plan-bullets" id="app-plan-annual-bullets"></ul>
-                                        <span class="app-payment-plan-sub" id="app-plan-annual-sub1" hidden>${escHtml(L.planAnnualSub1)}</span>
-                                        <span class="app-payment-plan-sub" id="app-plan-annual-sub2" hidden>${escHtml(L.planAnnualSub2)}</span>
-                                    </span>
-                                </button>
                             </div>
 
                             <div class="app-whats-included-panel">

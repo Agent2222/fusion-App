@@ -57,6 +57,7 @@ export const STUDIO_NAV_ICON_ALIASES = {
     schedule: 'nav-status',
     finance: 'nav-services',
     travel: 'nav-programs',
+    'join-network': 'nav-gallery-access',
 };
 
 /** Sidebar group label (lowercase) → existing group icon. */

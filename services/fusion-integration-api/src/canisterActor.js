@@ -176,4 +176,33 @@ export async function pushPayPalSubscriptionToCanister(subscription) {
         [status],
         periodEnd ? [periodEnd] : [],
     );
+    let tier = '';
+    if (typeof meta.tier === 'string' && meta.tier.trim()) {
+        tier = meta.tier.trim().toLowerCase();
+    }
+    const planId = String(subscription.plan_id || '').trim();
+    if (!tier && planId) {
+        try {
+            const { membershipTierFromPayPalPlanId } = await import(
+                './payments/providers/paypalProvider.js'
+            );
+            tier = membershipTierFromPayPalPlanId(planId) || '';
+        } catch {
+            /* ignore */
+        }
+    }
+    if (
+        tier &&
+        typeof actor.integrationSetMembershipTier === 'function' &&
+        ['monthly', 'quarterly', 'annual', 'bimonthly'].includes(tier)
+    ) {
+        try {
+            await actor.integrationSetMembershipTier(p, tier);
+        } catch (e) {
+            console.warn(
+                '[canister] integrationSetMembershipTier failed:',
+                e instanceof Error ? e.message : e,
+            );
+        }
+    }
 }

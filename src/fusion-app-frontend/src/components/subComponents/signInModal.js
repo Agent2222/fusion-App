@@ -13,8 +13,13 @@ class SignInModal extends HTMLElement {
         this.shadow = this.attachShadow({ mode: 'open' });
         /** @type {HTMLDialogElement | null} */
         this._dlg = null;
+        /** @type {boolean} */
+        this._loggingIn = false;
         this._onOpen = () => this.open();
         this._onLocale = () => this._syncCopy();
+        this._onDialogCancel = (e) => {
+            if (this._loggingIn) e.preventDefault();
+        };
     }
 
     connectedCallback() {
@@ -26,6 +31,7 @@ class SignInModal extends HTMLElement {
     disconnectedCallback() {
         window.removeEventListener('fusion-open-sign-in', this._onOpen);
         window.removeEventListener('fusion-localechange', this._onLocale);
+        this._dlg?.removeEventListener('cancel', this._onDialogCancel);
     }
 
     /** @returns {'en' | 'ja'} */
@@ -49,11 +55,24 @@ class SignInModal extends HTMLElement {
         const body = t.querySelector('#siBody');
         const primary = t.querySelector('#siPrimary');
         const cancel = t.querySelector('#siCancel');
-        if (title) title.textContent = en ? 'Sign in' : 'サインイン';
+        const loadingText = t.querySelector('#siLoadingText');
+        if (title) {
+            title.textContent = this._loggingIn
+                ? en
+                    ? 'Logging in'
+                    : 'ログイン中'
+                : en
+                  ? 'Sign in'
+                  : 'サインイン';
+        }
         if (body) {
-            body.textContent = en
-                ? 'Continue with Internet Identity to access your account.'
-                : 'Internet Identityで続行し、アカウントにアクセスします。';
+            body.textContent = this._loggingIn
+                ? en
+                    ? 'Finishing Internet Identity sign-in. This can take a few seconds — please wait.'
+                    : 'Internet Identityのサインインを完了しています。数秒かかることがあります。お待ちください。'
+                : en
+                  ? 'Continue with Internet Identity to access your account.'
+                  : 'Internet Identityで続行し、アカウントにアクセスします。';
         }
         if (primary) {
             primary.textContent = en ? 'Continue with Internet Identity' : 'Internet Identityで続行';
@@ -61,12 +80,57 @@ class SignInModal extends HTMLElement {
         if (cancel) {
             cancel.setAttribute('aria-label', en ? 'Cancel' : 'キャンセル');
         }
+        if (loadingText) {
+            loadingText.textContent = en ? 'Logging in…' : 'ログイン中…';
+        }
+    }
+
+    /**
+     * @param {boolean} busy
+     */
+    _setLoggingIn(busy) {
+        this._loggingIn = Boolean(busy);
+        const t = this.shadowRoot;
+        if (!t) return;
+        const loading = t.querySelector('#siLoading');
+        const actions = t.querySelector('#siActions');
+        const help = t.querySelector('app-auth-browser-help');
+        const primary = /** @type {HTMLButtonElement | null} */ (t.querySelector('#siPrimary'));
+        const cancel = /** @type {HTMLButtonElement | null} */ (t.querySelector('#siCancel'));
+        const err = t.querySelector('#siErr');
+        if (loading) {
+            if (this._loggingIn) loading.removeAttribute('hidden');
+            else loading.setAttribute('hidden', '');
+        }
+        if (actions instanceof HTMLElement) {
+            actions.hidden = this._loggingIn;
+        }
+        if (help instanceof HTMLElement) {
+            help.hidden = this._loggingIn;
+        }
+        if (primary) {
+            primary.disabled = this._loggingIn;
+            if (this._loggingIn) primary.setAttribute('aria-busy', 'true');
+            else primary.removeAttribute('aria-busy');
+        }
+        if (cancel) {
+            cancel.disabled = this._loggingIn;
+            cancel.hidden = this._loggingIn;
+        }
+        if (err && this._loggingIn) err.textContent = '';
+        const dlg = this._dlg || t.querySelector('.si-dialog');
+        if (dlg instanceof HTMLDialogElement) {
+            dlg.setAttribute('aria-busy', this._loggingIn ? 'true' : 'false');
+        }
+        this._syncCopy();
     }
 
     open() {
+        if (this._loggingIn) return;
         const dlg = this._dlg || this.shadowRoot?.querySelector('.si-dialog');
         if (dlg && typeof dlg.showModal === 'function') {
             dlg.showModal();
+            this._setLoggingIn(false);
             this._syncCopy();
             const err = this.shadowRoot?.querySelector('#siErr');
             if (err) err.textContent = '';
@@ -77,6 +141,7 @@ class SignInModal extends HTMLElement {
     }
 
     close() {
+        if (this._loggingIn) return;
         const dlg = this._dlg || this.shadowRoot?.querySelector('.si-dialog');
         if (dlg && typeof dlg.close === 'function') dlg.close();
     }
@@ -147,8 +212,12 @@ class SignInModal extends HTMLElement {
                     align-items: center;
                     justify-content: center;
                 }
-                .si-close:hover {
+                .si-close:hover:not(:disabled) {
                     background: color-mix(in srgb, var(--si-c2) 6%, transparent);
+                }
+                .si-close:disabled {
+                    opacity: 0.35;
+                    cursor: not-allowed;
                 }
                 .si-close:focus-visible {
                     outline: 2px solid var(--si-c2);
@@ -181,12 +250,49 @@ class SignInModal extends HTMLElement {
                     font-size: 0.88rem;
                     color: #a01818;
                 }
+                .si-loading {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 0.85rem;
+                    margin: 1.25rem 0 0.5rem;
+                    min-height: 5.5rem;
+                }
+                .si-loading[hidden] {
+                    display: none;
+                }
+                .si-spinner {
+                    width: 2rem;
+                    height: 2rem;
+                    border-radius: 50%;
+                    border: 2px solid color-mix(in srgb, var(--si-c2) 18%, transparent);
+                    border-top-color: var(--si-c2);
+                    animation: si-spin 0.75s linear infinite;
+                }
+                .si-loading-text {
+                    margin: 0;
+                    font-size: clamp(0.88rem, 1.15vw, 1rem);
+                    font-variation-settings: var(--fv-nav-active, "wght" 550);
+                    letter-spacing: 0.04em;
+                    text-transform: uppercase;
+                    color: var(--si-c2);
+                }
+                @keyframes si-spin {
+                    to { transform: rotate(360deg); }
+                }
+                @media (prefers-reduced-motion: reduce) {
+                    .si-spinner { animation: none; border-top-color: color-mix(in srgb, var(--si-c2) 45%, transparent); }
+                }
                 .si-actions {
                     display: flex;
                     flex-wrap: wrap;
                     gap: 0.75rem;
                     justify-content: center;
                     margin-top: 1.25rem;
+                }
+                .si-actions[hidden] {
+                    display: none;
                 }
                 .si-btn {
                     font-family: inherit;
@@ -209,12 +315,16 @@ class SignInModal extends HTMLElement {
                 .si-btn--primary:hover:not(:disabled) {
                     opacity: 0.88;
                 }
+                .si-btn--primary:disabled {
+                    opacity: 0.55;
+                    cursor: not-allowed;
+                }
                 .si-btn--primary:focus-visible {
                     outline: 2px solid var(--si-c2);
                     outline-offset: 2px;
                 }
             </style>
-            <dialog class="si-dialog" aria-labelledby="siTitle">
+            <dialog class="si-dialog" aria-labelledby="siTitle" aria-busy="false">
                 <div class="si-texture" aria-hidden="true"></div>
                 <div class="si-dialog-inner">
                     <button type="button" class="si-close" id="siCancel" aria-label="${en ? 'Cancel' : 'キャンセル'}">×</button>
@@ -222,8 +332,12 @@ class SignInModal extends HTMLElement {
                         <h2 class="si-title" id="siTitle">${en ? 'Sign in' : 'サインイン'}</h2>
                         <p class="si-body" id="siBody">${en ? 'Continue with Internet Identity to access your account.' : 'Internet Identityで続行し、アカウントにアクセスします。'}</p>
                     </div>
+                    <div id="siLoading" class="si-loading" hidden>
+                        <span class="si-spinner" aria-hidden="true"></span>
+                        <p id="siLoadingText" class="si-loading-text">${en ? 'Logging in…' : 'ログイン中…'}</p>
+                    </div>
                     <p id="siErr" class="si-live" aria-live="polite"></p>
-                    <div class="si-actions">
+                    <div class="si-actions" id="siActions">
                         <button type="button" class="si-btn si-btn--primary" id="siPrimary">${en ? 'Continue with Internet Identity' : 'Internet Identityで続行'}</button>
                     </div>
                     <app-auth-browser-help></app-auth-browser-help>
@@ -231,16 +345,23 @@ class SignInModal extends HTMLElement {
             </dialog>
         `;
         this._dlg = this.shadow.querySelector('.si-dialog');
+        this._dlg?.addEventListener('cancel', this._onDialogCancel);
         const cancel = this.shadow.querySelector('#siCancel');
         const primary = this.shadow.querySelector('#siPrimary');
         cancel?.addEventListener('click', () => this.close());
         primary?.addEventListener('click', async () => {
+            if (this._loggingIn) return;
             const errEl = this.shadow.querySelector('#siErr');
             if (errEl) errEl.textContent = '';
+            this._setLoggingIn(true);
             try {
                 await loginInternetIdentity();
-                this.close();
+                // Close while still in the loading UI so the idle form never flashes.
+                this._loggingIn = false;
+                const dlg = this._dlg || this.shadowRoot?.querySelector('.si-dialog');
+                if (dlg && typeof dlg.close === 'function') dlg.close();
             } catch (e) {
+                this._setLoggingIn(false);
                 if (e === ERROR_USER_INTERRUPT) {
                     return;
                 }

@@ -5,21 +5,69 @@ import '../../styles/memberProfileDashboard.css';
 import '../../styles/studioFinanceDashboard.css';
 import {
     adminListAccountContactsForStudio,
+    addProgramTeamMemberStudio,
+    archiveFinancePromotionStudio,
     getAccountsForStudio,
     getApplicants,
     getProgramDisplayNameFromRow,
     getPrograms,
     getStaffProgramPaymentsFinanceStudio,
+    listAdminsForStudio,
+    listFinancePromotionsStudio,
+    listProgramTeamStudio,
     reassignProgramLedgerEntryStudio,
     recordStaffManualProgramLedgerStudio,
+    removeProgramTeamMemberStudio,
+    updateProgramTeamMemberExpensesStudio,
+    updateProgramTeamMemberPayoutPercentStudio,
+    upsertProgramTeamOwedEntryStudio,
+    upsertProgramTeamPaidEntryStudio,
+    voidProgramTeamOwedEntryStudio,
+    voidProgramTeamPaidEntryStudio,
+    updateStaffManualProgramLedgerStudio,
     upsertApplicantStudio,
+    upsertFinancePromotionStudio,
 } from '../../utils/database.js';
+import {
+    fetchMembershipRevenueSummary,
+    syncPayPalSubscription,
+    syncSubscriptionFromStripe,
+    syncSubscriptionFromStripeByEmail,
+} from '../../utils/integrationApi.js';
+import {
+    applicantCategoryPillHtml,
+    applicantDisplayNamesFromPayload,
+    getApplicantCategory,
+    getApplicantFlightCostCents,
+    getApplicantIsTester,
+    getApplicantLocalTravelCostCents,
+    getApplicantManualDepositSubmitted,
+    getApplicantSpecialProgramTotalCents,
+    getApplicantSponsorshipMode,
+    getApplicantSponsoredCreditCents,
+    getApplicantSponsoredPercent,
+    getApplicantSponsoredCreditInputMode,
+    mergeApplicantStaffFields,
+    parseApplicantPayload,
+    shortPrincipalDisplay,
+} from '../../utils/studioPlainForms.js';
 import { firstNonEmptyString } from '../../utils/localeFallback.js';
+import { parseProgramEndDate } from '../../utils/programAlumniEligibility.js';
 import {
     buildProgramPaymentIndex,
     buildStudioProgramFinanceRows,
     computeFinancePanelTotals,
     computeProgramExpectedRevenueCents,
+    computeProgramCollectedPaymentsCents,
+    activeTeamMemberOwedEntries,
+    activeTeamMemberPaidEntries,
+    computeAdminFundedStaffPaidCents,
+    computeAdminNetProgramPayoutCents,
+    computeProgramProfitCents,
+    computeProjectedPayoutCents,
+    computeStaffOutstandingOwedCents,
+    listStaffPaidDisbursementEntries,
+    paidEntryFundedBy,
     formatUsdFromCents,
     isApplicantSlotSecured,
     isLedgerPaymentRow,
@@ -27,6 +75,14 @@ import {
     ledgerRowSource,
     ledgerRowTypeLabel,
     PROGRAM_VETERAN_DISCOUNT_CENTS,
+    programPromotionExpenseCents,
+    programPromotionsForProgram,
+    sumTeamMemberOwedCents,
+    sumTeamMemberPaidCents,
+    teamMemberDisbursementRemainingCents,
+    teamMemberDisbursementRemainingWithProgramCents,
+    teamMemberOutstandingOwedCents,
+    teamMemberExpenseSubtotalCents,
 } from '../../utils/programPaymentMoney.js';
 import {
     countMembershipMetrics,
@@ -37,25 +93,12 @@ import {
     studioStripeDashboardCustomerUrl,
 } from '../../utils/studioMembershipPresentation.js';
 import {
-    applicantCategoryPillHtml,
-    applicantDisplayNamesFromPayload,
-    getApplicantCategory,
-    getApplicantFlightCostCents,
-    getApplicantIsTester,
-    getApplicantLocalTravelCostCents,
-    getApplicantManualDepositSubmitted,
-    mergeApplicantStaffFields,
-    parseApplicantPayload,
-    shortPrincipalDisplay,
-} from '../../utils/studioPlainForms.js';
-import {
     studioFeatureAccess,
     studioFinanceCategoryAccess,
     studioFinanceVisibleCategories,
 } from '../../utils/studioShellState.js';
 import { studioIconHref } from '../../utils/studioIconRegistry.js';
 import { getStripePublishableKeyResolved } from '../../utils/studioServicesConfig.js';
-import { fetchMembershipRevenueSummary } from '../../utils/integrationApi.js';
 import { formatMembershipRevenueStatHtml } from '../../utils/membershipRevenueMoney.js';
 import { openStudioModal } from '../../utils/studioModal.js';
 import { openApplicantEmailModal } from './applicantEmailModal.js';
@@ -65,7 +108,7 @@ const PROGRAM_SELECT_STORAGE_KEY = 'studio-finance-selected-program-v1';
 
 /**
  * @param {string} payloadJson
- * @param {Partial<{ internalNotes: string, manualDepositSubmitted: boolean, applicantCategory: string, isTester: boolean, flightCostCents: number, localTravelCostCents: number }>} overrides
+ * @param {Partial<Record<string, unknown>>} overrides
  */
 function staffFieldsFromPayload(payloadJson, overrides = {}) {
     const { internalNotes } = parseApplicantPayload(payloadJson);
@@ -76,6 +119,11 @@ function staffFieldsFromPayload(payloadJson, overrides = {}) {
         isTester: getApplicantIsTester(payloadJson),
         flightCostCents: getApplicantFlightCostCents(payloadJson),
         localTravelCostCents: getApplicantLocalTravelCostCents(payloadJson),
+        specialProgramTotalCents: getApplicantSpecialProgramTotalCents(payloadJson) || null,
+        sponsorshipMode: getApplicantSponsorshipMode(payloadJson),
+        sponsoredCreditCents: getApplicantSponsoredCreditCents(payloadJson),
+        sponsoredPercent: getApplicantSponsoredPercent(payloadJson),
+        sponsoredCreditInputMode: getApplicantSponsoredCreditInputMode(payloadJson),
         ...overrides,
     };
 }
@@ -233,9 +281,15 @@ export function renderFinance() {
                 </div>
                 <div class="mpd-program-tab-panel" id="studio-finance-panel-programs" role="tabpanel" aria-labelledby="studio-finance-tab-programs" data-finance-panel="programs" hidden>
                     <div class="studio-finance-programs-panel">
-                        <div id="studio-finance-program-revenue-stat" class="studio-finance-program-revenue-stat" aria-live="polite"></div>
+                        <div class="mpd-payments-section-head" style="margin-bottom:0.75rem">
+                            <div id="studio-finance-program-revenue-stat" class="studio-finance-program-revenue-stat" aria-live="polite"></div>
+                            <button type="button" class="studio-btn-ghost" id="studio-finance-programs-refresh">Refresh payments</button>
+                        </div>
+                        <p class="studio-muted mpd-field-hint" id="studio-finance-programs-refresh-status" role="status"></p>
                         <div class="studio-finance-program-cards-rail studio-finance-program-cards-rail--unified" id="studio-finance-program-cards-unified" role="list" aria-label="Programs"></div>
                         <div id="studio-finance-program-table-wrap" class="studio-finance-program-table-wrap" aria-live="polite"></div>
+                        <div id="studio-finance-program-promotions-wrap" class="studio-finance-program-promotions-wrap" aria-live="polite"></div>
+                        <div id="studio-finance-disbursements-wrap" class="studio-finance-disbursements-wrap" aria-live="polite"></div>
                     </div>
                 </div>
                 <div class="mpd-program-tab-panel" id="studio-finance-panel-users" role="tabpanel" aria-labelledby="studio-finance-tab-users" data-finance-panel="users" hidden>
@@ -244,14 +298,15 @@ export function renderFinance() {
                     <section class="member-profile-dashboard__card" style="margin-top:0.75rem">
                         <div class="mpd-payments-section-head">
                             <h3>Membership accounts</h3>
-                            <span class="studio-muted">Join / Fusion subscription on canister</span>
+                            <button type="button" class="studio-btn-ghost" id="studio-finance-users-refresh">Refresh memberships</button>
                         </div>
+                        <p class="studio-muted mpd-field-hint" id="studio-finance-users-refresh-status" role="status"></p>
                         <div class="studio-finance-filter-bar">
                             <label class="studio-field">
                                 <span>Membership</span>
                                 <select id="studio-finance-users-membership" class="studio-select">
                                     <option value="">All</option>
-                                    <option value="active">Active</option>
+                                    <option value="active" selected>Active</option>
                                     <option value="trialing">Trialing</option>
                                     <option value="past_due">Past due</option>
                                     <option value="canceled">Canceled</option>
@@ -273,7 +328,7 @@ export function renderFinance() {
                                         <th>Email</th>
                                         <th>Membership</th>
                                         <th>Renews</th>
-                                        <th>Stripe</th>
+                                        <th>Provider</th>
                                         <th>Principal</th>
                                     </tr>
                                 </thead>
@@ -290,11 +345,29 @@ export function renderFinance() {
                     )}
                 </div>
                 <div class="mpd-program-tab-panel" id="studio-finance-panel-promotions" role="tabpanel" aria-labelledby="studio-finance-tab-promotions" data-finance-panel="promotions" hidden>
-                    ${placeholderPanelHtml(
-                        'Promotions',
-                        'Advertising and promotional spend tracking is planned for a later release.',
-                        ['Campaign budgets and spend', 'Attribution to programs or products', 'Coupon / promo code redemption (optional)'],
-                    )}
+                    <div id="studio-finance-promotions-overview" class="mpd-payments-overview-grid" style="margin-bottom:1rem"></div>
+                    <section class="member-profile-dashboard__card">
+                        <div class="mpd-payments-section-head">
+                            <h2>Promotions</h2>
+                            <button type="button" class="studio-btn-primary" id="studio-finance-promo-add">Add promotion</button>
+                        </div>
+                        <p class="studio-muted">Track advertising and partnership spend by program or platform-wide.</p>
+                        <div class="studio-table-wrap studio-table-wrap--sticky-head">
+                            <table class="studio-table studio-table--dense">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Company</th>
+                                        <th>Dates</th>
+                                        <th>Target</th>
+                                        <th>Cost</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="studio-finance-promotions-tbody"><tr><td colspan="6">Loading…</td></tr></tbody>
+                            </table>
+                        </div>
+                    </section>
                 </div>
                 <div class="mpd-program-tab-panel" id="studio-finance-panel-diagnostics" role="tabpanel" aria-labelledby="studio-finance-tab-diagnostics" data-finance-panel="diagnostics" hidden>
                     <section class="member-profile-dashboard__card">
@@ -302,7 +375,7 @@ export function renderFinance() {
                             <h2>Payment diagnostics</h2>
                             <button type="button" class="studio-btn-ghost" id="studio-finance-diagnostics-refresh">Refresh</button>
                         </div>
-                        <p class="studio-muted">Temporary tool. Cross-checks every recorded ledger payment (Stripe, PayPal, staff) against applicant records so you can see why a payment may not appear in the Programs table. A payment only shows in Programs when it matches an applicant on an <strong>active/open/full</strong> program and that applicant is <strong>slot-secured</strong>.</p>
+                        <p class="studio-muted">Temporary tool. Cross-checks every recorded ledger payment (Stripe, PayPal, staff) against applicant records so you can see why a payment may not appear in the Programs table. A payment only shows in Programs when it matches an applicant on an <strong>active/open/full</strong> program and that applicant is <strong>slot-secured</strong>. If a ledger row exists but the applicant is missing, use <strong>Assign…</strong> to attach it.</p>
                         <div id="studio-finance-diagnostics-body" aria-live="polite"></div>
                     </section>
                 </div>
@@ -349,6 +422,29 @@ function financeLifecycleFromStudioStatus(studioStatus) {
 }
 
 /**
+ * True when studio status is completed or program end date is today/past.
+ * @param {object | null | undefined} programRow
+ */
+function isFinanceProgramEnded(programRow) {
+    if (!programRow || typeof programRow !== 'object') return false;
+    if (String(programRow.studioStatus || '').trim() === 'completed') return true;
+    const card =
+        (programRow.enCard && typeof programRow.enCard === 'object' ? programRow.enCard : null) ||
+        (programRow.jaCard && typeof programRow.jaCard === 'object' ? programRow.jaCard : null) ||
+        {};
+    const endDate = String(card.endDate ?? card.end ?? card.programEnd ?? '').trim();
+    const startDate = String(card.startDate ?? card.start ?? '').trim();
+    const year = String(card.year ?? '').trim();
+    if (!endDate) return false;
+    const end = parseProgramEndDate(endDate, startDate, year);
+    if (!end || Number.isNaN(end.getTime())) return false;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    end.setHours(0, 0, 0, 0);
+    return end.getTime() <= today.getTime();
+}
+
+/**
  * @param {string} raw
  * @returns {number}
  */
@@ -371,12 +467,34 @@ function computeExpectedRevenue(programRow, applicantsForProgram, paymentIndex) 
  * @param {object} programRow
  * @param {object[] | undefined} applicantsForProgram
  * @param {ReturnType<typeof buildProgramPaymentIndex>} paymentIndex
+ * @param {object[] | undefined} [teamMembers]
+ * @param {object[] | undefined} [promotions]
  */
-function buildFinanceProgramCardModel(programRow, applicantsForProgram, paymentIndex) {
+function buildFinanceProgramCardModel(
+    programRow,
+    applicantsForProgram,
+    paymentIndex,
+    teamMembers,
+    promotions,
+) {
     const lifecycle = financeLifecycleFromStudioStatus(programRow.studioStatus);
     const revenue = computeExpectedRevenue(programRow, applicantsForProgram, paymentIndex);
+    const collected = computeProgramCollectedPaymentsCents(
+        programRow,
+        applicantsForProgram,
+        paymentIndex,
+    );
+    const programId = String(programRow.id || '');
+    const promotionExpenseCents = programPromotionExpenseCents(promotions, programId);
+    const profitCents = computeProgramProfitCents(
+        programRow,
+        applicantsForProgram,
+        paymentIndex,
+        teamMembers,
+        promotions,
+    );
     return {
-        id: String(programRow.id || ''),
+        id: programId,
         title: getProgramDisplayNameFromRow(programRow),
         imageSrc: firstNonEmptyString(
             programRow.jaCard?.imageSrc,
@@ -384,6 +502,9 @@ function buildFinanceProgramCardModel(programRow, applicantsForProgram, paymentI
         ),
         ...lifecycle,
         ...revenue,
+        ...collected,
+        promotionExpenseCents,
+        profitCents,
     };
 }
 
@@ -407,9 +528,12 @@ function sortFinanceProgramRows(a, b) {
  * @param {boolean} selected
  */
 function financeProgramCardHtml(item, selected) {
-    let slotLine = 'No confirmed slots yet';
-    if (item.filledSlots > 0) {
-        const parts = [`${item.filledSlots} slot${item.filledSlots === 1 ? '' : 's'}`];
+    const claimed = Number(item.slotsClaimed ?? item.filledSlots ?? 0);
+    let slotLine = 'No deposit-paid slots claimed yet';
+    if (claimed > 0) {
+        const parts = [
+            `${claimed} slot${claimed === 1 ? '' : 's'} claimed (deposit paid)`,
+        ];
         if (item.veteranSlotCount > 0) {
             parts.push(
                 `${item.veteranSlotCount} veteran (−${formatUsdFromCents(PROGRAM_VETERAN_DISCOUNT_CENTS)} ea)`,
@@ -417,8 +541,6 @@ function financeProgramCardHtml(item, selected) {
         }
         if (item.avgPerSlotCents > 0) {
             parts.push(`avg ${formatUsdFromCents(item.avgPerSlotCents)}/slot`);
-        } else {
-            parts.push('category-adjusted');
         }
         slotLine = parts.join(' · ');
     }
@@ -432,7 +554,13 @@ function financeProgramCardHtml(item, selected) {
                 <h4 class="studio-finance-program-card__title">${escapeHtml(item.title)}</h4>
                 <span class="studio-finance-program-card__status studio-finance-program-card__status--${escapeHtml(item.badgeKey)}">${escapeHtml(item.badge)}</span>
             </div>
-            <p class="studio-finance-program-card__revenue"><span>Expected revenue</span><strong>${escapeHtml(formatUsdFromCents(item.expectedCents))}</strong></p>
+            <div class="studio-finance-program-card__metrics">
+                <p class="studio-finance-program-card__revenue"><span>Expected revenue</span><strong>${escapeHtml(formatUsdFromCents(item.expectedCents))}</strong></p>
+                <p class="studio-finance-program-card__revenue"><span>Total payments</span><strong>${escapeHtml(formatUsdFromCents(item.totalPaymentsCents))}</strong></p>
+                <p class="studio-finance-program-card__revenue"><span>Remaining</span><strong>${escapeHtml(formatUsdFromCents(item.remainingBalanceCents))}</strong></p>
+                <p class="studio-finance-program-card__revenue"><span>Promotions</span><strong>${escapeHtml(formatUsdFromCents(item.promotionExpenseCents))}</strong></p>
+                <p class="studio-finance-program-card__revenue"><span>Total profit</span><strong>${escapeHtml(formatUsdFromCents(item.profitCents))}</strong></p>
+            </div>
             <p class="studio-finance-program-card__slots">${escapeHtml(slotLine)}</p>
         </div>
     </button>`;
@@ -442,10 +570,33 @@ function financeProgramCardHtml(item, selected) {
  * @param {ReturnType<typeof buildStudioProgramFinanceRows>[number]} row
  */
 function financeProgramTableRowHtml(row) {
-    const categoryCell = `${applicantCategoryPillHtml(row.category, escapeHtml)} <span class="studio-finance-price-amount">${escapeHtml(formatUsdFromCents(row.priceCategoryCents))}</span>`;
-    const depositCell = row.depositPaid
-        ? `<span class="mpd-payments-pill mpd-payments-pill--paid">Paid</span> <span class="studio-finance-price-amount">${escapeHtml(formatUsdFromCents(row.depositAmountCents))}</span>`
-        : '<span class="studio-muted">—</span>';
+    const priceBadges = [];
+    if (normalizeCentsSafe(row.specialProgramTotalCents) > 0) {
+        priceBadges.push('<span class="studio-status-pill studio-status-pill--category-veteran-plus">Special</span>');
+    }
+    if (row.sponsorshipMode === 'full') {
+        priceBadges.push('<span class="studio-status-pill studio-status-pill--category-sponsored">Sponsored (full)</span>');
+    } else if (row.sponsorshipMode === 'partial') {
+        const creditLabel =
+            row.sponsoredPercent != null
+                ? `−${Number(row.sponsoredPercent)}%`
+                : `−${formatUsdFromCents(row.sponsoredCreditCents || 0)}`;
+        priceBadges.push(
+            `<span class="studio-status-pill studio-status-pill--category-partial">Partial (${escapeHtml(creditLabel)})</span>`,
+        );
+    }
+    const categoryCell = `${applicantCategoryPillHtml(row.category, escapeHtml)} ${priceBadges.join(' ')} <span class="studio-finance-price-amount">${escapeHtml(formatUsdFromCents(row.priceCategoryCents))}</span>`;
+    const depositWaived =
+        Boolean(row.depositWaived) ||
+        row.sponsorshipMode === 'full' ||
+        row.category === 'sponsored' ||
+        row.category === 'extSponsored' ||
+        String(row.summary?.depositStatus || '') === 'waived';
+    const depositCell = depositWaived
+        ? '<span class="mpd-payments-pill mpd-payments-pill--muted">Waived</span>'
+        : row.depositPaid
+          ? `<span class="mpd-payments-pill mpd-payments-pill--paid">Paid</span> <span class="studio-finance-price-amount">${escapeHtml(formatUsdFromCents(row.depositAmountCents))}</span>`
+          : '<span class="studio-muted">—</span>';
     const planCell = row.planActive
         ? '<span class="mpd-payments-pill mpd-payments-pill--active">Active</span>'
         : '<span class="studio-muted">—</span>';
@@ -474,19 +625,89 @@ function financeProgramTableRowHtml(row) {
         <td>${escapeHtml(formatUsdFromCents(row.subtotalCents))}</td>
         <td>${escapeHtml(formatUsdFromCents(row.remainingBalanceCents))}</td>
         <td>${escapeHtml(formatUsdFromCents(row.profitCents))}</td>
+        <td><span class="studio-muted">—</span></td>
         <td><button type="button" class="studio-btn-ghost studio-finance-email-btn" data-finance-email-applicant="${escapeHtml(row.applicantId)}">Email</button></td>
     </tr>`;
 }
 
+/**
+ * @param {object} member
+ * @param {{ firstName?: string, lastName?: string, email?: string } | null} contact
+ * @param {number} programProfitCents
+ * @param {boolean} canEdit
+ */
+function financeTeamTableRowHtml(member, contact, programProfitCents, canEdit) {
+    const id = String(member.id || '');
+    const kind = String(member.kind || 'staff');
+    const kindLabel = kind === 'admin' ? 'Admin' : kind === 'collaborator' ? 'Collaborator' : 'Staff';
+    const first =
+        String(contact?.firstName || '').trim() ||
+        shortPrincipalDisplay(String(member.principalText || ''));
+    const last = String(contact?.lastName || '').trim() || '—';
+    const tickets = normalizeCentsSafe(member.ticketsCents);
+    const travel = normalizeCentsSafe(member.localTravelCents);
+    const p1 = normalizeCentsSafe(member.partner1Cents);
+    const p2 = normalizeCentsSafe(member.partner2Cents);
+    const p3 = normalizeCentsSafe(member.partner3Cents);
+    const subtotal = teamMemberExpenseSubtotalCents(member);
+    const pct = Math.max(0, Math.min(100, Number(member.payoutPercent) || 0));
+    const projected = computeProjectedPayoutCents(programProfitCents, pct);
+    const expenseBtn = (field, cents) =>
+        canEdit
+            ? `<button type="button" class="studio-finance-money-btn" data-finance-team-expense="1" data-team-member-id="${escapeHtml(id)}" data-expense-field="${field}">${escapeHtml(formatUsdFromCents(cents))}</button>`
+            : escapeHtml(formatUsdFromCents(cents));
+    const payoutBtn = canEdit
+        ? `<button type="button" class="studio-finance-money-btn" data-finance-team-payout-pct="1" data-team-member-id="${escapeHtml(id)}" title="Edit payout %">${escapeHtml(formatUsdFromCents(projected))} <span class="studio-muted">(${pct}%)</span></button>`
+        : `${escapeHtml(formatUsdFromCents(projected))} <span class="studio-muted">(${pct}%)</span>`;
+    return `<tr class="studio-finance-team-row" data-finance-team-member-id="${escapeHtml(id)}">
+        <td class="studio-finance-sticky-col studio-finance-sticky-col--first">${escapeHtml(first)}</td>
+        <td class="studio-finance-sticky-col studio-finance-sticky-col--second">${escapeHtml(last)}</td>
+        <td><span class="studio-muted">Team</span></td>
+        <td><span class="studio-status-pill studio-status-pill--category-sponsored">${escapeHtml(kindLabel)}</span></td>
+        <td><span class="studio-muted">—</span></td>
+        <td><span class="studio-muted">—</span></td>
+        <td><span class="studio-muted">—</span></td>
+        <td><span class="studio-muted">—</span></td>
+        <td><span class="studio-muted">—</span></td>
+        <td>${expenseBtn('ticketsCents', tickets)}</td>
+        <td>${expenseBtn('localTravelCents', travel)}</td>
+        <td>${expenseBtn('partner1Cents', p1)}</td>
+        <td>${expenseBtn('partner2Cents', p2)}</td>
+        <td>${expenseBtn('partner3Cents', p3)}</td>
+        <td>${escapeHtml(formatUsdFromCents(subtotal))}</td>
+        <td><span class="studio-muted">—</span></td>
+        <td>${escapeHtml(formatUsdFromCents(-subtotal))}</td>
+        <td>${payoutBtn}</td>
+        <td><span class="studio-muted">—</span></td>
+    </tr>`;
+}
+
+function normalizeCentsSafe(value) {
+    const n = Number(value ?? 0);
+    return Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0;
+}
+
 /** @type {const} */
-const FINANCE_TABLE_COL_COUNT = 18;
+const FINANCE_TABLE_COL_COUNT = 19;
 
 /**
  * @param {ReturnType<typeof buildStudioProgramFinanceRows>} rows
  * @param {string | null} selectedProgramId
  * @param {Map<string, ReturnType<typeof buildFinanceProgramCardModel>>} programCardById
+ * @param {object[]} [teamMembers]
+ * @param {Map<string, { firstName: string, lastName: string, fullName: string, email: string }>} [contactByPrincipal]
+ * @param {number} [programProfitCents]
+ * @param {boolean} [canEdit]
  */
-function financeProgramTableHtml(rows, selectedProgramId, programCardById) {
+function financeProgramTableHtml(
+    rows,
+    selectedProgramId,
+    programCardById,
+    teamMembers = [],
+    contactByPrincipal = new Map(),
+    programProfitCents = 0,
+    canEdit = false,
+) {
     let filterLabel = 'All active programs — slot-secured applicants';
     if (selectedProgramId) {
         const card = programCardById.get(selectedProgramId);
@@ -494,10 +715,32 @@ function financeProgramTableHtml(rows, selectedProgramId, programCardById) {
             ? `Filtered: ${card.title}`
             : 'Filtered to one program';
     }
-    const body =
+    const applicantBody =
         rows.length > 0
             ? rows.map((row) => financeProgramTableRowHtml(row)).join('')
-            : `<tr><td colspan="${FINANCE_TABLE_COL_COUNT}">${selectedProgramId ? 'No slot-secured applicants for this program.' : 'No slot-secured applicants on active programs.'}</td></tr>`;
+            : '';
+    const teamBody =
+        selectedProgramId && Array.isArray(teamMembers) && teamMembers.length
+            ? teamMembers
+                  .filter((m) => m && String(m.status || 'active') !== 'removed')
+                  .map((m) =>
+                      financeTeamTableRowHtml(
+                          m,
+                          contactByPrincipal.get(String(m.principalText || '')) || null,
+                          programProfitCents,
+                          canEdit,
+                      ),
+                  )
+                  .join('')
+            : '';
+    const body =
+        applicantBody || teamBody
+            ? `${applicantBody}${teamBody}`
+            : `<tr><td colspan="${FINANCE_TABLE_COL_COUNT}">${
+                  selectedProgramId
+                      ? 'No slot-secured applicants or team members for this program.'
+                      : 'No slot-secured applicants on active programs. Select a program to manage team.'
+              }</td></tr>`;
     return `
         <section class="member-profile-dashboard__card studio-finance-program-table-section">
             <div class="mpd-payments-section-head">
@@ -525,6 +768,7 @@ function financeProgramTableHtml(rows, selectedProgramId, programCardById) {
                             <th>Subtotal</th>
                             <th>Remaining</th>
                             <th>Profit</th>
+                            <th>Projected payout</th>
                             <th>Email</th>
                         </tr>
                     </thead>
@@ -533,6 +777,223 @@ function financeProgramTableHtml(rows, selectedProgramId, programCardById) {
             </div>
         </section>
     `;
+}
+
+/**
+ * @param {object[]} promotions
+ * @param {string | null} selectedProgramId
+ * @param {boolean} canEditPromotions
+ */
+function financeProgramPromotionsHtml(promotions, selectedProgramId, canEditPromotions) {
+    if (!selectedProgramId) {
+        return `
+          <section class="member-profile-dashboard__card studio-finance-program-promotions-section">
+            <div class="mpd-payments-section-head">
+              <h3>Program promotions</h3>
+            </div>
+            <p class="studio-muted">Select a program to see linked promotions.</p>
+          </section>`;
+    }
+    const rows = programPromotionsForProgram(promotions, selectedProgramId);
+    const totalCents = programPromotionExpenseCents(promotions, selectedProgramId);
+    const body =
+        rows.length > 0
+            ? rows
+                  .map((p) => {
+                      const dates = [
+                          String(p.startIso || '').slice(0, 10),
+                          String(p.endIso || '').slice(0, 10),
+                      ]
+                          .filter(Boolean)
+                          .join(' → ');
+                      const actions = canEditPromotions
+                          ? `<button type="button" class="studio-btn-ghost" data-finance-promo-edit="${escapeHtml(String(p.id || ''))}">Edit</button>
+                             <button type="button" class="studio-btn-ghost" data-finance-promo-archive="${escapeHtml(String(p.id || ''))}">Archive</button>`
+                          : '<span class="studio-muted">—</span>';
+                      return `<tr>
+                        <td>${escapeHtml(String(p.name || '—'))}</td>
+                        <td>${escapeHtml(String(p.company || '—'))}</td>
+                        <td>${escapeHtml(dates || '—')}</td>
+                        <td>${escapeHtml(formatUsdFromCents(p.costCents))}</td>
+                        <td>${actions}</td>
+                      </tr>`;
+                  })
+                  .join('')
+            : '<tr><td colspan="5">No promotions linked to this program.</td></tr>';
+    return `
+      <section class="member-profile-dashboard__card studio-finance-program-promotions-section">
+        <div class="mpd-payments-section-head">
+          <h3>Program promotions</h3>
+          <span class="studio-muted">Expense total ${escapeHtml(formatUsdFromCents(totalCents))}</span>
+        </div>
+        <p class="studio-muted mpd-field-hint">Promotion costs for this program are deducted from Total profit on the overview card.</p>
+        <div class="studio-table-wrap studio-table-wrap--sticky-head">
+          <table class="studio-table studio-table--dense">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Company</th>
+                <th>Dates</th>
+                <th>Cost</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>${body}</tbody>
+          </table>
+        </div>
+      </section>`;
+}
+
+/**
+ * @param {object[]} teamMembers
+ * @param {string | null} selectedProgramId
+ * @param {Map<string, { firstName: string, lastName: string, fullName: string, email: string }>} contactByPrincipal
+ * @param {boolean} canEdit
+ */
+/**
+ * @param {object[]} teamMembers
+ * @param {string | null} selectedProgramId
+ * @param {Map<string, { firstName: string, lastName: string, fullName: string, email: string }>} contactByPrincipal
+ * @param {boolean} canEdit
+ * @param {{ programProfitCents?: number, programEnded?: boolean, includeProgramByMemberId?: Map<string, boolean> }} [opts]
+ */
+function financeDisbursementsHtml(
+    teamMembers,
+    selectedProgramId,
+    contactByPrincipal,
+    canEdit,
+    opts = {},
+) {
+    if (!selectedProgramId) {
+        return `
+          <section class="member-profile-dashboard__card studio-finance-disbursements-section">
+            <div class="mpd-payments-section-head">
+              <h3>Disbursements</h3>
+            </div>
+            <p class="studio-muted">Select a program to manage team disbursements.</p>
+          </section>`;
+    }
+    const members = (Array.isArray(teamMembers) ? teamMembers : []).filter(
+        (m) => m && String(m.status || 'active') !== 'removed',
+    );
+    const programProfitCents = Number(opts.programProfitCents) || 0;
+    const programEnded = Boolean(opts.programEnded);
+    const includeMap = opts.includeProgramByMemberId instanceof Map ? opts.includeProgramByMemberId : new Map();
+    const payoutPillClass = programEnded
+        ? 'studio-finance-disb-payout-pill studio-finance-disb-payout-pill--complete'
+        : 'studio-finance-disb-payout-pill studio-finance-disb-payout-pill--active';
+    const addBtn = canEdit
+        ? '<button type="button" class="studio-btn-primary" id="studio-finance-team-add">Add team member</button>'
+        : '';
+    const rows =
+        members.length > 0
+            ? members
+                  .map((m) => {
+                      const id = String(m.id || '');
+                      const contact = contactByPrincipal.get(String(m.principalText || '')) || null;
+                      const fullName =
+                          contact?.fullName ||
+                          [contact?.firstName, contact?.lastName].filter(Boolean).join(' ').trim();
+                      const principalShort = shortPrincipalDisplay(String(m.principalText || ''));
+                      const personCell = fullName
+                          ? `<span class="studio-finance-disb-person-name">${escapeHtml(fullName)}</span>${
+                                contact?.email
+                                    ? `<span class="studio-muted studio-finance-disb-person-meta">${escapeHtml(contact.email)}</span>`
+                                    : ''
+                            }`
+                          : `<span class="studio-finance-disb-person-name">${escapeHtml(principalShort)}</span><span class="studio-muted studio-finance-disb-person-meta">Add name in Users → Manage</span>`;
+                      const kind = String(m.kind || 'staff');
+                      const kindLabel =
+                          kind === 'admin'
+                              ? 'Admin'
+                              : kind === 'collaborator'
+                                ? 'Collaborator'
+                                : 'Staff';
+                      const expenses = teamMemberExpenseSubtotalCents(m);
+                      const owed = teamMemberOutstandingOwedCents(m);
+                      const paid = sumTeamMemberPaidCents(m);
+                      const pct = Math.max(0, Math.min(100, Number(m.payoutPercent) || 0));
+                      const isAdmin = kind === 'admin';
+                      const grossPayout = computeProjectedPayoutCents(programProfitCents, pct);
+                      const programPayout = isAdmin
+                          ? computeAdminNetProgramPayoutCents(m, programProfitCents, members)
+                          : grossPayout;
+                      const staffPaidDeduction = isAdmin
+                          ? computeAdminFundedStaffPaidCents(members)
+                          : 0;
+                      const includeProgram = includeMap.has(id)
+                          ? Boolean(includeMap.get(id))
+                          : programEnded;
+                      const remaining = teamMemberDisbursementRemainingWithProgramCents(m, {
+                          includeProgramPayout: includeProgram,
+                          programPayoutCents: programPayout,
+                      });
+                      const owedBtn = canEdit
+                          ? `<button type="button" class="studio-finance-money-btn" data-finance-team-disbursement="owed" data-team-member-id="${escapeHtml(id)}">${escapeHtml(formatUsdFromCents(owed))}</button>`
+                          : escapeHtml(formatUsdFromCents(owed));
+                      const paidBtn = canEdit
+                          ? `<button type="button" class="studio-finance-money-btn" data-finance-team-disbursement="paid" data-team-member-id="${escapeHtml(id)}">${escapeHtml(formatUsdFromCents(paid))}</button>`
+                          : escapeHtml(formatUsdFromCents(paid));
+                      const removeBtn = canEdit
+                          ? `<button type="button" class="studio-btn-ghost" data-finance-team-remove="${escapeHtml(id)}">Remove</button>`
+                          : '<span class="studio-muted">—</span>';
+                      const payoutTitle = isAdmin
+                          ? `${pct}% of program profit (${formatUsdFromCents(grossPayout)}) minus ${formatUsdFromCents(staffPaidDeduction)} admin-funded paid to staff`
+                          : `${pct}% of program profit`;
+                      const payoutPill = isAdmin
+                          ? `<button type="button" class="${payoutPillClass} studio-finance-disb-payout-pill--btn" data-finance-admin-payout="${escapeHtml(id)}" title="${escapeHtml(payoutTitle)}">${escapeHtml(formatUsdFromCents(programPayout))} <span class="studio-finance-disb-payout-pct">(${pct}%)</span></button>`
+                          : `<span class="${payoutPillClass}" title="${escapeHtml(payoutTitle)}">${escapeHtml(formatUsdFromCents(programPayout))} <span class="studio-finance-disb-payout-pct">(${pct}%)</span></span>`;
+                      const includeCb = `<label class="studio-finance-disb-include">
+                        <input type="checkbox" data-finance-include-program="${escapeHtml(id)}" ${includeProgram ? 'checked' : ''} ${canEdit ? '' : 'disabled'} />
+                        <span class="studio-sr-only">Include program payout</span>
+                      </label>`;
+                      return `<tr>
+                        <td class="studio-finance-disb-person">${personCell}</td>
+                        <td>${escapeHtml(kindLabel)}</td>
+                        <td>${escapeHtml(formatUsdFromCents(expenses))}</td>
+                        <td>${owedBtn}</td>
+                        <td>${paidBtn}</td>
+                        <td>${payoutPill}</td>
+                        <td>${includeCb}</td>
+                        <td>${escapeHtml(formatUsdFromCents(remaining))}</td>
+                        <td>${removeBtn}</td>
+                      </tr>`;
+                  })
+                  .join('')
+            : '<tr><td colspan="9">No team members yet. Use Add team member to assign staff, collaborators, or one admin.</td></tr>';
+    return `
+      <section class="member-profile-dashboard__card studio-finance-disbursements-section">
+        <div class="mpd-payments-section-head">
+          <h3>Disbursements</h3>
+          ${addBtn}
+        </div>
+        <p class="studio-muted mpd-field-hint">Owed and paid are line-item ledgers. Amount owed shows the balance after admin-funded payments (program-funded pays do not reduce it). Admin Program Payout is reduced by admin-funded pays and outstanding owed. Check Include Program to add payout into Remaining.</p>
+        <div class="studio-table-wrap studio-table-wrap--sticky-head">
+          <table class="studio-table studio-table--dense">
+            <thead>
+              <tr>
+                <th>Person</th>
+                <th>Role</th>
+                <th>Expenses</th>
+                <th>Amount owed</th>
+                <th>Amount paid</th>
+                <th class="studio-finance-disb-payout-th">
+                  <span>Program Payout</span>
+                  <button type="button" class="studio-finance-disb-info-btn" data-finance-payout-info="1" aria-label="About Program Payout" title="About Program Payout">i</button>
+                </th>
+                <th>Include Program</th>
+                <th>Remaining</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        <div class="studio-finance-disb-info-popover" id="studio-finance-disb-payout-info" hidden role="dialog" aria-label="Program Payout info">
+          <p>Program Payout is an estimate of this person’s share of current program profit (from their payout %). While the program is active, expenses and payments can change, so this amount may go up or down. For the admin, admin-funded paid disbursements and outstanding amounts owed to other staff come out of this payout; payments marked as from the program reduce Total profit instead. Check “Include Program” to add the net estimate into Remaining.</p>
+          <button type="button" class="studio-btn-ghost studio-btn-tiny" data-finance-payout-info-close="1">Close</button>
+        </div>
+      </section>`;
 }
 
 /**
@@ -577,6 +1038,8 @@ export async function initFinance(mainEl) {
     const programRevenueStat = mainEl.querySelector('#studio-finance-program-revenue-stat');
     const programCardsUnified = mainEl.querySelector('#studio-finance-program-cards-unified');
     const programTableWrap = mainEl.querySelector('#studio-finance-program-table-wrap');
+    const programPromotionsWrap = mainEl.querySelector('#studio-finance-program-promotions-wrap');
+    const disbursementsWrap = mainEl.querySelector('#studio-finance-disbursements-wrap');
     const diagnosticsBody = mainEl.querySelector('#studio-finance-diagnostics-body');
     const diagnosticsRefreshBtn = mainEl.querySelector('#studio-finance-diagnostics-refresh');
 
@@ -629,10 +1092,18 @@ export async function initFinance(mainEl) {
     /** @type {Map<string, object>} */
     let applicantById = new Map();
     const programsCanEdit = studioFinanceCategoryAccess('Programs').canEdit;
+    const promotionsCanEdit = studioFinanceCategoryAccess('Promotions').canEdit;
     /** @type {Map<string, { firstName: string, lastName: string, fullName: string, email: string }>} */
     let contactByPrincipal = new Map();
     /** @type {Record<string, unknown>} */
     let membershipRevenue = { ok: false };
+    /** @type {object[]} */
+    let financePromotions = [];
+    /** @type {Map<string, object[]>} */
+    let teamMembersByProgramId = new Map();
+    /** Session UI: teamMemberId → include program payout in Remaining */
+    /** @type {Map<string, boolean>} */
+    let includeProgramPayoutByMemberId = new Map();
 
     const loadChipState = () => {
         const defaults = FINANCE_DOMAINS.filter((d) => d.chip && domainTabVisible(d)).map((d) => d.chip);
@@ -717,7 +1188,22 @@ export async function initFinance(mainEl) {
         const m = countMembershipMetrics(allAccounts);
 
         if (enabledChips.has('programs') && studioFinanceCategoryAccess('Programs').visible) {
-            parts.push(comingSoonBlock('Programs', 'Residency deposits, plans, and balances (staff list API pending).'));
+            let expectedTotal = 0;
+            let claimedTotal = 0;
+            for (const card of programCardById.values()) {
+                if (card.section !== 'active') continue;
+                expectedTotal += Number(card.expectedCents || 0);
+                claimedTotal += Number(card.slotsClaimed ?? card.filledSlots ?? 0);
+            }
+            parts.push(`
+                <div class="studio-finance-category-block" data-finance-category-block="Programs">
+                    <h3>Programs — deposit-paid</h3>
+                    <p class="studio-muted">Expected revenue from applicants who have paid a deposit (not reserved names).</p>
+                    <div class="mpd-payments-overview-grid">
+                        ${metricCard('Expected revenue', formatUsdFromCents(expectedTotal), `${claimedTotal} slots claimed`)}
+                    </div>
+                </div>
+            `);
         }
         if (enabledChips.has('users') && studioFinanceCategoryAccess('Users').visible) {
             parts.push(`
@@ -729,7 +1215,7 @@ export async function initFinance(mainEl) {
                         ${metricCard('Active', m.active, 'Active or trialing')}
                         ${metricCard('Past due', m.pastDue, 'Needs billing attention')}
                         ${metricCard('Exempt', m.exempt, 'Manual complimentary')}
-                        ${metricCard('No subscription', m.none, 'No Stripe status')}
+                        ${metricCard('No subscription', m.none, 'No subscription')}
                     </div>
                 </div>
             `);
@@ -738,7 +1224,34 @@ export async function initFinance(mainEl) {
             parts.push(comingSoonBlock('Products', 'Edition checkout and object sales.'));
         }
         if (enabledChips.has('promotions') && studioFinanceCategoryAccess('Promotions').visible) {
-            parts.push(comingSoonBlock('Promotions', 'Advertising and promotional campaigns.'));
+            const overall = financePromotions.reduce(
+                (sum, p) => sum + Math.max(0, Math.round(Number(p.costCents) || 0)),
+                0,
+            );
+            /** @type {Map<string, number>} */
+            const byProgram = new Map();
+            for (const p of financePromotions) {
+                if (String(p.target || '') !== 'program') continue;
+                const pid = String(p.programId || '').trim();
+                if (!pid) continue;
+                byProgram.set(pid, (byProgram.get(pid) || 0) + Math.max(0, Math.round(Number(p.costCents) || 0)));
+            }
+            const programCards = [...byProgram.entries()]
+                .map(([pid, cents]) => {
+                    const title = programCardById.get(pid)?.title || pid;
+                    return metricCard(title, formatUsdFromCents(cents), 'Program promotions');
+                })
+                .join('');
+            parts.push(`
+                <div class="studio-finance-category-block" data-finance-category-block="Promotions">
+                    <h3>Promotions</h3>
+                    <p class="studio-muted">Campaign spend. Platform-wide costs count in overall only.</p>
+                    <div class="mpd-payments-overview-grid">
+                        ${metricCard('Overall promotion cost', formatUsdFromCents(overall), `${financePromotions.length} active`)}
+                        ${programCards}
+                    </div>
+                </div>
+            `);
         }
 
         overviewSections.innerHTML =
@@ -765,7 +1278,7 @@ export async function initFinance(mainEl) {
                     ${metricCard('Active', m.active, 'Active or trialing')}
                     ${metricCard('Past due', m.pastDue, 'Needs billing attention')}
                     ${metricCard('Exempt', m.exempt, 'Manual complimentary')}
-                    ${metricCard('No subscription', m.none, 'No Stripe status')}
+                    ${metricCard('No subscription', m.none, 'No subscription')}
                 </div>
             </section>
         `;
@@ -796,23 +1309,34 @@ export async function initFinance(mainEl) {
                 const contact = contactByPrincipal.get(String(r.principal || '')) || null;
                 const name = contact?.fullName || [contact?.firstName, contact?.lastName].filter(Boolean).join(' ') || '—';
                 const email = contact?.email || '—';
-                const renews = formatSubscriptionPeriodEnd(r.stripeCurrentPeriodEnd);
+                const renews = formatSubscriptionPeriodEnd(
+                    r.stripeCurrentPeriodEnd || r.paypalCurrentPeriodEnd || '',
+                );
                 const custId = String(r.stripeCustomerId || '').trim();
                 const subId = String(r.stripeSubscriptionId || '').trim();
+                const paypalId = String(r.paypalSubscriptionId || '').trim();
+                const provider = String(r.paymentProvider || '').toLowerCase();
                 const custUrl = studioStripeDashboardCustomerUrl(custId, pk);
-                const stripeCell = custUrl
-                    ? `<a class="mpd-membership-text-link" href="${escapeHtml(custUrl)}" target="_blank" rel="noopener noreferrer">Customer</a>${subId ? ` · <span class="studio-muted" title="${escapeHtml(subId)}">Sub</span>` : ''}`
-                    : '<span class="studio-muted">—</span>';
+                let providerCell = '<span class="studio-muted">—</span>';
+                if (provider === 'paypal' || paypalId) {
+                    providerCell = `<span title="${escapeHtml(paypalId)}">PayPal${paypalId ? ` · ${escapeHtml(paypalId.slice(0, 12))}…` : ''}</span>`;
+                } else if (custUrl) {
+                    providerCell = `<a class="mpd-membership-text-link" href="${escapeHtml(custUrl)}" target="_blank" rel="noopener noreferrer">Stripe</a>${subId ? ` · <span class="studio-muted" title="${escapeHtml(subId)}">Sub</span>` : ''}`;
+                } else if (custId || subId) {
+                    providerCell = 'Stripe';
+                }
                 const membershipLabel = r.membershipExemptManual
                     ? 'Exempt (manual)'
-                    : studioMembershipStatusLabel(r.stripeSubscriptionStatus);
+                    : studioMembershipStatusLabel(
+                          r.paypalSubscriptionStatus || r.stripeSubscriptionStatus,
+                      );
                 return `<tr>
                     <td>${studioMembershipBadgeHtml(r, escapeHtml)}</td>
                     <td>${escapeHtml(name)}</td>
                     <td>${escapeHtml(email)}</td>
                     <td>${escapeHtml(membershipLabel)}</td>
-                    <td><span class="studio-muted" title="${escapeHtml(r.stripeCurrentPeriodEnd || '')}">${escapeHtml(renews)}</span></td>
-                    <td>${stripeCell}</td>
+                    <td><span class="studio-muted" title="${escapeHtml(r.stripeCurrentPeriodEnd || r.paypalCurrentPeriodEnd || '')}">${escapeHtml(renews)}</span></td>
+                    <td>${providerCell}</td>
                     <td><span class="studio-identity-short" title="${escapeHtml(r.principal)}">${escapeHtml(shortPrincipalDisplay(r.principal))}</span></td>
                 </tr>`;
             })
@@ -849,8 +1373,52 @@ export async function initFinance(mainEl) {
     const getFilteredFinanceRows = () =>
         buildStudioProgramFinanceRows(allApplicants, allPrograms, paymentIndex, {
             filterProgramId: selectedProgramId,
-            activeOnly: true,
+            activeOnly: !selectedProgramId,
         });
+
+    const selectedTeamMembers = () =>
+        selectedProgramId ? teamMembersByProgramId.get(selectedProgramId) || [] : [];
+
+    const selectedProgramProfitCents = () => {
+        if (!selectedProgramId) return 0;
+        const programRow = allPrograms.find((p) => String(p.id || '') === selectedProgramId) || null;
+        const applicants = applicantsByProgramId.get(selectedProgramId) || [];
+        return computeProgramProfitCents(
+            programRow,
+            applicants,
+            paymentIndex,
+            selectedTeamMembers(),
+            financePromotions,
+        );
+    };
+
+    const loadAllProgramTeams = async () => {
+        const ids = allPrograms.map((p) => String(p?.id || '').trim()).filter(Boolean);
+        const results = await Promise.all(
+            ids.map(async (id) => {
+                try {
+                    const members = await listProgramTeamStudio(id);
+                    return /** @type {const} */ ([id, Array.isArray(members) ? members : []]);
+                } catch {
+                    return /** @type {const} */ ([id, []]);
+                }
+            }),
+        );
+        teamMembersByProgramId = new Map(results);
+    };
+
+    const refreshSelectedProgramTeam = async () => {
+        if (!selectedProgramId) return;
+        try {
+            const members = await listProgramTeamStudio(selectedProgramId);
+            teamMembersByProgramId.set(
+                selectedProgramId,
+                Array.isArray(members) ? members : [],
+            );
+        } catch {
+            /* keep prior */
+        }
+    };
 
     const renderProgramRevenueStat = () => {
         if (!programRevenueStat) return;
@@ -862,12 +1430,61 @@ export async function initFinance(mainEl) {
         );
     };
 
+    const selectedProgramRow = () =>
+        selectedProgramId
+            ? allPrograms.find((p) => String(p.id || '') === selectedProgramId) || null
+            : null;
+
+    const ensureIncludeProgramDefaults = () => {
+        const programEnded = isFinanceProgramEnded(selectedProgramRow());
+        for (const m of selectedTeamMembers()) {
+            const id = String(m?.id || '');
+            if (!id || includeProgramPayoutByMemberId.has(id)) continue;
+            includeProgramPayoutByMemberId.set(id, programEnded);
+        }
+    };
+
+    const renderDisbursements = () => {
+        if (!disbursementsWrap) return;
+        ensureIncludeProgramDefaults();
+        disbursementsWrap.innerHTML = financeDisbursementsHtml(
+            selectedTeamMembers(),
+            selectedProgramId,
+            contactByPrincipal,
+            programsCanEdit,
+            {
+                programProfitCents: selectedProgramProfitCents(),
+                programEnded: isFinanceProgramEnded(selectedProgramRow()),
+                includeProgramByMemberId: includeProgramPayoutByMemberId,
+            },
+        );
+    };
+
+    const renderProgramPromotions = () => {
+        if (!programPromotionsWrap) return;
+        programPromotionsWrap.innerHTML = financeProgramPromotionsHtml(
+            financePromotions,
+            selectedProgramId,
+            promotionsCanEdit,
+        );
+    };
+
     const renderProgramTable = () => {
         if (!programTableWrap) return;
         const rows = getFilteredFinanceRows();
         financeRowByApplicantId = new Map(rows.map((row) => [row.applicantId, row]));
-        programTableWrap.innerHTML = financeProgramTableHtml(rows, selectedProgramId, programCardById);
+        programTableWrap.innerHTML = financeProgramTableHtml(
+            rows,
+            selectedProgramId,
+            programCardById,
+            selectedTeamMembers(),
+            contactByPrincipal,
+            selectedProgramProfitCents(),
+            programsCanEdit,
+        );
         renderProgramRevenueStat();
+        renderProgramPromotions();
+        renderDisbursements();
     };
 
     const renderDiagnostics = () => {
@@ -976,14 +1593,190 @@ export async function initFinance(mainEl) {
         `;
     };
 
+    const renderPromotions = () => {
+        const overviewEl = mainEl.querySelector('#studio-finance-promotions-overview');
+        const tbody = mainEl.querySelector('#studio-finance-promotions-tbody');
+        const overall = financePromotions.reduce(
+            (sum, p) => sum + Math.max(0, Math.round(Number(p.costCents) || 0)),
+            0,
+        );
+        /** @type {Map<string, number>} */
+        const byProgram = new Map();
+        for (const p of financePromotions) {
+            if (String(p.target || '') !== 'program') continue;
+            const pid = String(p.programId || '').trim();
+            if (!pid) continue;
+            byProgram.set(pid, (byProgram.get(pid) || 0) + Math.max(0, Math.round(Number(p.costCents) || 0)));
+        }
+        if (overviewEl) {
+            const cards = [
+                metricCard('Overall', formatUsdFromCents(overall), `${financePromotions.length} promotions`),
+                ...[...byProgram.entries()].map(([pid, cents]) =>
+                    metricCard(
+                        programCardById.get(pid)?.title || pid,
+                        formatUsdFromCents(cents),
+                        'Program total',
+                    ),
+                ),
+            ];
+            overviewEl.innerHTML = cards.join('');
+        }
+        if (!tbody) return;
+        if (!financePromotions.length) {
+            tbody.innerHTML = '<tr><td colspan="6">No promotions yet. Click Add promotion.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = financePromotions
+            .map((p) => {
+                const target =
+                    String(p.target || '') === 'program'
+                        ? programCardById.get(String(p.programId || ''))?.title ||
+                          String(p.programId || 'Program')
+                        : 'Platform';
+                const dates = [String(p.startIso || '').slice(0, 10), String(p.endIso || '').slice(0, 10)]
+                    .filter(Boolean)
+                    .join(' → ');
+                const actions = promotionsCanEdit
+                    ? `<button type="button" class="studio-btn-ghost" data-finance-promo-edit="${escapeHtml(String(p.id || ''))}">Edit</button>
+                       <button type="button" class="studio-btn-ghost" data-finance-promo-archive="${escapeHtml(String(p.id || ''))}">Archive</button>`
+                    : '—';
+                return `<tr>
+                    <td>${escapeHtml(String(p.name || ''))}</td>
+                    <td>${escapeHtml(String(p.company || '—'))}</td>
+                    <td>${escapeHtml(dates || '—')}</td>
+                    <td>${escapeHtml(target)}</td>
+                    <td>${escapeHtml(formatUsdFromCents(p.costCents))}</td>
+                    <td>${actions}</td>
+                </tr>`;
+            })
+            .join('');
+    };
+
+    /**
+     * @param {object | null} [existing]
+     */
+    const openPromotionModal = (existing = null) => {
+        const programOptions = allPrograms
+            .map((p) => {
+                const id = String(p.id || '');
+                const sel = existing && String(existing.programId || '') === id ? 'selected' : '';
+                return `<option value="${escapeHtml(id)}" ${sel}>${escapeHtml(getProgramDisplayNameFromRow(p))}</option>`;
+            })
+            .join('');
+        const target = existing ? String(existing.target || 'platform') : 'platform';
+        const body = `
+          <form class="studio-modal-form" id="studio-finance-promo-form">
+            <label class="studio-field"><span>Promotion name</span>
+              <input class="studio-input" id="studio-finance-promo-name" required value="${escapeHtml(String(existing?.name || ''))}" />
+            </label>
+            <label class="studio-field"><span>Company</span>
+              <input class="studio-input" id="studio-finance-promo-company" value="${escapeHtml(String(existing?.company || ''))}" />
+            </label>
+            <div class="studio-modal-fields-row">
+              <label class="studio-field"><span>Start date</span>
+                <input class="studio-input" type="date" id="studio-finance-promo-start" value="${escapeHtml(String(existing?.startIso || '').slice(0, 10))}" />
+              </label>
+              <label class="studio-field"><span>End date</span>
+                <input class="studio-input" type="date" id="studio-finance-promo-end" value="${escapeHtml(String(existing?.endIso || '').slice(0, 10))}" />
+              </label>
+            </div>
+            <label class="studio-field"><span>Target</span>
+              <select class="studio-select" id="studio-finance-promo-target">
+                <option value="platform" ${target === 'platform' ? 'selected' : ''}>Platform-wide</option>
+                <option value="program" ${target === 'program' ? 'selected' : ''}>Specific program</option>
+              </select>
+            </label>
+            <label class="studio-field" id="studio-finance-promo-program-wrap" ${target === 'program' ? '' : 'hidden'}><span>Program</span>
+              <select class="studio-select" id="studio-finance-promo-program">${programOptions}</select>
+            </label>
+            <label class="studio-field"><span>Cost (USD)</span>
+              <input class="studio-input" id="studio-finance-promo-cost" inputmode="decimal" required value="${escapeHtml(existing ? (Number(existing.costCents || 0) / 100).toFixed(2) : '')}" />
+            </label>
+            <div class="studio-modal-actions">
+              <button type="submit" class="studio-btn-primary">Save promotion</button>
+              <button type="button" class="studio-btn-ghost" data-studio-modal-close="1">Cancel</button>
+            </div>
+            <p class="studio-muted" id="studio-finance-promo-status" role="status"></p>
+          </form>`;
+        const { close, root } = openStudioModal(body, {
+            title: existing ? 'Edit promotion' : 'Add promotion',
+            wide: true,
+        });
+        const targetSel = root.querySelector('#studio-finance-promo-target');
+        const programWrap = root.querySelector('#studio-finance-promo-program-wrap');
+        targetSel?.addEventListener('change', () => {
+            if (programWrap instanceof HTMLElement) {
+                programWrap.hidden = !(
+                    targetSel instanceof HTMLSelectElement && targetSel.value === 'program'
+                );
+            }
+        });
+        root.querySelector('#studio-finance-promo-form')?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const statusEl = root.querySelector('#studio-finance-promo-status');
+            const name =
+                /** @type {HTMLInputElement|null} */ (root.querySelector('#studio-finance-promo-name'))
+                    ?.value.trim() || '';
+            const company =
+                /** @type {HTMLInputElement|null} */ (root.querySelector('#studio-finance-promo-company'))
+                    ?.value.trim() || '';
+            const startIso =
+                /** @type {HTMLInputElement|null} */ (root.querySelector('#studio-finance-promo-start'))
+                    ?.value || '';
+            const endIso =
+                /** @type {HTMLInputElement|null} */ (root.querySelector('#studio-finance-promo-end'))
+                    ?.value || '';
+            const t =
+                /** @type {HTMLSelectElement|null} */ (root.querySelector('#studio-finance-promo-target'))
+                    ?.value || 'platform';
+            const programId =
+                /** @type {HTMLSelectElement|null} */ (root.querySelector('#studio-finance-promo-program'))
+                    ?.value || '';
+            const costCents = parseUsdInputToCents(
+                /** @type {HTMLInputElement|null} */ (root.querySelector('#studio-finance-promo-cost'))
+                    ?.value || '',
+            );
+            if (endIso && startIso && endIso < startIso) {
+                if (statusEl) statusEl.textContent = 'End date must be on or after start date.';
+                return;
+            }
+            if (t === 'program' && !programId) {
+                if (statusEl) statusEl.textContent = 'Select a program.';
+                return;
+            }
+            if (statusEl) statusEl.textContent = 'Saving…';
+            try {
+                await upsertFinancePromotionStudio({
+                    id: existing ? String(existing.id || '') : '',
+                    name,
+                    company,
+                    startIso,
+                    endIso,
+                    target: t === 'program' ? 'program' : 'platform',
+                    programId,
+                    costCents,
+                });
+                financePromotions = await listFinancePromotionsStudio();
+                renderPromotions();
+                renderProgramCards();
+                renderOverview();
+                close();
+            } catch (err) {
+                if (statusEl) statusEl.textContent = err instanceof Error ? err.message : String(err);
+            }
+        });
+    };
+
     const reloadAllFinanceData = async () => {
-        const [applicants, bundle] = await Promise.all([
+        const [applicants, bundle, promos] = await Promise.all([
             getApplicants(),
             getStaffProgramPaymentsFinanceStudio(),
+            listFinancePromotionsStudio().catch(() => []),
         ]);
         allApplicants = Array.isArray(applicants) ? applicants : [];
         financeBundle = normalizeFinanceBundle(bundle);
         paymentIndex = buildProgramPaymentIndex(bundle);
+        financePromotions = Array.isArray(promos) ? promos : [];
         applicantsByProgramId = new Map();
         applicantById = new Map();
         for (const applicant of allApplicants) {
@@ -996,16 +1789,21 @@ export async function initFinance(mainEl) {
             }
             applicantsByProgramId.get(programId).push(applicant);
         }
+        await loadAllProgramTeams();
         renderProgramCards();
         renderDiagnostics();
+        renderPromotions();
+        renderOverview();
     };
 
     const reloadFinancePayments = async () => {
         const bundle = await getStaffProgramPaymentsFinanceStudio();
         financeBundle = normalizeFinanceBundle(bundle);
         paymentIndex = buildProgramPaymentIndex(bundle);
+        await loadAllProgramTeams();
         renderProgramCards();
         renderDiagnostics();
+        renderOverview();
     };
 
     const reloadApplicantsAndFinance = async () => {
@@ -1081,7 +1879,13 @@ export async function initFinance(mainEl) {
         const isPayments = mode === 'payments';
         const isTravel = mode === 'travel';
         const ledgerRows = isPayments
-            ? row.ledger.filter((entry) => isLedgerPaymentRow(entry))
+            ? row.ledger.filter((entry) => {
+                  if (isLedgerPaymentRow(entry)) return true;
+                  return (
+                      ledgerRowSource(entry) === 'staff' &&
+                      String(entry?.status || '').toLowerCase() === 'voided'
+                  );
+              })
             : isTravel
               ? row.ledger.filter(
                     (entry) =>
@@ -1099,9 +1903,10 @@ export async function initFinance(mainEl) {
                 ? ledgerRows
                       .map((entry) => {
                           const src = ledgerRowSource(entry);
+                          const voided = String(entry?.status || '').toLowerCase() === 'voided';
                           const badge =
                               src === 'staff'
-                                  ? '<span class="studio-finance-ledger-badge studio-finance-ledger-badge--staff">Staff</span>'
+                                  ? `<span class="studio-finance-ledger-badge studio-finance-ledger-badge--staff">${voided ? 'Staff · voided' : 'Staff'}</span>`
                                   : src === 'paypal'
                                     ? '<span class="studio-finance-ledger-badge studio-finance-ledger-badge--paypal">PayPal</span>'
                                     : '<span class="studio-finance-ledger-badge studio-finance-ledger-badge--stripe">Stripe</span>';
@@ -1110,22 +1915,34 @@ export async function initFinance(mainEl) {
                           const amountCell = isPayments
                               ? formatUsdFromCents(entry.amountCents)
                               : formatUsdFromCents(entry.feeCents);
-                          return `<tr>
+                          const canEditStaff =
+                              programsCanEdit &&
+                              isPayments &&
+                              src === 'staff' &&
+                              !voided;
+                          const actions = canEditStaff
+                              ? `<button type="button" class="studio-btn-ghost" data-finance-ledger-edit="${escapeHtml(String(entry.id || ''))}">Edit</button>
+                                 <button type="button" class="studio-btn-ghost" data-finance-ledger-void="${escapeHtml(String(entry.id || ''))}">Void</button>`
+                              : '—';
+                          return `<tr class="${voided ? 'studio-muted' : ''}">
                             <td>${badge}</td>
                             <td>${escapeHtml(ledgerRowTypeLabel(entry))}</td>
                             <td>${escapeHtml(amountCell)}</td>
                             <td>${escapeHtml(date)}</td>
                             <td>${note ? escapeHtml(note) : '—'}</td>
+                            <td>${actions}</td>
                           </tr>`;
                       })
                       .join('')
-                : `<tr><td colspan="5">${isPayments ? 'No payment rows yet.' : isTravel ? 'No travel fee rows yet.' : 'No fee rows yet.'}</td></tr>`;
+                : `<tr><td colspan="6">${isPayments ? 'No payment rows yet.' : isTravel ? 'No travel fee rows yet.' : 'No fee rows yet.'}</td></tr>`;
         const amountHeader = isPayments ? 'Amount' : 'Fee';
         let addForm = '';
         if (programsCanEdit) {
             if (isPayments) {
                 addForm = `<form class="studio-finance-ledger-add" id="studio-finance-ledger-add-form">
-                    <h4 class="studio-subheading">Add manual payment</h4>
+                    <h4 class="studio-subheading" id="studio-finance-ledger-form-title">Add manual payment</h4>
+                    <p class="studio-muted mpd-field-hint">PayPal payments appear after capture. Use Refresh payments or Diagnostics → Assign if a payment is missing.</p>
+                    <input type="hidden" id="studio-finance-ledger-edit-id" value="" />
                     <div class="studio-modal-fields-row">
                         <label class="studio-field"><span>Amount (USD)</span>
                             <input type="text" class="studio-input" id="studio-finance-ledger-amount" inputmode="decimal" placeholder="0.00" required />
@@ -1138,7 +1955,7 @@ export async function initFinance(mainEl) {
                         <input type="text" class="studio-input" id="studio-finance-ledger-note" placeholder="Wire transfer ref…" />
                     </label>
                     <div class="studio-modal-actions">
-                        <button type="submit" class="studio-btn-primary">Save payment</button>
+                        <button type="submit" class="studio-btn-primary" id="studio-finance-ledger-submit">Save payment</button>
                         <button type="button" class="studio-btn-ghost" data-studio-modal-close="1">Close</button>
                     </div>
                     <p class="studio-muted mpd-field-hint" id="studio-finance-ledger-status" role="status"></p>
@@ -1195,6 +2012,7 @@ export async function initFinance(mainEl) {
                                 <th>${escapeHtml(amountHeader)}</th>
                                 <th>Date</th>
                                 <th>Note</th>
+                                ${isPayments ? '<th>Actions</th>' : ''}
                             </tr>
                         </thead>
                         <tbody>${ledgerTable}</tbody>
@@ -1205,6 +2023,62 @@ export async function initFinance(mainEl) {
         const { close, root } = openStudioModal(inner, { title, wide: true });
         const form = root.querySelector('#studio-finance-ledger-add-form');
         if (!(form instanceof HTMLFormElement)) return;
+
+        const fillEditForm = (entry) => {
+            const editId = root.querySelector('#studio-finance-ledger-edit-id');
+            const amountInput = root.querySelector('#studio-finance-ledger-amount');
+            const feeInput = root.querySelector('#studio-finance-ledger-fee');
+            const noteInput = root.querySelector('#studio-finance-ledger-note');
+            const titleEl = root.querySelector('#studio-finance-ledger-form-title');
+            const submitBtn = root.querySelector('#studio-finance-ledger-submit');
+            if (editId instanceof HTMLInputElement) editId.value = String(entry.id || '');
+            if (amountInput instanceof HTMLInputElement) {
+                amountInput.value = (Number(entry.amountCents || 0) / 100).toFixed(2);
+            }
+            if (feeInput instanceof HTMLInputElement) {
+                const fee = Number(entry.feeCents || 0);
+                feeInput.value = fee > 0 ? (fee / 100).toFixed(2) : '';
+            }
+            if (noteInput instanceof HTMLInputElement) {
+                noteInput.value = String(entry.staffNote || '').replace(/\s*\[edited\]\s*$/i, '');
+            }
+            if (titleEl) titleEl.textContent = 'Edit manual payment';
+            if (submitBtn) submitBtn.textContent = 'Update payment';
+        };
+
+        root.addEventListener('click', async (ev) => {
+            const editBtn =
+                ev.target instanceof Element ? ev.target.closest('[data-finance-ledger-edit]') : null;
+            if (editBtn) {
+                const id = editBtn.getAttribute('data-finance-ledger-edit');
+                const entry = row.ledger.find((e) => String(e?.id || '') === id);
+                if (entry) fillEditForm(entry);
+                return;
+            }
+            const voidBtn =
+                ev.target instanceof Element ? ev.target.closest('[data-finance-ledger-void]') : null;
+            if (voidBtn && programsCanEdit) {
+                const id = voidBtn.getAttribute('data-finance-ledger-void');
+                if (!id || !confirm('Void this staff payment? It will no longer count toward totals.')) {
+                    return;
+                }
+                const entry = row.ledger.find((e) => String(e?.id || '') === id);
+                try {
+                    await updateStaffManualProgramLedgerStudio({
+                        paymentId: id,
+                        amountCents: Number(entry?.amountCents || 0),
+                        feeCents: Number(entry?.feeCents || 0),
+                        staffNote: String(entry?.staffNote || ''),
+                        status: 'voided',
+                    });
+                    close();
+                    await reloadFinancePayments();
+                } catch (err) {
+                    alert(err instanceof Error ? err.message : String(err));
+                }
+            }
+        });
+
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             const statusEl = root.querySelector('#studio-finance-ledger-status');
@@ -1216,6 +2090,9 @@ export async function initFinance(mainEl) {
             if (isPayments) {
                 const amountInput = root.querySelector('#studio-finance-ledger-amount');
                 const feeInput = root.querySelector('#studio-finance-ledger-fee');
+                const editIdInput = root.querySelector('#studio-finance-ledger-edit-id');
+                const editId =
+                    editIdInput instanceof HTMLInputElement ? editIdInput.value.trim() : '';
                 amountCents = parseUsdInputToCents(
                     amountInput instanceof HTMLInputElement ? amountInput.value : '',
                 );
@@ -1226,6 +2103,36 @@ export async function initFinance(mainEl) {
                     if (statusEl) statusEl.textContent = 'Enter a payment amount.';
                     return;
                 }
+                const submitBtn = form.querySelector('button[type="submit"]');
+                if (submitBtn instanceof HTMLButtonElement) submitBtn.disabled = true;
+                if (statusEl) statusEl.textContent = 'Saving…';
+                try {
+                    if (editId) {
+                        await updateStaffManualProgramLedgerStudio({
+                            paymentId: editId,
+                            amountCents,
+                            feeCents,
+                            staffNote,
+                            status: 'succeeded',
+                        });
+                    } else {
+                        await recordStaffManualProgramLedgerStudio({
+                            applicantId,
+                            programId: row.programId,
+                            amountCents,
+                            feeCents,
+                            staffNote,
+                        });
+                    }
+                    close();
+                    await reloadFinancePayments();
+                } catch (err) {
+                    if (statusEl) {
+                        statusEl.textContent = err instanceof Error ? err.message : String(err);
+                    }
+                    if (submitBtn instanceof HTMLButtonElement) submitBtn.disabled = false;
+                }
+                return;
             } else if (isTravel) {
                 const plannedInput = root.querySelector('#studio-finance-travel-planned');
                 const feeInput = root.querySelector('#studio-finance-ledger-fee');
@@ -1394,7 +2301,7 @@ export async function initFinance(mainEl) {
         });
     };
 
-    const toggleProgramFilter = (programId) => {
+    const toggleProgramFilter = async (programId) => {
         const id = String(programId || '').trim();
         if (!id || !programCardById.has(id)) return;
         if (selectedProgramId === id) {
@@ -1403,9 +2310,560 @@ export async function initFinance(mainEl) {
         } else {
             selectedProgramId = id;
             saveSelectedProgramId(id);
+            await refreshSelectedProgramTeam();
         }
         syncProgramCardSelection();
+        renderProgramCards();
         renderProgramTable();
+    };
+
+    const openTeamExpenseModal = (teamMemberId, field) => {
+        const members = selectedTeamMembers();
+        const member = members.find((m) => String(m.id || '') === teamMemberId);
+        if (!member) return;
+        const labels = {
+            ticketsCents: 'Tickets (USD)',
+            localTravelCents: 'Local travel (USD)',
+            partner1Cents: 'Partner 1 (USD)',
+            partner2Cents: 'Partner 2 (USD)',
+            partner3Cents: 'Partner 3 (USD)',
+        };
+        const label = labels[field] || field;
+        const current = Number(member[field] || 0) / 100;
+        const body = `
+          <form class="studio-modal-form" id="studio-finance-team-expense-form">
+            <label class="studio-field"><span>${escapeHtml(label)}</span>
+              <input class="studio-input" id="studio-finance-team-expense-amount" inputmode="decimal" value="${escapeHtml(current ? current.toFixed(2) : '')}" />
+            </label>
+            <div class="studio-modal-actions">
+              <button type="submit" class="studio-btn-primary">Save</button>
+              <button type="button" class="studio-btn-ghost" data-studio-modal-close="1">Cancel</button>
+            </div>
+            <p class="studio-muted" id="studio-finance-team-expense-status" role="status"></p>
+          </form>`;
+        const { close, root } = openStudioModal(body, { title: 'Team expense' });
+        root.querySelector('#studio-finance-team-expense-form')?.addEventListener('submit', async (ev) => {
+            ev.preventDefault();
+            const statusEl = root.querySelector('#studio-finance-team-expense-status');
+            const cents = parseUsdInputToCents(
+                /** @type {HTMLInputElement|null} */ (root.querySelector('#studio-finance-team-expense-amount'))
+                    ?.value || '',
+            );
+            if (statusEl) statusEl.textContent = 'Saving…';
+            try {
+                await updateProgramTeamMemberExpensesStudio({
+                    teamMemberId,
+                    ticketsCents: field === 'ticketsCents' ? cents : Number(member.ticketsCents || 0),
+                    localTravelCents:
+                        field === 'localTravelCents' ? cents : Number(member.localTravelCents || 0),
+                    partner1Cents: field === 'partner1Cents' ? cents : Number(member.partner1Cents || 0),
+                    partner2Cents: field === 'partner2Cents' ? cents : Number(member.partner2Cents || 0),
+                    partner3Cents: field === 'partner3Cents' ? cents : Number(member.partner3Cents || 0),
+                });
+                await refreshSelectedProgramTeam();
+                renderProgramCards();
+                renderProgramTable();
+                close();
+            } catch (err) {
+                if (statusEl) statusEl.textContent = err instanceof Error ? err.message : String(err);
+            }
+        });
+    };
+
+    const openTeamPayoutPercentModal = (teamMemberId) => {
+        const member = selectedTeamMembers().find((m) => String(m.id || '') === teamMemberId);
+        if (!member) return;
+        const pct = Math.max(0, Math.min(100, Number(member.payoutPercent) || 0));
+        const profit = selectedProgramProfitCents();
+        const body = `
+          <form class="studio-modal-form" id="studio-finance-team-pct-form">
+            <p class="studio-muted">Program profit: ${escapeHtml(formatUsdFromCents(profit))}. Projected payout = profit × percent.</p>
+            <label class="studio-field"><span>Payout percent (0–100)</span>
+              <input class="studio-input" type="number" min="0" max="100" step="1" id="studio-finance-team-pct" value="${escapeHtml(String(pct))}" />
+            </label>
+            <div class="studio-modal-actions">
+              <button type="submit" class="studio-btn-primary">Save</button>
+              <button type="button" class="studio-btn-ghost" data-studio-modal-close="1">Cancel</button>
+            </div>
+            <p class="studio-muted" id="studio-finance-team-pct-status" role="status"></p>
+          </form>`;
+        const { close, root } = openStudioModal(body, { title: 'Projected payout %' });
+        root.querySelector('#studio-finance-team-pct-form')?.addEventListener('submit', async (ev) => {
+            ev.preventDefault();
+            const statusEl = root.querySelector('#studio-finance-team-pct-status');
+            const value = Number(
+                /** @type {HTMLInputElement|null} */ (root.querySelector('#studio-finance-team-pct'))
+                    ?.value || 0,
+            );
+            if (statusEl) statusEl.textContent = 'Saving…';
+            try {
+                await updateProgramTeamMemberPayoutPercentStudio({
+                    teamMemberId,
+                    payoutPercent: value,
+                });
+                await refreshSelectedProgramTeam();
+                renderProgramTable();
+                close();
+            } catch (err) {
+                if (statusEl) statusEl.textContent = err instanceof Error ? err.message : String(err);
+            }
+        });
+    };
+
+    const teamMemberDisplayName = (member) => {
+        const contact = contactByPrincipal.get(String(member?.principalText || '')) || null;
+        return (
+            contact?.fullName ||
+            [contact?.firstName, contact?.lastName].filter(Boolean).join(' ').trim() ||
+            shortPrincipalDisplay(String(member?.principalText || ''))
+        );
+    };
+
+    const openAdminProgramPayoutModal = (teamMemberId) => {
+        const members = selectedTeamMembers();
+        const admin = members.find((m) => String(m.id || '') === teamMemberId);
+        if (!admin || String(admin.kind || '') !== 'admin') return;
+        const profit = selectedProgramProfitCents();
+        const pct = Math.max(0, Math.min(100, Number(admin.payoutPercent) || 0));
+        const gross = computeProjectedPayoutCents(profit, pct);
+        const staffPaid = computeAdminFundedStaffPaidCents(members);
+        const staffOutstanding = computeStaffOutstandingOwedCents(members);
+        const net = computeAdminNetProgramPayoutCents(admin, profit, members);
+        const paidRows = listStaffPaidDisbursementEntries(members, 'admin');
+        const paidTable =
+            paidRows.length > 0
+                ? paidRows
+                      .map(({ member, entry }) => {
+                          const person = teamMemberDisplayName(member);
+                          return `<tr>
+                            <td>${escapeHtml(person)}</td>
+                            <td>${escapeHtml(String(entry.name || '—'))}</td>
+                            <td>${escapeHtml(String(entry.description || '—'))}</td>
+                            <td>${escapeHtml(String(entry.dateIso || '').slice(0, 10) || '—')}</td>
+                            <td>${escapeHtml(String(entry.paymentService || 'other'))}</td>
+                            <td>${escapeHtml(formatUsdFromCents(entry.amountCents))}</td>
+                          </tr>`;
+                      })
+                      .join('')
+                : '<tr><td colspan="6">No admin-funded paid disbursements to other staff yet.</td></tr>';
+        const owedRows = members
+            .filter((m) => m && String(m.status || 'active') !== 'removed' && String(m.kind || '') !== 'admin')
+            .map((m) => {
+                const owedLedger = sumTeamMemberOwedCents(m);
+                const outstanding = teamMemberOutstandingOwedCents(m);
+                const paid = sumTeamMemberPaidCents(m);
+                const rem = teamMemberDisbursementRemainingCents(m);
+                if (owedLedger <= 0 && rem <= 0) return '';
+                return `<tr>
+                  <td>${escapeHtml(teamMemberDisplayName(m))}</td>
+                  <td>${escapeHtml(formatUsdFromCents(outstanding))}</td>
+                  <td>${escapeHtml(formatUsdFromCents(paid))}</td>
+                  <td>${escapeHtml(formatUsdFromCents(rem))}</td>
+                </tr>`;
+            })
+            .filter(Boolean)
+            .join('');
+        const owedTable = owedRows
+            ? owedRows
+            : '<tr><td colspan="4">No outstanding or owed amounts to other staff.</td></tr>';
+        const body = `
+          <div class="studio-finance-admin-payout-modal">
+            <p><strong>${escapeHtml(teamMemberDisplayName(admin))}</strong> · Admin</p>
+            <p class="studio-muted mpd-field-hint">Admin-funded paid disbursements and outstanding amounts owed to other staff come out of the admin Program Payout. Payments marked as from the program reduce Total profit instead.</p>
+            <dl class="studio-user-manage-dl">
+              <dt>Program profit</dt><dd>${escapeHtml(formatUsdFromCents(profit))}</dd>
+              <dt>Gross payout (${pct}%)</dt><dd>${escapeHtml(formatUsdFromCents(gross))}</dd>
+              <dt>Admin-funded paid to staff</dt><dd>−${escapeHtml(formatUsdFromCents(staffPaid))}</dd>
+              <dt>Outstanding owed to staff</dt><dd>−${escapeHtml(formatUsdFromCents(staffOutstanding))}</dd>
+              <dt>Net Program Payout</dt><dd><strong>${escapeHtml(formatUsdFromCents(net))}</strong></dd>
+            </dl>
+            <h4 class="studio-subheading">Admin-funded paid to other staff</h4>
+            <div class="studio-table-wrap">
+              <table class="studio-table studio-table--dense">
+                <thead>
+                  <tr>
+                    <th>Person</th>
+                    <th>Name</th>
+                    <th>Description</th>
+                    <th>Date</th>
+                    <th>Service</th>
+                    <th>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>${paidTable}</tbody>
+              </table>
+            </div>
+            <h4 class="studio-subheading">Amounts owed to other staff</h4>
+            <div class="studio-table-wrap">
+              <table class="studio-table studio-table--dense">
+                <thead>
+                  <tr>
+                    <th>Person</th>
+                    <th>Owed</th>
+                    <th>Paid</th>
+                    <th>Remaining</th>
+                  </tr>
+                </thead>
+                <tbody>${owedTable}</tbody>
+              </table>
+            </div>
+            <div class="studio-modal-actions">
+              <button type="button" class="studio-btn-ghost" data-studio-modal-close="1">Close</button>
+            </div>
+          </div>`;
+        openStudioModal(body, { title: 'Admin Program Payout', wide: true });
+    };
+
+    const openTeamDisbursementModal = (teamMemberId, which) => {
+        const isOwed = which === 'owed';
+        /** @type {string | null} */
+        let editingEntryId = null;
+
+        const paint = () => {
+            const member = selectedTeamMembers().find((m) => String(m.id || '') === teamMemberId);
+            if (!member) return;
+            const kind = String(member.kind || 'staff');
+            const kindLabel =
+                kind === 'admin' ? 'Admin' : kind === 'collaborator' ? 'Collaborator' : 'Staff';
+            const personName = teamMemberDisplayName(member);
+            const pct = Math.max(0, Math.min(100, Number(member.payoutPercent) || 0));
+            const profit = selectedProgramProfitCents();
+            const projected = computeProjectedPayoutCents(profit, pct);
+            const entries = isOwed
+                ? activeTeamMemberOwedEntries(member)
+                : activeTeamMemberPaidEntries(member);
+            const total = isOwed ? sumTeamMemberOwedCents(member) : sumTeamMemberPaidCents(member);
+            const editing = editingEntryId
+                ? entries.find((e) => String(e.id || '') === editingEntryId)
+                : null;
+            const serviceOpts = ['stripe', 'paypal', 'wire', 'cash', 'other']
+                .map((s) => {
+                    const sel =
+                        String(editing?.paymentService || 'other').toLowerCase() === s
+                            ? 'selected'
+                            : '';
+                    return `<option value="${s}" ${sel}>${s}</option>`;
+                })
+                .join('');
+            const paidColspan = 7;
+            const rowsHtml = entries.length
+                ? entries
+                      .map((e) => {
+                          const eid = String(e.id || '');
+                          const svc = isOwed
+                              ? ''
+                              : `<td>${escapeHtml(String(e.paymentService || 'other'))}</td>`;
+                          const funded =
+                              isOwed
+                                  ? ''
+                                  : `<td>${escapeHtml(
+                                        paidEntryFundedBy(e) === 'program' ? 'Program' : 'Admin',
+                                    )}</td>`;
+                          return `<tr>
+                            <td>${escapeHtml(String(e.name || '—'))}</td>
+                            <td>${escapeHtml(String(e.description || '—'))}</td>
+                            <td>${escapeHtml(String(e.dateIso || '').slice(0, 10) || '—')}</td>
+                            ${svc}
+                            ${funded}
+                            <td>${escapeHtml(formatUsdFromCents(e.amountCents))}</td>
+                            <td>
+                              <button type="button" class="studio-btn-ghost" data-disb-edit="${escapeHtml(eid)}">Edit</button>
+                              <button type="button" class="studio-btn-ghost" data-disb-void="${escapeHtml(eid)}">Void</button>
+                            </td>
+                          </tr>`;
+                      })
+                      .join('')
+                : `<tr><td colspan="${isOwed ? 5 : paidColspan}">No ${isOwed ? 'owed' : 'paid'} entries yet.</td></tr>`;
+            const projectedBlock = isOwed
+                ? `<p class="studio-muted mpd-field-hint">Projected payout: <strong>${escapeHtml(formatUsdFromCents(projected))}</strong> (${pct}% of program profit ${escapeHtml(formatUsdFromCents(profit))}). Guidance only — does not write owed lines.</p>`
+                : `<p class="studio-muted mpd-field-hint">Check “Payment from program” for prorated or program-funded pays (reduces Total profit). Leave unchecked for admin-funded pays (reduces admin Program Payout).</p>`;
+            const serviceField = isOwed
+                ? ''
+                : `<label class="studio-field"><span>Payment service</span>
+                    <select class="studio-select" id="studio-finance-disb-service">${serviceOpts}</select>
+                  </label>`;
+            const fundedByChecked =
+                editing && paidEntryFundedBy(editing) === 'program' ? 'checked' : '';
+            const fundedByField = isOwed
+                ? ''
+                : `<label class="studio-field studio-field--inline-check">
+                    <input type="checkbox" class="studio-checkbox" id="studio-finance-disb-funded-program" ${fundedByChecked} />
+                    <span>Payment from program</span>
+                  </label>`;
+            const amountVal =
+                editing && Number(editing.amountCents)
+                    ? (Number(editing.amountCents) / 100).toFixed(2)
+                    : '';
+            bodyRoot.innerHTML = `
+              <div class="studio-finance-disb-ledger-modal">
+                <p><strong>${escapeHtml(personName)}</strong> · ${escapeHtml(kindLabel)}</p>
+                ${projectedBlock}
+                <div class="studio-table-wrap">
+                  <table class="studio-table studio-table--dense">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Description</th>
+                        <th>Date</th>
+                        ${isOwed ? '' : '<th>Service</th>'}
+                        ${isOwed ? '' : '<th>Funded by</th>'}
+                        <th>Amount</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>${rowsHtml}</tbody>
+                  </table>
+                </div>
+                <p class="studio-muted">Total ${isOwed ? 'owed' : 'paid'}: <strong>${escapeHtml(formatUsdFromCents(total))}</strong></p>
+                <form class="studio-modal-form" id="studio-finance-disb-entry-form">
+                  <h4 class="studio-subheading">${editing ? 'Edit entry' : 'Add entry'}</h4>
+                  <label class="studio-field"><span>Name</span>
+                    <input class="studio-input" id="studio-finance-disb-name" required value="${escapeHtml(String(editing?.name || ''))}" />
+                  </label>
+                  <label class="studio-field"><span>Description</span>
+                    <input class="studio-input" id="studio-finance-disb-desc" value="${escapeHtml(String(editing?.description || ''))}" />
+                  </label>
+                  <label class="studio-field"><span>Date</span>
+                    <input class="studio-input" type="date" id="studio-finance-disb-date" value="${escapeHtml(String(editing?.dateIso || '').slice(0, 10))}" />
+                  </label>
+                  ${serviceField}
+                  <label class="studio-field"><span>Amount (USD)</span>
+                    <input class="studio-input" id="studio-finance-disb-amount" inputmode="decimal" required value="${escapeHtml(amountVal)}" />
+                  </label>
+                  ${fundedByField}
+                  <div class="studio-modal-actions">
+                    <button type="submit" class="studio-btn-primary">${editing ? 'Update entry' : 'Add entry'}</button>
+                    ${
+                        editing
+                            ? '<button type="button" class="studio-btn-ghost" id="studio-finance-disb-cancel-edit">Cancel edit</button>'
+                            : ''
+                    }
+                    <button type="button" class="studio-btn-ghost" data-studio-modal-close="1">Close</button>
+                  </div>
+                  <p class="studio-muted" id="studio-finance-disb-status" role="status"></p>
+                </form>
+              </div>`;
+
+            bodyRoot
+                .querySelector('#studio-finance-disb-entry-form')
+                ?.addEventListener('submit', async (ev) => {
+                    ev.preventDefault();
+                    const statusEl = bodyRoot.querySelector('#studio-finance-disb-status');
+                    const name =
+                        /** @type {HTMLInputElement|null} */ (
+                            bodyRoot.querySelector('#studio-finance-disb-name')
+                        )?.value?.trim() || '';
+                    const description =
+                        /** @type {HTMLInputElement|null} */ (
+                            bodyRoot.querySelector('#studio-finance-disb-desc')
+                        )?.value?.trim() || '';
+                    const dateIso =
+                        /** @type {HTMLInputElement|null} */ (
+                            bodyRoot.querySelector('#studio-finance-disb-date')
+                        )?.value?.trim() || '';
+                    const amountCents = parseUsdInputToCents(
+                        /** @type {HTMLInputElement|null} */ (
+                            bodyRoot.querySelector('#studio-finance-disb-amount')
+                        )?.value || '',
+                    );
+                    const paymentService =
+                        /** @type {HTMLSelectElement|null} */ (
+                            bodyRoot.querySelector('#studio-finance-disb-service')
+                        )?.value || 'other';
+                    const fundedBy =
+                        /** @type {HTMLInputElement|null} */ (
+                            bodyRoot.querySelector('#studio-finance-disb-funded-program')
+                        )?.checked
+                            ? 'program'
+                            : 'admin';
+                    if (!name) {
+                        if (statusEl) statusEl.textContent = 'Name is required.';
+                        return;
+                    }
+                    if (statusEl) statusEl.textContent = 'Saving…';
+                    try {
+                        if (isOwed) {
+                            await upsertProgramTeamOwedEntryStudio({
+                                teamMemberId,
+                                entryId: editingEntryId || '',
+                                name,
+                                description,
+                                dateIso,
+                                amountCents,
+                            });
+                        } else {
+                            await upsertProgramTeamPaidEntryStudio({
+                                teamMemberId,
+                                entryId: editingEntryId || '',
+                                name,
+                                description,
+                                dateIso,
+                                amountCents,
+                                paymentService,
+                                fundedBy,
+                            });
+                        }
+                        editingEntryId = null;
+                        await refreshSelectedProgramTeam();
+                        renderProgramCards();
+                        paint();
+                    } catch (err) {
+                        if (statusEl) {
+                            statusEl.textContent =
+                                err instanceof Error ? err.message : String(err);
+                        }
+                    }
+                });
+
+            bodyRoot
+                .querySelector('#studio-finance-disb-cancel-edit')
+                ?.addEventListener('click', () => {
+                    editingEntryId = null;
+                    paint();
+                });
+
+            bodyRoot.querySelectorAll('[data-disb-edit]').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    editingEntryId = btn.getAttribute('data-disb-edit');
+                    paint();
+                });
+            });
+
+            bodyRoot.querySelectorAll('[data-disb-void]').forEach((btn) => {
+                btn.addEventListener('click', async () => {
+                    const eid = btn.getAttribute('data-disb-void');
+                    if (!eid || !window.confirm('Void this entry?')) return;
+                    const statusEl = bodyRoot.querySelector('#studio-finance-disb-status');
+                    if (statusEl) statusEl.textContent = 'Voiding…';
+                    try {
+                        if (isOwed) await voidProgramTeamOwedEntryStudio(eid);
+                        else await voidProgramTeamPaidEntryStudio(eid);
+                        if (editingEntryId === eid) editingEntryId = null;
+                        await refreshSelectedProgramTeam();
+                        renderProgramCards();
+                        paint();
+                    } catch (err) {
+                        if (statusEl) {
+                            statusEl.textContent =
+                                err instanceof Error ? err.message : String(err);
+                        }
+                    }
+                });
+            });
+        };
+
+        const { root } = openStudioModal('<div id="studio-finance-disb-body"></div>', {
+            title: isOwed ? 'Amount owed' : 'Amount paid',
+            wide: true,
+        });
+        const bodyRoot = root.querySelector('#studio-finance-disb-body');
+        if (!(bodyRoot instanceof HTMLElement)) return;
+        paint();
+    };
+
+    const openAddTeamMemberModal = async () => {
+        if (!selectedProgramId || !programsCanEdit) return;
+        const currentTeam = selectedTeamMembers();
+        const assigned = new Set(currentTeam.map((m) => String(m.principalText || '')));
+        const hasAdmin = currentTeam.some((m) => String(m.kind || '') === 'admin');
+        /** @type {{ principal: string, label: string, kind: string }[]} */
+        const options = [];
+        const roleOf = (acc) => {
+            const roleObj = acc?.role;
+            if (roleObj && typeof roleObj === 'object') {
+                return String(Object.keys(roleObj)[0] || '').toLowerCase();
+            }
+            return String(roleObj || '').toLowerCase();
+        };
+        for (const acc of allAccounts) {
+            const principal = String(acc?.principal || '').trim();
+            if (!principal || assigned.has(principal)) continue;
+            const role = roleOf(acc);
+            if (!['staff', 'collaborator', 'admin'].includes(role)) continue;
+            if (role === 'admin' && hasAdmin) continue;
+            const contact = contactByPrincipal.get(principal);
+            const name =
+                contact?.fullName ||
+                [contact?.firstName, contact?.lastName].filter(Boolean).join(' ') ||
+                shortPrincipalDisplay(principal);
+            options.push({
+                principal,
+                label: `${name} · ${role}${contact?.email ? ` · ${contact.email}` : ''}`,
+                kind: role,
+            });
+        }
+        if (!hasAdmin) {
+            try {
+                const admins = await listAdminsForStudio();
+                for (const a of Array.isArray(admins) ? admins : []) {
+                    const principal =
+                        a && typeof a === 'object' && typeof a.toText === 'function'
+                            ? a.toText()
+                            : String(a || '');
+                    if (!principal || assigned.has(principal)) continue;
+                    if (options.some((o) => o.principal === principal)) continue;
+                    const contact = contactByPrincipal.get(principal);
+                    const name =
+                        contact?.fullName ||
+                        [contact?.firstName, contact?.lastName].filter(Boolean).join(' ') ||
+                        shortPrincipalDisplay(principal);
+                    options.push({
+                        principal,
+                        label: `${name} · admin`,
+                        kind: 'admin',
+                    });
+                }
+            } catch {
+                /* optional */
+            }
+        }
+        if (!options.length) {
+            window.alert(
+                hasAdmin
+                    ? 'No additional staff or collaborators available to add.'
+                    : 'No staff, collaborators, or admins available to add.',
+            );
+            return;
+        }
+        const optsHtml = options
+            .map(
+                (o) =>
+                    `<option value="${escapeHtml(o.principal)}" data-kind="${escapeHtml(o.kind)}">${escapeHtml(o.label)}</option>`,
+            )
+            .join('');
+        const body = `
+          <form class="studio-modal-form" id="studio-finance-team-add-form">
+            <label class="studio-field"><span>Staff, collaborator, or one admin</span>
+              <select class="studio-select" id="studio-finance-team-add-principal" required>${optsHtml}</select>
+            </label>
+            <p class="studio-muted mpd-field-hint">At most one admin per program. Staff and collaborators can be added freely.</p>
+            <div class="studio-modal-actions">
+              <button type="submit" class="studio-btn-primary">Add to program</button>
+              <button type="button" class="studio-btn-ghost" data-studio-modal-close="1">Cancel</button>
+            </div>
+            <p class="studio-muted" id="studio-finance-team-add-status" role="status"></p>
+          </form>`;
+        const { close, root } = openStudioModal(body, { title: 'Add team member' });
+        root.querySelector('#studio-finance-team-add-form')?.addEventListener('submit', async (ev) => {
+            ev.preventDefault();
+            const statusEl = root.querySelector('#studio-finance-team-add-status');
+            const selectEl = /** @type {HTMLSelectElement|null} */ (
+                root.querySelector('#studio-finance-team-add-principal')
+            );
+            const principal = selectEl?.value || '';
+            const selectedOpt = selectEl?.selectedOptions?.[0];
+            const kind = selectedOpt?.getAttribute('data-kind') || '';
+            if (statusEl) statusEl.textContent = 'Saving…';
+            try {
+                await addProgramTeamMemberStudio(selectedProgramId, principal, { kind });
+                await refreshSelectedProgramTeam();
+                renderProgramCards();
+                renderProgramTable();
+                close();
+            } catch (err) {
+                if (statusEl) statusEl.textContent = err instanceof Error ? err.message : String(err);
+            }
+        });
     };
 
     const renderProgramCards = () => {
@@ -1416,7 +2874,14 @@ export async function initFinance(mainEl) {
         const sortedPrograms = [...allPrograms].sort(sortFinanceProgramRows);
         for (const row of sortedPrograms) {
             const applicants = applicantsByProgramId.get(String(row.id || '')) || [];
-            const model = buildFinanceProgramCardModel(row, applicants, paymentIndex);
+            const team = teamMembersByProgramId.get(String(row.id || '')) || [];
+            const model = buildFinanceProgramCardModel(
+                row,
+                applicants,
+                paymentIndex,
+                team,
+                financePromotions,
+            );
             programCardById.set(model.id, model);
             buckets[model.section].push(model);
         }
@@ -1487,10 +2952,113 @@ export async function initFinance(mainEl) {
             }
             return;
         }
+        const teamExpenseBtn =
+            e.target instanceof Element ? e.target.closest('[data-finance-team-expense]') : null;
+        if (teamExpenseBtn && programsCanEdit) {
+            const teamMemberId = teamExpenseBtn.getAttribute('data-team-member-id');
+            const field = teamExpenseBtn.getAttribute('data-expense-field');
+            if (
+                teamMemberId &&
+                field &&
+                [
+                    'ticketsCents',
+                    'localTravelCents',
+                    'partner1Cents',
+                    'partner2Cents',
+                    'partner3Cents',
+                ].includes(field)
+            ) {
+                openTeamExpenseModal(teamMemberId, field);
+            }
+            return;
+        }
+        const teamPctBtn =
+            e.target instanceof Element ? e.target.closest('[data-finance-team-payout-pct]') : null;
+        if (teamPctBtn && programsCanEdit) {
+            const teamMemberId = teamPctBtn.getAttribute('data-team-member-id');
+            if (teamMemberId) openTeamPayoutPercentModal(teamMemberId);
+            return;
+        }
+        const adminPayoutBtn =
+            e.target instanceof Element ? e.target.closest('[data-finance-admin-payout]') : null;
+        if (adminPayoutBtn) {
+            const teamMemberId = adminPayoutBtn.getAttribute('data-finance-admin-payout');
+            if (teamMemberId) openAdminProgramPayoutModal(teamMemberId);
+            return;
+        }
+        const teamDisbBtn =
+            e.target instanceof Element ? e.target.closest('[data-finance-team-disbursement]') : null;
+        if (teamDisbBtn && programsCanEdit) {
+            const teamMemberId = teamDisbBtn.getAttribute('data-team-member-id');
+            const which = teamDisbBtn.getAttribute('data-finance-team-disbursement');
+            if (teamMemberId && (which === 'owed' || which === 'paid')) {
+                openTeamDisbursementModal(teamMemberId, which);
+            }
+            return;
+        }
+        const teamRemoveBtn =
+            e.target instanceof Element ? e.target.closest('[data-finance-team-remove]') : null;
+        if (teamRemoveBtn && programsCanEdit) {
+            const teamMemberId = teamRemoveBtn.getAttribute('data-finance-team-remove');
+            if (teamMemberId && window.confirm('Remove this team member from the program?')) {
+                void (async () => {
+                    try {
+                        await removeProgramTeamMemberStudio(teamMemberId);
+                        await refreshSelectedProgramTeam();
+                        renderProgramCards();
+                        renderProgramTable();
+                    } catch (err) {
+                        window.alert(err instanceof Error ? err.message : String(err));
+                    }
+                })();
+            }
+            return;
+        }
+        if (
+            e.target instanceof Element &&
+            e.target.closest('#studio-finance-team-add') &&
+            programsCanEdit
+        ) {
+            void openAddTeamMemberModal();
+            return;
+        }
+        const payoutInfoClose =
+            e.target instanceof Element
+                ? e.target.closest('[data-finance-payout-info-close]')
+                : null;
+        if (payoutInfoClose) {
+            const pop = mainEl.querySelector('#studio-finance-disb-payout-info');
+            if (pop instanceof HTMLElement) pop.hidden = true;
+            return;
+        }
+        const payoutInfoBtn =
+            e.target instanceof Element ? e.target.closest('[data-finance-payout-info]') : null;
+        if (payoutInfoBtn) {
+            const pop = mainEl.querySelector('#studio-finance-disb-payout-info');
+            if (pop instanceof HTMLElement) pop.hidden = !pop.hidden;
+            return;
+        }
         const btn = e.target instanceof Element ? e.target.closest('[data-finance-program-id]') : null;
         if (!btn) return;
         const id = btn.getAttribute('data-finance-program-id');
-        if (id) toggleProgramFilter(id);
+        if (id) void toggleProgramFilter(id);
+    });
+
+    disbursementsWrap?.addEventListener('change', (e) => {
+        const t = e.target;
+        if (!(t instanceof HTMLInputElement) || t.type !== 'checkbox') return;
+        const memberId = t.getAttribute('data-finance-include-program');
+        if (!memberId || !programsCanEdit) return;
+        includeProgramPayoutByMemberId.set(memberId, t.checked);
+        renderDisbursements();
+    });
+
+    disbursementsWrap?.addEventListener('mouseover', (e) => {
+        const btn =
+            e.target instanceof Element ? e.target.closest('[data-finance-payout-info]') : null;
+        if (!btn || !disbursementsWrap.contains(btn)) return;
+        const pop = disbursementsWrap.querySelector('#studio-finance-disb-payout-info');
+        if (pop instanceof HTMLElement) pop.hidden = false;
     });
 
     mainEl.querySelectorAll('[data-finance-tab]').forEach((btn) => {
@@ -1519,6 +3087,123 @@ export async function initFinance(mainEl) {
 
     membershipFilter?.addEventListener('change', renderUsersTable);
     usersSearch?.addEventListener('input', renderUsersTable);
+
+    const programsRefreshBtn = mainEl.querySelector('#studio-finance-programs-refresh');
+    const programsRefreshStatus = mainEl.querySelector('#studio-finance-programs-refresh-status');
+    programsRefreshBtn?.addEventListener('click', async () => {
+        if (programsRefreshBtn instanceof HTMLButtonElement) programsRefreshBtn.disabled = true;
+        if (programsRefreshStatus) programsRefreshStatus.textContent = 'Refreshing payments…';
+        try {
+            await reloadFinancePayments();
+            if (programsRefreshStatus) {
+                programsRefreshStatus.textContent = 'Payments refreshed.';
+            }
+        } catch (err) {
+            if (programsRefreshStatus) {
+                programsRefreshStatus.textContent =
+                    err instanceof Error ? err.message : String(err);
+            }
+        } finally {
+            if (programsRefreshBtn instanceof HTMLButtonElement) programsRefreshBtn.disabled = false;
+        }
+    });
+
+    const usersRefreshBtn = mainEl.querySelector('#studio-finance-users-refresh');
+    const usersRefreshStatus = mainEl.querySelector('#studio-finance-users-refresh-status');
+    usersRefreshBtn?.addEventListener('click', async () => {
+        if (usersRefreshBtn instanceof HTMLButtonElement) usersRefreshBtn.disabled = true;
+        const total = allAccounts.length;
+        let done = 0;
+        let errors = 0;
+        if (usersRefreshStatus) {
+            usersRefreshStatus.textContent = total
+                ? `Syncing 0/${total}…`
+                : 'No accounts to sync.';
+        }
+        try {
+            for (const account of allAccounts) {
+                const principal = String(account?.principal || '').trim();
+                const paypalId = String(account?.paypalSubscriptionId || '').trim();
+                const contact = contactByPrincipal.get(principal);
+                const email = String(contact?.email || '').trim();
+                try {
+                    if (paypalId && principal) {
+                        await syncPayPalSubscription({
+                            principal,
+                            subscriptionId: paypalId,
+                        });
+                    } else if (email.includes('@') && principal) {
+                        await syncSubscriptionFromStripeByEmail(email, principal);
+                    } else if (principal) {
+                        await syncSubscriptionFromStripe(principal);
+                    }
+                } catch {
+                    errors += 1;
+                }
+                done += 1;
+                if (usersRefreshStatus) {
+                    usersRefreshStatus.textContent = `Synced ${done}/${total}${errors ? ` · ${errors} failed` : ''}…`;
+                }
+            }
+            allAccounts = await getAccountsForStudio();
+            try {
+                membershipRevenue = await fetchMembershipRevenueSummary();
+            } catch {
+                membershipRevenue = { ok: false };
+            }
+            renderUsersRevenueStat();
+            renderUsersSummary();
+            renderUsersTable();
+            renderOverview();
+            if (usersRefreshStatus) {
+                usersRefreshStatus.textContent = total
+                    ? `Synced ${done}/${total}${errors ? ` · ${errors} failed` : ''}.`
+                    : 'No accounts to sync.';
+            }
+        } catch (err) {
+            if (usersRefreshStatus) {
+                usersRefreshStatus.textContent =
+                    err instanceof Error ? err.message : String(err);
+            }
+        } finally {
+            if (usersRefreshBtn instanceof HTMLButtonElement) usersRefreshBtn.disabled = false;
+        }
+    });
+
+    const promoAddBtn = mainEl.querySelector('#studio-finance-promo-add');
+    if (promoAddBtn instanceof HTMLButtonElement) {
+        promoAddBtn.hidden = !promotionsCanEdit;
+        promoAddBtn.addEventListener('click', () => openPromotionModal(null));
+    }
+    const handleFinancePromoActionClick = async (e) => {
+        const t = e.target;
+        if (!(t instanceof Element)) return;
+        const editBtn = t.closest('[data-finance-promo-edit]');
+        if (editBtn) {
+            const editId = editBtn.getAttribute('data-finance-promo-edit');
+            const existing = financePromotions.find((p) => String(p.id || '') === editId);
+            if (existing) openPromotionModal(existing);
+            return;
+        }
+        const archiveBtn = t.closest('[data-finance-promo-archive]');
+        if (!archiveBtn) return;
+        const archiveId = archiveBtn.getAttribute('data-finance-promo-archive');
+        if (!archiveId) return;
+        if (!window.confirm('Archive this promotion?')) return;
+        try {
+            await archiveFinancePromotionStudio(archiveId);
+            financePromotions = await listFinancePromotionsStudio();
+            renderPromotions();
+            renderProgramCards();
+            renderOverview();
+        } catch (err) {
+            window.alert(err instanceof Error ? err.message : String(err));
+        }
+    };
+    mainEl
+        .querySelector('#studio-finance-promotions-tbody')
+        ?.addEventListener('click', handleFinancePromoActionClick);
+    programPromotionsWrap?.addEventListener('click', handleFinancePromoActionClick);
 
     diagnosticsRefreshBtn?.addEventListener('click', async () => {
         if (diagnosticsRefreshBtn instanceof HTMLButtonElement) {
@@ -1594,15 +3279,17 @@ export async function initFinance(mainEl) {
 
     if (programsVisible) {
         try {
-            const [programs, applicants, paymentsBundle] = await Promise.all([
+            const [programs, applicants, paymentsBundle, promos] = await Promise.all([
                 getPrograms(),
                 getApplicants(),
                 getStaffProgramPaymentsFinanceStudio(),
+                listFinancePromotionsStudio().catch(() => []),
             ]);
             allPrograms = Array.isArray(programs) ? programs : [];
             allApplicants = Array.isArray(applicants) ? applicants : [];
             financeBundle = normalizeFinanceBundle(paymentsBundle);
             paymentIndex = buildProgramPaymentIndex(paymentsBundle);
+            financePromotions = Array.isArray(promos) ? promos : [];
             applicantsByProgramId = new Map();
             applicantById = new Map();
             for (const applicant of allApplicants) {
@@ -1616,12 +3303,48 @@ export async function initFinance(mainEl) {
                 applicantsByProgramId.get(programId).push(applicant);
             }
             selectedProgramId = loadSelectedProgramId();
+            await loadAllProgramTeams();
+            if (!usersVisible) {
+                try {
+                    const contacts = await adminListAccountContactsForStudio().catch(() => []);
+                    contactByPrincipal = new Map(
+                        (Array.isArray(contacts) ? contacts : []).map((row) => {
+                            const p =
+                                row &&
+                                row[0] &&
+                                typeof row[0] === 'object' &&
+                                typeof row[0].toText === 'function'
+                                    ? row[0].toText()
+                                    : String(row?.[0] || '');
+                            const c = row?.[1] || {};
+                            const firstName = String(c.firstName || '').trim();
+                            const lastName = String(c.lastName || '').trim();
+                            const email = String(c.email || '').trim();
+                            const fullName = String(`${firstName} ${lastName}`).trim();
+                            return [p, { firstName, lastName, fullName, email }];
+                        }),
+                    );
+                } catch {
+                    /* optional for team labels */
+                }
+                try {
+                    allAccounts = await getAccountsForStudio().catch(() => []);
+                } catch {
+                    allAccounts = [];
+                }
+            }
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             allPrograms = [];
             allApplicants = [];
             applicantsByProgramId = new Map();
             loadWarnings.push(msg);
+        }
+    } else if (studioFinanceCategoryAccess('Promotions').visible) {
+        try {
+            financePromotions = await listFinancePromotionsStudio();
+        } catch {
+            financePromotions = [];
         }
     }
 
@@ -1637,9 +3360,12 @@ export async function initFinance(mainEl) {
     renderUsersTable();
     if (studioFinanceCategoryAccess('Programs').visible) {
         renderProgramCards();
-    } else if (programTableWrap) {
-        programTableWrap.innerHTML = '';
+    } else {
+        if (programTableWrap) programTableWrap.innerHTML = '';
+        if (programPromotionsWrap) programPromotionsWrap.innerHTML = '';
+        if (disbursementsWrap) disbursementsWrap.innerHTML = '';
     }
+    renderPromotions();
     renderDiagnostics();
     setFinanceTab(defaultTab());
 

@@ -195,25 +195,90 @@ export async function getPayPalSubscription(subscriptionId) {
 }
 
 /**
+ * New checkout tiers. Legacy bi-monthly is detection-only (not creatable here).
+ * Prefers PAYPAL_SUBSCRIPTION_* env; falls back to PAYPAL_PLAN_ANNUAL_ID for annual.
+ * @param {string} tier
+ * @returns {string}
+ */
+export function paypalPlanIdForTier(tier) {
+    const t = String(tier || '')
+        .trim()
+        .toLowerCase();
+    if (t === 'monthly') {
+        return process.env.PAYPAL_SUBSCRIPTION_MONTHLY_ID || '';
+    }
+    if (t === 'quarterly') {
+        return process.env.PAYPAL_SUBSCRIPTION_QUARTERLY_ID || '';
+    }
+    if (t === 'annual') {
+        return (
+            process.env.PAYPAL_SUBSCRIPTION_ANNUAL_ID ||
+            process.env.PAYPAL_PLAN_ANNUAL_ID ||
+            ''
+        );
+    }
+    return '';
+}
+
+/**
+ * @param {string} planId
+ * @returns {'monthly' | 'quarterly' | 'annual' | 'bimonthly' | ''}
+ */
+export function membershipTierFromPayPalPlanId(planId) {
+    const id = String(planId || '').trim();
+    if (!id) return '';
+    if (id === String(process.env.PAYPAL_SUBSCRIPTION_MONTHLY_ID || '').trim()) return 'monthly';
+    if (id === String(process.env.PAYPAL_SUBSCRIPTION_QUARTERLY_ID || '').trim()) return 'quarterly';
+    if (
+        id === String(process.env.PAYPAL_SUBSCRIPTION_ANNUAL_ID || '').trim() ||
+        id === String(process.env.PAYPAL_PLAN_ANNUAL_ID || '').trim()
+    ) {
+        return 'annual';
+    }
+    if (id === String(process.env.PAYPAL_PLAN_BIMONTHLY_ID || '').trim()) return 'bimonthly';
+    return '';
+}
+
+/**
+ * @param {'monthly' | 'quarterly' | 'annual' | 'bimonthly' | string} tier
+ */
+export function membershipPlanDisplay(tier) {
+    const t = String(tier || '').toLowerCase();
+    if (t === 'bimonthly') {
+        return { planLabel: 'Bi-monthly (legacy)', planPriceLine: '$50 every 2 months' };
+    }
+    if (t === 'monthly') {
+        return { planLabel: 'Monthly membership', planPriceLine: '$30 per month' };
+    }
+    if (t === 'quarterly') {
+        return { planLabel: 'Quarterly membership', planPriceLine: '$75 per quarter' };
+    }
+    if (t === 'annual') {
+        return { planLabel: 'Annual membership', planPriceLine: '$260 per year' };
+    }
+    return { planLabel: 'Membership', planPriceLine: '' };
+}
+
+/**
  * @param {object} reqBody
  */
 export async function createPayPalSubscription(reqBody) {
     const tierRaw = reqBody?.subscriptionTier;
     let tier = typeof tierRaw === 'string' ? tierRaw.trim().toLowerCase() : '';
-    if (!tier) tier = 'bimonthly';
-    if (tier !== 'bimonthly' && tier !== 'annual') {
-        throw new Error('Invalid subscriptionTier (use bimonthly or annual)');
+    // Migrate legacy default: new checkouts default to monthly
+    if (!tier || tier === 'bimonthly' || tier === 'bi_monthly') tier = 'monthly';
+    if (tier !== 'monthly' && tier !== 'quarterly' && tier !== 'annual') {
+        throw new Error('Invalid subscriptionTier (use monthly, quarterly, or annual)');
     }
-    const planId =
-        tier === 'annual'
-            ? process.env.PAYPAL_PLAN_ANNUAL_ID || ''
-            : process.env.PAYPAL_PLAN_BIMONTHLY_ID || '';
+    const planId = paypalPlanIdForTier(tier);
     if (!planId) {
-        throw new Error(
+        const envName =
             tier === 'annual'
-                ? 'PAYPAL_PLAN_ANNUAL_ID not configured'
-                : 'PAYPAL_PLAN_BIMONTHLY_ID not configured',
-        );
+                ? 'PAYPAL_SUBSCRIPTION_ANNUAL_ID'
+                : tier === 'quarterly'
+                  ? 'PAYPAL_SUBSCRIPTION_QUARTERLY_ID'
+                  : 'PAYPAL_SUBSCRIPTION_MONTHLY_ID';
+        throw new Error(`${envName} not configured`);
     }
     const principalRaw = reqBody?.principal;
     const principal =
@@ -231,7 +296,10 @@ export async function createPayPalSubscription(reqBody) {
     const rawMeta =
         reqBody?.metadata && typeof reqBody.metadata === 'object' ? reqBody.metadata : {};
     /** @type {Record<string, string>} */
-    const customData = { pending_email: email.trim().slice(0, 500) };
+    const customData = {
+        pending_email: email.trim().slice(0, 500),
+        tier: tier.slice(0, 16),
+    };
     if (payFirstPending) {
         customData.fusion_pending_id = fusionPendingId;
     } else {
@@ -280,6 +348,49 @@ export async function cancelPayPalSubscriptionAtPeriodEnd(subscriptionId) {
             body: { reason: 'Member requested cancellation at period end' },
         },
     );
+}
+
+/**
+ * Revise subscription to a new plan (buyer must approve via returned approve URL).
+ * @param {string} subscriptionId
+ * @param {string} targetTier monthly | quarterly | annual
+ * @param {{ returnUrl?: string, cancelUrl?: string }} [opts]
+ */
+export async function revisePayPalSubscription(subscriptionId, targetTier, opts = {}) {
+    const tier = String(targetTier || '')
+        .trim()
+        .toLowerCase();
+    if (tier !== 'monthly' && tier !== 'quarterly' && tier !== 'annual') {
+        throw new Error('Invalid targetTier (use monthly, quarterly, or annual)');
+    }
+    const planId = paypalPlanIdForTier(tier);
+    if (!planId) {
+        throw new Error(`PayPal plan not configured for tier: ${tier}`);
+    }
+    /** @type {Record<string, unknown>} */
+    const body = { plan_id: planId };
+    const returnUrl = typeof opts.returnUrl === 'string' ? opts.returnUrl.trim() : '';
+    const cancelUrl = typeof opts.cancelUrl === 'string' ? opts.cancelUrl.trim() : '';
+    if (returnUrl || cancelUrl) {
+        body.application_context = {
+            ...(returnUrl ? { return_url: returnUrl } : {}),
+            ...(cancelUrl ? { cancel_url: cancelUrl } : {}),
+        };
+    }
+    const revised = await paypalRequest(
+        `/v1/billing/subscriptions/${encodeURIComponent(subscriptionId)}/revise`,
+        {
+            method: 'POST',
+            body,
+        },
+    );
+    const approveLink = (revised.links || []).find((l) => l.rel === 'approve');
+    return {
+        subscription: revised,
+        approveUrl: approveLink?.href || '',
+        planId,
+        targetTier: tier,
+    };
 }
 
 /**

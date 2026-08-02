@@ -17,6 +17,7 @@ import {
     programHeroLoaderHtml,
 } from '../../utils/programHeroLoader.js';
 import { withSeoImageAlt } from '../../utils/mediaAltSeo.js';
+import { revealProgramApplicationOrOpenJoin } from '../../utils/scrollAnchorToViewportGap.js';
 
 function escapeHtml(s) {
     return String(s)
@@ -37,6 +38,15 @@ function phantomPlaceholderCopy() {
         return 'アーティストの確定を進めています';
     }
     return 'Artists are being confirmed';
+}
+
+/** Remaining open-slot cards beside confirmed artists. */
+function openSlotPlaceholderCopy() {
+    const loc = typeof window.getLocale === 'function' ? window.getLocale() : 'en';
+    if (loc === 'ja') {
+        return { title: '空き枠', sub: 'お早めに' };
+    }
+    return { title: 'Available slot', sub: 'Apply now' };
 }
 
 class ConfirmedArtistsFeedComponent extends HTMLElement {
@@ -125,6 +135,91 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
         return card;
     }
 
+    /**
+     * Open slot card — same dashed phantom used when no artists are confirmed yet.
+     * @param {boolean} [withMessage]
+     * @param {{ matchArtistLayout?: boolean }} [opts] When true, mirror image + content stack so mixed rows align.
+     */
+    _createPhantomCard(withMessage = false, opts = {}) {
+        const matchArtistLayout = Boolean(opts?.matchArtistLayout);
+        const card = document.createElement('div');
+        card.className = matchArtistLayout
+            ? 'artist-card artist-card--phantom artist-card--open-slot'
+            : 'artist-card artist-card--phantom';
+        card.setAttribute('aria-hidden', 'true');
+
+        if (matchArtistLayout) {
+            const copy = openSlotPlaceholderCopy();
+            card.removeAttribute('aria-hidden');
+            card.setAttribute('role', 'button');
+            card.setAttribute('tabindex', '0');
+            card.setAttribute('aria-label', `${copy.title}. ${copy.sub}`);
+            const startApplication = (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                void revealProgramApplicationOrOpenJoin();
+            };
+            card.addEventListener('click', startApplication);
+            card.addEventListener('keydown', (e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                startApplication(e);
+            });
+            const frame = document.createElement('div');
+            frame.className = 'artist-card--phantom-frame';
+            const body = document.createElement('div');
+            body.className = 'artist-card--open-slot-body';
+            const title = document.createElement('p');
+            title.className = 'artist-card--open-slot-title';
+            title.textContent = copy.title;
+            const sub = document.createElement('p');
+            sub.className = 'artist-card--open-slot-sub';
+            sub.textContent = copy.sub;
+            body.appendChild(title);
+            body.appendChild(sub);
+            frame.appendChild(body);
+            card.appendChild(frame);
+            const content = document.createElement('div');
+            content.className = 'artist-card-content artist-card-content--phantom';
+            content.setAttribute('aria-hidden', 'true');
+            content.innerHTML =
+                '<div class="artist-card-title">&nbsp;</div><div class="artist-card-discipline">&nbsp;</div>';
+            card.appendChild(content);
+            return card;
+        }
+
+        if (withMessage) {
+            const msg = document.createElement('p');
+            msg.className = 'artist-card--phantom-message';
+            msg.textContent = phantomPlaceholderCopy();
+            card.appendChild(msg);
+        }
+        return card;
+    }
+
+    /**
+     * How many open-slot phantoms to append after confirmed artists.
+     * Uses `totalSlots - confirmedCount` when totalSlots is set.
+     * @param {number} confirmedCount
+     * @param {number | null} availableSlots
+     * @param {number | null} totalSlots
+     */
+    _remainingPlaceholderCount(confirmedCount, availableSlots, totalSlots) {
+        const hasTotal =
+            typeof totalSlots === 'number' && Number.isFinite(totalSlots) && totalSlots > 0;
+        if (hasTotal) {
+            const capacity = Math.min(MAX_ARTISTS, Math.floor(totalSlots));
+            return Math.max(0, capacity - confirmedCount);
+        }
+        const hasAvail =
+            typeof availableSlots === 'number' &&
+            Number.isFinite(availableSlots) &&
+            availableSlots > 0;
+        if (hasAvail) {
+            return Math.min(MAX_ARTISTS, Math.floor(availableSlots));
+        }
+        return 0;
+    }
+
     _setActiveDot(index) {
         const dots = this.shadowRoot?.querySelectorAll('.confirmed-pagination-dot');
         if (!dots?.length) return;
@@ -207,8 +302,20 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
             typeof totalSlots === 'number' &&
             Number.isFinite(totalSlots);
 
-        const showPhantomPlaceholders = list.length === 0;
-        const hostHidden = showPhantomPlaceholders ? false : !hasHeadline && list.length === 0;
+        // Empty cohort: keep the centered 3-phantom “being confirmed” row.
+        const showEmptyPhantomRow = list.length === 0;
+        const remainingPlaceholders = showEmptyPhantomRow
+            ? 0
+            : this._remainingPlaceholderCount(list.length, availableSlots, totalSlots);
+        /** @type {Array<{ kind: 'artist', artist: object } | { kind: 'phantom' }>} */
+        const displayItems = [
+            ...list.map((artist) => /** @type {const} */ ({ kind: 'artist', artist })),
+            ...Array.from({ length: remainingPlaceholders }, () =>
+                /** @type {const} */ ({ kind: 'phantom' }),
+            ),
+        ];
+
+        const hostHidden = showEmptyPhantomRow ? false : !hasHeadline && list.length === 0;
         this.style.display = hostHidden ? 'none' : '';
 
         const headlineEl = root.querySelector('.confirmed-headline');
@@ -228,7 +335,7 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
             }
         }
 
-        const pageCount = showPhantomPlaceholders ? 1 : this._numPages(list.length);
+        const pageCount = showEmptyPhantomRow ? 1 : this._numPages(displayItems.length);
         this._slideCount = pageCount;
         this._activeIndex = 0;
 
@@ -236,7 +343,7 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
             scrollEl.innerHTML = '';
             scrollEl.scrollLeft = 0;
 
-            if (showPhantomPlaceholders) {
+            if (showEmptyPhantomRow) {
                 const slide = document.createElement('div');
                 slide.className = 'confirmed-slide';
                 slide.setAttribute('data-slide-index', '0');
@@ -252,32 +359,32 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
                         grid.appendChild(sp);
                         continue;
                     }
-                    const card = document.createElement('div');
-                    card.className = 'artist-card artist-card--phantom';
-                    card.setAttribute('aria-hidden', 'true');
-                    if (i === 2) {
-                        const msg = document.createElement('p');
-                        msg.className = 'artist-card--phantom-message';
-                        msg.textContent = phantomPlaceholderCopy();
-                        card.appendChild(msg);
-                    }
-                    grid.appendChild(card);
+                    grid.appendChild(this._createPhantomCard(i === 2));
                 }
 
                 slide.appendChild(grid);
                 scrollEl.appendChild(slide);
             } else {
                 for (let p = 0; p < pageCount; p++) {
-                    const slice = this._sliceForPage(list, p);
+                    const slice = this._sliceForPage(displayItems, p);
                     const slide = document.createElement('div');
                     slide.className = 'confirmed-slide';
                     slide.setAttribute('data-slide-index', String(p));
 
                     const grid = document.createElement('div');
                     grid.className = 'confirmed-grid';
+                    if (remainingPlaceholders > 0) {
+                        grid.classList.add('confirmed-grid--with-open-slots');
+                    }
 
-                    slice.forEach((artist) => {
-                        grid.appendChild(this._createArtistCard(artist));
+                    slice.forEach((item) => {
+                        if (item.kind === 'phantom') {
+                            grid.appendChild(
+                                this._createPhantomCard(false, { matchArtistLayout: true }),
+                            );
+                        } else {
+                            grid.appendChild(this._createArtistCard(item.artist));
+                        }
                     });
 
                     slide.appendChild(grid);
@@ -491,6 +598,73 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
                     padding: clamp(0.65rem, 2vw, 1.1rem);
                 }
 
+                /* Remaining open slots beside real artists: dashed frame + empty content band. */
+                .artist-card--phantom.artist-card--open-slot {
+                    aspect-ratio: auto;
+                    border: none;
+                    padding: 0;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: stretch;
+                    justify-content: flex-start;
+                    cursor: pointer;
+                }
+
+                .artist-card--phantom-frame {
+                    width: 100%;
+                    aspect-ratio: 3 / 4;
+                    box-sizing: border-box;
+                    border: 2px dashed rgba(0, 0, 0, 0.28);
+                    border-radius: 2px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: clamp(0.65rem, 2vw, 1.1rem);
+                    background: rgba(0, 0, 0, 0.025);
+                }
+
+                .artist-card--open-slot-body {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 0.25rem;
+                    text-align: center;
+                    max-width: 14ch;
+                }
+
+                /* Match confirmed artist name (.artist-card-title). */
+                .artist-card--open-slot-title {
+                    margin: 0;
+                    font-size: clamp(0.7rem, 1.1vw, 1rem);
+                    font-variation-settings: var(--fv-card-title);
+                    letter-spacing: 0.06em;
+                    text-transform: none;
+                    color: var(--c2);
+                    line-height: 1.25;
+                }
+
+                /* Match discipline line styling; no pulse. */
+                .artist-card--open-slot-sub {
+                    margin: 0;
+                    font-size: clamp(0.65rem, 0.95vw, 0.9rem);
+                    font-variation-settings: var(--fv-body-wide);
+                    letter-spacing: 0.02em;
+                    color: var(--c2);
+                    line-height: 1.2;
+                    opacity: 0.85;
+                }
+
+                .artist-card--phantom.artist-card--open-slot:hover .artist-card--open-slot-sub {
+                    opacity: 1;
+                    text-decoration: underline;
+                    text-underline-offset: 0.15em;
+                }
+
+                .artist-card-content--phantom {
+                    visibility: hidden;
+                }
+
                 .artist-card--phantom:hover {
                     opacity: 1;
                 }
@@ -545,6 +719,7 @@ class ConfirmedArtistsFeedComponent extends HTMLElement {
                 }
 
                 .artist-card-image {
+                    position: relative;
                     width: 100%;
                     aspect-ratio: 3 / 4;
                     overflow: hidden;

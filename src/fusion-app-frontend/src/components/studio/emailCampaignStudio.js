@@ -43,7 +43,30 @@ import {
     resolveContentSource,
     serializeCampaignMeta,
 } from '../../utils/emailCampaignContentSources.js';
+import {
+    applySocialCropToStage,
+    DEFAULT_SOCIAL_CROP,
+    DEFAULT_SOCIAL_HERO,
+    SOCIAL_CAPTION_HASHTAGS,
+    defaultLayoutForSourceType,
+    ensureSocialCaptionHashtags,
+    headlineHtmlFromPlain,
+    normalizeSocialCrop,
+    plainTextFromHtml,
+    renderSocialCardHtml,
+    slotsFromEmailSource,
+    socialExportFilename,
+    socialRatioPixels,
+    stripSocialCaptionHashtags,
+} from '../../utils/socialCardLayout.js';
+import {
+    canCopySocialPng,
+    captureSocialCardPng,
+    copySocialPng,
+    downloadSocialPng,
+} from '../../utils/socialCardExport.js';
 import { openEmailMediaPickerModal, emailMediaInsertHtml } from './emailMediaPickerModal.js';
+import { openSocialImagePickerModal } from './socialImagePickerModal.js';
 import { Principal } from '@dfinity/principal';
 
 const LLM_MAX = 12000;
@@ -261,11 +284,12 @@ export function renderEmailCampaignStudio() {
 <div class="studio-ec" data-studio-ec-root>
   <div class="studio-ec__layout" role="group" aria-label="Email campaign layout">
     <aside class="studio-ec__col studio-ec__col--assist" aria-label="Campaigns and assistance">
-      <div class="studio-ec__subtabs studio-ec__subtabs--four" role="tablist" aria-label="Left panel">
+      <div class="studio-ec__subtabs studio-ec__subtabs--five" role="tablist" aria-label="Left panel">
         <button type="button" class="studio-ec__subtab" id="studio-ec-ltab-cam" data-ec-ltab="campaigns" role="tab" aria-selected="false">Campaigns</button>
         <button type="button" class="studio-ec__subtab is-active" id="studio-ec-ltab-a" data-ec-ltab="compose" role="tab" aria-selected="true">Compose</button>
         <button type="button" class="studio-ec__subtab" id="studio-ec-ltab-b" data-ec-ltab="gen" role="tab" aria-selected="false">Generate</button>
         <button type="button" class="studio-ec__subtab" id="studio-ec-ltab-c" data-ec-ltab="tpl" role="tab" aria-selected="false">Templates</button>
+        <button type="button" class="studio-ec__subtab" id="studio-ec-ltab-social" data-ec-ltab="social" role="tab" aria-selected="false">Social</button>
       </div>
       <div id="studio-ec-panel-l-campaigns" class="studio-ec__assist-panels studio-ec__panel--campaigns" role="region" aria-label="Saved campaigns" hidden>
         <div class="studio-ec__list-head">
@@ -334,6 +358,7 @@ export function renderEmailCampaignStudio() {
               <option value="video">Community video</option>
               <option value="journal">Journal entry</option>
               <option value="program">Program</option>
+              <option value="website">Website / Network</option>
             </select>
           </label>
           <label class="studio-field">
@@ -344,11 +369,122 @@ export function renderEmailCampaignStudio() {
           </label>
           <button type="button" class="studio-btn-secondary studio-ec__apply-content" id="studio-ec-apply-content">Apply content</button>
         </div>
+        <label class="studio-field" id="studio-ec-qd-prompt-wrap" hidden>
+          <span>Quick Design prompt <span class="studio-muted">(optional)</span></span>
+          <textarea class="studio-textarea" id="studio-ec-qd-prompt" rows="3" placeholder="e.g. Emphasize Japan residencies and cancel-anytime membership…"></textarea>
+        </label>
         <div class="studio-ec__tpl-actions">
           <button type="button" class="studio-btn-secondary" id="studio-ec-apply-template">Apply template</button>
           <button type="button" class="studio-btn-primary" id="studio-ec-quick-design">Quick Design</button>
         </div>
         <p class="studio-muted studio-ec__tpl-note">Quick Design uses the selected template styling and optional content source. Review before sending.</p>
+      </div>
+      <div id="studio-ec-panel-l-social" class="studio-ec__social-panel" hidden>
+        <p class="studio-ec__assist-hint">Compose a branded 1:1 or 4:5 graphic from live content, crop the hero, then download a PNG for social.</p>
+        <label class="studio-field">
+          <span>Format</span>
+          <select class="studio-select" id="studio-ec-social-ratio">
+            <option value="1:1" selected>1:1 — Square (1080×1080)</option>
+            <option value="4:5">4:5 — Portrait (1080×1350)</option>
+          </select>
+        </label>
+        <label class="studio-field">
+          <span>Layout</span>
+          <select class="studio-select" id="studio-ec-social-layout">
+            <option value="spotlight">Spotlight — full-bleed</option>
+            <option value="editorial" selected>Editorial — image + copy</option>
+            <option value="portrait">Portrait — artist crop</option>
+          </select>
+        </label>
+        <p class="studio-ec__kicker">Content source</p>
+        <label class="studio-field">
+          <span>Source type</span>
+          <select class="studio-select" id="studio-ec-social-source-type">
+            <option value="">— Select —</option>
+            <option value="artist">Featured artist</option>
+            <option value="video">Community video</option>
+            <option value="journal">Journal entry</option>
+            <option value="program">Program</option>
+            <option value="website">Website / Network</option>
+          </select>
+        </label>
+        <label class="studio-field">
+          <span>Item</span>
+          <select class="studio-select" id="studio-ec-social-source-id" disabled>
+            <option value="">— Select type first —</option>
+          </select>
+        </label>
+        <label class="studio-field" id="studio-ec-social-qd-prompt-wrap">
+          <span>Quick Design prompt <span class="studio-muted">(optional)</span></span>
+          <textarea class="studio-textarea" id="studio-ec-social-qd-prompt" rows="3" placeholder="e.g. Short punchy headline for Instagram…"></textarea>
+        </label>
+        <div class="studio-ec__social-actions">
+          <div class="studio-ec__social-actions-row">
+            <button type="button" class="studio-btn-secondary" id="studio-ec-social-apply">Apply content</button>
+            <button type="button" class="studio-btn-primary" id="studio-ec-social-quick-design">Quick Design</button>
+          </div>
+          <div class="studio-ec__social-actions-row">
+            <button type="button" class="studio-btn-secondary" id="studio-ec-social-pick-image" disabled>Change image…</button>
+            <button type="button" class="studio-btn-ghost" id="studio-ec-social-reset-crop" disabled>Reset crop</button>
+          </div>
+          <div class="studio-ec__social-actions-row">
+            <button type="button" class="studio-btn-secondary" id="studio-ec-social-download" disabled>Download PNG</button>
+            <button type="button" class="studio-btn-ghost" id="studio-ec-social-copy" disabled>Copy image</button>
+          </div>
+        </div>
+        <div class="studio-ec__social-crop-block" id="studio-ec-social-crop-block" hidden>
+          <p class="studio-ec__kicker">Crop / focus</p>
+          <label class="studio-field">
+            <span>Zoom <em class="studio-ec__n" id="studio-ec-social-zoom-n">1.0×</em></span>
+            <input type="range" id="studio-ec-social-zoom" min="1" max="2.5" step="0.05" value="1" />
+          </label>
+          <p class="studio-ec__social-hint">Drag the image on the stage to reposition. Use Change image to browse Artists, Programs, Journal, Videos, and Website stills.</p>
+        </div>
+        <div class="studio-ec__social-caption-block" id="studio-ec-social-caption-block" hidden>
+          <p class="studio-ec__kicker">Card text</p>
+          <label class="studio-field">
+            <span>Headline (EN)</span>
+            <textarea class="studio-textarea" id="studio-ec-social-headline" rows="2" placeholder="Headline lines…"></textarea>
+          </label>
+          <label class="studio-field">
+            <span>Body (EN)</span>
+            <textarea class="studio-textarea" id="studio-ec-social-body" rows="2" placeholder="Short supporting line…"></textarea>
+          </label>
+          <div class="studio-ec__social-actions-row" style="margin-top:0.35rem">
+            <button type="button" class="studio-btn-secondary" id="studio-ec-social-apply-text" disabled>Apply to graphic</button>
+            <button type="button" class="studio-btn-ghost" id="studio-ec-social-translate-text" disabled>Translate text</button>
+          </div>
+          <label class="studio-field" style="margin-top:0.55rem">
+            <span>Headline (JA)</span>
+            <textarea class="studio-textarea" id="studio-ec-social-headline-ja" rows="2" placeholder="日本語の見出し…"></textarea>
+          </label>
+          <label class="studio-field">
+            <span>Body (JA)</span>
+            <textarea class="studio-textarea" id="studio-ec-social-body-ja" rows="2" placeholder="日本語の本文…"></textarea>
+          </label>
+          <div class="studio-ec__social-actions-row" style="margin-top:0.35rem">
+            <button type="button" class="studio-btn-secondary" id="studio-ec-social-apply-text-ja" disabled>Apply JA to graphic</button>
+          </div>
+          <p class="studio-ec__kicker" style="margin-top:0.85rem">Caption</p>
+          <label class="studio-field">
+            <span>Caption (EN)</span>
+            <textarea class="studio-textarea" id="studio-ec-social-caption" rows="4" placeholder="Generate a caption for Instagram / feed…"></textarea>
+          </label>
+          <div class="studio-ec__social-actions-row" style="margin-top:0.5rem">
+            <button type="button" class="studio-btn-primary" id="studio-ec-social-gen-caption" disabled>Generate caption</button>
+            <button type="button" class="studio-btn-ghost" id="studio-ec-social-copy-caption" disabled>Copy EN</button>
+          </div>
+          <div class="studio-ec__social-actions-row" style="margin-top:0.35rem">
+            <button type="button" class="studio-btn-secondary" id="studio-ec-social-translate-caption" disabled>Translate caption</button>
+            <button type="button" class="studio-btn-ghost" id="studio-ec-social-copy-caption-ja" disabled>Copy JA</button>
+          </div>
+          <label class="studio-field" style="margin-top:0.55rem">
+            <span>Caption (JA)</span>
+            <textarea class="studio-textarea" id="studio-ec-social-caption-ja" rows="4" placeholder="日本語のキャプション…"></textarea>
+          </label>
+          <p class="studio-muted studio-ec__tpl-note">Captions always include ${SOCIAL_CAPTION_HASHTAGS} (kept in English).</p>
+        </div>
+        <p class="studio-muted studio-ec__tpl-note">Red accent uses story pagination dots (not a clickable button). Download PNG for posting.</p>
       </div>
     </aside>
     <section class="studio-ec__col studio-ec__col--editor" aria-label="Message">
@@ -396,6 +532,20 @@ export function renderEmailCampaignStudio() {
               <button type="button" class="studio-ec__aib" id="studio-ec-ai-expand">Expand</button>
               <button type="button" class="studio-ec__aib" id="studio-ec-ai-shorten">Shorten</button>
               <button type="button" class="studio-ec__aib" id="studio-ec-sel-ja">To Japanese</button>
+            </div>
+          </div>
+        </div>
+        <div id="studio-ec-panel-m-social" class="studio-ec__main-panel studio-ec__main-panel--social" role="region" aria-label="Social graphic" hidden>
+          <div class="studio-ec__edtabs studio-ec__edtabs--bodybar" role="group" aria-label="Social stage">
+            <span class="studio-ec__body-tab-label">Social graphic</span>
+            <span class="studio-muted" id="studio-ec-social-dims-label">1080×1080</span>
+          </div>
+          <p class="studio-ec__msg studio-ec__social-msg" id="studio-ec-social-msg" style="display:none" role="status" aria-live="polite"></p>
+          <div class="studio-ec__social-stage-wrap">
+            <div class="studio-ec__social-stage-scale" id="studio-ec-social-stage-scale" data-ratio="1:1">
+              <div class="studio-ec__social-stage" id="studio-ec-social-stage">
+                <p class="studio-ec__social-empty" id="studio-ec-social-empty">Select a content source and click Apply content to generate a social graphic.</p>
+              </div>
             </div>
           </div>
         </div>
@@ -507,6 +657,13 @@ export async function initEmailCampaignStudio(mainEl) {
     const panelCampaigns = root.querySelector('#studio-ec-panel-l-campaigns');
     const panelComposeL = root.querySelector('#studio-ec-panel-l-compose');
     const panelTplL = root.querySelector('#studio-ec-panel-l-tpl');
+    const panelSocialL = root.querySelector('#studio-ec-panel-l-social');
+    const panelMessageM = root.querySelector('#studio-ec-panel-m-message');
+    const panelSocialM = root.querySelector('#studio-ec-panel-m-social');
+    const messageRowFields = root.querySelector('.studio-ec__row-fields');
+    const messageTitleEl = root.querySelector('.studio-ec__col--editor .studio-ec__title');
+    const messageEyebrowEl = root.querySelector('.studio-ec__col--editor .studio-ec__eyebrow');
+    const messageLedeEl = root.querySelector('#studio-ec-save-state');
 
     const titleInp = root.querySelector('#studio-ec-title');
     const subjInp = root.querySelector('#studio-ec-subject');
@@ -536,27 +693,38 @@ export async function initEmailCampaignStudio(mainEl) {
     let contentCaches = { artists: [], journals: [], programs: [], videos: [], media: [], images: [] };
     /** @type {{ templateId?: string, source?: { type: string, id: string } | null }} */
     let campaignMeta = {};
+    /** @type {string} */
+    let leftSubtabKey = 'compose';
+
+    const socialMsgEl = root.querySelector('#studio-ec-social-msg');
 
     const setMsg = (kind, text) => {
-        if (!(msgEl instanceof HTMLElement)) return;
-        if (!text) {
-            msgEl.style.display = 'none';
-            msgEl.textContent = '';
-            msgEl.className = 'studio-ec__msg';
-            return;
-        }
-        msgEl.style.display = 'block';
+        const targets = [msgEl, socialMsgEl].filter((el) => el instanceof HTMLElement);
+        if (!targets.length) return;
         const err = kind === 'error';
         const info = kind === 'info';
-        msgEl.className = `studio-ec__msg${
+        const cls = `studio-ec__msg${
             err ? ' studio-ec__msg--err' : info ? ' studio-ec__msg--info' : ' studio-ec__msg--ok'
         }`;
-        msgEl.textContent = text;
+        for (const el of targets) {
+            if (!text) {
+                el.style.display = 'none';
+                el.textContent = '';
+                el.className = el.id === 'studio-ec-social-msg' ? 'studio-ec__msg studio-ec__social-msg' : 'studio-ec__msg';
+                continue;
+            }
+            el.style.display = 'block';
+            el.className =
+                el.id === 'studio-ec-social-msg' ? `${cls} studio-ec__social-msg` : cls;
+            el.textContent = text;
+        }
     };
 
     const syncSaveUi = (transient = '') => {
         if (savedEl instanceof HTMLElement) {
-            if (transient) {
+            if (leftSubtabKey === 'social' && !transient) {
+                savedEl.textContent = 'Preview at export size, crop the hero, then download a PNG.';
+            } else if (transient) {
                 savedEl.textContent = transient;
             } else {
                 savedEl.textContent = isDirty
@@ -658,13 +826,819 @@ export async function initEmailCampaignStudio(mainEl) {
 
     openPreviewBtn?.addEventListener('click', () => openMessagePreviewModal());
 
+    /* —— Social graphic composer —— */
+    const socialRatioSel = root.querySelector('#studio-ec-social-ratio');
+    const socialLayoutSel = root.querySelector('#studio-ec-social-layout');
+    const socialSourceTypeSel = root.querySelector('#studio-ec-social-source-type');
+    const socialSourceIdSel = root.querySelector('#studio-ec-social-source-id');
+    const socialStage = root.querySelector('#studio-ec-social-stage');
+    const socialStageScale = root.querySelector('#studio-ec-social-stage-scale');
+    const socialDimsLabel = root.querySelector('#studio-ec-social-dims-label');
+    const socialZoomInp = root.querySelector('#studio-ec-social-zoom');
+    const socialZoomN = root.querySelector('#studio-ec-social-zoom-n');
+    const socialCropBlock = root.querySelector('#studio-ec-social-crop-block');
+    const socialDownloadBtn = root.querySelector('#studio-ec-social-download');
+    const socialCopyBtn = root.querySelector('#studio-ec-social-copy');
+    const socialPickImageBtn = root.querySelector('#studio-ec-social-pick-image');
+    const socialResetCropBtn = root.querySelector('#studio-ec-social-reset-crop');
+    const socialCaptionBlock = root.querySelector('#studio-ec-social-caption-block');
+    const socialCaptionTa = root.querySelector('#studio-ec-social-caption');
+    const socialCaptionJaTa = root.querySelector('#studio-ec-social-caption-ja');
+    const socialHeadlineTa = root.querySelector('#studio-ec-social-headline');
+    const socialBodyTa = root.querySelector('#studio-ec-social-body');
+    const socialHeadlineJaTa = root.querySelector('#studio-ec-social-headline-ja');
+    const socialBodyJaTa = root.querySelector('#studio-ec-social-body-ja');
+    const socialGenCaptionBtn = root.querySelector('#studio-ec-social-gen-caption');
+    const socialCopyCaptionBtn = root.querySelector('#studio-ec-social-copy-caption');
+    const socialTranslateCaptionBtn = root.querySelector('#studio-ec-social-translate-caption');
+    const socialCopyCaptionJaBtn = root.querySelector('#studio-ec-social-copy-caption-ja');
+    const socialApplyTextBtn = root.querySelector('#studio-ec-social-apply-text');
+    const socialTranslateTextBtn = root.querySelector('#studio-ec-social-translate-text');
+    const socialApplyTextJaBtn = root.querySelector('#studio-ec-social-apply-text-ja');
+
+    /** @type {ReturnType<typeof slotsFromEmailSource> | null} */
+    let socialSlots = null;
+    /** @type {'1:1' | '4:5'} */
+    let socialRatio = '1:1';
+    /** @type {'spotlight' | 'editorial' | 'portrait'} */
+    let socialLayout = 'editorial';
+    let socialCrop = { ...DEFAULT_SOCIAL_CROP };
+
+    const getSocialSourceRef = () => {
+        const type = socialSourceTypeSel instanceof HTMLSelectElement ? socialSourceTypeSel.value : '';
+        const id = socialSourceIdSel instanceof HTMLSelectElement ? socialSourceIdSel.value : '';
+        if (!type || !id) return null;
+        return { type, id };
+    };
+
+    const setSocialExportEnabled = (on) => {
+        if (socialDownloadBtn instanceof HTMLButtonElement) socialDownloadBtn.disabled = !on;
+        if (socialPickImageBtn instanceof HTMLButtonElement) socialPickImageBtn.disabled = !on;
+        if (socialResetCropBtn instanceof HTMLButtonElement) socialResetCropBtn.disabled = !on;
+        if (socialGenCaptionBtn instanceof HTMLButtonElement) socialGenCaptionBtn.disabled = !on;
+        if (socialTranslateCaptionBtn instanceof HTMLButtonElement) {
+            socialTranslateCaptionBtn.disabled = !on;
+        }
+        if (socialApplyTextBtn instanceof HTMLButtonElement) socialApplyTextBtn.disabled = !on;
+        if (socialTranslateTextBtn instanceof HTMLButtonElement) socialTranslateTextBtn.disabled = !on;
+        if (socialApplyTextJaBtn instanceof HTMLButtonElement) socialApplyTextJaBtn.disabled = !on;
+        if (socialCaptionBlock instanceof HTMLElement) socialCaptionBlock.hidden = !on;
+        if (socialCopyBtn instanceof HTMLButtonElement) {
+            const copyOk = canCopySocialPng();
+            socialCopyBtn.disabled = !on || !copyOk;
+            socialCopyBtn.title = copyOk
+                ? 'Copy PNG to clipboard'
+                : 'Clipboard blocked here — use Download PNG';
+            if (!copyOk) socialCopyBtn.textContent = 'Copy unavailable';
+            else if (socialCopyBtn.textContent === 'Copy unavailable') {
+                socialCopyBtn.textContent = 'Copy image';
+            }
+        }
+        if (socialCopyCaptionBtn instanceof HTMLButtonElement) {
+            const hasCap =
+                socialCaptionTa instanceof HTMLTextAreaElement &&
+                socialCaptionTa.value.trim().length > 0;
+            socialCopyCaptionBtn.disabled = !on || !hasCap;
+        }
+        if (socialCopyCaptionJaBtn instanceof HTMLButtonElement) {
+            const hasJa =
+                socialCaptionJaTa instanceof HTMLTextAreaElement &&
+                socialCaptionJaTa.value.trim().length > 0;
+            socialCopyCaptionJaBtn.disabled = !on || !hasJa;
+        }
+    };
+
+    const syncSocialTextFieldsFromSlots = () => {
+        if (!socialSlots) return;
+        if (socialHeadlineTa instanceof HTMLTextAreaElement) {
+            socialHeadlineTa.value = String(socialSlots.headlineHtml || '')
+                .replace(/<br\s*\/?>/gi, '\n')
+                .replace(/<[^>]+>/g, '')
+                .replace(/&nbsp;/g, ' ')
+                .replace(/&amp;/g, '&')
+                .replace(/&lt;/g, '<')
+                .replace(/&gt;/g, '>')
+                .replace(/&quot;/g, '"')
+                .trim();
+        }
+        if (socialBodyTa instanceof HTMLTextAreaElement) {
+            socialBodyTa.value = String(socialSlots.bodyText || '');
+        }
+    };
+
+    /**
+     * @param {string} text
+     */
+    const copyTextToClipboard = async (text) => {
+        const t = String(text || '').trim();
+        if (!t) throw new Error('Nothing to copy.');
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(t);
+            return;
+        }
+        const ta = document.createElement('textarea');
+        ta.value = t;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+    };
+
+    const wireSocialHeroFallback = () => {
+        if (!(socialStage instanceof HTMLElement)) return;
+        const img = socialStage.querySelector('img[data-social-hero]');
+        if (!(img instanceof HTMLImageElement)) return;
+        img.addEventListener(
+            'error',
+            () => {
+                if (img.dataset.fallbackApplied === '1') return;
+                img.dataset.fallbackApplied = '1';
+                img.src = DEFAULT_SOCIAL_HERO;
+                if (socialSlots) {
+                    socialSlots = { ...socialSlots, heroUrl: DEFAULT_SOCIAL_HERO };
+                }
+                setMsg('info', 'Hero image failed to load — swapped in Fusion default.');
+            },
+            { once: true },
+        );
+    };
+
+    const scaleSocialStage = () => {
+        if (!(socialStage instanceof HTMLElement) || !(socialStageScale instanceof HTMLElement)) return;
+        if (socialStageScale.classList.contains('is-empty') || !socialSlots) {
+            socialStage.style.width = '';
+            socialStage.style.height = '';
+            socialStage.style.transform = '';
+            socialStageScale.style.height = '';
+            return;
+        }
+        const dims = socialRatioPixels(socialRatio);
+        const wrap = socialStageScale.parentElement;
+        const pad = 24;
+        const availW = Math.max(
+            160,
+            (wrap instanceof HTMLElement ? wrap.clientWidth : socialStageScale.clientWidth) - pad,
+        );
+        const availH = Math.max(
+            160,
+            (wrap instanceof HTMLElement ? wrap.clientHeight : 480) - pad,
+        );
+        const scale = Math.min(availW / dims.width, availH / dims.height, 1);
+        const shownW = Math.round(dims.width * scale);
+        const shownH = Math.round(dims.height * scale);
+        socialStageScale.style.width = `${shownW}px`;
+        socialStageScale.style.height = `${shownH}px`;
+        socialStage.style.width = `${dims.width}px`;
+        socialStage.style.height = `${dims.height}px`;
+        socialStage.style.transform = `scale(${scale})`;
+    };
+
+    /** Crop drag state (delegated on socialStage — wired once). */
+    let socialCropDragging = false;
+    let socialCropLastX = 0;
+    let socialCropLastY = 0;
+
+    if (socialStage instanceof HTMLElement) {
+        socialStage.addEventListener('pointerdown', (e) => {
+            if (!(e instanceof PointerEvent) || !socialSlots) return;
+            const t = e.target;
+            if (!(t instanceof Element)) return;
+            const cropEl = t.closest('[data-social-crop-target]');
+            if (!(cropEl instanceof HTMLElement) || !socialStage.contains(cropEl)) return;
+            socialCropDragging = true;
+            socialCropLastX = e.clientX;
+            socialCropLastY = e.clientY;
+            try {
+                socialStage.setPointerCapture(e.pointerId);
+            } catch {
+                /* ignore */
+            }
+            e.preventDefault();
+        });
+        socialStage.addEventListener('pointermove', (e) => {
+            if (!(e instanceof PointerEvent) || !socialCropDragging || !socialSlots) return;
+            const dx = e.clientX - socialCropLastX;
+            const dy = e.clientY - socialCropLastY;
+            socialCropLastX = e.clientX;
+            socialCropLastY = e.clientY;
+            const sens = 0.12 / Math.max(socialCrop.zoom, 1);
+            socialCrop = normalizeSocialCrop({
+                x: socialCrop.x - dx * sens,
+                y: socialCrop.y - dy * sens,
+                zoom: socialCrop.zoom,
+            });
+            socialSlots = { ...socialSlots, crop: socialCrop };
+            applySocialCropToStage(socialStage, socialCrop);
+        });
+        const endSocialCropDrag = () => {
+            socialCropDragging = false;
+        };
+        socialStage.addEventListener('pointerup', endSocialCropDrag);
+        socialStage.addEventListener('pointercancel', endSocialCropDrag);
+    }
+
+    const renderSocialStage = () => {
+        if (!(socialStage instanceof HTMLElement)) return;
+        if (!socialSlots) {
+            if (socialStageScale instanceof HTMLElement) {
+                socialStageScale.classList.add('is-empty');
+            }
+            socialStage.innerHTML =
+                '<p class="studio-ec__social-empty" id="studio-ec-social-empty">Select a content source and click Apply content to generate a social graphic.</p>';
+            if (socialCropBlock instanceof HTMLElement) socialCropBlock.hidden = true;
+            setSocialExportEnabled(false);
+            scaleSocialStage();
+            return;
+        }
+        if (socialStageScale instanceof HTMLElement) {
+            socialStageScale.classList.remove('is-empty');
+        }
+        socialSlots = { ...socialSlots, crop: socialCrop };
+        socialStage.innerHTML = renderSocialCardHtml(socialSlots, {
+            ratio: socialRatio,
+            layout: socialLayout,
+        });
+        if (socialCropBlock instanceof HTMLElement) socialCropBlock.hidden = !socialSlots.heroUrl;
+        if (socialZoomInp instanceof HTMLInputElement) {
+            socialZoomInp.value = String(socialCrop.zoom);
+        }
+        if (socialZoomN) socialZoomN.textContent = `${socialCrop.zoom.toFixed(2)}×`;
+        setSocialExportEnabled(true);
+        syncSocialTextFieldsFromSlots();
+        // Scale after layout so the wrap has real dimensions.
+        requestAnimationFrame(() => {
+            scaleSocialStage();
+            wireSocialHeroFallback();
+        });
+    };
+
+    const syncSocialChrome = () => {
+        socialRatio =
+            socialRatioSel instanceof HTMLSelectElement && socialRatioSel.value === '4:5' ? '4:5' : '1:1';
+        socialLayout =
+            socialLayoutSel instanceof HTMLSelectElement &&
+            (socialLayoutSel.value === 'spotlight' ||
+                socialLayoutSel.value === 'editorial' ||
+                socialLayoutSel.value === 'portrait')
+                ? /** @type {any} */ (socialLayoutSel.value)
+                : 'editorial';
+        if (socialStageScale instanceof HTMLElement) {
+            socialStageScale.setAttribute('data-ratio', socialRatio);
+        }
+        const dims = socialRatioPixels(socialRatio);
+        if (socialDimsLabel) socialDimsLabel.textContent = `${dims.width}×${dims.height}`;
+        if (socialSlots) renderSocialStage();
+        else scaleSocialStage();
+    };
+
+    const populateSocialSourceIdSelect = () => {
+        if (!(socialSourceIdSel instanceof HTMLSelectElement)) return;
+        const type = socialSourceTypeSel instanceof HTMLSelectElement ? socialSourceTypeSel.value : '';
+        if (!type) {
+            socialSourceIdSel.innerHTML = '<option value="">— Select type first —</option>';
+            socialSourceIdSel.disabled = true;
+            return;
+        }
+        const rows =
+            type === 'artist'
+                ? contentCaches.artists
+                : type === 'video'
+                  ? contentCaches.videos
+                  : type === 'journal'
+                    ? contentCaches.journals
+                    : type === 'website'
+                      ? contentCaches.website || []
+                      : contentCaches.programs;
+        const options = listContentSourceOptions(/** @type {any} */ (type), rows);
+        socialSourceIdSel.innerHTML =
+            '<option value="">— Select —</option>' +
+            options.map((o) => `<option value="${esc(o.id)}">${esc(o.label)}</option>`).join('');
+        socialSourceIdSel.disabled = options.length === 0;
+    };
+
+    const resolveSocialSourceSlots = () => {
+        const source = getSocialSourceRef();
+        if (!source) return null;
+        return resolveContentSource(
+            source,
+            contentCaches.artists,
+            contentCaches.journals,
+            contentCaches.programs,
+            contentCaches.videos,
+            {
+                context: contentCaches.context,
+                joinNetworkFlow: contentCaches.joinNetworkFlow,
+                programs: contentCaches.programs,
+                featureCards: contentCaches.featureCards,
+            },
+        );
+    };
+
+    const applySocialContent = () => {
+        const source = getSocialSourceRef();
+        if (!source) {
+            setMsg('error', 'Select a content source type and item first.');
+            return;
+        }
+        const emailSlots = resolveSocialSourceSlots();
+        if (!emailSlots) {
+            setMsg('error', 'Could not resolve content for that item.');
+            return;
+        }
+        if (
+            socialLayoutSel instanceof HTMLSelectElement &&
+            !socialSlots &&
+            defaultLayoutForSourceType(source.type) !== socialLayoutSel.value
+        ) {
+            socialLayoutSel.value = defaultLayoutForSourceType(source.type);
+        }
+        syncSocialChrome();
+        socialCrop = { ...DEFAULT_SOCIAL_CROP };
+        socialSlots = slotsFromEmailSource(emailSlots, {
+            sourceType: source.type,
+            sourceId: source.id,
+            crop: socialCrop,
+        });
+        renderSocialStage();
+        setMsg('ok', 'Social graphic applied. Adjust crop, then download PNG.');
+    };
+
+    socialRatioSel?.addEventListener('change', () => {
+        syncSocialChrome();
+    });
+    socialLayoutSel?.addEventListener('change', () => {
+        syncSocialChrome();
+        if (socialSlots) renderSocialStage();
+    });
+    socialSourceTypeSel?.addEventListener('change', () => {
+        populateSocialSourceIdSelect();
+        const type = socialSourceTypeSel instanceof HTMLSelectElement ? socialSourceTypeSel.value : '';
+        if (type && socialLayoutSel instanceof HTMLSelectElement) {
+            socialLayoutSel.value = defaultLayoutForSourceType(type);
+        }
+    });
+    socialZoomInp?.addEventListener('input', () => {
+        if (!(socialZoomInp instanceof HTMLInputElement) || !socialSlots) return;
+        socialCrop = normalizeSocialCrop({
+            ...socialCrop,
+            zoom: Number(socialZoomInp.value) || 1,
+        });
+        socialSlots = { ...socialSlots, crop: socialCrop };
+        if (socialZoomN) socialZoomN.textContent = `${socialCrop.zoom.toFixed(2)}×`;
+        if (socialStage instanceof HTMLElement) applySocialCropToStage(socialStage, socialCrop);
+    });
+
+    root.querySelector('#studio-ec-social-apply')?.addEventListener('click', () => {
+        applySocialContent();
+    });
+
+    socialPickImageBtn?.addEventListener('click', async () => {
+        if (!socialSlots) {
+            setMsg('error', 'Apply content before changing the image.');
+            return;
+        }
+        try {
+            await openSocialImagePickerModal({
+                media: contentCaches.socialMedia || [],
+                caches: contentCaches,
+                onSelect: (sel) => {
+                    const url = String(sel?.url || '').trim();
+                    if (!url) {
+                        setMsg('error', 'Selected image has no URL.');
+                        return;
+                    }
+                    socialSlots = {
+                        ...socialSlots,
+                        heroUrl: url,
+                        heroAlt: sel.label || socialSlots?.heroAlt || 'Fusion',
+                        crop: { ...DEFAULT_SOCIAL_CROP },
+                    };
+                    socialCrop = { ...DEFAULT_SOCIAL_CROP };
+                    renderSocialStage();
+                    setMsg('ok', 'Image updated. Adjust crop if needed.');
+                },
+            });
+        } catch (e) {
+            setMsg('error', e instanceof Error ? e.message : String(e));
+        }
+    });
+
+    socialResetCropBtn?.addEventListener('click', () => {
+        if (!socialSlots) return;
+        socialCrop = { ...DEFAULT_SOCIAL_CROP };
+        socialSlots = { ...socialSlots, crop: socialCrop };
+        renderSocialStage();
+    });
+
+    socialApplyTextBtn?.addEventListener('click', () => {
+        if (!socialSlots) return;
+        const headline =
+            socialHeadlineTa instanceof HTMLTextAreaElement ? socialHeadlineTa.value : '';
+        const body = socialBodyTa instanceof HTMLTextAreaElement ? socialBodyTa.value.trim() : '';
+        socialSlots = {
+            ...socialSlots,
+            headlineHtml: headlineHtmlFromPlain(headline) || socialSlots.headlineHtml,
+            bodyText: body,
+            artistName:
+                socialSlots.sourceType === 'artist'
+                    ? plainTextFromHtml(headlineHtmlFromPlain(headline).replace(/<br\s*\/?>/gi, ' '), 80) ||
+                      socialSlots.artistName
+                    : socialSlots.artistName,
+        };
+        renderSocialStage();
+        setMsg('ok', 'Graphic text updated.');
+    });
+
+    socialApplyTextJaBtn?.addEventListener('click', () => {
+        if (!socialSlots) return;
+        const headline =
+            socialHeadlineJaTa instanceof HTMLTextAreaElement ? socialHeadlineJaTa.value : '';
+        const body =
+            socialBodyJaTa instanceof HTMLTextAreaElement ? socialBodyJaTa.value.trim() : '';
+        if (!headline.trim() && !body) {
+            setMsg('error', 'Translate text first, or enter Japanese copy.');
+            return;
+        }
+        socialSlots = {
+            ...socialSlots,
+            headlineHtml: headlineHtmlFromPlain(headline) || socialSlots.headlineHtml,
+            bodyText: body || socialSlots.bodyText,
+            artistName:
+                socialSlots.sourceType === 'artist'
+                    ? plainTextFromHtml(
+                          headlineHtmlFromPlain(headline).replace(/<br\s*\/?>/gi, ' '),
+                          80,
+                      ) || socialSlots.artistName
+                    : socialSlots.artistName,
+        };
+        renderSocialStage();
+        setMsg('ok', 'Japanese text applied to graphic.');
+    });
+
+    socialTranslateTextBtn?.addEventListener('click', async () => {
+        if (!socialSlots) return;
+        const headline =
+            socialHeadlineTa instanceof HTMLTextAreaElement
+                ? socialHeadlineTa.value.trim()
+                : plainTextFromHtml(String(socialSlots.headlineHtml || ''), 200);
+        const body =
+            socialBodyTa instanceof HTMLTextAreaElement
+                ? socialBodyTa.value.trim()
+                : String(socialSlots.bodyText || '');
+        const payload = `HEADLINE:\n${headline}\n\nBODY:\n${body}`;
+        if (!headline && !body) {
+            setMsg('error', 'Nothing to translate.');
+            return;
+        }
+        setMsg('info', 'Translating card text to Japanese…');
+        try {
+            const out = await studioTranslateEnToJa(payload);
+            const hMatch = String(out).match(/HEADLINE:\s*([\s\S]*?)(?:\n\s*BODY:|$)/i);
+            const bMatch = String(out).match(/BODY:\s*([\s\S]*)$/i);
+            let hJa = hMatch ? hMatch[1].trim() : '';
+            let bJa = bMatch ? bMatch[1].trim() : '';
+            if (!hJa && !bJa) {
+                // Fallback: treat whole output as headline if short
+                const lines = String(out)
+                    .trim()
+                    .split(/\n+/)
+                    .map((l) => l.trim())
+                    .filter(Boolean);
+                hJa = lines[0] || '';
+                bJa = lines.slice(1).join('\n');
+            }
+            if (socialHeadlineJaTa instanceof HTMLTextAreaElement) socialHeadlineJaTa.value = hJa;
+            if (socialBodyJaTa instanceof HTMLTextAreaElement) socialBodyJaTa.value = bJa;
+            setSocialExportEnabled(true);
+            setMsg('ok', 'Japanese card text ready — Apply JA to graphic when you want.');
+        } catch (e) {
+            setMsg('error', e instanceof Error ? e.message : String(e));
+        }
+    });
+
+    socialGenCaptionBtn?.addEventListener('click', async () => {
+        if (!socialSlots) {
+            setMsg('error', 'Apply content before generating a caption.');
+            return;
+        }
+        const source = getSocialSourceRef();
+        const facts = {
+            sourceType: socialSlots.sourceType || source?.type || '',
+            sourceId: socialSlots.sourceId || source?.id || '',
+            eyebrow: socialSlots.eyebrow,
+            pill: socialSlots.pillLabel,
+            headline: plainTextFromHtml(String(socialSlots.headlineHtml || ''), 120),
+            body: socialSlots.bodyText,
+            artistName: socialSlots.artistName,
+            requiredHashtags: SOCIAL_CAPTION_HASHTAGS,
+        };
+        const prompt = `You write short Instagram captions for FUSION (Japan-rooted art platform). Elevated, warm, concise. Reply with ONE JSON object only (no markdown): {"caption":"..."}. caption: 1–3 short sentences, no hashtags inside (app appends them). Do not invent residency dates. JSON:`;
+        const src = JSON.stringify(facts);
+        if (prompt.length + src.length > LLM_MAX) {
+            setMsg('error', 'Caption context too long.');
+            return;
+        }
+        setMsg('info', 'Generating caption…');
+        try {
+            const raw = await studioReinterpretWithPrompt(prompt, src, 'en');
+            let caption = '';
+            try {
+                const cleaned = String(raw || '')
+                    .replace(/^```(?:json)?\s*/i, '')
+                    .replace(/\s*```$/i, '')
+                    .trim();
+                const parsed = JSON.parse(cleaned);
+                caption = String(parsed?.caption ?? '').trim();
+            } catch {
+                caption = String(raw || '')
+                    .replace(/^["']|["']$/g, '')
+                    .trim();
+            }
+            if (!caption) {
+                setMsg('error', 'Could not parse caption. Try again.');
+                return;
+            }
+            const finalCap = ensureSocialCaptionHashtags(caption);
+            if (socialCaptionTa instanceof HTMLTextAreaElement) {
+                socialCaptionTa.value = finalCap;
+            }
+            setSocialExportEnabled(true);
+            setMsg('ok', 'Caption ready — copy and paste into your post.');
+        } catch (e) {
+            setMsg('error', e instanceof Error ? e.message : String(e));
+        }
+    });
+
+    socialTranslateCaptionBtn?.addEventListener('click', async () => {
+        const en =
+            socialCaptionTa instanceof HTMLTextAreaElement ? socialCaptionTa.value.trim() : '';
+        if (!en) {
+            setMsg('error', 'Generate or enter an English caption first.');
+            return;
+        }
+        const { body } = stripSocialCaptionHashtags(en);
+        if (!body) {
+            setMsg('error', 'Caption has no text to translate (only hashtags).');
+            return;
+        }
+        setMsg('info', 'Translating caption to Japanese…');
+        try {
+            const jaBody = await studioTranslateEnToJa(body);
+            const finalJa = ensureSocialCaptionHashtags(String(jaBody || '').trim());
+            if (socialCaptionJaTa instanceof HTMLTextAreaElement) {
+                socialCaptionJaTa.value = finalJa;
+            }
+            setSocialExportEnabled(true);
+            setMsg('ok', 'Japanese caption ready.');
+        } catch (e) {
+            setMsg('error', e instanceof Error ? e.message : String(e));
+        }
+    });
+
+    socialCopyCaptionBtn?.addEventListener('click', async () => {
+        const text =
+            socialCaptionTa instanceof HTMLTextAreaElement ? socialCaptionTa.value.trim() : '';
+        if (!text) {
+            setMsg('error', 'Generate a caption first.');
+            return;
+        }
+        try {
+            await copyTextToClipboard(text);
+            setMsg('ok', 'English caption copied.');
+        } catch {
+            setMsg('error', 'Could not copy caption. Select the text and copy manually.');
+        }
+    });
+
+    socialCopyCaptionJaBtn?.addEventListener('click', async () => {
+        const text =
+            socialCaptionJaTa instanceof HTMLTextAreaElement
+                ? socialCaptionJaTa.value.trim()
+                : '';
+        if (!text) {
+            setMsg('error', 'Translate the caption first.');
+            return;
+        }
+        try {
+            await copyTextToClipboard(text);
+            setMsg('ok', 'Japanese caption copied.');
+        } catch {
+            setMsg('error', 'Could not copy caption. Select the text and copy manually.');
+        }
+    });
+
+    socialCaptionTa?.addEventListener('input', () => {
+        if (socialCopyCaptionBtn instanceof HTMLButtonElement) {
+            const has =
+                socialCaptionTa instanceof HTMLTextAreaElement &&
+                socialCaptionTa.value.trim().length > 0;
+            socialCopyCaptionBtn.disabled = !has || !socialSlots;
+        }
+    });
+
+    socialCaptionJaTa?.addEventListener('input', () => {
+        if (socialCopyCaptionJaBtn instanceof HTMLButtonElement) {
+            const has =
+                socialCaptionJaTa instanceof HTMLTextAreaElement &&
+                socialCaptionJaTa.value.trim().length > 0;
+            socialCopyCaptionJaBtn.disabled = !has || !socialSlots;
+        }
+    });
+
+    root.querySelector('#studio-ec-social-quick-design')?.addEventListener('click', async () => {
+        const source = getSocialSourceRef();
+        if (!source) {
+            setMsg('error', 'Select a content source before Quick Design.');
+            return;
+        }
+        const qdEl = root.querySelector('#studio-ec-social-qd-prompt');
+        const idea = (qdEl instanceof HTMLTextAreaElement ? qdEl.value : '').trim();
+        const emailSlots = resolveSocialSourceSlots();
+        if (!emailSlots) {
+            setMsg('error', 'Could not resolve content for that item.');
+            return;
+        }
+        const tplId =
+            source.type === 'artist'
+                ? 'tpl_featured_artist'
+                : source.type === 'video'
+                  ? 'tpl_featured_video'
+                  : source.type === 'journal'
+                    ? 'tpl_journal_entry'
+                    : source.type === 'website'
+                      ? 'tpl_onboarding'
+                      : 'tpl_program_update';
+        const currentSocial = socialSlots || slotsFromEmailSource(emailSlots, {
+            sourceType: source.type,
+            sourceId: source.id,
+            crop: socialCrop,
+        });
+        const context = buildQuickDesignContext(tplId, source, idea, contentCaches, {
+            subject: '',
+            previewText: currentSocial.bodyText || '',
+            isBranded: true,
+            layoutSlots: {
+                eyebrow: currentSocial.eyebrow,
+                pillLabel: currentSocial.pillLabel,
+                headlineHtml: currentSocial.headlineHtml,
+                bodyHtml: currentSocial.bodyText
+                    ? `<p>${String(currentSocial.bodyText).replace(/&/g, '&amp;').replace(/</g, '&lt;')}</p>`
+                    : emailSlots.bodyHtml,
+                cta: emailSlots.cta,
+                heroImageUrl: currentSocial.heroUrl,
+                heroAlt: currentSocial.heroAlt,
+            },
+            rawBodyHtml: emailSlots.bodyHtml || '',
+        });
+        const prompt = `You write short social-media copy for FUSION art platform (Instagram / feed graphic). Elevated tone. Reply with ONE JSON object only (no markdown). Keys: "subject" (unused string), "previewText" (string, max 140 chars — caption-style body), "layout" (object with optional string fields: eyebrow, pillLabel, headlineHtml, bodyHtml, and cta object with label). headlineHtml: short punchy lines with <br> allowed. bodyHtml: one short <p> only (1–2 sentences). Do NOT include hero image URLs. Keep factual names from sourceFacts. JSON:`;
+        const src = JSON.stringify(context);
+        if (prompt.length + src.length > LLM_MAX) {
+            setMsg('error', 'Prompt too long. Shorten the Quick Design description.');
+            return;
+        }
+        setMsg('info', 'Social Quick Design generating…');
+        try {
+            const raw = await studioReinterpretWithPrompt(prompt, src, 'en');
+            const parsed = parseEmailLayoutLlmJson(raw.trim());
+            if (!parsed?.layout) {
+                setMsg('error', 'Could not parse Quick Design JSON. Try again.');
+                return;
+            }
+            // Keep hero from source; prefer LLM text for social punchiness.
+            const merged = finalizeQuickDesignSlots(
+                tplId,
+                {
+                    eyebrow: parsed.layout.eyebrow,
+                    pillLabel: parsed.layout.pillLabel,
+                    headlineHtml: parsed.layout.headlineHtml,
+                    bodyHtml: parsed.layout.bodyHtml,
+                    cta: parsed.layout.cta,
+                    subject: parsed.subject,
+                    previewText: parsed.previewText,
+                },
+                { sourceSlots: emailSlots, editorSlots: emailSlots },
+            );
+            const str = (v) => (v != null && String(v).trim() !== '' ? String(v).trim() : '');
+            const socialMerged = {
+                ...merged,
+                eyebrow: str(parsed.layout.eyebrow) || merged.eyebrow,
+                pillLabel: str(parsed.layout.pillLabel) || merged.pillLabel,
+                headlineHtml: str(parsed.layout.headlineHtml) || merged.headlineHtml,
+                bodyHtml: str(parsed.layout.bodyHtml) || merged.bodyHtml,
+                heroImageUrl: emailSlots.heroImageUrl,
+                heroPosterUrl: emailSlots.heroPosterUrl,
+                heroAlt: emailSlots.heroAlt,
+                cta: {
+                    label: str(parsed.layout.cta?.label) || merged.cta?.label || '',
+                    href: merged.cta?.href || emailSlots.cta?.href || '',
+                },
+            };
+            socialCrop = socialSlots?.crop ? normalizeSocialCrop(socialSlots.crop) : { ...DEFAULT_SOCIAL_CROP };
+            socialSlots = slotsFromEmailSource(socialMerged, {
+                sourceType: source.type,
+                sourceId: source.id,
+                crop: socialCrop,
+            });
+            const caption = str(parsed.previewText);
+            if (caption) socialSlots.bodyText = caption.slice(0, 140);
+            syncSocialChrome();
+            renderSocialStage();
+            setMsg('ok', 'Social Quick Design applied. Review before exporting.');
+        } catch (e) {
+            setMsg('error', e instanceof Error ? e.message : String(e));
+        }
+    });
+
+    root.querySelector('#studio-ec-social-download')?.addEventListener('click', async () => {
+        if (!(socialStage instanceof HTMLElement) || !socialSlots) {
+            setMsg('error', 'Apply content before downloading.');
+            return;
+        }
+        setMsg('info', 'Rendering PNG…');
+        try {
+            const blob = await captureSocialCardPng(socialStage, socialRatio);
+            downloadSocialPng(blob, socialExportFilename(socialSlots, socialRatio));
+            setMsg('ok', 'PNG downloaded.');
+        } catch (e) {
+            setMsg('error', e instanceof Error ? e.message : String(e));
+        }
+    });
+
+    root.querySelector('#studio-ec-social-copy')?.addEventListener('click', async () => {
+        if (!(socialStage instanceof HTMLElement) || !socialSlots) {
+            setMsg('error', 'Apply content before copying.');
+            return;
+        }
+        if (!canCopySocialPng()) {
+            setMsg('error', 'Clipboard blocked here. Use Download PNG instead.');
+            return;
+        }
+        setMsg('info', 'Copying image…');
+        try {
+            const blob = await captureSocialCardPng(socialStage, socialRatio);
+            await copySocialPng(blob);
+            setMsg('ok', 'Image copied to clipboard.');
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            setMsg('error', msg);
+            // Offer download when clipboard is blocked after a user gesture.
+            if (/clipboard|permissions policy|blocked/i.test(msg) && socialStage && socialSlots) {
+                try {
+                    const blob = await captureSocialCardPng(socialStage, socialRatio);
+                    downloadSocialPng(blob, socialExportFilename(socialSlots, socialRatio));
+                    setMsg('ok', 'Clipboard blocked — downloaded PNG instead.');
+                } catch {
+                    /* keep prior error */
+                }
+            }
+        }
+    });
+
+    window.addEventListener('resize', () => {
+        if (panelSocialM && !panelSocialM.hasAttribute('hidden')) scaleSocialStage();
+    });
+
+    const settingsCol = root.querySelector('.studio-ec__col--settings');
+    const editorCol = root.querySelector('.studio-ec__col--editor');
+    const dockEl = root.querySelector('#studio-ec-dock');
+
     const setLeftSubtab = (k) => {
         const key = k || 'compose';
+        leftSubtabKey = key;
         const isCampaigns = key === 'campaigns';
         const isTpl = key === 'tpl';
+        const isSocial = key === 'social';
+        root.classList.toggle('studio-ec--social', isSocial);
         if (panelCampaigns) panelCampaigns.toggleAttribute('hidden', !isCampaigns);
-        if (panelComposeL) panelComposeL.toggleAttribute('hidden', isTpl || isCampaigns);
+        if (panelComposeL) panelComposeL.toggleAttribute('hidden', isTpl || isCampaigns || isSocial);
         if (panelTplL) panelTplL.toggleAttribute('hidden', !isTpl);
+        if (panelSocialL) panelSocialL.toggleAttribute('hidden', !isSocial);
+        if (panelMessageM) panelMessageM.toggleAttribute('hidden', isSocial);
+        if (panelSocialM) panelSocialM.toggleAttribute('hidden', !isSocial);
+        if (settingsCol instanceof HTMLElement) {
+            settingsCol.toggleAttribute('hidden', isSocial);
+            settingsCol.setAttribute('aria-hidden', isSocial ? 'true' : 'false');
+        }
+        if (dockEl instanceof HTMLElement) {
+            dockEl.toggleAttribute('hidden', isSocial);
+        }
+        if (editorCol instanceof HTMLElement) {
+            editorCol.setAttribute('aria-label', isSocial ? 'Social graphic' : 'Message');
+        }
+        if (messageRowFields instanceof HTMLElement) {
+            messageRowFields.toggleAttribute('hidden', isSocial);
+        }
+        if (messageEyebrowEl instanceof HTMLElement) {
+            messageEyebrowEl.textContent = isSocial ? 'Social' : 'Email';
+        }
+        if (messageTitleEl instanceof HTMLElement) {
+            messageTitleEl.textContent = isSocial ? 'Graphic' : 'Message';
+        }
+        syncSaveUi();
+        if (isSocial) {
+            // Wait a frame so two-column layout settles before scaling the stage.
+            requestAnimationFrame(() => scaleSocialStage());
+        }
         root.querySelectorAll('[data-ec-ltab]').forEach((b) => {
             if (b instanceof HTMLButtonElement) {
                 const on = b.getAttribute('data-ec-ltab') === key;
@@ -867,7 +1841,7 @@ export async function initEmailCampaignStudio(mainEl) {
         const type = sourceTypeSel instanceof HTMLSelectElement ? sourceTypeSel.value : '';
         const id = sourceIdSel instanceof HTMLSelectElement ? sourceIdSel.value : '';
         if (!type || !id) return null;
-        return { type: /** @type {'artist'|'journal'|'program'|'video'} */ (type), id };
+        return { type: /** @type {'artist'|'journal'|'program'|'video'|'website'} */ (type), id };
     };
 
     const updateSourcePanelVisibility = () => {
@@ -876,6 +1850,8 @@ export async function initEmailCampaignStudio(mainEl) {
         const types = tpl?.contentSourceTypes || [];
         const show = types.length > 0;
         if (sourcePanel instanceof HTMLElement) sourcePanel.hidden = !show;
+        const qdWrap = root.querySelector('#studio-ec-qd-prompt-wrap');
+        if (qdWrap instanceof HTMLElement) qdWrap.hidden = tplId !== 'tpl_onboarding';
         if (sourceTypeSel instanceof HTMLSelectElement) {
             [...sourceTypeSel.options].forEach((opt) => {
                 if (!opt.value) return;
@@ -883,6 +1859,9 @@ export async function initEmailCampaignStudio(mainEl) {
             });
             if (sourceTypeSel.value && !types.includes(/** @type {any} */ (sourceTypeSel.value))) {
                 sourceTypeSel.value = '';
+            }
+            if (types.includes('website') && !sourceTypeSel.value) {
+                sourceTypeSel.value = 'website';
             }
         }
         populateSourceIdSelect();
@@ -903,7 +1882,9 @@ export async function initEmailCampaignStudio(mainEl) {
                   ? contentCaches.videos
                   : type === 'journal'
                     ? contentCaches.journals
-                    : contentCaches.programs;
+                    : type === 'website'
+                      ? contentCaches.website || []
+                      : contentCaches.programs;
         const options = listContentSourceOptions(/** @type {any} */ (type), rows);
         sourceIdSel.innerHTML =
             '<option value="">— Select —</option>' +
@@ -1140,7 +2121,10 @@ export async function initEmailCampaignStudio(mainEl) {
             setMsg('error', 'Select a template before Quick Design.');
             return;
         }
-        const idea = (assistPrompt instanceof HTMLTextAreaElement ? assistPrompt.value : '').trim();
+        const qdPromptEl = root.querySelector('#studio-ec-qd-prompt');
+        const qdIdea = (qdPromptEl instanceof HTMLTextAreaElement ? qdPromptEl.value : '').trim();
+        const assistIdea = (assistPrompt instanceof HTMLTextAreaElement ? assistPrompt.value : '').trim();
+        const idea = qdIdea || assistIdea;
         const source = getCurrentSourceRef();
         const tone = toneEl instanceof HTMLSelectElement ? toneEl.value : 'Elevated';
         const len = lengthEl instanceof HTMLSelectElement ? lengthEl.value : 'Standard';
@@ -1155,7 +2139,11 @@ export async function initEmailCampaignStudio(mainEl) {
             layoutSlots: editorDraft.layoutSlots,
             rawBodyHtml: editorDraft.rawBodyHtml,
         });
-        const prompt = `You write marketing email copy for FUSION art platform. ${tone} tone. ${len} length. Reformat existingDraft into branded layout slots using styleGuide (canvas #faf3f4, black text, #c12525 CTA applied by the app shell). Reply with ONE JSON object only (no markdown). Keys: "subject" (string), "previewText" (string, max 160 chars), "layout" (object with optional string fields: eyebrow, pillLabel, headlineHtml, bodyHtml, footnote, and cta object with label and href). Use <br> inside headlineHtml for line breaks. bodyHtml: <p> paragraphs only — no h1, tables, logo, or CTA button. Black text; links use black underline. Do NOT include hero image URLs. JSON:`;
+        const onboardingHint =
+            tplId === 'tpl_onboarding'
+                ? ' This is an onboarding membership invite; CTA href must be https://fusionart.world/join-network.'
+                : '';
+        const prompt = `You write marketing email copy for FUSION art platform. ${tone} tone. ${len} length.${onboardingHint} Reformat existingDraft into branded layout slots using styleGuide (canvas #faf3f4, black text, #c12525 CTA applied by the app shell). Reply with ONE JSON object only (no markdown). Keys: "subject" (string), "previewText" (string, max 160 chars), "layout" (object with optional string fields: eyebrow, pillLabel, headlineHtml, bodyHtml, footnote, and cta object with label and href). Use <br> inside headlineHtml for line breaks. bodyHtml: <p> paragraphs only — no h1, tables, logo, or CTA button. Black text; links use black underline. Do NOT include hero image URLs. JSON:`;
         const src = JSON.stringify(context);
         if (prompt.length + src.length > LLM_MAX) {
             setMsg('error', 'Prompt too long. Shorten the compose description.');
@@ -1176,6 +2164,12 @@ export async function initEmailCampaignStudio(mainEl) {
                       contentCaches.journals,
                       contentCaches.programs,
                       contentCaches.videos,
+                      {
+                          context: contentCaches.context,
+                          joinNetworkFlow: contentCaches.joinNetworkFlow,
+                          programs: contentCaches.programs,
+                          featureCards: contentCaches.featureCards,
+                      },
                   )
                 : null;
             const editorSlots = {
@@ -1832,6 +2826,8 @@ export async function initEmailCampaignStudio(mainEl) {
     } catch {
         contentCaches = { artists: [], journals: [], programs: [], videos: [], media: [], images: [] };
     }
+    populateSocialSourceIdSelect();
+    syncSocialChrome();
     await loadSubscribers();
     await loadResendSegmentPresets();
     if (segmentInp instanceof HTMLInputElement && !segmentInp.value.trim() && resendMeta.segmentId) {

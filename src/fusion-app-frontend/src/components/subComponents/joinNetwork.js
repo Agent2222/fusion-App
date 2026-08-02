@@ -8,7 +8,7 @@ import {
 
 /**
  * Join FUSION — band + multi-stage modal (`data-modal-type`: membership | access | apply).
- * Copy: `testData.joinNetworkFlow`; legacy `context` maps to modal type. Value step: two subscription cards (`planBimonthly` / `planAnnual`); payment summary uses `payment.bimonthly` / `payment.annual` overrides. `planKey` / tier drives PostHog on completion.
+ * Copy: `testData.joinNetworkFlow`; legacy `context` maps to modal type. Value step: three subscription cards (`planMonthly` / `planQuarterly` / `planAnnual`); payment summary uses `payment.monthly` / `payment.quarterly` / `payment.annual` overrides. `planKey` / tier drives PostHog on completion.
  *
  * Vertical spacing (host margins), any CSS length (e.g. `48px`, `3rem`):
  * - `data-margin-top`, `data-margin-bottom` (preferred)
@@ -58,6 +58,15 @@ import {
   getStripePublishableKeyResolved,
 } from "../../utils/studioServicesConfig.js";
 import { saveProfileSetupDraft } from "../../utils/profileSetupDraft.js";
+import { planIdForTier } from "../../utils/membershipPlanChange.js";
+
+/** @typedef {'monthly' | 'quarterly' | 'annual'} JoinSubscriptionTier */
+
+const JOIN_SUBSCRIPTION_TIERS = /** @type {const} */ ([
+  "monthly",
+  "quarterly",
+  "annual",
+]);
 
 /** Persisted while the join dialog is on the exempt (access-code) path so refresh keeps the digits. */
 const PENDING_JOIN_ACCESS_CODE_KEY = "fusion-pending-join-access-code";
@@ -227,7 +236,7 @@ class JoinNetworkComponent extends HTMLElement {
     /** Bumps when leaving payment or starting a new prepare; invalidates in-flight async work. */
     this._stripePrepareGen = 0;
     /** PaymentIntent amount (cents) from CMS copy — display/order card only. */
-    this._paymentAmountCents = 5000;
+    this._paymentAmountCents = 3000;
     /** Fingerprint for reusing the same Stripe Elements session (subscription). */
     this._stripePrepareKey = "";
     /** Stable key from `joinNetworkFlow.*.payment.planKey` (CMS) for PostHog. */
@@ -235,9 +244,9 @@ class JoinNetworkComponent extends HTMLElement {
     /** Non-PII display label (e.g. `value.periodLabel`) for `payment_plan_label` on successful payment. */
     this._paymentPlanLabel = /** @type {string | null} */ (null);
     /** Selected subscription tier from value-step cards (`null` until user picks). Resubscribe flow leaves this unset. */
-    this._joinSubscriptionTier = /** @type {null | 'bimonthly' | 'annual'} */ (null);
+    this._joinSubscriptionTier = /** @type {null | JoinSubscriptionTier} */ (null);
     /** Parsed per-tier payment copy from CMS (`joinNetworkFlow.*.payment`). */
-    this._joinPaymentTierSlices = /** @type {{ bimonthly: Record<string, string>, annual: Record<string, string> } | null} */ (
+    this._joinPaymentTierSlices = /** @type {{ monthly: Record<string, string>, quarterly: Record<string, string>, annual: Record<string, string> } | null} */ (
       null
     );
     /** Last merged `value` slice — plan-specific what's included + hydration. */
@@ -452,8 +461,13 @@ class JoinNetworkComponent extends HTMLElement {
       : [];
     this._studioPreviewLocale =
       st.locale === "ja" || st.locale === "en" ? st.locale : null;
-    const plan = st.selectedPlan === "annual" ? "annual" : "bimonthly";
-    this._joinSubscriptionTier = plan === "annual" ? "annual" : "bimonthly";
+    const plan =
+      st.selectedPlan === "annual"
+        ? "annual"
+        : st.selectedPlan === "quarterly"
+          ? "quarterly"
+          : "monthly";
+    this._joinSubscriptionTier = plan;
 
     const rawStage = String(st.stage || "entry");
     this._joinExemptCodePath = rawStage === "linkAccountExempt";
@@ -664,7 +678,7 @@ class JoinNetworkComponent extends HTMLElement {
   }
 
   /**
-   * @param {'bimonthly' | 'annual'} tier
+   * @param {JoinSubscriptionTier} tier
    * @param {Record<string, unknown>} payment
    * @param {'en' | 'ja'} loc
    * @returns {{ finalPaymentPrice: string, finalPaymentStatement: string, amount: string, planKey: string, footerNote: string, footerNote2: string }}
@@ -685,30 +699,49 @@ class JoinNetworkComponent extends HTMLElement {
         return v != null && String(v).trim() !== "";
       });
 
-    if (tier === "bimonthly" && !hasNested) {
-      return {
-        finalPaymentPrice: flatFinal || "$50",
-        finalPaymentStatement:
-          flatStmt || (loc === "ja" ? "2か月ごと" : "every 2 months"),
-        amount: flatAmount || "$50.00",
-        planKey: flatPlanKey || "bi_monthly",
-        footerNote: flatFoot1,
-        footerNote2: flatFoot2,
-      };
-    }
-
-    if (tier === "annual" && !hasNested) {
-      return {
-        finalPaymentPrice: "$260",
-        finalPaymentStatement: loc === "ja" ? "年間" : "per year",
+    /** @type {Record<JoinSubscriptionTier, { price: string, stmt: string, amount: string, planKey: string, foot2: string }>} */
+    const tierDefaults = {
+      monthly: {
+        price: "$30",
+        stmt: loc === "ja" ? "月額" : "per month",
+        amount: "$30.00",
+        planKey: "monthly",
+        foot2:
+          loc === "ja"
+            ? "毎月更新 — プロフィールから解約できます"
+            : "Renews monthly — cancel anytime from your profile",
+      },
+      quarterly: {
+        price: "$75",
+        stmt: loc === "ja" ? "3か月ごと" : "per quarter",
+        amount: "$75.00",
+        planKey: "quarterly",
+        foot2:
+          loc === "ja"
+            ? "3か月ごとに更新 — プロフィールから解約できます"
+            : "Renews quarterly — cancel anytime from your profile",
+      },
+      annual: {
+        price: "$260",
+        stmt: loc === "ja" ? "年間" : "per year",
         amount: "$260.00",
         planKey: "annual",
-        footerNote:
-          loc === "ja" ? "本日のお支払い" : "First payment today",
-        footerNote2:
+        foot2:
           loc === "ja"
             ? "年ごとに更新 — プロフィールから解約できます"
             : "Renews annually — cancel anytime from your profile",
+      },
+    };
+    const def = tierDefaults[tier];
+
+    if (!hasNested) {
+      return {
+        finalPaymentPrice: flatFinal || def.price,
+        finalPaymentStatement: flatStmt || def.stmt,
+        amount: flatAmount || def.amount,
+        planKey: flatPlanKey || def.planKey,
+        footerNote: flatFoot1 || (loc === "ja" ? "本日のお支払い" : "First payment today"),
+        footerNote2: flatFoot2 || def.foot2,
       };
     }
 
@@ -718,12 +751,46 @@ class JoinNetworkComponent extends HTMLElement {
         nested.finalPaymentStatement ?? flatStmt,
       ).trim(),
       amount: String(nested.amount ?? flatAmount).trim(),
-      planKey: String(
-        nested.planKey ??
-          (tier === "annual" ? "annual" : flatPlanKey || "bi_monthly"),
-      ).trim(),
+      planKey: String(nested.planKey ?? (flatPlanKey || def.planKey)).trim(),
       footerNote: String(nested.footerNote ?? flatFoot1).trim(),
       footerNote2: String(nested.footerNote2 ?? flatFoot2).trim(),
+    };
+  }
+
+  /**
+   * @param {'en' | 'ja'} loc
+   * @returns {{ title: string, displayPrice: string, every: string, subtext: string, subtext2: string, discount: string }}
+   */
+  _defaultMonthlyPlanCard(loc) {
+    return {
+      title: loc === "ja" ? "月額メンバーシップ" : "Monthly membership",
+      displayPrice: "$30",
+      every: loc === "ja" ? "月額" : "per month",
+      subtext: loc === "ja" ? "毎月請求" : "Billed monthly",
+      subtext2:
+        loc === "ja"
+          ? "プロフィールからいつでも解約できます"
+          : "Flexible — cancel anytime from your profile",
+      discount: "",
+    };
+  }
+
+  /**
+   * @param {'en' | 'ja'} loc
+   * @returns {{ title: string, displayPrice: string, every: string, subtext: string, subtext2: string, discount: string }}
+   */
+  _defaultQuarterlyPlanCard(loc) {
+    return {
+      title: loc === "ja" ? "四半期メンバーシップ" : "Quarterly membership",
+      displayPrice: "$75",
+      every: loc === "ja" ? "3か月ごと" : "per quarter",
+      subtext:
+        loc === "ja"
+          ? "四半期ごとに1回の応募クレジット"
+          : "One application credit per quarter",
+      subtext2:
+        loc === "ja" ? "未使用分は繰り越されます" : "Unused credits roll over",
+      discount: "",
     };
   }
 
@@ -745,27 +812,34 @@ class JoinNetworkComponent extends HTMLElement {
 
   /**
    * @param {Record<string, unknown>} valueMerged
-   * @param {'bimonthly' | 'annual'} tier
+   * @param {JoinSubscriptionTier} tier
    * @param {'en' | 'ja'} loc
    */
   _mergePlanCardCopy(valueMerged, tier, loc) {
     const vr = valueMerged;
-    const price = String(vr.price ?? "").trim() || "$50";
     const renew = String(vr.renewLine ?? "").trim();
-    const period = String(vr.periodLabel ?? "").trim();
-    if (tier === "bimonthly") {
-      const pb = asRecord(vr.planBimonthly);
+    if (tier === "monthly") {
+      const pm = asRecord(vr.planMonthly);
+      const def = this._defaultMonthlyPlanCard(loc);
       return {
-        title:
-          strField(pb, "title") ||
-          (loc === "ja" ? "一般メンバーシップ" : "General membership"),
-        displayPrice: strField(pb, "displayPrice") || price,
-        every:
-          strField(pb, "every") ||
-          (loc === "ja" ? "2か月ごと" : "every 2 months"),
-        subtext: strField(pb, "subtext") || renew,
-        subtext2: strField(pb, "subtext2"),
-        discount: strField(pb, "discount"),
+        title: strField(pm, "title") || def.title,
+        displayPrice: strField(pm, "displayPrice") || def.displayPrice,
+        every: strField(pm, "every") || def.every,
+        subtext: strField(pm, "subtext") || renew || def.subtext,
+        subtext2: strField(pm, "subtext2") || def.subtext2,
+        discount: strField(pm, "discount"),
+      };
+    }
+    if (tier === "quarterly") {
+      const pq = asRecord(vr.planQuarterly);
+      const def = this._defaultQuarterlyPlanCard(loc);
+      return {
+        title: strField(pq, "title") || def.title,
+        displayPrice: strField(pq, "displayPrice") || def.displayPrice,
+        every: strField(pq, "every") || def.every,
+        subtext: strField(pq, "subtext") || def.subtext,
+        subtext2: strField(pq, "subtext2") || def.subtext2,
+        discount: strField(pq, "discount"),
       };
     }
     const pa = asRecord(vr.planAnnual);
@@ -795,19 +869,27 @@ class JoinNetworkComponent extends HTMLElement {
         g || (loc === "ja" ? "メンバーシップを選択" : "Choose your membership");
     }
 
-    const bi = this._mergePlanCardCopy(vr, "bimonthly", loc);
+    const mo = this._mergePlanCardCopy(vr, "monthly", loc);
+    const qu = this._mergePlanCardCopy(vr, "quarterly", loc);
     const an = this._mergePlanCardCopy(vr, "annual", loc);
 
     const set = (sel, text) => {
       const n = root.querySelector(sel);
       if (n) n.textContent = text ?? "";
     };
-    set("#jnPlanBimonthlyTitle", bi.title);
-    set("#jnPlanBimonthlyPrice", bi.displayPrice);
-    const biEvery = root.querySelector("#jnPlanBimonthlyEvery");
-    if (biEvery) biEvery.textContent = bi.every;
-    set("#jnPlanBimonthlySub1", bi.subtext);
-    set("#jnPlanBimonthlySub2", bi.subtext2);
+    set("#jnPlanMonthlyTitle", mo.title);
+    set("#jnPlanMonthlyPrice", mo.displayPrice);
+    const moEvery = root.querySelector("#jnPlanMonthlyEvery");
+    if (moEvery) moEvery.textContent = mo.every;
+    set("#jnPlanMonthlySub1", mo.subtext);
+    set("#jnPlanMonthlySub2", mo.subtext2);
+
+    set("#jnPlanQuarterlyTitle", qu.title);
+    set("#jnPlanQuarterlyPrice", qu.displayPrice);
+    const quEvery = root.querySelector("#jnPlanQuarterlyEvery");
+    if (quEvery) quEvery.textContent = qu.every;
+    set("#jnPlanQuarterlySub1", qu.subtext);
+    set("#jnPlanQuarterlySub2", qu.subtext2);
 
     set("#jnPlanAnnualTitle", an.title);
     set("#jnPlanAnnualPrice", an.displayPrice);
@@ -820,7 +902,7 @@ class JoinNetworkComponent extends HTMLElement {
     set("#jnPlanAnnualSub1", an.subtext);
     set("#jnPlanAnnualSub2", an.subtext2);
 
-    const badge = root.querySelector("#jnPlanBimonthlyBadge");
+    const badge = root.querySelector("#jnPlanMonthlyBadge");
     if (badge instanceof HTMLElement) {
       badge.textContent =
         loc === "ja" ? "おすすめ" : "Popular";
@@ -844,7 +926,8 @@ class JoinNetworkComponent extends HTMLElement {
     const pObj = /** @type {Record<string, unknown>} */ (payment);
     const loc = this._getLocale();
     this._joinPaymentTierSlices = {
-      bimonthly: this._mergePaymentTierSlice(pObj, "bimonthly", loc),
+      monthly: this._mergePaymentTierSlice(pObj, "monthly", loc),
+      quarterly: this._mergePaymentTierSlice(pObj, "quarterly", loc),
       annual: this._mergePaymentTierSlice(pObj, "annual", loc),
     };
   }
@@ -856,25 +939,35 @@ class JoinNetworkComponent extends HTMLElement {
     this._ensureJoinPaymentTierSlices();
     const slices = this._joinPaymentTierSlices;
     if (!slices) return;
-    const sl = tier === "annual" ? slices.annual : slices.bimonthly;
+    const sl = slices[tier];
     if (!sl) return;
 
     const set = (sel, text) => {
       const n = root.querySelector(sel);
       if (n) n.textContent = text ?? "";
     };
-    const price =
-      String(sl.finalPaymentPrice ?? "").trim() ||
-      (tier === "annual" ? "$260" : "$50");
-    const stmt =
-      String(sl.finalPaymentStatement ?? "").trim() ||
-      (this._getLocale() === "ja"
-        ? tier === "annual"
-          ? "年間"
-          : "2か月ごと"
-        : tier === "annual"
-          ? "per year"
-          : "every 2 months");
+    const loc = this._getLocale();
+    /** @type {Record<JoinSubscriptionTier, { price: string, stmt: string, amount: string }>} */
+    const fallbacks = {
+      monthly: {
+        price: "$30",
+        stmt: loc === "ja" ? "月額" : "per month",
+        amount: "30",
+      },
+      quarterly: {
+        price: "$75",
+        stmt: loc === "ja" ? "3か月ごと" : "per quarter",
+        amount: "75",
+      },
+      annual: {
+        price: "$260",
+        stmt: loc === "ja" ? "年間" : "per year",
+        amount: "260",
+      },
+    };
+    const fb = fallbacks[tier];
+    const price = String(sl.finalPaymentPrice ?? "").trim() || fb.price;
+    const stmt = String(sl.finalPaymentStatement ?? "").trim() || fb.stmt;
     set("#jnFinalPaymentPrice", price);
     set("#final-payment-statement", stmt);
     set("#jnPayFooter", sl.footerNote);
@@ -884,14 +977,10 @@ class JoinNetworkComponent extends HTMLElement {
       pf2.hidden = !String(sl.footerNote2 || "").trim();
     }
     this._paymentAmountCents = parseMoneyToCents(
-      String(sl.amount ?? "").trim() || (tier === "annual" ? "260" : "50"),
+      String(sl.amount ?? "").trim() || fb.amount,
     );
     if (sl.planKey) this._paymentPlanKey = sl.planKey;
-    const lbl =
-      tier === "annual"
-        ? stmt || "annual"
-        : stmt || "bimonthly";
-    this._paymentPlanLabel = lbl;
+    this._paymentPlanLabel = stmt || tier;
   }
 
   /** What's included (global + plan) — mirrors program application `details` pattern. */
@@ -952,7 +1041,12 @@ class JoinNetworkComponent extends HTMLElement {
     /** @type {string[]} */
     let planBullets = [];
     if (tier && vr) {
-      const pk = tier === "annual" ? "planAnnual" : "planBimonthly";
+      const pk =
+        tier === "annual"
+          ? "planAnnual"
+          : tier === "quarterly"
+            ? "planQuarterly"
+            : "planMonthly";
       const po = asRecord(vr[pk]);
       const ib = po.includedBullets;
       if (Array.isArray(ib) && ib.length > 0) {
@@ -1116,7 +1210,8 @@ class JoinNetworkComponent extends HTMLElement {
     if (payment) {
       const pObj = /** @type {Record<string, unknown>} */ (payment);
       this._joinPaymentTierSlices = {
-        bimonthly: this._mergePaymentTierSlice(pObj, "bimonthly", loc),
+        monthly: this._mergePaymentTierSlice(pObj, "monthly", loc),
+        quarterly: this._mergePaymentTierSlice(pObj, "quarterly", loc),
         annual: this._mergePaymentTierSlice(pObj, "annual", loc),
       };
       {
@@ -1329,8 +1424,7 @@ class JoinNetworkComponent extends HTMLElement {
       if (
         this._joinMode !== "resubscribe" &&
         this._joinSubscriptionTier &&
-        (this._joinSubscriptionTier === "bimonthly" ||
-          this._joinSubscriptionTier === "annual")
+        JOIN_SUBSCRIPTION_TIERS.includes(this._joinSubscriptionTier)
       ) {
         this._applyPaymentCopyForTier(this._joinSubscriptionTier);
       }
@@ -1506,6 +1600,16 @@ class JoinNetworkComponent extends HTMLElement {
         firstName: this._formFirstName,
         lastName: this._formLastName,
       });
+      // Must create UserAccount before PayPal/Stripe link — canister
+      // integrationRecord*Subscription traps with "No account for member principal".
+      const cat = this._getSelectedCategoryNormalized();
+      const { getAuthenticatedFusionBackendActor } =
+        await import("../../utils/earlyAccessSubscribe.js");
+      const { categoryToUserRole } = await import("../../utils/authHeader.js");
+      const actor = await getAuthenticatedFusionBackendActor();
+      if (actor && typeof actor.registerOrUpdateAccount === "function") {
+        await actor.registerOrUpdateAccount(categoryToUserRole(cat));
+      }
       await (getActiveProvider() === "paypal"
         ? linkPayPalSubscriptionToPrincipal({
             fusionPendingId: this._fusionPendingId,
@@ -1521,14 +1625,6 @@ class JoinNetworkComponent extends HTMLElement {
           }));
       setStoredBillingEmailForPrincipal(principal, email);
       clearPendingPaymentEmailLocal("join");
-      const cat = this._getSelectedCategoryNormalized();
-      const { getAuthenticatedFusionBackendActor } =
-        await import("../../utils/earlyAccessSubscribe.js");
-      const { categoryToUserRole } = await import("../../utils/authHeader.js");
-      const actor = await getAuthenticatedFusionBackendActor();
-      if (actor && typeof actor.registerOrUpdateAccount === "function") {
-        await actor.registerOrUpdateAccount(categoryToUserRole(cat));
-      }
       try {
         const { setMyAccountContactForCaller } =
           await import("../../utils/database.js");
@@ -1935,11 +2031,22 @@ class JoinNetworkComponent extends HTMLElement {
   async _prepareStripePayment() {
     if (this._isStudioPreview()) return;
     const provider = getActiveProvider();
-    if (provider === "stripe") {
+    if (provider === "stripe" && this._canUseStripeForJoinTier()) {
       await this._prepareStripeElementsPayment();
     } else {
       await this._preparePayPalEmbeddedPayment();
     }
+  }
+
+  /**
+   * Stripe checkout only when a dedicated Price id exists for the selected tier.
+   * Monthly and quarterly join tiers are PayPal-only until STRIPE_* price env vars exist.
+   * @returns {boolean}
+   */
+  _canUseStripeForJoinTier() {
+    if (this._joinMode === "resubscribe") return true;
+    const tier = this._joinSubscriptionTier || "monthly";
+    return tier === "annual";
   }
 
   async _preparePayPalEmbeddedPayment() {
@@ -2015,28 +2122,29 @@ class JoinNetworkComponent extends HTMLElement {
 
       if (myGen !== this._stripePrepareGen || this._stage !== "payment") return;
 
-      /** @type {'bimonthly' | 'annual' | undefined} */
+      /** @type {JoinSubscriptionTier | undefined} */
       let subscriptionTier;
       if (this._joinMode === "resubscribe") {
         subscriptionTier = undefined;
-      } else if (this._joinSubscriptionTier === "annual") {
-        subscriptionTier = "annual";
       } else {
-        subscriptionTier = "bimonthly";
+        subscriptionTier = this._joinSubscriptionTier || "monthly";
       }
 
       const payConfig = await fetchPaymentConfig();
       if (myGen !== this._stripePrepareGen || this._stage !== "payment") return;
 
-      const planId =
-        subscriptionTier === "annual"
-          ? payConfig.planAnnual
-          : payConfig.planBimonthly;
+      const planId = subscriptionTier
+        ? planIdForTier(subscriptionTier, payConfig)
+        : "";
       if (!planId) {
-        throw new Error(
+        const envHint =
           subscriptionTier === "annual"
-            ? "PayPal annual plan not configured on integration server (PAYPAL_PLAN_ANNUAL_ID)."
-            : "PayPal bimonthly plan not configured on integration server (PAYPAL_PLAN_BIMONTHLY_ID).",
+            ? "PAYPAL_SUBSCRIPTION_ANNUAL_ID or PAYPAL_PLAN_ANNUAL_ID"
+            : subscriptionTier === "quarterly"
+              ? "PAYPAL_SUBSCRIPTION_QUARTERLY_ID"
+              : "PAYPAL_SUBSCRIPTION_MONTHLY_ID";
+        throw new Error(
+          `PayPal ${subscriptionTier} plan not configured on integration server (${envHint}).`,
         );
       }
 
@@ -2235,14 +2343,14 @@ class JoinNetworkComponent extends HTMLElement {
 
       if (myGen !== this._stripePrepareGen || this._stage !== "payment") return;
 
-      /** @type {'bimonthly' | 'annual' | undefined} */
+      /** @type {'annual' | undefined} */
       let subscriptionTier;
       if (this._joinMode === "resubscribe") {
         subscriptionTier = undefined;
       } else if (this._joinSubscriptionTier === "annual") {
         subscriptionTier = "annual";
       } else {
-        subscriptionTier = "bimonthly";
+        subscriptionTier = undefined;
       }
 
       const [{ loadStripe }, subRes] = await Promise.all([
@@ -2643,7 +2751,7 @@ class JoinNetworkComponent extends HTMLElement {
                 }
                 @media (min-width: 520px) {
                     .jn-plan-grid {
-                        grid-template-columns: 1fr 1fr;
+                        grid-template-columns: repeat(3, 1fr);
                         align-items: stretch;
                     }
                 }
@@ -3103,20 +3211,32 @@ class JoinNetworkComponent extends HTMLElement {
                             <p class="jn-plan-group-label" id="jnPlanGroupLabel"></p>
                             <div class="jn-plan-grid" id="jnPlanGrid" role="radiogroup" aria-labelledby="jnPlanGroupLabel">
                                 <div class="jn-plan-wrap jn-plan-wrap--suggested">
-                                    <span class="jn-plan-suggested-badge" id="jnPlanBimonthlyBadge" aria-hidden="true">Popular</span>
-                                    <button type="button" class="jn-plan-card" id="jnPlanBimonthly" data-jn-subscription-tier="bimonthly" role="radio" aria-checked="false">
+                                    <span class="jn-plan-suggested-badge" id="jnPlanMonthlyBadge" aria-hidden="true">Popular</span>
+                                    <button type="button" class="jn-plan-card" id="jnPlanMonthly" data-jn-subscription-tier="monthly" role="radio" aria-checked="false">
                                         <span class="jn-plan-radio" aria-hidden="true"></span>
                                         <span class="jn-plan-card-body">
-                                            <span class="jn-plan-title" id="jnPlanBimonthlyTitle"></span>
+                                            <span class="jn-plan-title" id="jnPlanMonthlyTitle"></span>
                                             <span class="jn-plan-price-row">
-                                                <span class="jn-plan-price" id="jnPlanBimonthlyPrice"></span>
-                                                <span class="jn-plan-every" id="jnPlanBimonthlyEvery"></span>
+                                                <span class="jn-plan-price" id="jnPlanMonthlyPrice"></span>
+                                                <span class="jn-plan-every" id="jnPlanMonthlyEvery"></span>
                                             </span>
-                                            <span class="jn-plan-sub" id="jnPlanBimonthlySub1"></span>
-                                            <span class="jn-plan-sub" id="jnPlanBimonthlySub2"></span>
+                                            <span class="jn-plan-sub" id="jnPlanMonthlySub1"></span>
+                                            <span class="jn-plan-sub" id="jnPlanMonthlySub2"></span>
                                         </span>
                                     </button>
                                 </div>
+                                <button type="button" class="jn-plan-card" id="jnPlanQuarterly" data-jn-subscription-tier="quarterly" role="radio" aria-checked="false">
+                                    <span class="jn-plan-radio" aria-hidden="true"></span>
+                                    <span class="jn-plan-card-body">
+                                        <span class="jn-plan-title" id="jnPlanQuarterlyTitle"></span>
+                                        <span class="jn-plan-price-row">
+                                            <span class="jn-plan-price" id="jnPlanQuarterlyPrice"></span>
+                                            <span class="jn-plan-every" id="jnPlanQuarterlyEvery"></span>
+                                        </span>
+                                        <span class="jn-plan-sub" id="jnPlanQuarterlySub1"></span>
+                                        <span class="jn-plan-sub" id="jnPlanQuarterlySub2"></span>
+                                    </span>
+                                </button>
                                 <button type="button" class="jn-plan-card" id="jnPlanAnnual" data-jn-subscription-tier="annual" role="radio" aria-checked="false">
                                     <span class="jn-plan-radio" aria-hidden="true"></span>
                                     <span class="jn-plan-card-body">
@@ -3259,15 +3379,43 @@ class JoinNetworkComponent extends HTMLElement {
   }
 
   /**
-   * Open the join flow dialog (same as the band “Open” button). Used by header Register and
-   * `window` event `fusion-open-join-network`.
-   * @param {{ mode?: 'resubscribe' } | undefined} [detail]
+   * Open the join flow dialog. Used for `/join-network` checkout handoff,
+   * pending-link resume, and resubscribe — not for the band “Join FUSION” CTA
+   * (that navigates to `/join-network`).
+   * @param {{
+   *   mode?: 'resubscribe',
+   *   firstName?: string,
+   *   lastName?: string,
+   *   email?: string,
+   *   accessCode?: string,
+   *   category?: string,
+   *   subscriptionTier?: JoinSubscriptionTier,
+   *   stage?: string,
+   *   fromJoinNetworkPage?: boolean,
+   *   resumePendingLink?: boolean,
+   * } | undefined} [detail]
    */
   openModal(detail) {
     this._openModal(detail);
   }
 
-  /** @param {{ mode?: 'resubscribe' } | undefined} [detail] */
+  /**
+   * @param {string} category
+   */
+  _selectJoinRole(category) {
+    const root = this.shadowRoot;
+    if (!root) return;
+    const want = String(category || "").trim();
+    if (!want) return;
+    root.querySelectorAll("#jnRoleGroups .categoryButton").forEach((btn) => {
+      if (!(btn instanceof HTMLButtonElement)) return;
+      const role = btn.getAttribute("data-role") || btn.textContent || "";
+      const on = role.toLowerCase() === want.toLowerCase();
+      btn.classList.toggle("active", on);
+    });
+  }
+
+  /** @param {Parameters<JoinNetworkComponent['openModal']>[0]} [detail] */
   _openModal(detail) {
     const root = this.shadowRoot;
     if (!root) return;
@@ -3279,6 +3427,7 @@ class JoinNetworkComponent extends HTMLElement {
         this._modalType || this.getAttribute("data-modal-type") || "membership",
       mode: (detail && detail.mode) || "full",
       page_context: String(this.getAttribute("context") || "home").trim() || "home",
+      from_join_network_page: Boolean(detail?.fromJoinNetworkPage),
     });
     const pendingRestore =
       (!detail || detail.mode !== "resubscribe") &&
@@ -3289,6 +3438,8 @@ class JoinNetworkComponent extends HTMLElement {
       pendingRestore?.fusionPendingId &&
       (Boolean(detail?.resumePendingLink) ||
         hasActiveJoinMembershipLinkSession());
+
+    const pagePrefill = Boolean(detail?.fromJoinNetworkPage) || Boolean(detail?.firstName || detail?.email);
 
     if (resumeLink) {
       this._joinExemptCodePath = false;
@@ -3328,6 +3479,40 @@ class JoinNetworkComponent extends HTMLElement {
         if (STAGES.includes(/** @type {FlowStage} */ (dbg))) {
           this._stage = /** @type {FlowStage} */ (dbg);
         }
+        if (pagePrefill && detail) {
+          const fn = String(detail.firstName ?? "").trim();
+          const ln = String(detail.lastName ?? "").trim();
+          const em = String(detail.email ?? "").trim();
+          const code = normalizeJoinAccessCodeInput(detail.accessCode || "");
+          if (fn) this._formFirstName = fn;
+          if (ln) this._formLastName = ln;
+          if (fn || ln) this._formFullName = `${fn} ${ln}`.trim();
+          if (em) this._formEmail = em;
+          if (
+            detail.subscriptionTier === "annual" ||
+            detail.subscriptionTier === "quarterly" ||
+            detail.subscriptionTier === "monthly"
+          ) {
+            this._joinSubscriptionTier = detail.subscriptionTier;
+          } else {
+            this._joinSubscriptionTier = "monthly";
+          }
+          const wantStage = String(detail.stage || "").trim();
+          if (code.length === 8) {
+            try {
+              sessionStorage.setItem(PENDING_JOIN_ACCESS_CODE_KEY, code);
+            } catch {
+              /* ignore */
+            }
+            this._joinExemptCodePath = true;
+            this._stage = "linkAccount";
+          } else if (STAGES.includes(/** @type {FlowStage} */ (wantStage))) {
+            this._stage = /** @type {FlowStage} */ (wantStage);
+            if (this._stage === "payment") {
+              void import("@stripe/stripe-js");
+            }
+          }
+        }
         this._logoutIfDismissedWithoutJoin =
           _pendingLogoutIfDismissedWithoutAccount;
         _pendingLogoutIfDismissedWithoutAccount = false;
@@ -3349,15 +3534,41 @@ class JoinNetworkComponent extends HTMLElement {
       } catch {
         persisted = "";
       }
-      acEl.value = normalizeJoinAccessCodeInput(persisted);
+      const fromDetail = pagePrefill
+        ? normalizeJoinAccessCodeInput(detail?.accessCode || "")
+        : "";
+      acEl.value = fromDetail || normalizeJoinAccessCodeInput(persisted);
+    }
+    if (pagePrefill && detail?.category) {
+      this._selectJoinRole(detail.category);
+    }
+    if (this._joinSubscriptionTier) {
+      this._syncJoinPlanSelectionUi();
     }
     this._lastFocused = document.activeElement;
     if (dlg && typeof dlg.showModal === "function") {
       dlg.showModal();
       // Same backend actor as loadscreen `#csCTAForm` — warm connection early (before payment).
       prefetchFusionBackendActor();
+      if (pagePrefill && this._joinExemptCodePath && this._formEmail) {
+        const cat = this._getSelectedCategoryNormalized();
+        const fullName =
+          this._formFullName ||
+          `${this._formFirstName} ${this._formLastName}`.trim();
+        void submitEarlyAccessToCanister(
+          this._formEmail,
+          cat,
+          fullName,
+          this._modalType,
+        ).catch((err) => {
+          if (DEV_MODE) console.error("[JoinNetwork] page prefill early access", err);
+        });
+      }
       requestAnimationFrame(() => {
-        const focusEl = root.querySelector("#jnFirstName") || openBtn;
+        const focusEl =
+          this._stage === "payment"
+            ? root.querySelector("#jnPayComplete") || root.querySelector("#jnFirstName")
+            : root.querySelector("#jnFirstName") || openBtn;
         focusEl?.focus?.();
       });
     }
@@ -3371,7 +3582,7 @@ class JoinNetworkComponent extends HTMLElement {
         const btn = e.target?.closest?.("[data-jn-subscription-tier]");
         if (!(btn instanceof HTMLButtonElement)) return;
         const t = btn.getAttribute("data-jn-subscription-tier");
-        if (t !== "bimonthly" && t !== "annual") return;
+        if (!JOIN_SUBSCRIPTION_TIERS.includes(/** @type {JoinSubscriptionTier} */ (t))) return;
         this._joinSubscriptionTier = t;
         this._syncJoinPlanSelectionUi();
       });
@@ -3382,7 +3593,8 @@ class JoinNetworkComponent extends HTMLElement {
     const closeBtn = root.querySelector(".jn-close");
 
     openBtn?.addEventListener("click", () => {
-      this._openModal();
+      // Prefer the dedicated membership page; hold off on opening the band modal.
+      navigate("/join-network");
     });
 
     closeBtn?.addEventListener("click", () => {
@@ -3518,7 +3730,7 @@ class JoinNetworkComponent extends HTMLElement {
       const btn = e.target?.closest?.("[data-jn-subscription-tier]");
       if (!(btn instanceof HTMLButtonElement)) return;
       const t = btn.getAttribute("data-jn-subscription-tier");
-      if (t !== "bimonthly" && t !== "annual") return;
+      if (!JOIN_SUBSCRIPTION_TIERS.includes(/** @type {JoinSubscriptionTier} */ (t))) return;
       this._joinSubscriptionTier = t;
       this._syncJoinPlanSelectionUi();
     });
@@ -3939,7 +4151,10 @@ class JoinNetworkComponent extends HTMLElement {
 
 customElements.define("app-join-network", JoinNetworkComponent);
 
-/** Header “Register” and other shell controls: open the membership modal without navigating. */
+/**
+ * Join entry points: route to `/join-network` by default.
+ * Keep the modal only for checkout handoff, pending-link resume, and resubscribe.
+ */
 window.addEventListener("fusion-open-join-network", (ev) => {
   const d =
     ev && typeof ev === "object" && "detail" in ev
@@ -3947,20 +4162,44 @@ window.addEventListener("fusion-open-join-network", (ev) => {
       : null;
   const detail =
     d && typeof d === "object"
-      ? /** @type {{ logoutIfDismissedWithoutAccount?: boolean, mode?: string }} */ (
-          d
-        )
+      ? /** @type {Record<string, unknown>} */ (d)
       : null;
+  const needsModal = Boolean(
+    detail &&
+      (detail.fromJoinNetworkPage ||
+        detail.resumePendingLink ||
+        detail.mode === "resubscribe"),
+  );
+  if (!needsModal) {
+    _pendingLogoutIfDismissedWithoutAccount = false;
+    navigate("/join-network");
+    return;
+  }
   _pendingLogoutIfDismissedWithoutAccount = Boolean(
     detail &&
-    detail.logoutIfDismissedWithoutAccount &&
-    detail.mode !== "resubscribe",
+      detail.logoutIfDismissedWithoutAccount &&
+      detail.mode !== "resubscribe",
   );
-  const openOpts =
-    detail?.mode === "resubscribe" ? { mode: "resubscribe" } : undefined;
+  /** Prefer page/header bridge instance; pass full detail for /join-network prefills. */
+  const openOpts = detail || undefined;
+  const pageBridge = document.querySelector(
+    'app-join-network[context="join-network"]',
+  );
+  if (
+    detail?.fromJoinNetworkPage &&
+    pageBridge &&
+    typeof pageBridge.openModal === "function"
+  ) {
+    pageBridge.openModal(openOpts);
+    return;
+  }
   const bridge = document.getElementById("joinNetworkHeaderBridge");
   if (bridge && typeof bridge.openModal === "function") {
     bridge.openModal(openOpts);
+    return;
+  }
+  if (pageBridge && typeof pageBridge.openModal === "function") {
+    pageBridge.openModal(openOpts);
     return;
   }
   const fallback = document.querySelector("app-join-network");

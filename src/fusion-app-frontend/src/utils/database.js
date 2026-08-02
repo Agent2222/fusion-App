@@ -24,7 +24,7 @@ import {
 import { getFusionBackendActor } from './earlyAccessSubscribe.js';
 import { getStudioAuthenticatedActor } from './studioAuth.js';
 import { mergeStudioPermissionMap, parseStudioPermissionMatrixTuples } from './studioPermissionFeatures.js';
-import { getApplicantManualDepositSubmitted } from './studioPlainForms.js';
+import { getApplicantManualDepositSubmitted, getApplicantSponsorshipMode } from './studioPlainForms.js';
 import {
     artistRecordToTestOverlayShape,
     cohortNatPairsForCanisterBulk,
@@ -373,7 +373,7 @@ export async function setApplicationPaymentGlobal(value) {
 
 /**
  * Where this slug is primarily edited in Fusion Studio (Content tab lists only `content`).
- * @typedef {'home' | 'programs' | 'products' | 'journal' | 'content' | 'user-studio'} StudioSurface
+ * @typedef {'home' | 'programs' | 'products' | 'journal' | 'content' | 'user-studio' | 'join-network'} StudioSurface
  */
 
 /**
@@ -583,6 +583,15 @@ export const CONTENT_PAGE_REGISTRY = [
         editorMode: 'full',
         primaryStudioSurface: 'user-studio',
         studioSurfaces: ['user-studio'],
+    },
+    {
+        key: 'joinNetworkPage',
+        slug: 'join-network-page',
+        testKey: 'joinNetworkPage',
+        label: 'Join Network page (/join-network)',
+        editorMode: 'locales',
+        primaryStudioSurface: 'join-network',
+        studioSurfaces: ['join-network'],
     },
 ];
 
@@ -2435,6 +2444,81 @@ export async function getMembershipAccessForCaller() {
         if ('needsSubscription' in r) return 'needsSubscription';
     }
     return 'ok';
+}
+
+/**
+ * Application fee due for the signed-in caller (runs quarterly credit accrual server-side).
+ * @param {string} [programId]
+ * @returns {Promise<{ dueCents: number, reason: string, membershipTier: string, appCreditBalance: number }>}
+ */
+export async function applicationFeeDueForCaller(programId = '') {
+    const { APPLICATION_FEE_GUEST_CENTS, calendarQuarterKey } = await import(
+        './applicationFeePolicy.js'
+    );
+    const quarterKey = calendarQuarterKey();
+    if (getDataSource() === 'test') {
+        return {
+            dueCents: 0,
+            reason: 'exempt',
+            membershipTier: 'annual',
+            appCreditBalance: 0,
+        };
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.applicationFeeDueForCaller !== 'function') {
+        return {
+            dueCents: APPLICATION_FEE_GUEST_CENTS,
+            reason: 'application_only',
+            membershipTier: '',
+            appCreditBalance: 0,
+        };
+    }
+    try {
+        const r = await actor.applicationFeeDueForCaller(
+            String(programId || ''),
+            quarterKey,
+        );
+        return {
+            dueCents: Number(r?.dueCents ?? APPLICATION_FEE_GUEST_CENTS) || 0,
+            reason: String(r?.reason || ''),
+            membershipTier: String(r?.membershipTier || ''),
+            appCreditBalance: Number(r?.appCreditBalance ?? 0) || 0,
+        };
+    } catch {
+        return {
+            dueCents: APPLICATION_FEE_GUEST_CENTS,
+            reason: 'application_only',
+            membershipTier: '',
+            appCreditBalance: 0,
+        };
+    }
+}
+
+/** @returns {Promise<string>} */
+export async function getMembershipTierForCaller() {
+    if (getDataSource() === 'test') return 'annual';
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.getMembershipTierForCaller !== 'function') return '';
+    try {
+        return String((await actor.getMembershipTierForCaller()) || '');
+    } catch {
+        return '';
+    }
+}
+
+/** @returns {Promise<number>} */
+export async function getQuarterlyAppCreditBalanceForCaller() {
+    if (getDataSource() === 'test') return 0;
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.getQuarterlyAppCreditBalanceForCaller !== 'function') return 0;
+    try {
+        return Number(await actor.getQuarterlyAppCreditBalanceForCaller()) || 0;
+    } catch {
+        return 0;
+    }
 }
 
 /**
@@ -5409,7 +5493,11 @@ function emptyLiveContentBundle(entry) {
         if (entry.testKey === 'events' || entry.testKey === 'audio') return [];
         return {};
     }
-    if (entry.testKey === 'context' || entry.testKey === 'artistsPage') {
+    if (
+        entry.testKey === 'context' ||
+        entry.testKey === 'artistsPage' ||
+        entry.testKey === 'joinNetworkPage'
+    ) {
         return { en: {}, ja: {} };
     }
     return { en: [], ja: [] };
@@ -6314,11 +6402,14 @@ export async function getApplicantSlotSecuredStudio(applicantId, programId, payl
     const id = String(applicantId || '').trim();
     const pid = String(programId || '').trim();
     if (!id || !pid) return false;
+    if (getApplicantSponsorshipMode(payloadJson) === 'full') return true;
     if (getDataSource() === 'test') {
         return getApplicantManualDepositSubmitted(payloadJson);
     }
     const actor = await getStudioAuthenticatedActor();
-    if (typeof actor.staffIsApplicantSlotSecured !== 'function') return false;
+    if (typeof actor.staffIsApplicantSlotSecured !== 'function') {
+        return getApplicantManualDepositSubmitted(payloadJson);
+    }
     return Boolean(await actor.staffIsApplicantSlotSecured(id, pid));
 }
 
@@ -6462,6 +6553,696 @@ export async function recordStaffManualProgramLedgerStudio(opts) {
         recordedAt,
         entryKind,
     );
+}
+
+/**
+ * Edit or soft-void a staff ledger payment row.
+ * @param {{ paymentId: string, amountCents: number, feeCents: number, staffNote?: string, status?: 'succeeded' | 'voided' }} opts
+ */
+export async function updateStaffManualProgramLedgerStudio(opts) {
+    const paymentId = String(opts.paymentId || '').trim();
+    const amountCents = Math.max(0, Math.round(Number(opts.amountCents) || 0));
+    const feeCents = Math.max(0, Math.round(Number(opts.feeCents) || 0));
+    const staffNote = String(opts.staffNote || '').trim();
+    const status = opts.status === 'voided' ? 'voided' : 'succeeded';
+    if (!paymentId) throw new Error('paymentId required');
+    if (status === 'succeeded' && amountCents === 0 && feeCents === 0) {
+        throw new Error('amount or fee required');
+    }
+    if (getDataSource() === 'test') {
+        const stored = readStudioLs(LS_STAFF_FINANCE_PAYMENTS) || {
+            summaries: [],
+            ledger: [],
+            plans: [],
+        };
+        stored.ledger = Array.isArray(stored.ledger) ? stored.ledger : [];
+        const row = stored.ledger.find((r) => String(r?.id || '') === paymentId);
+        if (!row) throw new Error('Ledger row not found');
+        if (String(row.paymentProvider || 'staff') !== 'staff' && String(row.paymentType || '') !== 'staff_manual') {
+            throw new Error('Only staff ledger rows can be edited');
+        }
+        row.amountCents = amountCents;
+        row.feeCents = feeCents;
+        row.staffNote = staffNote || row.staffNote || '';
+        row.status = status;
+        writeStudioLs(LS_STAFF_FINANCE_PAYMENTS, stored);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.staffUpdateManualProgramLedgerEntry !== 'function') {
+        throw new Error('staffUpdateManualProgramLedgerEntry missing — run dfx generate');
+    }
+    await actor.staffUpdateManualProgramLedgerEntry(
+        paymentId,
+        BigInt(amountCents),
+        BigInt(feeCents),
+        staffNote,
+        status,
+    );
+}
+
+const LS_STAFF_FINANCE_PROMOTIONS = 'staffFinancePromotions';
+
+/**
+ * @returns {Promise<object[]>}
+ */
+export async function listFinancePromotionsStudio() {
+    if (getDataSource() === 'test') {
+        const stored = readStudioLs(LS_STAFF_FINANCE_PROMOTIONS);
+        return Array.isArray(stored) ? stored.filter((p) => p && p.status !== 'archived') : [];
+    }
+    try {
+        const actor = await getStudioAuthenticatedActor();
+        if (typeof actor.staffListPromotionsJson !== 'function') return [];
+        const raw = await actor.staffListPromotionsJson();
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * @param {{ id?: string, name: string, company?: string, startIso?: string, endIso?: string, target: 'platform' | 'program', programId?: string, costCents: number }} opts
+ * @returns {Promise<string>} promotion id
+ */
+export async function upsertFinancePromotionStudio(opts) {
+    const name = String(opts.name || '').trim();
+    const company = String(opts.company || '').trim();
+    const startIso = String(opts.startIso || '').trim();
+    const endIso = String(opts.endIso || '').trim();
+    const target = opts.target === 'program' ? 'program' : 'platform';
+    const programId = String(opts.programId || '').trim();
+    const costCents = Math.max(0, Math.round(Number(opts.costCents) || 0));
+    const id = String(opts.id || '').trim();
+    if (!name) throw new Error('Promotion name required');
+    if (target === 'program' && !programId) throw new Error('Program required');
+    if (getDataSource() === 'test') {
+        const list = Array.isArray(readStudioLs(LS_STAFF_FINANCE_PROMOTIONS))
+            ? readStudioLs(LS_STAFF_FINANCE_PROMOTIONS)
+            : [];
+        const now = new Date().toISOString();
+        const rowId = id || `promo-test-${Date.now()}`;
+        const idx = list.findIndex((p) => String(p?.id || '') === rowId);
+        const row = {
+            id: rowId,
+            name,
+            company,
+            startIso,
+            endIso,
+            target,
+            programId: target === 'program' ? programId : '',
+            costCents,
+            status: 'active',
+            createdAt: idx >= 0 ? list[idx].createdAt || now : now,
+            updatedAt: now,
+            createdBy: 'test',
+        };
+        if (idx >= 0) list[idx] = row;
+        else list.push(row);
+        writeStudioLs(LS_STAFF_FINANCE_PROMOTIONS, list);
+        return rowId;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.staffUpsertPromotion !== 'function') {
+        throw new Error('staffUpsertPromotion missing — run dfx generate');
+    }
+    const newId = await actor.staffUpsertPromotion(
+        id,
+        name,
+        company,
+        startIso,
+        endIso,
+        target,
+        programId,
+        BigInt(costCents),
+    );
+    return String(newId || '');
+}
+
+/**
+ * @param {string} promotionId
+ */
+export async function archiveFinancePromotionStudio(promotionId) {
+    const id = String(promotionId || '').trim();
+    if (!id) throw new Error('id required');
+    if (getDataSource() === 'test') {
+        const list = Array.isArray(readStudioLs(LS_STAFF_FINANCE_PROMOTIONS))
+            ? readStudioLs(LS_STAFF_FINANCE_PROMOTIONS)
+            : [];
+        const row = list.find((p) => String(p?.id || '') === id);
+        if (!row) throw new Error('Promotion not found');
+        row.status = 'archived';
+        row.updatedAt = new Date().toISOString();
+        writeStudioLs(LS_STAFF_FINANCE_PROMOTIONS, list);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.staffArchivePromotion !== 'function') {
+        throw new Error('staffArchivePromotion missing — run dfx generate');
+    }
+    await actor.staffArchivePromotion(id);
+}
+
+const LS_STAFF_PROGRAM_TEAM = 'staffProgramTeamMembers';
+
+/**
+ * @param {object} member
+ */
+function recomputeTeamMemberDisbursementTotalsLocal(member) {
+    const owed = (Array.isArray(member.owedEntries) ? member.owedEntries : []).filter(
+        (e) => e && String(e.status || 'active') !== 'voided',
+    );
+    const paid = (Array.isArray(member.paidEntries) ? member.paidEntries : []).filter(
+        (e) => e && String(e.status || 'active') !== 'voided',
+    );
+    member.owedEntries = owed;
+    member.paidEntries = paid;
+    member.amountOwedCents = owed.reduce(
+        (sum, e) => sum + Math.max(0, Math.round(Number(e.amountCents) || 0)),
+        0,
+    );
+    member.amountPaidCents = paid.reduce(
+        (sum, e) => sum + Math.max(0, Math.round(Number(e.amountCents) || 0)),
+        0,
+    );
+}
+
+/**
+ * @param {object} member
+ */
+function migrateLegacyTeamDisbursementsLocal(member) {
+    if (!member || typeof member !== 'object') return;
+    if (!Array.isArray(member.owedEntries)) member.owedEntries = [];
+    if (!Array.isArray(member.paidEntries)) member.paidEntries = [];
+    const now = new Date().toISOString();
+    const activeOwed = member.owedEntries.filter((e) => e && String(e.status || 'active') !== 'voided');
+    const activePaid = member.paidEntries.filter((e) => e && String(e.status || 'active') !== 'voided');
+    const owedCached = Math.max(0, Math.round(Number(member.amountOwedCents) || 0));
+    const paidCached = Math.max(0, Math.round(Number(member.amountPaidCents) || 0));
+    if (owedCached > 0 && activeOwed.length === 0) {
+        member.owedEntries.push({
+            id: `owed-${member.id}-legacy`,
+            teamMemberId: member.id,
+            programId: member.programId,
+            name: 'Prior balance',
+            description: 'Migrated from previous amount owed',
+            dateIso: '',
+            amountCents: owedCached,
+            createdAt: now,
+            updatedAt: now,
+            createdBy: 'test',
+            status: 'active',
+        });
+    }
+    if (paidCached > 0 && activePaid.length === 0) {
+        member.paidEntries.push({
+            id: `paid-${member.id}-legacy`,
+            teamMemberId: member.id,
+            programId: member.programId,
+            name: 'Prior balance',
+            description: 'Migrated from previous amount paid',
+            dateIso: '',
+            amountCents: paidCached,
+            paymentService: 'other',
+            createdAt: now,
+            updatedAt: now,
+            createdBy: 'test',
+            status: 'active',
+        });
+    }
+    recomputeTeamMemberDisbursementTotalsLocal(member);
+}
+
+/**
+ * @param {string} programId
+ * @returns {Promise<object[]>}
+ */
+export async function listProgramTeamStudio(programId) {
+    const pid = String(programId || '').trim();
+    if (!pid) return [];
+    if (getDataSource() === 'test') {
+        const stored = readStudioLs(LS_STAFF_PROGRAM_TEAM);
+        let list = Array.isArray(stored) ? stored : [];
+        const activeAdmins = list.filter(
+            (m) =>
+                m &&
+                m.programId === pid &&
+                m.status !== 'removed' &&
+                String(m.kind || '') === 'admin',
+        );
+        if (activeAdmins.length > 1) {
+            const now = new Date().toISOString();
+            list = list.map((m) => {
+                if (
+                    m &&
+                    m.programId === pid &&
+                    m.status !== 'removed' &&
+                    String(m.kind || '') === 'admin'
+                ) {
+                    return { ...m, status: 'removed', updatedAt: now };
+                }
+                return m;
+            });
+        }
+        for (const m of list) {
+            if (m && m.programId === pid && m.status !== 'removed') {
+                migrateLegacyTeamDisbursementsLocal(m);
+            }
+        }
+        writeStudioLs(LS_STAFF_PROGRAM_TEAM, list);
+        return list
+            .filter((m) => m && m.programId === pid && m.status !== 'removed')
+            .map((m) => ({
+                ...m,
+                owedEntries: Array.isArray(m.owedEntries) ? m.owedEntries : [],
+                paidEntries: Array.isArray(m.paidEntries) ? m.paidEntries : [],
+            }));
+    }
+    try {
+        const actor = await getStudioAuthenticatedActor();
+        if (typeof actor.staffListProgramTeamJson !== 'function') return [];
+        const raw = await actor.staffListProgramTeamJson(pid);
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * @param {string} programId
+ * @param {string} principalText
+ * @param {{ kind?: string }} [opts] — test-mode kind hint (`admin` | `staff` | `collaborator`)
+ * @returns {Promise<string>} team member id
+ */
+export async function addProgramTeamMemberStudio(programId, principalText, opts = {}) {
+    const pid = String(programId || '').trim();
+    const pt = String(principalText || '').trim();
+    if (!pid || !pt) throw new Error('programId and principal required');
+    if (getDataSource() === 'test') {
+        const list = Array.isArray(readStudioLs(LS_STAFF_PROGRAM_TEAM))
+            ? readStudioLs(LS_STAFF_PROGRAM_TEAM)
+            : [];
+        const rowId = `team-${pid}-${pt}`;
+        const now = new Date().toISOString();
+        const idx = list.findIndex((m) => String(m?.id || '') === rowId);
+        const kindHint = String(opts?.kind || '').toLowerCase();
+        const kind =
+            kindHint === 'admin' || kindHint === 'collaborator' || kindHint === 'staff'
+                ? kindHint
+                : 'staff';
+        if (
+            kind === 'admin' &&
+            list.some(
+                (m) =>
+                    m &&
+                    m.programId === pid &&
+                    m.status !== 'removed' &&
+                    String(m.kind || '') === 'admin' &&
+                    String(m.principalText || '') !== pt,
+            )
+        ) {
+            throw new Error('Only one admin can be on a program team');
+        }
+        const row = {
+            id: rowId,
+            programId: pid,
+            principalText: pt,
+            kind,
+            ticketsCents: 0,
+            localTravelCents: 0,
+            partner1Cents: 0,
+            partner2Cents: 0,
+            partner3Cents: 0,
+            amountOwedCents: 0,
+            amountPaidCents: 0,
+            payoutPercent: 0,
+            owedEntries: idx >= 0 && Array.isArray(list[idx].owedEntries) ? list[idx].owedEntries : [],
+            paidEntries: idx >= 0 && Array.isArray(list[idx].paidEntries) ? list[idx].paidEntries : [],
+            createdAt: idx >= 0 ? list[idx].createdAt || now : now,
+            updatedAt: now,
+            createdBy: 'test',
+            status: 'active',
+        };
+        if (idx >= 0) list[idx] = { ...list[idx], ...row, status: 'active' };
+        else list.push(row);
+        writeStudioLs(LS_STAFF_PROGRAM_TEAM, list);
+        return rowId;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.staffAddProgramTeamMember !== 'function') {
+        throw new Error('staffAddProgramTeamMember missing — run dfx generate');
+    }
+    return String(await actor.staffAddProgramTeamMember(pid, pt));
+}
+
+/**
+ * @param {{ teamMemberId: string, ticketsCents?: number, localTravelCents?: number, partner1Cents?: number, partner2Cents?: number, partner3Cents?: number }} opts
+ */
+export async function updateProgramTeamMemberExpensesStudio(opts) {
+    const id = String(opts.teamMemberId || '').trim();
+    if (!id) throw new Error('teamMemberId required');
+    const ticketsCents = Math.max(0, Math.round(Number(opts.ticketsCents) || 0));
+    const localTravelCents = Math.max(0, Math.round(Number(opts.localTravelCents) || 0));
+    const partner1Cents = Math.max(0, Math.round(Number(opts.partner1Cents) || 0));
+    const partner2Cents = Math.max(0, Math.round(Number(opts.partner2Cents) || 0));
+    const partner3Cents = Math.max(0, Math.round(Number(opts.partner3Cents) || 0));
+    if (getDataSource() === 'test') {
+        const list = Array.isArray(readStudioLs(LS_STAFF_PROGRAM_TEAM))
+            ? readStudioLs(LS_STAFF_PROGRAM_TEAM)
+            : [];
+        const row = list.find((m) => String(m?.id || '') === id);
+        if (!row) throw new Error('Team member not found');
+        Object.assign(row, {
+            ticketsCents,
+            localTravelCents,
+            partner1Cents,
+            partner2Cents,
+            partner3Cents,
+            updatedAt: new Date().toISOString(),
+        });
+        writeStudioLs(LS_STAFF_PROGRAM_TEAM, list);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.staffUpdateProgramTeamMemberExpenses !== 'function') {
+        throw new Error('staffUpdateProgramTeamMemberExpenses missing — run dfx generate');
+    }
+    await actor.staffUpdateProgramTeamMemberExpenses(
+        id,
+        BigInt(ticketsCents),
+        BigInt(localTravelCents),
+        BigInt(partner1Cents),
+        BigInt(partner2Cents),
+        BigInt(partner3Cents),
+    );
+}
+
+/**
+ * Compatibility scalar setter (prefer upsert owed/paid entry APIs).
+ * @param {{ teamMemberId: string, amountOwedCents: number, amountPaidCents: number }} opts
+ */
+export async function updateProgramTeamMemberDisbursementStudio(opts) {
+    const id = String(opts.teamMemberId || '').trim();
+    if (!id) throw new Error('teamMemberId required');
+    const amountOwedCents = Math.max(0, Math.round(Number(opts.amountOwedCents) || 0));
+    const amountPaidCents = Math.max(0, Math.round(Number(opts.amountPaidCents) || 0));
+    if (getDataSource() === 'test') {
+        const list = Array.isArray(readStudioLs(LS_STAFF_PROGRAM_TEAM))
+            ? readStudioLs(LS_STAFF_PROGRAM_TEAM)
+            : [];
+        const row = list.find((m) => String(m?.id || '') === id);
+        if (!row) throw new Error('Team member not found');
+        if (!Array.isArray(row.owedEntries)) row.owedEntries = [];
+        if (!Array.isArray(row.paidEntries)) row.paidEntries = [];
+        const now = new Date().toISOString();
+        row.owedEntries = amountOwedCents
+            ? [
+                  {
+                      id: `owed-${id}-compat`,
+                      teamMemberId: id,
+                      programId: row.programId,
+                      name: 'Adjusted total',
+                      description: 'Set via compatibility disbursement API',
+                      dateIso: '',
+                      amountCents: amountOwedCents,
+                      createdAt: now,
+                      updatedAt: now,
+                      createdBy: 'test',
+                      status: 'active',
+                  },
+              ]
+            : [];
+        row.paidEntries = amountPaidCents
+            ? [
+                  {
+                      id: `paid-${id}-compat`,
+                      teamMemberId: id,
+                      programId: row.programId,
+                      name: 'Adjusted total',
+                      description: 'Set via compatibility disbursement API',
+                      dateIso: '',
+                      amountCents: amountPaidCents,
+                      paymentService: 'other',
+                      createdAt: now,
+                      updatedAt: now,
+                      createdBy: 'test',
+                      status: 'active',
+                  },
+              ]
+            : [];
+        recomputeTeamMemberDisbursementTotalsLocal(row);
+        row.updatedAt = now;
+        writeStudioLs(LS_STAFF_PROGRAM_TEAM, list);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.staffUpdateProgramTeamMemberDisbursement !== 'function') {
+        throw new Error('staffUpdateProgramTeamMemberDisbursement missing — run dfx generate');
+    }
+    await actor.staffUpdateProgramTeamMemberDisbursement(
+        id,
+        BigInt(amountOwedCents),
+        BigInt(amountPaidCents),
+    );
+}
+
+/**
+ * @param {{ teamMemberId: string, entryId?: string, name: string, description?: string, dateIso?: string, amountCents: number }} opts
+ * @returns {Promise<string>} entry id
+ */
+export async function upsertProgramTeamOwedEntryStudio(opts) {
+    const teamMemberId = String(opts.teamMemberId || '').trim();
+    if (!teamMemberId) throw new Error('teamMemberId required');
+    const name = String(opts.name || '').trim();
+    if (!name) throw new Error('name required');
+    const description = String(opts.description || '').trim();
+    const dateIso = String(opts.dateIso || '').trim();
+    const amountCents = Math.max(0, Math.round(Number(opts.amountCents) || 0));
+    const entryId = String(opts.entryId || '').trim();
+    if (getDataSource() === 'test') {
+        const list = Array.isArray(readStudioLs(LS_STAFF_PROGRAM_TEAM))
+            ? readStudioLs(LS_STAFF_PROGRAM_TEAM)
+            : [];
+        const row = list.find((m) => String(m?.id || '') === teamMemberId);
+        if (!row || row.status === 'removed') throw new Error('Team member not found');
+        if (!Array.isArray(row.owedEntries)) row.owedEntries = [];
+        const now = new Date().toISOString();
+        const id = entryId || `owed-${teamMemberId}-${Date.now()}`;
+        const idx = row.owedEntries.findIndex((e) => String(e?.id || '') === id);
+        const next = {
+            id,
+            teamMemberId,
+            programId: row.programId,
+            name,
+            description,
+            dateIso,
+            amountCents,
+            createdAt: idx >= 0 ? row.owedEntries[idx].createdAt || now : now,
+            updatedAt: now,
+            createdBy: 'test',
+            status: 'active',
+        };
+        if (idx >= 0) row.owedEntries[idx] = next;
+        else row.owedEntries.push(next);
+        recomputeTeamMemberDisbursementTotalsLocal(row);
+        row.updatedAt = now;
+        writeStudioLs(LS_STAFF_PROGRAM_TEAM, list);
+        return id;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.staffUpsertProgramTeamOwedEntry !== 'function') {
+        throw new Error('staffUpsertProgramTeamOwedEntry missing — run dfx generate');
+    }
+    return String(
+        await actor.staffUpsertProgramTeamOwedEntry(
+            teamMemberId,
+            entryId,
+            name,
+            description,
+            dateIso,
+            BigInt(amountCents),
+        ),
+    );
+}
+
+/**
+ * @param {string} entryId
+ */
+export async function voidProgramTeamOwedEntryStudio(entryId) {
+    const id = String(entryId || '').trim();
+    if (!id) throw new Error('entryId required');
+    if (getDataSource() === 'test') {
+        const list = Array.isArray(readStudioLs(LS_STAFF_PROGRAM_TEAM))
+            ? readStudioLs(LS_STAFF_PROGRAM_TEAM)
+            : [];
+        for (const row of list) {
+            if (!row || !Array.isArray(row.owedEntries)) continue;
+            const entry = row.owedEntries.find((e) => String(e?.id || '') === id);
+            if (!entry) continue;
+            entry.status = 'voided';
+            entry.updatedAt = new Date().toISOString();
+            recomputeTeamMemberDisbursementTotalsLocal(row);
+            row.updatedAt = entry.updatedAt;
+            writeStudioLs(LS_STAFF_PROGRAM_TEAM, list);
+            return;
+        }
+        throw new Error('Owed entry not found');
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.staffVoidProgramTeamOwedEntry !== 'function') {
+        throw new Error('staffVoidProgramTeamOwedEntry missing — run dfx generate');
+    }
+    await actor.staffVoidProgramTeamOwedEntry(id);
+}
+
+/**
+ * @param {{ teamMemberId: string, entryId?: string, name: string, description?: string, dateIso?: string, amountCents: number, paymentService?: string, fundedBy?: 'admin' | 'program' | string }} opts
+ * @returns {Promise<string>} entry id
+ */
+export async function upsertProgramTeamPaidEntryStudio(opts) {
+    const teamMemberId = String(opts.teamMemberId || '').trim();
+    if (!teamMemberId) throw new Error('teamMemberId required');
+    const name = String(opts.name || '').trim();
+    if (!name) throw new Error('name required');
+    const description = String(opts.description || '').trim();
+    const dateIso = String(opts.dateIso || '').trim();
+    const amountCents = Math.max(0, Math.round(Number(opts.amountCents) || 0));
+    const entryId = String(opts.entryId || '').trim();
+    const serviceRaw = String(opts.paymentService || 'other').toLowerCase().trim();
+    const paymentService = ['stripe', 'paypal', 'wire', 'cash', 'other'].includes(serviceRaw)
+        ? serviceRaw
+        : 'other';
+    const fundedBy =
+        String(opts.fundedBy || '').toLowerCase().trim() === 'program' ? 'program' : 'admin';
+    if (getDataSource() === 'test') {
+        const list = Array.isArray(readStudioLs(LS_STAFF_PROGRAM_TEAM))
+            ? readStudioLs(LS_STAFF_PROGRAM_TEAM)
+            : [];
+        const row = list.find((m) => String(m?.id || '') === teamMemberId);
+        if (!row || row.status === 'removed') throw new Error('Team member not found');
+        if (!Array.isArray(row.paidEntries)) row.paidEntries = [];
+        const now = new Date().toISOString();
+        const id = entryId || `paid-${teamMemberId}-${Date.now()}`;
+        const idx = row.paidEntries.findIndex((e) => String(e?.id || '') === id);
+        const next = {
+            id,
+            teamMemberId,
+            programId: row.programId,
+            name,
+            description,
+            dateIso,
+            amountCents,
+            paymentService,
+            fundedBy,
+            createdAt: idx >= 0 ? row.paidEntries[idx].createdAt || now : now,
+            updatedAt: now,
+            createdBy: 'test',
+            status: 'active',
+        };
+        if (idx >= 0) row.paidEntries[idx] = next;
+        else row.paidEntries.push(next);
+        recomputeTeamMemberDisbursementTotalsLocal(row);
+        row.updatedAt = now;
+        writeStudioLs(LS_STAFF_PROGRAM_TEAM, list);
+        return id;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.staffUpsertProgramTeamPaidEntry !== 'function') {
+        throw new Error('staffUpsertProgramTeamPaidEntry missing — run dfx generate');
+    }
+    return String(
+        await actor.staffUpsertProgramTeamPaidEntry(
+            teamMemberId,
+            entryId,
+            name,
+            description,
+            dateIso,
+            BigInt(amountCents),
+            paymentService,
+            fundedBy,
+        ),
+    );
+}
+
+/**
+ * @param {string} entryId
+ */
+export async function voidProgramTeamPaidEntryStudio(entryId) {
+    const id = String(entryId || '').trim();
+    if (!id) throw new Error('entryId required');
+    if (getDataSource() === 'test') {
+        const list = Array.isArray(readStudioLs(LS_STAFF_PROGRAM_TEAM))
+            ? readStudioLs(LS_STAFF_PROGRAM_TEAM)
+            : [];
+        for (const row of list) {
+            if (!row || !Array.isArray(row.paidEntries)) continue;
+            const entry = row.paidEntries.find((e) => String(e?.id || '') === id);
+            if (!entry) continue;
+            entry.status = 'voided';
+            entry.updatedAt = new Date().toISOString();
+            recomputeTeamMemberDisbursementTotalsLocal(row);
+            row.updatedAt = entry.updatedAt;
+            writeStudioLs(LS_STAFF_PROGRAM_TEAM, list);
+            return;
+        }
+        throw new Error('Paid entry not found');
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.staffVoidProgramTeamPaidEntry !== 'function') {
+        throw new Error('staffVoidProgramTeamPaidEntry missing — run dfx generate');
+    }
+    await actor.staffVoidProgramTeamPaidEntry(id);
+}
+
+/**
+ * @param {{ teamMemberId: string, payoutPercent: number }} opts
+ */
+export async function updateProgramTeamMemberPayoutPercentStudio(opts) {
+    const id = String(opts.teamMemberId || '').trim();
+    if (!id) throw new Error('teamMemberId required');
+    const payoutPercent = Math.max(0, Math.min(100, Math.round(Number(opts.payoutPercent) || 0)));
+    if (getDataSource() === 'test') {
+        const list = Array.isArray(readStudioLs(LS_STAFF_PROGRAM_TEAM))
+            ? readStudioLs(LS_STAFF_PROGRAM_TEAM)
+            : [];
+        const row = list.find((m) => String(m?.id || '') === id);
+        if (!row) throw new Error('Team member not found');
+        row.payoutPercent = payoutPercent;
+        row.updatedAt = new Date().toISOString();
+        writeStudioLs(LS_STAFF_PROGRAM_TEAM, list);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.staffUpdateProgramTeamMemberPayoutPercent !== 'function') {
+        throw new Error('staffUpdateProgramTeamMemberPayoutPercent missing — run dfx generate');
+    }
+    await actor.staffUpdateProgramTeamMemberPayoutPercent(id, BigInt(payoutPercent));
+}
+
+/**
+ * @param {string} teamMemberId
+ */
+export async function removeProgramTeamMemberStudio(teamMemberId) {
+    const id = String(teamMemberId || '').trim();
+    if (!id) throw new Error('teamMemberId required');
+    if (getDataSource() === 'test') {
+        const list = Array.isArray(readStudioLs(LS_STAFF_PROGRAM_TEAM))
+            ? readStudioLs(LS_STAFF_PROGRAM_TEAM)
+            : [];
+        const row = list.find((m) => String(m?.id || '') === id);
+        if (!row) throw new Error('Team member not found');
+        row.status = 'removed';
+        row.updatedAt = new Date().toISOString();
+        writeStudioLs(LS_STAFF_PROGRAM_TEAM, list);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.staffRemoveProgramTeamMember !== 'function') {
+        throw new Error('staffRemoveProgramTeamMember missing — run dfx generate');
+    }
+    await actor.staffRemoveProgramTeamMember(id);
 }
 
 /**

@@ -8,6 +8,10 @@ import {
     getApplicantIsTester,
     getApplicantLocalTravelCostCents,
     getApplicantManualDepositSubmitted,
+    getApplicantSpecialProgramTotalCents,
+    getApplicantSponsorshipMode,
+    getApplicantSponsoredCreditCents,
+    getApplicantSponsoredPercent,
 } from './studioPlainForms.js';
 import {
     programRowConfirmedArtistNames,
@@ -134,6 +138,109 @@ export function computeMemberProgramTotalDueCents({ category, ownFlight }) {
     const categoryDiscount = applicantCategoryDiscountCents(String(category || 'general'));
     const flightCredit = ownFlight ? PROGRAM_OWN_FLIGHT_CREDIT_CENTS : 0;
     return Math.max(0, base - categoryDiscount - flightCredit);
+}
+
+/**
+ * Effective program total due after special price + sponsorship.
+ * Special price is an absolute override of list price (veteran discount does not stack on top).
+ * Own-flight credit still applies to list price only when no special price is set.
+ *
+ * @param {{
+ *   category?: string,
+ *   ownFlight?: boolean,
+ *   specialProgramTotalCents?: number,
+ *   sponsorshipMode?: 'none' | 'partial' | 'full',
+ *   sponsoredCreditCents?: number,
+ * }} args
+ * @returns {number}
+ */
+export function computeApplicantEffectiveTotalDueCents({
+    category,
+    ownFlight,
+    specialProgramTotalCents,
+    sponsorshipMode,
+    sponsoredCreditCents,
+}) {
+    const special = normalizeCents(specialProgramTotalCents);
+    const base =
+        special > 0
+            ? special
+            : computeMemberProgramTotalDueCents({ category, ownFlight });
+    const mode = String(sponsorshipMode || 'none').toLowerCase();
+    if (mode === 'full') return 0;
+    if (mode === 'partial') {
+        return Math.max(0, base - normalizeCents(sponsoredCreditCents));
+    }
+    return base;
+}
+
+/**
+ * @param {string} payloadJson
+ * @param {{ category?: string, ownFlight?: boolean }} [ctx]
+ */
+export function computeApplicantEffectiveTotalDueFromPayload(payloadJson, ctx = {}) {
+    const category = ctx.category || getApplicantCategory(payloadJson);
+    const ownFlight = Boolean(ctx.ownFlight);
+    const specialProgramTotalCents = getApplicantSpecialProgramTotalCents(payloadJson);
+    const sponsorshipMode = getApplicantSponsorshipMode(payloadJson);
+    let sponsoredCreditCents = getApplicantSponsoredCreditCents(payloadJson);
+    const pct = getApplicantSponsoredPercent(payloadJson);
+    if (sponsorshipMode === 'partial' && pct != null && sponsoredCreditCents <= 0) {
+        const base =
+            specialProgramTotalCents > 0
+                ? specialProgramTotalCents
+                : computeMemberProgramTotalDueCents({ category, ownFlight });
+        sponsoredCreditCents = Math.round((base * pct) / 100);
+    }
+    return computeApplicantEffectiveTotalDueCents({
+        category,
+        ownFlight,
+        specialProgramTotalCents,
+        sponsorshipMode,
+        sponsoredCreditCents,
+    });
+}
+
+/**
+ * Deposit waived via full sponsorship (no money required).
+ * @param {string} payloadJson
+ */
+export function isApplicantDepositWaived(payloadJson) {
+    if (getApplicantSponsorshipMode(payloadJson) === 'full') return true;
+    // Category labels that mean the slot is covered without a deposit.
+    const category = getApplicantCategory(payloadJson);
+    return category === 'sponsored' || category === 'extSponsored';
+}
+
+/**
+ * Real deposit money received (ledger / summary) — excludes checkbox-only and full sponsorship waiver.
+ * @param {object} applicant
+ * @param {ReturnType<typeof buildProgramPaymentIndex>} index
+ * @param {object | null | undefined} [programRow]
+ */
+export function isApplicantDepositPaid(applicant, index, programRow = null) {
+    if (!applicant || typeof applicant !== 'object') return false;
+    const payloadJson = String(applicant.payloadJson || '');
+    if (isApplicantDepositWaived(payloadJson)) return false;
+    const appId = String(applicant.id || '').trim();
+    const summary = index.summariesByApplicationId.get(appId);
+    const depositStatus = String(summary?.depositStatus || '');
+    if (depositStatus === 'paid' || depositStatus === 'paid_full') return true;
+    const depositAmountCents = resolveApplicantDepositAmountCents(summary, programRow);
+    const ledger = index.ledgerByApplicationId.get(appId) || [];
+    return ledgerHasDepositPayment(ledger, depositAmountCents);
+}
+
+/**
+ * Slot/revenue cohort: real deposit paid or fully sponsored (deposit waived).
+ * @param {object} applicant
+ * @param {ReturnType<typeof buildProgramPaymentIndex>} index
+ * @param {object | null | undefined} [programRow]
+ */
+export function isApplicantDepositSatisfied(applicant, index, programRow = null) {
+    if (!applicant || typeof applicant !== 'object') return false;
+    if (isApplicantDepositWaived(String(applicant.payloadJson || ''))) return true;
+    return isApplicantDepositPaid(applicant, index, programRow);
 }
 
 /**
@@ -287,6 +394,10 @@ export function isMemberProgramDepositPaid(approval, summary, ledger, depositAmo
 export function computeEffectiveTotalPaymentsCents(applicant, ledger, summary, depositAmountCents) {
     const ledgerTotal = sumLedgerPaymentsCents(ledger);
     const payloadJson = String(applicant?.payloadJson || '');
+    // Fully sponsored: never invent a synthetic deposit; only real ledger money counts.
+    if (isApplicantDepositWaived(payloadJson)) {
+        return ledgerTotal;
+    }
     const manualDeposit = getApplicantManualDepositSubmitted(payloadJson);
     const deposit = normalizeCents(depositAmountCents) || PROGRAM_DEFAULT_DEPOSIT_CENTS;
     if (manualDeposit && !ledgerHasDepositPayment(ledger, deposit)) {
@@ -368,11 +479,13 @@ export function buildProgramPaymentIndex(paymentsBundle) {
 export function isApplicantSlotSecured(applicant, index) {
     if (!applicant || typeof applicant !== 'object') return false;
     const payloadJson = String(applicant.payloadJson || '');
+    if (getApplicantSponsorshipMode(payloadJson) === 'full') return true;
     if (getApplicantManualDepositSubmitted(payloadJson)) return true;
     const appId = String(applicant.id || '').trim();
     const summary = index.summariesByApplicationId.get(appId);
     const depositStatus = String(summary?.depositStatus || '');
     if (depositStatus === 'paid' || depositStatus === 'paid_full') return true;
+    if (normalizeCents(summary?.totalDueCents) === 0 && summary) return true;
     const ledger = index.ledgerByApplicationId.get(appId) || [];
     return ledger.some((row) => {
         const type = String(row?.paymentType || '');
@@ -396,8 +509,24 @@ export function applicantPaymentContext(applicant, index) {
             ? index.plansById.get(String(summary.activePlanId)) || null
             : null;
     const ownFlight = summary?.ownFlight === true || String(summary?.ownFlight || '').toLowerCase() === 'true';
-    const category = getApplicantCategory(String(applicant?.payloadJson || ''));
-    const priceCategoryCents = computeMemberProgramTotalDueCents({ category, ownFlight });
+    const payloadJson = String(applicant?.payloadJson || '');
+    const category = getApplicantCategory(payloadJson);
+    const listPriceCents = computeMemberProgramTotalDueCents({ category, ownFlight });
+    const specialProgramTotalCents = getApplicantSpecialProgramTotalCents(payloadJson);
+    const sponsorshipMode = getApplicantSponsorshipMode(payloadJson);
+    let sponsoredCreditCents = getApplicantSponsoredCreditCents(payloadJson);
+    const sponsoredPercent = getApplicantSponsoredPercent(payloadJson);
+    if (sponsorshipMode === 'partial' && sponsoredPercent != null && sponsoredCreditCents <= 0) {
+        const base = specialProgramTotalCents > 0 ? specialProgramTotalCents : listPriceCents;
+        sponsoredCreditCents = Math.round((base * sponsoredPercent) / 100);
+    }
+    const priceCategoryCents = computeApplicantEffectiveTotalDueCents({
+        category,
+        ownFlight,
+        specialProgramTotalCents,
+        sponsorshipMode,
+        sponsoredCreditCents,
+    });
     const totalPaymentsCents = sumLedgerPaymentsCents(ledger);
     const paymentFeesCents = sumLedgerFeesCents(ledger);
     const installmentCount = Math.max(0, Math.round(Number(plan?.installmentCount ?? 0)));
@@ -415,6 +544,11 @@ export function applicantPaymentContext(applicant, index) {
         plan,
         ownFlight,
         category,
+        listPriceCents,
+        specialProgramTotalCents,
+        sponsorshipMode,
+        sponsoredCreditCents,
+        sponsoredPercent,
         priceCategoryCents,
         totalPaymentsCents,
         paymentFeesCents,
@@ -436,7 +570,10 @@ export function buildStudioProgramFinanceRow(applicant, programRow, index, partn
     const payloadJson = String(applicant?.payloadJson || '');
     const names = applicantDisplayNamesFromPayload(payloadJson, String(applicant?.fullName || ''));
     const ctx = applicantPaymentContext(applicant, index);
-    const depositAmountCents = resolveApplicantDepositAmountCents(ctx.summary, programRow);
+    const depositWaived = isApplicantDepositWaived(payloadJson);
+    const depositAmountCents = depositWaived
+        ? 0
+        : resolveApplicantDepositAmountCents(ctx.summary, programRow);
     const totalPaymentsCents = computeEffectiveTotalPaymentsCents(
         applicant,
         ctx.ledger,
@@ -454,6 +591,7 @@ export function buildStudioProgramFinanceRow(applicant, programRow, index, partn
         ctx.paymentFeesCents + ticketsCents + localTravelCents + partner1Cents + partner2Cents + partner3Cents;
     const profitCents = totalPaymentsCents - subtotalCents;
     const remainingBalanceCents = Math.max(0, ctx.priceCategoryCents - totalPaymentsCents);
+    const depositPaid = !depositWaived && isApplicantDepositPaid(applicant, index, programRow);
     return {
         applicantId: appId,
         programId,
@@ -462,10 +600,16 @@ export function buildStudioProgramFinanceRow(applicant, programRow, index, partn
         lastName: names.lastName,
         discipline: names.discipline,
         category: ctx.category,
+        listPriceCents: ctx.listPriceCents,
+        specialProgramTotalCents: ctx.specialProgramTotalCents,
+        sponsorshipMode: ctx.sponsorshipMode,
+        sponsoredCreditCents: ctx.sponsoredCreditCents,
+        sponsoredPercent: ctx.sponsoredPercent,
         priceCategoryCents: ctx.priceCategoryCents,
         depositAmountCents,
+        depositWaived,
         slotSecured: isApplicantSlotSecured(applicant, index),
-        depositPaid: isApplicantSlotSecured(applicant, index),
+        depositPaid,
         planActive: ctx.planActive,
         planPriceCents: ctx.planPriceCents,
         totalPaymentsCents,
@@ -531,35 +675,367 @@ export function buildStudioProgramFinanceRows(applicants, programs, index, opts 
 }
 
 /**
- * Sum expected revenue for slot-secured applicants only.
+ * Expected revenue + slots claimed for deposit-paid applicants only (not reserved names).
  * @param {object | null | undefined} programRow
  * @param {object[] | null | undefined} applicantsForProgram
  * @param {ReturnType<typeof buildProgramPaymentIndex>} [paymentIndex]
- * @returns {{ expectedCents: number, filledSlots: number, veteranSlotCount: number, avgPerSlotCents: number, depositCents: number, totalPerSlotCents: number }}
+ * @returns {{ expectedCents: number, filledSlots: number, veteranSlotCount: number, avgPerSlotCents: number, depositCents: number, totalPerSlotCents: number, slotsClaimed: number }}
  */
 export function computeProgramExpectedRevenueCents(programRow, applicantsForProgram, paymentIndex) {
     const { depositCents, totalPerSlotCents } = resolveProgramTotalPerSlotCents(programRow);
     const applicants = Array.isArray(applicantsForProgram) ? applicantsForProgram : [];
     const index = paymentIndex || buildProgramPaymentIndex({});
-    const secured = applicants.filter((a) => isApplicantSlotSecured(a, index));
+    const depositPaid = applicants.filter(
+        (a) => !getApplicantIsTester(String(a?.payloadJson || '')) && isApplicantDepositSatisfied(a, index, programRow),
+    );
     let expectedCents = 0;
     let veteranSlotCount = 0;
-    for (const applicant of secured) {
-        const category = getApplicantCategory(String(applicant.payloadJson || ''));
+    for (const applicant of depositPaid) {
+        const payloadJson = String(applicant.payloadJson || '');
+        const category = getApplicantCategory(payloadJson);
         const summary = index.summariesByApplicationId.get(String(applicant.id || ''));
         const ownFlight =
             summary?.ownFlight === true || String(summary?.ownFlight || '').toLowerCase() === 'true';
-        expectedCents += computeMemberProgramTotalDueCents({ category, ownFlight });
+        expectedCents += computeApplicantEffectiveTotalDueFromPayload(payloadJson, { category, ownFlight });
         if (category === 'veteran') veteranSlotCount += 1;
     }
-    const filledSlots = secured.length;
+    const filledSlots = depositPaid.length;
     const avgPerSlotCents = filledSlots > 0 ? Math.round(expectedCents / filledSlots) : 0;
     return {
         expectedCents,
         filledSlots,
+        slotsClaimed: filledSlots,
         veteranSlotCount,
         avgPerSlotCents,
         depositCents,
         totalPerSlotCents,
     };
+}
+
+/**
+ * Sum total payments + remaining balance for slot-secured (non-tester) applicants on a program.
+ * @param {object | null | undefined} programRow
+ * @param {object[] | null | undefined} applicantsForProgram
+ * @param {ReturnType<typeof buildProgramPaymentIndex>} [paymentIndex]
+ * @returns {{ totalPaymentsCents: number, remainingBalanceCents: number }}
+ */
+export function computeProgramCollectedPaymentsCents(programRow, applicantsForProgram, paymentIndex) {
+    const applicants = Array.isArray(applicantsForProgram) ? applicantsForProgram : [];
+    const index = paymentIndex || buildProgramPaymentIndex({});
+    let totalPaymentsCents = 0;
+    let remainingBalanceCents = 0;
+    for (const applicant of applicants) {
+        if (!applicant || typeof applicant !== 'object') continue;
+        if (getApplicantIsTester(String(applicant.payloadJson || ''))) continue;
+        if (!isApplicantSlotSecured(applicant, index)) continue;
+        const row = buildStudioProgramFinanceRow(applicant, programRow, index);
+        totalPaymentsCents += normalizeCents(row.totalPaymentsCents);
+        remainingBalanceCents += normalizeCents(row.remainingBalanceCents);
+    }
+    return { totalPaymentsCents, remainingBalanceCents };
+}
+
+/**
+ * Expense subtotal for a program team member record.
+ * @param {object | null | undefined} member
+ */
+export function teamMemberExpenseSubtotalCents(member) {
+    if (!member || typeof member !== 'object') return 0;
+    return (
+        normalizeCents(member.ticketsCents) +
+        normalizeCents(member.localTravelCents) +
+        normalizeCents(member.partner1Cents) +
+        normalizeCents(member.partner2Cents) +
+        normalizeCents(member.partner3Cents)
+    );
+}
+
+/**
+ * Active promotions linked to a program (`target === "program"`).
+ * @param {object[] | null | undefined} promotions
+ * @param {string | null | undefined} programId
+ */
+export function programPromotionsForProgram(promotions, programId) {
+    const pid = String(programId || '').trim();
+    if (!pid) return [];
+    return (Array.isArray(promotions) ? promotions : []).filter((p) => {
+        if (!p || typeof p !== 'object') return false;
+        if (String(p.status || 'active') === 'archived') return false;
+        if (String(p.target || '') !== 'program') return false;
+        return String(p.programId || '').trim() === pid;
+    });
+}
+
+/**
+ * Total promotion cost (cents) for a program.
+ * @param {object[] | null | undefined} promotions
+ * @param {string | null | undefined} programId
+ */
+export function programPromotionExpenseCents(promotions, programId) {
+    let total = 0;
+    for (const p of programPromotionsForProgram(promotions, programId)) {
+        total += normalizeCents(p.costCents);
+    }
+    return total;
+}
+
+/**
+ * Active owed entries on a team member.
+ * @param {object | null | undefined} member
+ */
+export function activeTeamMemberOwedEntries(member) {
+    return (Array.isArray(member?.owedEntries) ? member.owedEntries : []).filter(
+        (e) => e && String(e.status || 'active') !== 'voided',
+    );
+}
+
+/**
+ * Active paid entries on a team member.
+ * @param {object | null | undefined} member
+ */
+export function activeTeamMemberPaidEntries(member) {
+    return (Array.isArray(member?.paidEntries) ? member.paidEntries : []).filter(
+        (e) => e && String(e.status || 'active') !== 'voided',
+    );
+}
+
+/**
+ * @param {object | null | undefined} member
+ */
+export function sumTeamMemberOwedCents(member) {
+    const entries = activeTeamMemberOwedEntries(member);
+    if (entries.length) {
+        return entries.reduce((sum, e) => sum + normalizeCents(e.amountCents), 0);
+    }
+    return normalizeCents(member?.amountOwedCents);
+}
+
+/**
+ * @param {object | null | undefined} member
+ */
+export function sumTeamMemberPaidCents(member) {
+    const entries = activeTeamMemberPaidEntries(member);
+    if (entries.length) {
+        return entries.reduce((sum, e) => sum + normalizeCents(e.amountCents), 0);
+    }
+    return normalizeCents(member?.amountPaidCents);
+}
+
+/**
+ * Admin-funded paid total for a member (pays down Amount owed / Remaining).
+ * Legacy `amountPaidCents` without entries is treated as admin-funded.
+ * @param {object | null | undefined} member
+ */
+export function sumTeamMemberAdminFundedPaidCents(member) {
+    const entries = activeTeamMemberPaidEntries(member);
+    if (entries.length) {
+        return entries.reduce((sum, e) => {
+            if (paidEntryFundedBy(e) !== 'admin') return sum;
+            return sum + normalizeCents(e.amountCents);
+        }, 0);
+    }
+    return normalizeCents(member?.amountPaidCents);
+}
+
+/**
+ * Balance still owed after admin-funded payments (program-funded pays do not reduce this).
+ * @param {object | null | undefined} member
+ */
+export function teamMemberOutstandingOwedCents(member) {
+    return Math.max(
+        0,
+        sumTeamMemberOwedCents(member) - sumTeamMemberAdminFundedPaidCents(member),
+    );
+}
+
+/**
+ * Sum of paid disbursement entries across a program team.
+ * @param {object[] | null | undefined} teamMembers
+ */
+export function computeProgramPaidDisbursementsCents(teamMembers) {
+    let total = 0;
+    for (const m of Array.isArray(teamMembers) ? teamMembers : []) {
+        if (!m || String(m.status || 'active') === 'removed') continue;
+        total += sumTeamMemberPaidCents(m);
+    }
+    return total;
+}
+
+/**
+ * @param {object | null | undefined} entry
+ * @returns {'admin' | 'program'}
+ */
+export function paidEntryFundedBy(entry) {
+    return String(entry?.fundedBy || '').toLowerCase() === 'program' ? 'program' : 'admin';
+}
+
+/**
+ * Sum active paid-entry amounts for non-admin team members matching `predicate`.
+ * @param {object[] | null | undefined} teamMembers
+ * @param {(entry: object) => boolean} predicate
+ */
+function sumStaffPaidEntriesBy(teamMembers, predicate) {
+    let total = 0;
+    for (const m of Array.isArray(teamMembers) ? teamMembers : []) {
+        if (!m || String(m.status || 'active') === 'removed') continue;
+        if (String(m.kind || '') === 'admin') continue;
+        for (const entry of activeTeamMemberPaidEntries(m)) {
+            if (!predicate(entry)) continue;
+            total += normalizeCents(entry.amountCents);
+        }
+    }
+    return total;
+}
+
+/**
+ * Paid disbursements to non-admin team members (any funder).
+ * @param {object[] | null | undefined} teamMembers
+ */
+export function computeStaffPaidDisbursementsCents(teamMembers) {
+    return sumStaffPaidEntriesBy(teamMembers, () => true);
+}
+
+/**
+ * Paid disbursements funded by the program (reduce Total profit).
+ * @param {object[] | null | undefined} teamMembers
+ */
+export function computeProgramFundedStaffPaidCents(teamMembers) {
+    return sumStaffPaidEntriesBy(
+        teamMembers,
+        (entry) => paidEntryFundedBy(entry) === 'program',
+    );
+}
+
+/**
+ * Paid disbursements funded by the admin (reduce admin Program Payout).
+ * @param {object[] | null | undefined} teamMembers
+ */
+export function computeAdminFundedStaffPaidCents(teamMembers) {
+    return sumStaffPaidEntriesBy(
+        teamMembers,
+        (entry) => paidEntryFundedBy(entry) === 'admin',
+    );
+}
+
+/**
+ * Active paid ledger rows for non-admin members (for admin payout breakdown).
+ * @param {object[] | null | undefined} teamMembers
+ * @param {'all' | 'admin' | 'program'} [fundedByFilter]
+ * @returns {{ member: object, entry: object }[]}
+ */
+export function listStaffPaidDisbursementEntries(teamMembers, fundedByFilter = 'all') {
+    const filter = String(fundedByFilter || 'all').toLowerCase();
+    /** @type {{ member: object, entry: object }[]} */
+    const out = [];
+    for (const m of Array.isArray(teamMembers) ? teamMembers : []) {
+        if (!m || String(m.status || 'active') === 'removed') continue;
+        if (String(m.kind || '') === 'admin') continue;
+        for (const entry of activeTeamMemberPaidEntries(m)) {
+            const fundedBy = paidEntryFundedBy(entry);
+            if (filter === 'admin' && fundedBy !== 'admin') continue;
+            if (filter === 'program' && fundedBy !== 'program') continue;
+            out.push({ member: m, entry });
+        }
+    }
+    return out;
+}
+
+/**
+ * Outstanding remaining owed to non-admin staff (owed − paid, floored at 0).
+ * @param {object[] | null | undefined} teamMembers
+ */
+export function computeStaffOutstandingOwedCents(teamMembers) {
+    let total = 0;
+    for (const m of Array.isArray(teamMembers) ? teamMembers : []) {
+        if (!m || String(m.status || 'active') === 'removed') continue;
+        if (String(m.kind || '') === 'admin') continue;
+        total += teamMemberDisbursementRemainingCents(m);
+    }
+    return total;
+}
+
+/**
+ * Admin net program payout = projected share − admin-funded staff paid − outstanding staff owed.
+ * Program-funded staff payments reduce Total profit instead.
+ * @param {object | null | undefined} adminMember
+ * @param {number} programProfitCents
+ * @param {object[] | null | undefined} teamMembers
+ */
+export function computeAdminNetProgramPayoutCents(adminMember, programProfitCents, teamMembers) {
+    const pct = Math.max(0, Math.min(100, Number(adminMember?.payoutPercent) || 0));
+    const gross = computeProjectedPayoutCents(programProfitCents, pct);
+    const adminFundedPaid = computeAdminFundedStaffPaidCents(teamMembers);
+    const staffOutstanding = computeStaffOutstandingOwedCents(teamMembers);
+    return Math.max(0, gross - adminFundedPaid - staffOutstanding);
+}
+
+/**
+ * Program profit = applicant profits − team expenses − promotions − program-funded staff paid.
+ * Admin-funded staff payments reduce the admin Program Payout instead.
+ * @param {object | null | undefined} programRow
+ * @param {object[] | null | undefined} applicantsForProgram
+ * @param {ReturnType<typeof buildProgramPaymentIndex>} [paymentIndex]
+ * @param {object[] | null | undefined} [teamMembers]
+ * @param {object[] | null | undefined} [promotions]
+ */
+export function computeProgramProfitCents(
+    programRow,
+    applicantsForProgram,
+    paymentIndex,
+    teamMembers,
+    promotions,
+) {
+    const applicants = Array.isArray(applicantsForProgram) ? applicantsForProgram : [];
+    const index = paymentIndex || buildProgramPaymentIndex({});
+    let applicantProfit = 0;
+    for (const applicant of applicants) {
+        if (!applicant || typeof applicant !== 'object') continue;
+        if (getApplicantIsTester(String(applicant.payloadJson || ''))) continue;
+        if (!isApplicantSlotSecured(applicant, index)) continue;
+        const row = buildStudioProgramFinanceRow(applicant, programRow, index);
+        applicantProfit += normalizeCents(row.profitCents);
+    }
+    let teamExpenses = 0;
+    for (const m of Array.isArray(teamMembers) ? teamMembers : []) {
+        if (!m || String(m.status || 'active') === 'removed') continue;
+        teamExpenses += teamMemberExpenseSubtotalCents(m);
+    }
+    const promoExpenses = programPromotionExpenseCents(
+        promotions,
+        programRow?.id ?? programRow?.programId,
+    );
+    const programFundedPaid = computeProgramFundedStaffPaidCents(teamMembers);
+    return applicantProfit - teamExpenses - promoExpenses - programFundedPaid;
+}
+
+/**
+ * @param {number} programProfitCents
+ * @param {number} payoutPercent 0–100
+ */
+export function computeProjectedPayoutCents(programProfitCents, payoutPercent) {
+    const profit = Math.max(0, normalizeCents(programProfitCents));
+    const pct = Math.max(0, Math.min(100, Number(payoutPercent) || 0));
+    return Math.round((profit * pct) / 100);
+}
+
+/**
+ * Remaining disbursement debt for a team member (owed − admin-funded paid).
+ * Program-funded payments do not pay down this balance.
+ * @param {object | null | undefined} member
+ */
+export function teamMemberDisbursementRemainingCents(member) {
+    return teamMemberOutstandingOwedCents(member);
+}
+
+/**
+ * Remaining when optionally including program payout estimate.
+ * Only admin-funded payments reduce the owed balance.
+ * @param {object | null | undefined} member
+ * @param {{ includeProgramPayout?: boolean, programPayoutCents?: number }} [opts]
+ */
+export function teamMemberDisbursementRemainingWithProgramCents(member, opts = {}) {
+    const owed = sumTeamMemberOwedCents(member);
+    const adminPaid = sumTeamMemberAdminFundedPaidCents(member);
+    const payout = opts.includeProgramPayout ? normalizeCents(opts.programPayoutCents) : 0;
+    return Math.max(0, owed + payout - adminPaid);
 }

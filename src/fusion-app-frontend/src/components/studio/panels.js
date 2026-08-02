@@ -101,6 +101,7 @@ import {
     generateAndUpsertArtistWorldFromBio,
     adminGenerateAccountRecoveryCodeStudio,
 } from '../../utils/database.js';
+import { computeMemberProgramTotalDueCents } from '../../utils/programPaymentMoney.js';
 import { renderTeamSection, initTeamSection } from './teamSection.js';
 import { STUDIO_WORLD_BATCH_MAX, buildMergedLocalesWithGeneratedWorldFromIdentity, hasUsableIdentityLlmSourceInput, translateManageFormWorldToNewWorld } from '../../utils/studioArtistWorldLlm.js';
 import { setStudioArtistManageBusy } from '../../utils/studioArtistManageBusy.js';
@@ -112,6 +113,7 @@ import {
 import {
     applicantPayloadToPlainNotes,
     APPLICANT_CATEGORY_OPTIONS,
+    applicantCategoryCellHtml,
     applicantCategoryPillHtml,
     buildApplicantApplicationSectionHtml,
     getApplicantCategory,
@@ -119,6 +121,11 @@ import {
     getApplicantLocalTravelCostCents,
     getApplicantIsTester,
     getApplicantManualDepositSubmitted,
+    getApplicantSpecialProgramTotalCents,
+    getApplicantSponsorshipMode,
+    getApplicantSponsoredCreditCents,
+    getApplicantSponsoredPercent,
+    getApplicantSponsoredCreditInputMode,
     hasSavedApplicantCategory,
     mergeApplicantStaffFields,
     parseApplicantPayload,
@@ -134,6 +141,10 @@ import { openSendBlastModal } from './sendBlastModal.js';
 import { openIndividualEmailModal } from './individualEmailModal.js';
 import { openApplicantEmailModal as openApplicantEmailComposer } from './applicantEmailModal.js';
 import { initEmailCampaignStudio, renderEmailCampaignStudio } from './emailCampaignStudio.js';
+import {
+    initJoinNetworkPageStudio,
+    renderJoinNetworkPageStudio,
+} from './sections/joinNetworkPageStudio.js';
 import { openJournalEntryModal } from './journalEntryModal.js';
 import { resolveJournalEntryLink } from '../../utils/journalEntryModalHelpers.js';
 import { formatStudioDate, formatStudioDateWithTitle } from '../../utils/studioDateFormat.js';
@@ -304,6 +315,7 @@ export const STUDIO_NAV_GROUPS = [
         label: 'Operations',
         items: [
             { id: 'gallery-access', label: 'Gallery Access' },
+            { id: 'join-network', label: 'Join Network' },
             { id: 'users', label: 'Users' },
             { id: 'services', label: 'Services' },
             { id: 'settings', label: 'Settings' },
@@ -373,6 +385,8 @@ export function renderStudioMain(sectionId) {
             return renderProducts();
         case 'gallery-access':
             return renderGalleryAccess();
+        case 'join-network':
+            return renderJoinNetworkPageStudio();
         case 'journal':
             return renderJournal();
         case 'sound':
@@ -1928,19 +1942,31 @@ function openStudioArtistManageFromRow(tableRow, afterSave, hostEl, listSurface 
                 if (!sel) return;
                 const input = root.querySelector(sel);
                 if (!(input instanceof HTMLInputElement)) return;
-                const apply = () => {
+                /** @param {{ bust?: boolean }} [opts] */
+                const apply = (opts = {}) => {
                     const v = String(input.value || '').trim();
                     if (!v) {
                         imgEl.removeAttribute('src');
                         imgEl.closest('.studio-asset-thumb')?.classList.add('is-empty');
                         return;
                     }
-                    imgEl.setAttribute('src', v);
+                    let src = v;
+                    if (opts.bust) {
+                        try {
+                            const u = new URL(v, window.location.origin);
+                            u.searchParams.set('studioPreview', String(Date.now()));
+                            src = u.href;
+                        } catch {
+                            const sep = v.includes('?') ? '&' : '?';
+                            src = `${v}${sep}studioPreview=${Date.now()}`;
+                        }
+                    }
+                    imgEl.setAttribute('src', src);
                     imgEl.closest('.studio-asset-thumb')?.classList.remove('is-empty');
                 };
-                input.addEventListener('input', apply);
-                input.addEventListener('change', apply);
-                apply();
+                input.addEventListener('input', () => apply({ bust: false }));
+                input.addEventListener('change', () => apply({ bust: true }));
+                apply({ bust: true });
             });
         };
         root.querySelector('#studio-art-exit-manage')?.addEventListener('click', () => close());
@@ -2131,6 +2157,10 @@ function openStudioArtistManageFromRow(tableRow, afterSave, hostEl, listSurface 
                         entityId: String(full.id || ''),
                         fieldKey: `${loc}-intro-${slot}`,
                     });
+                    // Deterministic S3 overwrite keeps the same URL — force preview refresh.
+                    if (targetInput instanceof HTMLInputElement) {
+                        targetInput.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
                 } catch (err) {
                     alert(err instanceof Error ? err.message : String(err));
                 }
@@ -2668,6 +2698,11 @@ function applicantCategoryPillHtmlLocal(category) {
     return applicantCategoryPillHtml(category, escapeHtml);
 }
 
+/** @param {string} payloadJson */
+function applicantCategoryCellHtmlLocal(payloadJson) {
+    return applicantCategoryCellHtml(payloadJson, escapeHtml);
+}
+
 /**
  * @param {object} applicantRow
  * @param {object[]} artists
@@ -2780,9 +2815,23 @@ function syncApplicantWorkflowControl(root) {
     }
 }
 
-function applicantWorkflowControlHtml(status, slotSecured = false, manualDepositSubmitted = false, isTester = false) {
+function applicantWorkflowControlHtml(
+    status,
+    slotSecured = false,
+    manualDepositSubmitted = false,
+    isTester = false,
+    depositWaived = false,
+) {
     const state = applicantWorkflowState(status, slotSecured);
     const checked = (value) => (value ? 'checked' : '');
+    const slotOn = state.slotSecured || manualDepositSubmitted || depositWaived;
+    const depositLabel = depositWaived ? 'Deposit waived' : 'Manual deposit submitted';
+    const depositHint = depositWaived
+        ? 'Fully sponsored — no deposit required'
+        : 'Payment received outside the member dashboard';
+    const slotHint = depositWaived
+        ? 'Secured by full sponsorship (no deposit required)'
+        : 'Completed after deposit or full payment';
     return `<fieldset class="studio-app-workflow" aria-label="Applicant workflow">
       <legend>Program status timeline</legend>
       <label class="studio-app-workflow__step">
@@ -2810,17 +2859,17 @@ function applicantWorkflowControlHtml(status, slotSecured = false, manualDeposit
           <option value="pulledOut" ${state.decisionValue === 'pulledOut' ? 'selected' : ''}>Pulled out</option>
         </select>
       </label>
-      <label class="studio-app-workflow__step">
-        <input type="checkbox" id="studio-app-step-manual-deposit" ${checked(manualDepositSubmitted)} />
-        <span><strong>Manual deposit submitted</strong><small>Payment received outside the member dashboard</small></span>
+      <label class="studio-app-workflow__step" id="studio-app-step-manual-deposit-wrap">
+        <input type="checkbox" id="studio-app-step-manual-deposit" ${checked(manualDepositSubmitted && !depositWaived)} ${depositWaived ? 'disabled' : ''} />
+        <span><strong id="studio-app-step-manual-deposit-label">${depositLabel}</strong><small id="studio-app-step-manual-deposit-hint">${depositHint}</small></span>
       </label>
       <label class="studio-app-workflow__step">
         <input type="checkbox" id="studio-app-step-is-tester" ${checked(isTester)} />
         <span><strong>Tester</strong><small>Hidden from All and status tabs; visible under Tester filter only</small></span>
       </label>
       <label class="studio-app-workflow__step studio-app-workflow__step--readonly">
-        <input type="checkbox" id="studio-app-step-slot-secured" ${checked(state.slotSecured || manualDepositSubmitted)} disabled />
-        <span><strong>Slot secured</strong><small>Completed after deposit or full payment</small></span>
+        <input type="checkbox" id="studio-app-step-slot-secured" ${checked(slotOn)} disabled />
+        <span><strong>Slot secured</strong><small id="studio-app-step-slot-secured-hint">${slotHint}</small></span>
       </label>
     </fieldset>`;
 }
@@ -2839,6 +2888,7 @@ const STUDIO_INIT = {
     programs: initPrograms,
     products: initProducts,
     'gallery-access': initGalleryAccess,
+    'join-network': initJoinNetworkPageStudio,
     journal: initJournal,
     sound: initSound,
     community: initCommunitySection,
@@ -3473,7 +3523,7 @@ async function initApplicants(mainEl) {
             <td>${escapeHtml(r.fullName || '')}</td>
             <td>${escapeHtml(r.programId)}</td>
             <td>${applicantStatusPillHtml(r.status)}</td>
-            <td>${applicantCategoryPillHtmlLocal(getApplicantCategory(r.payloadJson))}</td>
+            <td>${applicantCategoryCellHtmlLocal(r.payloadJson)}</td>
             <td>${applicantSlotSecuredPillHtml(Boolean(r.slotSecured))}</td>
             <td><span class="studio-muted" title="${escapeHtml(r.createdAt || '')}">${escapeHtml(formatStudioDate(r.createdAt))}</span></td>
             <td class="studio-td-actions"><button type="button" class="studio-btn-ghost studio-app-view" data-id="${escapeHtml(r.id)}">View</button></td>
@@ -3639,6 +3689,15 @@ async function initApplicants(mainEl) {
         const initialCategory = getApplicantCategory(r.payloadJson);
         const initialFlightCostUsd = (getApplicantFlightCostCents(r.payloadJson) / 100).toFixed(2);
         const initialLocalTravelUsd = (getApplicantLocalTravelCostCents(r.payloadJson) / 100).toFixed(2);
+        const initialSpecialCents = getApplicantSpecialProgramTotalCents(r.payloadJson);
+        const initialSpecialUsd =
+            initialSpecialCents > 0 ? (initialSpecialCents / 100).toFixed(2) : '';
+        const initialSponsorshipMode = getApplicantSponsorshipMode(r.payloadJson);
+        const initialSponsoredCreditCents = getApplicantSponsoredCreditCents(r.payloadJson);
+        const initialSponsoredPercent = getApplicantSponsoredPercent(r.payloadJson);
+        const initialSponsoredInputMode = getApplicantSponsoredCreditInputMode(r.payloadJson);
+        const initialSponsoredUsd =
+            initialSponsoredCreditCents > 0 ? (initialSponsoredCreditCents / 100).toFixed(2) : '';
         const em = String(r.email || '')
             .trim()
             .toLowerCase();
@@ -3661,13 +3720,40 @@ async function initApplicants(mainEl) {
             <h3 class="studio-subheading">Application</h3>
             ${appBlock}
             <div class="studio-app-status-with-email">
-              <div class="studio-app-status-with-email__status">${applicantWorkflowControlHtml(r.status, false, initialManualDeposit, initialIsTester)}</div>
+              <div class="studio-app-status-with-email__status">${applicantWorkflowControlHtml(r.status, initialSponsorshipMode === 'full', initialManualDeposit, initialIsTester, initialSponsorshipMode === 'full')}</div>
               <div class="studio-app-status-with-email__send">
                 <span class="studio-sr-only">Send email to applicant</span>
                 <button type="button" class="studio-btn-ghost" id="studio-app-modal-send-email">Send email</button>
               </div>
             </div>
             ${applicantCategorySelectHtml(initialCategory)}
+            <h3 class="studio-subheading">Special pricing</h3>
+            <p class="studio-muted mpd-field-hint">Overrides list price for Finance remaining balance and expected revenue. Fully sponsored = $0 due and deposit waived (still Confirmed).</p>
+            <label class="studio-field studio-field--check"><input type="checkbox" id="studio-app-modal-special-price-on" ${initialSpecialCents > 0 ? 'checked' : ''} /> <span>Custom program price</span></label>
+            <label class="studio-field" id="studio-app-modal-special-price-wrap" ${initialSpecialCents > 0 ? '' : 'hidden'}><span>Special total (USD)</span>
+              <input type="text" id="studio-app-modal-special-price" class="studio-input" inputmode="decimal" placeholder="0.00" value="${escapeHtml(initialSpecialUsd)}" />
+            </label>
+            <label class="studio-field"><span>Sponsorship</span>
+              <select id="studio-app-modal-sponsorship" class="studio-select">
+                <option value="none" ${initialSponsorshipMode === 'none' ? 'selected' : ''}>None</option>
+                <option value="partial" ${initialSponsorshipMode === 'partial' ? 'selected' : ''}>Partially sponsored</option>
+                <option value="full" ${initialSponsorshipMode === 'full' ? 'selected' : ''}>Fully sponsored ($0 due, deposit waived)</option>
+              </select>
+            </label>
+            <div id="studio-app-modal-sponsorship-partial" ${initialSponsorshipMode === 'partial' ? '' : 'hidden'}>
+              <label class="studio-field"><span>Credit type</span>
+                <select id="studio-app-modal-sponsorship-input-mode" class="studio-select">
+                  <option value="usd" ${initialSponsoredInputMode === 'usd' ? 'selected' : ''}>Fixed USD</option>
+                  <option value="percent" ${initialSponsoredInputMode === 'percent' ? 'selected' : ''}>Percent of price</option>
+                </select>
+              </label>
+              <label class="studio-field" id="studio-app-modal-sponsored-usd-wrap" ${initialSponsoredInputMode === 'percent' ? 'hidden' : ''}><span>Sponsored credit (USD)</span>
+                <input type="text" id="studio-app-modal-sponsored-usd" class="studio-input" inputmode="decimal" placeholder="0.00" value="${escapeHtml(initialSponsoredUsd)}" />
+              </label>
+              <label class="studio-field" id="studio-app-modal-sponsored-pct-wrap" ${initialSponsoredInputMode === 'percent' ? '' : 'hidden'}><span>Sponsored percent</span>
+                <input type="number" id="studio-app-modal-sponsored-pct" class="studio-input" min="0" max="100" step="1" placeholder="0" value="${escapeHtml(initialSponsoredPercent != null ? String(initialSponsoredPercent) : '')}" />
+              </label>
+            </div>
             <label class="studio-field"><span>Flight / ticket cost (USD)</span>
               <input type="text" id="studio-app-modal-flight-cost" class="studio-input" inputmode="decimal" placeholder="0.00" value="${escapeHtml(initialFlightCostUsd === '0.00' ? '' : initialFlightCostUsd)}" />
             </label>
@@ -3690,28 +3776,107 @@ async function initApplicants(mainEl) {
         }
         let statusAtOpen = r.status;
 
+        const syncSpecialPricingUi = () => {
+            const specialOn = root.querySelector('#studio-app-modal-special-price-on');
+            const specialWrap = root.querySelector('#studio-app-modal-special-price-wrap');
+            const sponsorship = root.querySelector('#studio-app-modal-sponsorship');
+            const partialWrap = root.querySelector('#studio-app-modal-sponsorship-partial');
+            const modeSel = root.querySelector('#studio-app-modal-sponsorship-input-mode');
+            const usdWrap = root.querySelector('#studio-app-modal-sponsored-usd-wrap');
+            const pctWrap = root.querySelector('#studio-app-modal-sponsored-pct-wrap');
+            if (specialWrap instanceof HTMLElement) {
+                specialWrap.hidden = !(specialOn instanceof HTMLInputElement && specialOn.checked);
+            }
+            const mode =
+                sponsorship instanceof HTMLSelectElement ? sponsorship.value : 'none';
+            if (partialWrap instanceof HTMLElement) {
+                partialWrap.hidden = mode !== 'partial';
+            }
+            const inputMode =
+                modeSel instanceof HTMLSelectElement ? modeSel.value : 'usd';
+            if (usdWrap instanceof HTMLElement) usdWrap.hidden = inputMode === 'percent';
+            if (pctWrap instanceof HTMLElement) pctWrap.hidden = inputMode !== 'percent';
+            syncApplicantDepositUi();
+        };
+        root.querySelector('#studio-app-modal-special-price-on')?.addEventListener('change', syncSpecialPricingUi);
+        root.querySelector('#studio-app-modal-sponsorship')?.addEventListener('change', syncSpecialPricingUi);
+        root.querySelector('#studio-app-modal-sponsorship-input-mode')?.addEventListener(
+            'change',
+            syncSpecialPricingUi,
+        );
+        // Declared below; call after syncApplicantDepositUi exists.
+        const runInitialSpecialPricingUi = () => syncSpecialPricingUi();
+
+        const parseUsdToCents = (raw) => {
+            const s = String(raw || '').trim();
+            if (!s) return 0;
+            return Math.max(0, Math.round(Number(s.replace(/[^0-9.]/g, '')) * 100));
+        };
+
         const makePayloadForSave = () => {
             const rawInner = root.querySelector('#studio-app-modal-notes')?.value ?? '';
             const manualDepositInput = root.querySelector('#studio-app-step-manual-deposit');
             const testerInput = root.querySelector('#studio-app-step-is-tester');
             const categoryInput = root.querySelector('#studio-app-modal-category');
+            const sponsorshipSel = root.querySelector('#studio-app-modal-sponsorship');
+            const sponsorshipMode =
+                sponsorshipSel instanceof HTMLSelectElement
+                    ? /** @type {'none' | 'partial' | 'full'} */ (sponsorshipSel.value)
+                    : 'none';
+            // Fully sponsored waives deposit — do not persist a manual deposit flag.
             const manualDepositSubmitted =
-                manualDepositInput instanceof HTMLInputElement && manualDepositInput.checked;
+                sponsorshipMode !== 'full' &&
+                manualDepositInput instanceof HTMLInputElement &&
+                manualDepositInput.checked;
             const isTester = testerInput instanceof HTMLInputElement && testerInput.checked;
             const applicantCategory =
                 categoryInput instanceof HTMLSelectElement ? categoryInput.value : initialCategory;
             const flightCostInput = root.querySelector('#studio-app-modal-flight-cost');
             const flightCostRaw =
                 flightCostInput instanceof HTMLInputElement ? flightCostInput.value.trim() : '';
-            const flightCostCents = flightCostRaw
-                ? Math.max(0, Math.round(Number(flightCostRaw.replace(/[^0-9.]/g, '')) * 100))
-                : 0;
+            const flightCostCents = flightCostRaw ? parseUsdToCents(flightCostRaw) : 0;
             const localTravelInput = root.querySelector('#studio-app-modal-local-travel');
             const localTravelRaw =
                 localTravelInput instanceof HTMLInputElement ? localTravelInput.value.trim() : '';
-            const localTravelCostCents = localTravelRaw
-                ? Math.max(0, Math.round(Number(localTravelRaw.replace(/[^0-9.]/g, '')) * 100))
-                : 0;
+            const localTravelCostCents = localTravelRaw ? parseUsdToCents(localTravelRaw) : 0;
+            const specialOn = root.querySelector('#studio-app-modal-special-price-on');
+            const specialInput = root.querySelector('#studio-app-modal-special-price');
+            const specialProgramTotalCents =
+                specialOn instanceof HTMLInputElement && specialOn.checked
+                    ? parseUsdToCents(
+                          specialInput instanceof HTMLInputElement ? specialInput.value : '',
+                      )
+                    : 0;
+            const inputModeSel = root.querySelector('#studio-app-modal-sponsorship-input-mode');
+            const sponsoredCreditInputMode =
+                inputModeSel instanceof HTMLSelectElement && inputModeSel.value === 'percent'
+                    ? 'percent'
+                    : 'usd';
+            let sponsoredCreditCents = 0;
+            let sponsoredPercent = /** @type {number | null} */ (null);
+            if (sponsorshipMode === 'partial') {
+                if (sponsoredCreditInputMode === 'percent') {
+                    const pctInput = root.querySelector('#studio-app-modal-sponsored-pct');
+                    const pct =
+                        pctInput instanceof HTMLInputElement
+                            ? Number(pctInput.value)
+                            : 0;
+                    sponsoredPercent = Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : 0;
+                    const base =
+                        specialProgramTotalCents > 0
+                            ? specialProgramTotalCents
+                            : computeMemberProgramTotalDueCents({
+                                  category: applicantCategory,
+                                  ownFlight: false,
+                              });
+                    sponsoredCreditCents = Math.round((base * sponsoredPercent) / 100);
+                } else {
+                    const usdInput = root.querySelector('#studio-app-modal-sponsored-usd');
+                    sponsoredCreditCents = parseUsdToCents(
+                        usdInput instanceof HTMLInputElement ? usdInput.value : '',
+                    );
+                }
+            }
             if (rawInvalid) return r.payloadJson;
             return mergeApplicantStaffFields(
                 {
@@ -3721,21 +3886,53 @@ async function initApplicants(mainEl) {
                     isTester,
                     flightCostCents,
                     localTravelCostCents,
+                    specialProgramTotalCents,
+                    sponsorshipMode,
+                    sponsoredCreditCents,
+                    sponsoredPercent,
+                    sponsoredCreditInputMode,
                 },
                 r.payloadJson,
             );
         };
 
         const syncApplicantDepositUi = () => {
+            const sponsorship = root.querySelector('#studio-app-modal-sponsorship');
+            const depositWaived =
+                sponsorship instanceof HTMLSelectElement && sponsorship.value === 'full';
             const manualDepositInput = root.querySelector('#studio-app-step-manual-deposit');
             const slotInput = root.querySelector('#studio-app-step-slot-secured');
+            const depositLabel = root.querySelector('#studio-app-step-manual-deposit-label');
+            const depositHint = root.querySelector('#studio-app-step-manual-deposit-hint');
+            const slotHint = root.querySelector('#studio-app-step-slot-secured-hint');
+            if (manualDepositInput instanceof HTMLInputElement) {
+                manualDepositInput.disabled = depositWaived;
+                if (depositWaived) {
+                    manualDepositInput.checked = false;
+                }
+            }
+            if (depositLabel) {
+                depositLabel.textContent = depositWaived ? 'Deposit waived' : 'Manual deposit submitted';
+            }
+            if (depositHint) {
+                depositHint.textContent = depositWaived
+                    ? 'Fully sponsored — no deposit required'
+                    : 'Payment received outside the member dashboard';
+            }
+            if (slotHint) {
+                slotHint.textContent = depositWaived
+                    ? 'Secured by full sponsorship (no deposit required)'
+                    : 'Completed after deposit or full payment';
+            }
             const manual =
                 manualDepositInput instanceof HTMLInputElement && manualDepositInput.checked;
-            const paymentSecured = slotInput instanceof HTMLInputElement && slotInput.dataset.paymentSecured === 'true';
+            const paymentSecured =
+                slotInput instanceof HTMLInputElement && slotInput.dataset.paymentSecured === 'true';
             if (slotInput instanceof HTMLInputElement) {
-                slotInput.checked = paymentSecured || manual;
+                slotInput.checked = paymentSecured || manual || depositWaived;
             }
         };
+        runInitialSpecialPricingUi();
 
         root.querySelector('#studio-app-modal-send-email')?.addEventListener('click', () => {
             void openApplicantEmailComposer(r, {
@@ -3754,8 +3951,8 @@ async function initApplicants(mainEl) {
             const slotInput = root.querySelector('#studio-app-step-slot-secured');
             if (slotInput instanceof HTMLInputElement) {
                 slotInput.dataset.paymentSecured = slotSecured ? 'true' : 'false';
-                slotInput.checked = slotSecured || initialManualDeposit;
             }
+            syncApplicantDepositUi();
             if (!rawInvalid && !hasSavedApplicantCategory(r.payloadJson)) {
                 const artist = resolveArtistForApplicant(r, applicantArtistsFull);
                 const suggested = suggestApplicantCategoryFromArtist(artist, r.programId);
@@ -3791,10 +3988,15 @@ async function initApplicants(mainEl) {
         root.querySelector('#studio-app-modal-save')?.addEventListener('click', async () => {
             const status = applicantWorkflowStatusFromRoot(root);
             const payloadJson = makePayloadForSave();
+            const sponsorshipSel = root.querySelector('#studio-app-modal-sponsorship');
+            const sponsorshipMode =
+                sponsorshipSel instanceof HTMLSelectElement ? sponsorshipSel.value : 'none';
             const manualDepositInput = root.querySelector('#studio-app-step-manual-deposit');
             const categoryInput = root.querySelector('#studio-app-modal-category');
             const manualDepositSubmitted =
-                manualDepositInput instanceof HTMLInputElement && manualDepositInput.checked;
+                sponsorshipMode !== 'full' &&
+                manualDepositInput instanceof HTMLInputElement &&
+                manualDepositInput.checked;
             const previousCategory = getApplicantCategory(r.payloadJson);
             const nextCategory =
                 categoryInput instanceof HTMLSelectElement ? categoryInput.value : previousCategory;
@@ -3803,9 +4005,8 @@ async function initApplicants(mainEl) {
                 if (manualDepositSubmitted) {
                     await syncApplicantManualDepositStudio(r.id);
                 }
-                if (nextCategory !== previousCategory) {
-                    await syncApplicantCategoryPaymentStudio(r.id);
-                }
+                // Recompute Motoko totalDue (category + special price + sponsorship).
+                await syncApplicantCategoryPaymentStudio(r.id);
                 statusAtOpen = status;
                 close();
                 await reload();
@@ -4625,9 +4826,9 @@ function renderProfileImages() {
         <div class="studio-section-stack studio-category-page">
             ${studioPageHeaderHtml({
                 title: 'Profile Images',
-                subtitle: 'Review and approve hero profile images submitted by artists',
+                subtitle: 'Profile images pending staff review',
                 countId: 'studio-profile-images-header-count',
-                countLabel: 'with images',
+                countLabel: 'pending',
             })}
             ${studioFilterBarHtml({
                 searchId: 'studio-profile-images-search',
@@ -4679,7 +4880,12 @@ async function initProfileImages(mainEl) {
         reviewNotesMap = notes;
         allRows = all.filter((a) => {
             const img = a.heroProfileImage ?? a.heroProfileImageUrl ?? '';
-            return typeof img === 'string' && img.trim().length > 0;
+            if (typeof img !== 'string' || !img.trim()) return false;
+            const approved = Boolean(a.heroProfileImageApproved);
+            if (approved) return false;
+            const note = reviewNotesMap.get(String(a.id ?? ''));
+            if (note && !note.approved && note.reason) return false;
+            return true;
         });
         applyFilter();
     };
@@ -4706,7 +4912,7 @@ async function initProfileImages(mainEl) {
         if (countEl) countEl.textContent = String(list.length);
         if (!list.length) {
             tbody.innerHTML = `<tr><td colspan="5">${
-                allRows.length ? 'No rows match search.' : 'No artists with profile images.'
+                allRows.length ? 'No rows match search.' : 'No profile images pending review.'
             }</td></tr>`;
             return;
         }
@@ -4739,46 +4945,104 @@ async function initProfileImages(mainEl) {
         const note = reviewNotesMap.get(artistId) || null;
         const row = allRows.find((a) => a.id === artistId);
         const approved = Boolean(row?.heroProfileImageApproved);
-        const statusClass = approved ? 'studio-mod-manage-status--approved' : 'studio-mod-manage-status--pending';
-        const statusLabel = approved ? 'Approved' : 'Pending review';
 
         const body = `
             <div class="studio-mod-manage-modal">
                 <div class="studio-mod-manage-preview">
                     <img src="${escapeHtml(imgUrl)}" alt="${escapeHtml(name)}" />
                 </div>
-                <div class="studio-mod-manage-status ${statusClass}">${statusLabel}</div>
-                <div class="studio-field studio-field--checkbox">
-                    <input type="checkbox" id="studio-mod-manage-approved" ${approved ? 'checked' : ''} />
-                    <label for="studio-mod-manage-approved">Approved for public display</label>
+
+                <div class="studio-mod-manage-section">
+                    <h3 class="studio-mod-manage-heading">Decision</h3>
+                    <div class="studio-field studio-field--checkbox">
+                        <input type="checkbox" id="studio-mod-manage-approved" ${approved ? 'checked' : ''} />
+                        <label for="studio-mod-manage-approved">Approve this image for public display</label>
+                    </div>
                 </div>
-                <div class="studio-field">
-                    <span>Review note (visible to artist)</span>
-                    <textarea id="studio-mod-manage-reason" rows="3" placeholder="Optional reason or feedback…">${escapeHtml(note?.reason || '')}</textarea>
+
+                <div class="studio-mod-manage-section">
+                    <h3 class="studio-mod-manage-heading">Feedback for artist</h3>
+                    <p class="studio-mod-manage-hint">This message will be visible to the artist if changes are requested.</p>
+                    <textarea id="studio-mod-manage-reason" class="studio-input" rows="3" placeholder="e.g. Image is too dark — try a brighter, high-resolution photo…">${escapeHtml(note?.reason || '')}</textarea>
                 </div>
-                <div class="studio-field">
-                    <span>Reference image (optional)</span>
-                    <input type="text" id="studio-mod-manage-image" placeholder="Image URL" value="${escapeHtml(note?.imageUrl || '')}" />
+
+                <div class="studio-mod-manage-section">
+                    <h3 class="studio-mod-manage-heading">Reference image <span class="studio-mod-manage-optional">(optional)</span></h3>
+                    <p class="studio-mod-manage-hint">Upload an example or annotated screenshot the artist can reference.</p>
+                    <div class="studio-mod-manage-upload-row">
+                        <label class="studio-file-label studio-btn-ghost studio-mod-manage-upload-label">
+                            <input type="file" id="studio-mod-manage-image-file" accept="image/*" class="studio-file-input" />
+                            Upload image
+                        </label>
+                        <span class="studio-mod-manage-upload-or">or</span>
+                        <input type="text" id="studio-mod-manage-image" class="studio-input" placeholder="Paste image URL" value="${escapeHtml(note?.imageUrl || '')}" />
+                    </div>
+                    <div id="studio-mod-manage-image-preview" class="studio-mod-manage-image-preview" ${note?.imageUrl ? '' : 'hidden'}>
+                        ${note?.imageUrl ? `<img src="${escapeHtml(note.imageUrl)}" alt="Reference" />` : ''}
+                        <button type="button" class="studio-mod-manage-image-remove" aria-label="Remove image">&times;</button>
+                    </div>
+                    <p id="studio-mod-manage-upload-status" class="studio-mod-manage-upload-status" hidden></p>
                 </div>
+
                 <div class="studio-modal-actions">
                     <button data-studio-modal-close="1" class="studio-btn-ghost">Cancel</button>
-                    <button id="studio-mod-manage-save" class="studio-btn-primary">Save</button>
+                    <button id="studio-mod-manage-save" class="studio-btn-primary">Save review</button>
                 </div>
             </div>
         `;
 
-        const { close, root } = openStudioModal(body, { title: `Profile Image — ${escapeHtml(name)}`, compact: true });
+        const { close, root } = openStudioModal(body, { title: `Review — ${escapeHtml(name)}`, compact: true });
+
+        const imageInput = root.querySelector('#studio-mod-manage-image');
+        const imageFileInput = root.querySelector('#studio-mod-manage-image-file');
+        const imagePreview = root.querySelector('#studio-mod-manage-image-preview');
+        const uploadStatus = root.querySelector('#studio-mod-manage-upload-status');
+
+        const showImagePreview = (url) => {
+            if (imagePreview) {
+                imagePreview.innerHTML = `<img src="${escapeHtml(url)}" alt="Reference" /><button type="button" class="studio-mod-manage-image-remove" aria-label="Remove image">&times;</button>`;
+                imagePreview.hidden = false;
+                imagePreview.querySelector('.studio-mod-manage-image-remove')?.addEventListener('click', () => {
+                    if (imageInput instanceof HTMLInputElement) imageInput.value = '';
+                    imagePreview.hidden = true;
+                });
+            }
+        };
+
+        imageFileInput?.addEventListener('change', async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            if (uploadStatus instanceof HTMLElement) { uploadStatus.textContent = 'Uploading…'; uploadStatus.hidden = false; }
+            try {
+                const { prepareImageFileForUpload: prep } = await import('../../utils/imageUploadPrep.js');
+                const { file: prepared } = await prep(file);
+                const { uploadBlobToS3: upload } = await import('../../utils/studioS3Upload.js');
+                const url = await upload(prepared, imageInput instanceof HTMLInputElement ? imageInput : null, { area: 'studio/misc' });
+                if (imageInput instanceof HTMLInputElement) imageInput.value = url;
+                showImagePreview(url);
+                if (uploadStatus instanceof HTMLElement) uploadStatus.hidden = true;
+            } catch (err) {
+                console.error('Reference image upload failed', err);
+                if (uploadStatus instanceof HTMLElement) { uploadStatus.textContent = `Upload failed: ${err.message}`; uploadStatus.hidden = false; }
+            }
+        });
+
+        if (note?.imageUrl) {
+            imagePreview?.querySelector('.studio-mod-manage-image-remove')?.addEventListener('click', () => {
+                if (imageInput instanceof HTMLInputElement) imageInput.value = '';
+                if (imagePreview) imagePreview.hidden = true;
+            });
+        }
 
         root.querySelector('#studio-mod-manage-save')?.addEventListener('click', async () => {
             const cb = root.querySelector('#studio-mod-manage-approved');
             const reasonEl = root.querySelector('#studio-mod-manage-reason');
-            const imageEl = root.querySelector('#studio-mod-manage-image');
             const newApproved = cb instanceof HTMLInputElement ? cb.checked : approved;
             const reason = reasonEl instanceof HTMLTextAreaElement ? reasonEl.value.trim() : '';
-            const image = imageEl instanceof HTMLInputElement ? imageEl.value.trim() : '';
+            const image = imageInput instanceof HTMLInputElement ? imageInput.value.trim() : '';
 
             const saveBtn = root.querySelector('#studio-mod-manage-save');
-            if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = true;
+            if (saveBtn instanceof HTMLButtonElement) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
 
             try {
                 await staffSetHeroProfileImageReviewNote(artistId, newApproved, reason, image);
@@ -4789,7 +5053,7 @@ async function initProfileImages(mainEl) {
                 close();
             } catch (err) {
                 console.error('Profile image review note save failed', err);
-                if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = false;
+                if (saveBtn instanceof HTMLButtonElement) { saveBtn.disabled = false; saveBtn.textContent = 'Save review'; }
             }
         });
     };
@@ -4838,9 +5102,9 @@ function renderAudioFiles() {
         <div class="studio-section-stack studio-category-page">
             ${studioPageHeaderHtml({
                 title: 'Audio Files',
-                subtitle: 'Review and approve individual audio bites submitted by artists',
+                subtitle: 'Audio bites pending staff review',
                 countId: 'studio-audio-files-header-count',
-                countLabel: 'audio entries',
+                countLabel: 'pending',
             })}
             ${studioFilterBarHtml({
                 searchId: 'studio-audio-files-search',
@@ -4901,19 +5165,29 @@ async function initAudioFiles(mainEl) {
             const approvedUrls = new Set(approvedUrlsMap.get(id) || []);
             if (entries.length > 0) {
                 for (const entry of entries) {
+                    const isApproved = approvedUrls.has(entry.url);
+                    if (isApproved) continue;
+                    const compositeKey = `${id}|${entry.url}`;
+                    const note = reviewNotesMap.get(compositeKey);
+                    if (note && !note.approved && note.reason) continue;
                     allRows.push({
                         artistId: id, slug, name,
                         url: entry.url, title: entry.title || 'Audio bite',
-                        approved: approvedUrls.has(entry.url),
+                        approved: false,
                     });
                 }
             } else {
                 const legacyUrl = String(a.audioUrl ?? '').trim();
                 if (legacyUrl) {
+                    const isApproved = Boolean(a.audioApproved);
+                    if (isApproved) continue;
+                    const compositeKey = `${id}|${legacyUrl}`;
+                    const note = reviewNotesMap.get(compositeKey);
+                    if (note && !note.approved && note.reason) continue;
                     allRows.push({
                         artistId: id, slug, name,
                         url: legacyUrl, title: String(a.audioTitle ?? 'Audio bite'),
-                        approved: Boolean(a.audioApproved),
+                        approved: false,
                     });
                 }
             }
@@ -4944,7 +5218,7 @@ async function initAudioFiles(mainEl) {
         if (countEl) countEl.textContent = String(list.length);
         if (!list.length) {
             tbody.innerHTML = `<tr><td colspan="5">${
-                allRows.length ? 'No rows match search.' : 'No artists with audio files.'
+                allRows.length ? 'No rows match search.' : 'No audio files pending review.'
             }</td></tr>`;
             return;
         }
@@ -4974,47 +5248,105 @@ async function initAudioFiles(mainEl) {
         const note = reviewNotesMap.get(compositeKey) || null;
         const row = allRows.find((r) => r.artistId === artistId && r.url === url);
         const approved = Boolean(row?.approved);
-        const statusClass = approved ? 'studio-mod-manage-status--approved' : 'studio-mod-manage-status--pending';
-        const statusLabel = approved ? 'Approved' : 'Pending review';
 
         const body = `
             <div class="studio-mod-manage-modal">
-                <div class="studio-mod-manage-preview">
-                    <audio controls preload="metadata" src="${escapeHtml(url)}" style="width:100%;max-width:320px;height:36px"></audio>
-                    <div class="studio-muted" style="font-size:0.78rem;margin-top:4px;text-align:center">${escapeHtml(title)}</div>
+                <div class="studio-mod-manage-preview studio-mod-manage-preview--audio">
+                    <audio controls preload="metadata" src="${escapeHtml(url)}"></audio>
+                    <span class="studio-mod-manage-audio-title">${escapeHtml(title)}</span>
                 </div>
-                <div class="studio-mod-manage-status ${statusClass}">${statusLabel}</div>
-                <div class="studio-field studio-field--checkbox">
-                    <input type="checkbox" id="studio-mod-manage-approved" ${approved ? 'checked' : ''} />
-                    <label for="studio-mod-manage-approved">Approved for public playback</label>
+
+                <div class="studio-mod-manage-section">
+                    <h3 class="studio-mod-manage-heading">Decision</h3>
+                    <div class="studio-field studio-field--checkbox">
+                        <input type="checkbox" id="studio-mod-manage-approved" ${approved ? 'checked' : ''} />
+                        <label for="studio-mod-manage-approved">Approve this audio for public playback</label>
+                    </div>
                 </div>
-                <div class="studio-field">
-                    <span>Review note (visible to artist)</span>
-                    <textarea id="studio-mod-manage-reason" rows="3" placeholder="Optional reason or feedback…">${escapeHtml(note?.reason || '')}</textarea>
+
+                <div class="studio-mod-manage-section">
+                    <h3 class="studio-mod-manage-heading">Feedback for artist</h3>
+                    <p class="studio-mod-manage-hint">This message will be visible to the artist if changes are requested.</p>
+                    <textarea id="studio-mod-manage-reason" class="studio-input" rows="3" placeholder="e.g. Audio has background noise — try recording in a quieter space…">${escapeHtml(note?.reason || '')}</textarea>
                 </div>
-                <div class="studio-field">
-                    <span>Reference image (optional)</span>
-                    <input type="text" id="studio-mod-manage-image" placeholder="Image URL" value="${escapeHtml(note?.imageUrl || '')}" />
+
+                <div class="studio-mod-manage-section">
+                    <h3 class="studio-mod-manage-heading">Reference image <span class="studio-mod-manage-optional">(optional)</span></h3>
+                    <p class="studio-mod-manage-hint">Upload an example or annotated screenshot the artist can reference.</p>
+                    <div class="studio-mod-manage-upload-row">
+                        <label class="studio-file-label studio-btn-ghost studio-mod-manage-upload-label">
+                            <input type="file" id="studio-mod-manage-image-file" accept="image/*" class="studio-file-input" />
+                            Upload image
+                        </label>
+                        <span class="studio-mod-manage-upload-or">or</span>
+                        <input type="text" id="studio-mod-manage-image" class="studio-input" placeholder="Paste image URL" value="${escapeHtml(note?.imageUrl || '')}" />
+                    </div>
+                    <div id="studio-mod-manage-image-preview" class="studio-mod-manage-image-preview" ${note?.imageUrl ? '' : 'hidden'}>
+                        ${note?.imageUrl ? `<img src="${escapeHtml(note.imageUrl)}" alt="Reference" />` : ''}
+                        <button type="button" class="studio-mod-manage-image-remove" aria-label="Remove image">&times;</button>
+                    </div>
+                    <p id="studio-mod-manage-upload-status" class="studio-mod-manage-upload-status" hidden></p>
                 </div>
+
                 <div class="studio-modal-actions">
                     <button data-studio-modal-close="1" class="studio-btn-ghost">Cancel</button>
-                    <button id="studio-mod-manage-save" class="studio-btn-primary">Save</button>
+                    <button id="studio-mod-manage-save" class="studio-btn-primary">Save review</button>
                 </div>
             </div>
         `;
 
-        const { close, root } = openStudioModal(body, { title: `Audio — ${escapeHtml(name)}`, compact: true });
+        const { close, root } = openStudioModal(body, { title: `Review — ${escapeHtml(name)}`, compact: true });
+
+        const imageInput = root.querySelector('#studio-mod-manage-image');
+        const imageFileInput = root.querySelector('#studio-mod-manage-image-file');
+        const imagePreview = root.querySelector('#studio-mod-manage-image-preview');
+        const uploadStatus = root.querySelector('#studio-mod-manage-upload-status');
+
+        const showImagePreview = (url) => {
+            if (imagePreview) {
+                imagePreview.innerHTML = `<img src="${escapeHtml(url)}" alt="Reference" /><button type="button" class="studio-mod-manage-image-remove" aria-label="Remove image">&times;</button>`;
+                imagePreview.hidden = false;
+                imagePreview.querySelector('.studio-mod-manage-image-remove')?.addEventListener('click', () => {
+                    if (imageInput instanceof HTMLInputElement) imageInput.value = '';
+                    imagePreview.hidden = true;
+                });
+            }
+        };
+
+        imageFileInput?.addEventListener('change', async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            if (uploadStatus instanceof HTMLElement) { uploadStatus.textContent = 'Uploading…'; uploadStatus.hidden = false; }
+            try {
+                const { prepareImageFileForUpload: prep } = await import('../../utils/imageUploadPrep.js');
+                const { file: prepared } = await prep(file);
+                const { uploadBlobToS3: upload } = await import('../../utils/studioS3Upload.js');
+                const url = await upload(prepared, imageInput instanceof HTMLInputElement ? imageInput : null, { area: 'studio/misc' });
+                if (imageInput instanceof HTMLInputElement) imageInput.value = url;
+                showImagePreview(url);
+                if (uploadStatus instanceof HTMLElement) uploadStatus.hidden = true;
+            } catch (err) {
+                console.error('Reference image upload failed', err);
+                if (uploadStatus instanceof HTMLElement) { uploadStatus.textContent = `Upload failed: ${err.message}`; uploadStatus.hidden = false; }
+            }
+        });
+
+        if (note?.imageUrl) {
+            imagePreview?.querySelector('.studio-mod-manage-image-remove')?.addEventListener('click', () => {
+                if (imageInput instanceof HTMLInputElement) imageInput.value = '';
+                if (imagePreview) imagePreview.hidden = true;
+            });
+        }
 
         root.querySelector('#studio-mod-manage-save')?.addEventListener('click', async () => {
             const cb = root.querySelector('#studio-mod-manage-approved');
             const reasonEl = root.querySelector('#studio-mod-manage-reason');
-            const imageEl = root.querySelector('#studio-mod-manage-image');
             const newApproved = cb instanceof HTMLInputElement ? cb.checked : approved;
             const reason = reasonEl instanceof HTMLTextAreaElement ? reasonEl.value.trim() : '';
-            const image = imageEl instanceof HTMLInputElement ? imageEl.value.trim() : '';
+            const image = imageInput instanceof HTMLInputElement ? imageInput.value.trim() : '';
 
             const saveBtn = root.querySelector('#studio-mod-manage-save');
-            if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = true;
+            if (saveBtn instanceof HTMLButtonElement) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
 
             try {
                 await staffSetAudioEntryReviewNote(artistId, url, newApproved, reason, image);
@@ -5025,7 +5357,7 @@ async function initAudioFiles(mainEl) {
                 close();
             } catch (err) {
                 console.error('Audio entry review note save failed', err);
-                if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = false;
+                if (saveBtn instanceof HTMLButtonElement) { saveBtn.disabled = false; saveBtn.textContent = 'Save review'; }
             }
         });
     };
@@ -6980,8 +7312,9 @@ function formatStudioAccountCardHtml(u) {
  * @param {import('../../utils/database.js').StudioAccountRow} row
  * @param {() => void | Promise<void>} onSaved
  * @param {() => void | Promise<void>} [onRefreshUsersList] — reload Users table + `allPairs` (e.g. after Stripe sync)
+ * @param {{ firstName?: string, lastName?: string, email?: string } | null} [contact]
  */
-function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
+function openStudioUserManageModal(row, onSaved, onRefreshUsersList, contact = null) {
     const raw = row.rawAccount;
     if (!raw || typeof raw !== 'object') {
         openStudioModal('<p class="studio-muted">No account payload for this row.</p>', { title: 'Manage account', compact: true });
@@ -6998,6 +7331,9 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
     const canisterMembershipLabel = exempt ? 'Manual exempt' : String(stripeSt);
     const accountUpdated = formatStudioAccountUpdatedAt(row.updatedAt);
     const accountUpdatedLabel = escapeHtml(accountUpdated.label);
+    const contactFirst = String(contact?.firstName || '').trim();
+    const contactLast = String(contact?.lastName || '').trim();
+    const contactEmail = String(contact?.email || '').trim();
     const billingHintStored = getStoredBillingEmailForPrincipal(principal);
     const billingHintHtml =
         billingHintStored && billingHintStored.includes('@')
@@ -7016,6 +7352,19 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
           <div class="studio-user-manage-principal-row">
             <p class="studio-user-manage-principal studio-muted" id="studio-user-principal-line">${escapeHtml(principal)}</p>
             <button type="button" class="studio-btn-ghost studio-btn-tiny" id="studio-user-copy-principal">Copy principal</button>
+          </div>
+          <p class="studio-muted studio-user-manage-hint">Name and email are stored on the account contact directory (used for staff, team, and Users table).</p>
+          <div class="studio-user-manage-control-row">
+            <label class="studio-user-manage-label" for="studio-user-edit-first-name">First name</label>
+            <input type="text" id="studio-user-edit-first-name" class="studio-input studio-user-manage-contact-input" maxlength="256" autocomplete="off" value="${escapeHtml(contactFirst)}" />
+          </div>
+          <div class="studio-user-manage-control-row">
+            <label class="studio-user-manage-label" for="studio-user-edit-last-name">Last name</label>
+            <input type="text" id="studio-user-edit-last-name" class="studio-input studio-user-manage-contact-input" maxlength="256" autocomplete="off" value="${escapeHtml(contactLast)}" />
+          </div>
+          <div class="studio-user-manage-control-row">
+            <label class="studio-user-manage-label" for="studio-user-edit-contact-email">Email</label>
+            <input type="email" id="studio-user-edit-contact-email" class="studio-input studio-user-manage-contact-input" maxlength="256" autocomplete="off" value="${escapeHtml(contactEmail)}" />
           </div>
           <p class="studio-muted studio-user-manage-meta">Account <code>updatedAt</code> (core): ${accountUpdatedLabel}</p>
           ${billingHintHtml}
@@ -7565,6 +7914,15 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
         const memSel = root.querySelector('#studio-user-edit-membership');
         const mem = memSel instanceof HTMLSelectElement ? memSel.value : 'standard';
         const ex = mem === 'manual_exempt';
+        const firstName =
+            /** @type {HTMLInputElement|null} */ (root.querySelector('#studio-user-edit-first-name'))
+                ?.value?.trim() || '';
+        const lastName =
+            /** @type {HTMLInputElement|null} */ (root.querySelector('#studio-user-edit-last-name'))
+                ?.value?.trim() || '';
+        const directoryEmail =
+            /** @type {HTMLInputElement|null} */ (root.querySelector('#studio-user-edit-contact-email'))
+                ?.value?.trim() || '';
         const patched = {
             ...workingRaw,
             role: { [roleKey]: null },
@@ -7583,6 +7941,11 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList) {
         }
         try {
             await adminUpsertUserAccountStudio(principal, patched);
+            await adminSetAccountContactForStudio(principal, {
+                firstName,
+                lastName,
+                email: directoryEmail,
+            });
             close();
             await onSaved();
         } catch (e) {
@@ -7839,6 +8202,11 @@ async function initUsers(mainEl) {
                     async () => {
                         try {
                             allPairs = await getAccountsForStudio();
+                            try {
+                                await refreshAccountContacts();
+                            } catch {
+                                /* keep prior contacts */
+                            }
                             renderTable();
                             if (syncMsg) syncMsg.textContent = 'Account updated.';
                         } catch (err) {
@@ -7850,11 +8218,17 @@ async function initUsers(mainEl) {
                     async () => {
                         try {
                             allPairs = await getAccountsForStudio();
+                            try {
+                                await refreshAccountContacts();
+                            } catch {
+                                /* keep prior contacts */
+                            }
                             renderTable();
                         } catch {
                             /* ignore */
                         }
-                    }
+                    },
+                    contactByPrincipal.get(String(row.principal || '')) || null,
                 );
             });
         }
@@ -8031,7 +8405,7 @@ function openServicesHelpPayPal() {
         <li>Open the <a href="https://developer.paypal.com/dashboard/applications/sandbox" target="_blank" rel="noopener">PayPal Developer Dashboard → Apps &amp; Credentials</a>. Use <strong>Sandbox</strong> while testing, then repeat in <strong>Live</strong>.</li>
         <li>Create (or open) an app and copy the <strong>Client ID</strong> into the matching field above (Sandbox → Sandbox, Live → Live).</li>
         <li>Copy the <strong>Secret</strong> into <code>services/fusion-integration-api/.env</code> as <code>PAYPAL_CLIENT_SECRET</code>, with <code>PAYPAL_CLIENT_ID</code> and <code>PAYPAL_MODE=sandbox</code> (or <code>live</code>).</li>
-        <li>Under <strong>Billing → Products &amp; plans</strong> (or via API), create a product, then subscription plans: bimonthly (<code>MONTH</code> ×2) and annual (<code>YEAR</code> ×1). Put the plan IDs on the server as <code>PAYPAL_PLAN_BIMONTHLY_ID</code> and <code>PAYPAL_PLAN_ANNUAL_ID</code>.</li>
+        <li>Under <strong>Billing → Products &amp; plans</strong> (or via API), create a product, then subscription plans: monthly (<code>MONTH</code> ×1, $30), quarterly (<code>MONTH</code> ×3, $75), and annual (<code>YEAR</code> ×1, $260). Put the plan IDs on the server as <code>PAYPAL_SUBSCRIPTION_MONTHLY_ID</code>, <code>PAYPAL_SUBSCRIPTION_QUARTERLY_ID</code>, and <code>PAYPAL_SUBSCRIPTION_ANNUAL_ID</code>. Keep <code>PAYPAL_PLAN_BIMONTHLY_ID</code> for legacy bi-monthly detection only. Plan changes use <code>POST /payments/subscription/revise</code>.</li>
         <li>Add a webhook pointing at <code>&lt;integration-api&gt;/webhooks/paypal</code> and set <code>PAYPAL_WEBHOOK_ID</code>.</li>
         <li>Set the environment toggle above to <strong>Test / Sandbox</strong> for testing. Use the sandbox buyer account to complete a checkout.</li>
       </ol>
@@ -8045,7 +8419,7 @@ function openServicesHelpStripe() {
         <li>Open <a href="https://dashboard.stripe.com/test/apikeys" target="_blank" rel="noopener">Stripe Dashboard → Developers → API keys</a> (test mode).</li>
         <li>Copy <strong>Publishable key</strong> (<code>pk_test_…</code>) into Studio above — used by Stripe.js in the browser.</li>
         <li>Copy <strong>Secret key</strong> (<code>sk_test_…</code>) into <code>services/fusion-integration-api/.env</code> as <code>STRIPE_SECRET_KEY</code> (never expose in client bundles).</li>
-        <li>Create a recurring <strong>Price</strong> (e.g. $50 every 2 months) and set <code>STRIPE_PRICE_ID=price_…</code> on the integration server. Join uses <code>POST /stripe/create-subscription</code>.</li>
+        <li>Legacy Stripe memberships may still use an older bi-monthly price (<code>STRIPE_PRICE_ID</code>). New membership tiers (monthly / quarterly / annual) are PayPal-first; Stripe plan changes are not wired yet.</li>
         <li>Register <code>/webhooks/stripe</code> in Stripe with <code>STRIPE_WEBHOOK_SECRET</code>; set <code>FUSION_BACKEND_CANISTER_ID</code>, <code>INTEGRATION_IC_IDENTITY_PEM</code> (full PEM from <code>dfx identity export</code> — Ed25519 or secp256k1), <code>IC_HOST</code>; optionally <code>INTEGRATION_IC_IDENTITY_JSON</code> instead of PEM for legacy Ed25519 JSON. Then call the canister <code>adminSetIntegrationServicePrincipal</code> with that identity’s principal (see <code>services/fusion-integration-api/README.md</code>).</li>
         <li>Run the integration API locally: <code>npm run integration-api</code> from the repo root; use <code>VITE_INTEGRATION_API_URL=/integration</code> with Vite proxy.</li>
         <li>Test cards: <a href="https://stripe.com/docs/testing" target="_blank" rel="noopener">Stripe testing</a> (e.g. <code>4242 4242 4242 4242</code>).</li>

@@ -22,6 +22,7 @@ export const STUDIO_PERMISSION_FEATURE_ROWS = [
     { id: 'programs', label: 'Programs' },
     { id: 'products', label: 'Products' },
     { id: 'gallery-access', label: 'Gallery Access' },
+    { id: 'join-network', label: 'Join Network' },
     { id: 'journal', label: 'Journal' },
     { id: 'sound', label: 'Sound' },
     { id: 'community', label: 'Community' },

@@ -45,6 +45,7 @@ function robotsForPath(path) {
  */
 function shouldDeferSeoToPage(path) {
     if (path === '/join-fusion') return true;
+    if (path === '/join-network') return true;
     if (path.startsWith('/profile')) return true;
     if (path.startsWith('/settings')) return true;
     const isEditionDetail =
@@ -180,6 +181,13 @@ const routes = {
         title: 'Join Fusion team | Fusion',
         description: 'Onboard to Fusion with a staff or collaborator invite code.',
         contentGenerator: 'generateJoinFusionContent',
+    },
+    '/join-network': {
+        loader: () => import('./components/joinNetworkPage.js'),
+        title: 'Join FUSION | Membership',
+        description:
+            'Join a curated network connecting artists, galleries, curators, and collectors through programs rooted in Japan.',
+        contentGenerator: 'generateJoinNetworkPageContent',
     },
     '/profile': {
         loader: () => import('./components/profile.js'),
@@ -327,6 +335,8 @@ class Router {
             document.documentElement.setAttribute('data-fusion-page', 'community');
         } else if (path === '/profile' || path.startsWith('/profile/')) {
             document.documentElement.setAttribute('data-fusion-page', 'profile');
+        } else if (path === '/join-network') {
+            document.documentElement.setAttribute('data-fusion-page', 'join-network');
         } else {
             document.documentElement.removeAttribute('data-fusion-page');
         }
@@ -641,7 +651,11 @@ class Router {
                 let appElement2 = document.getElementById('app');
                 const hasHeader = !!document.getElementById('header');
                 const hasFooter = !!document.getElementById('footer');
-                if (headerAndFooterActive === false && (!hasHeader || !hasFooter)) {
+                if (
+                    headerAndFooterActive === false &&
+                    (!hasHeader || !hasFooter) &&
+                    !route.noChrome
+                ) {
                     const headerHtml = renderHeader();
                     const footerHtml = renderFooter();
                     const parser = new DOMParser();
@@ -650,7 +664,7 @@ class Router {
                     if (!hasHeader) appElement2.appendChild(headerElement);
                     if (!hasFooter) appElement2.appendChild(footerElement);
                     headerAndFooterActive = true;
-                } else if (hasHeader && hasFooter) {
+                } else if (hasHeader && hasFooter && !route.noChrome) {
                     headerAndFooterActive = true;
                 }
 

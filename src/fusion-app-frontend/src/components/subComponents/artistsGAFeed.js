@@ -118,6 +118,7 @@ class ArtistsGAFeedElement extends HTMLElement {
                 }
 
                 .artist-card-image {
+                    position: relative;
                     width: 100%;
                     aspect-ratio: 3.5 / 4;
                     overflow: hidden;

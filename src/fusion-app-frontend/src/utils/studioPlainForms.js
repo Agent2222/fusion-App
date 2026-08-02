@@ -422,6 +422,15 @@ export function applicantCategoryPillHtml(category, escapeHtml) {
 }
 
 /**
+ * Partial-sponsorship pill (distinct green from full Sponsored).
+ * @param {(s: string) => string} escapeHtml
+ * @returns {string}
+ */
+export function applicantPartialSponsorshipPillHtml(escapeHtml) {
+    return `<span class="studio-status-pill studio-status-pill--category-partial">${escapeHtml('Partial')}</span>`;
+}
+
+/**
  * Applicant display names from payload.
  * @param {string} payloadJson
  * @param {string} [fullNameFallback]
@@ -488,7 +497,77 @@ export function suggestApplicantCategoryFromArtist(artist, currentProgramId) {
 }
 
 /**
- * @param {{ internalNotes: string, manualDepositSubmitted: boolean, applicantCategory?: ApplicantCategory, isTester?: boolean, flightCostCents?: number, localTravelCostCents?: number }} fields
+ * @param {string} payloadJson
+ * @returns {number} 0 when unset
+ */
+export function getApplicantSpecialProgramTotalCents(payloadJson) {
+    const { other } = parseApplicantPayload(payloadJson);
+    if (!other) return 0;
+    const n = Number(other.specialProgramTotalCents ?? 0);
+    return Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0;
+}
+
+/**
+ * @param {string} payloadJson
+ * @returns {'none' | 'partial' | 'full'}
+ */
+export function getApplicantSponsorshipMode(payloadJson) {
+    const { other } = parseApplicantPayload(payloadJson);
+    if (!other) return 'none';
+    const m = String(other.sponsorshipMode || '').trim().toLowerCase();
+    if (m === 'full' || m === 'partial') return m;
+    return 'none';
+}
+
+/**
+ * Category column HTML: base category pill, plus Partial when sponsorship mode is partial.
+ * @param {string} payloadJson
+ * @param {(s: string) => string} escapeHtml
+ * @returns {string}
+ */
+export function applicantCategoryCellHtml(payloadJson, escapeHtml) {
+    const categoryPill = applicantCategoryPillHtml(getApplicantCategory(payloadJson), escapeHtml);
+    if (getApplicantSponsorshipMode(payloadJson) === 'partial') {
+        return `${categoryPill} ${applicantPartialSponsorshipPillHtml(escapeHtml)}`;
+    }
+    return categoryPill;
+}
+
+/**
+ * @param {string} payloadJson
+ * @returns {number}
+ */
+export function getApplicantSponsoredCreditCents(payloadJson) {
+    const { other } = parseApplicantPayload(payloadJson);
+    if (!other) return 0;
+    const n = Number(other.sponsoredCreditCents ?? 0);
+    return Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0;
+}
+
+/**
+ * @param {string} payloadJson
+ * @returns {number | null} percent 0–100 when set
+ */
+export function getApplicantSponsoredPercent(payloadJson) {
+    const { other } = parseApplicantPayload(payloadJson);
+    if (!other || other.sponsoredPercent == null || other.sponsoredPercent === '') return null;
+    const n = Number(other.sponsoredPercent);
+    if (!Number.isFinite(n)) return null;
+    return Math.max(0, Math.min(100, n));
+}
+
+/**
+ * @param {string} payloadJson
+ * @returns {'usd' | 'percent'}
+ */
+export function getApplicantSponsoredCreditInputMode(payloadJson) {
+    const { other } = parseApplicantPayload(payloadJson);
+    if (!other) return 'usd';
+    return String(other.sponsoredCreditInputMode || '').toLowerCase() === 'percent' ? 'percent' : 'usd';
+}
+
+/**
+ * @param {{ internalNotes: string, manualDepositSubmitted: boolean, applicantCategory?: ApplicantCategory, isTester?: boolean, flightCostCents?: number, localTravelCostCents?: number, specialProgramTotalCents?: number | null, sponsorshipMode?: 'none' | 'partial' | 'full', sponsoredCreditCents?: number, sponsoredPercent?: number | null, sponsoredCreditInputMode?: 'usd' | 'percent' }} fields
  * @param {string} previousPayloadJson
  * @returns {string} JSON string for `payloadJson` on applicant record
  */
@@ -546,6 +625,55 @@ export function mergeApplicantStaffFields(fields, previousPayloadJson) {
             delete next.staffApplicantLocalTravelCostCents;
         }
     }
+    if (fields.specialProgramTotalCents !== undefined) {
+        const special = Math.max(0, Math.round(Number(fields.specialProgramTotalCents) || 0));
+        if (special > 0) {
+            next.specialProgramTotalCents = special;
+        } else {
+            delete next.specialProgramTotalCents;
+        }
+    }
+    if (fields.sponsorshipMode !== undefined) {
+        const mode = String(fields.sponsorshipMode || 'none').toLowerCase();
+        if (mode === 'full' || mode === 'partial') {
+            next.sponsorshipMode = mode;
+        } else {
+            delete next.sponsorshipMode;
+            delete next.sponsoredCreditCents;
+            delete next.sponsoredPercent;
+            delete next.sponsoredCreditInputMode;
+        }
+    }
+    if (fields.sponsoredCreditCents !== undefined) {
+        const credit = Math.max(0, Math.round(Number(fields.sponsoredCreditCents) || 0));
+        if (credit > 0 && String(next.sponsorshipMode || '') === 'partial') {
+            next.sponsoredCreditCents = credit;
+        } else if (String(next.sponsorshipMode || '') !== 'partial') {
+            delete next.sponsoredCreditCents;
+        } else if (credit <= 0) {
+            delete next.sponsoredCreditCents;
+        }
+    }
+    if (fields.sponsoredPercent !== undefined) {
+        if (fields.sponsoredPercent == null || fields.sponsoredPercent === '') {
+            delete next.sponsoredPercent;
+        } else {
+            const pct = Math.max(0, Math.min(100, Number(fields.sponsoredPercent)));
+            if (Number.isFinite(pct) && String(next.sponsorshipMode || '') === 'partial') {
+                next.sponsoredPercent = pct;
+            } else {
+                delete next.sponsoredPercent;
+            }
+        }
+    }
+    if (fields.sponsoredCreditInputMode !== undefined) {
+        if (String(next.sponsorshipMode || '') === 'partial') {
+            next.sponsoredCreditInputMode =
+                fields.sponsoredCreditInputMode === 'percent' ? 'percent' : 'usd';
+        } else {
+            delete next.sponsoredCreditInputMode;
+        }
+    }
     return JSON.stringify(next);
 }
 
@@ -563,6 +691,11 @@ export function mergeApplicantInternalNotes(internalNotes, previousPayloadJson) 
             isTester: getApplicantIsTester(previousPayloadJson),
             flightCostCents: getApplicantFlightCostCents(previousPayloadJson),
             localTravelCostCents: getApplicantLocalTravelCostCents(previousPayloadJson),
+            specialProgramTotalCents: getApplicantSpecialProgramTotalCents(previousPayloadJson) || null,
+            sponsorshipMode: getApplicantSponsorshipMode(previousPayloadJson),
+            sponsoredCreditCents: getApplicantSponsoredCreditCents(previousPayloadJson),
+            sponsoredPercent: getApplicantSponsoredPercent(previousPayloadJson),
+            sponsoredCreditInputMode: getApplicantSponsoredCreditInputMode(previousPayloadJson),
         },
         previousPayloadJson,
     );

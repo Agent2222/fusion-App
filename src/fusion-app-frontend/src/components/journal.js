@@ -126,13 +126,17 @@ export default async function initJournal() {
                 const artist = pickArtistForRow(row, Array.isArray(artists) ? artists : [], 'audio');
                 if (!artist) continue;
                 const entries = getApprovedAudioEntries(artist);
+                const artistSlug = String(artist?.slug ?? '').trim();
+                const artistHrefAttr = artistSlug
+                    ? ` data-artist-href="${escAttr(`/profile/${artistSlug}`)}"`
+                    : '';
                 if (entries.length > 1) {
                     html.push(
-                        `<app-audio-row active="true" data-audio-sources='${escAttr(JSON.stringify(entries))}'></app-audio-row>`,
+                        `<app-audio-row active="true" data-audio-sources='${escAttr(JSON.stringify(entries))}'${artistHrefAttr}></app-audio-row>`,
                     );
                 } else if (entries.length === 1) {
                     html.push(
-                        `<app-audio-row active="true" data-audio-src="${escAttr(entries[0].url)}" data-audio-title="${escAttr(entries[0].title)}"></app-audio-row>`,
+                        `<app-audio-row active="true" data-audio-src="${escAttr(entries[0].url)}" data-audio-title="${escAttr(entries[0].title)}"${artistHrefAttr}></app-audio-row>`,
                     );
                 } else {
                     const src = String(artist.audioUrl ?? '').trim();
@@ -142,7 +146,7 @@ export default async function initJournal() {
                         String(artist?.locales?.en?.name ?? '').trim() ||
                         'Artist audio';
                     html.push(
-                        `<app-audio-row active="true" data-audio-src="${escAttr(src)}" data-audio-title="${escAttr(title)}"></app-audio-row>`,
+                        `<app-audio-row active="true" data-audio-src="${escAttr(src)}" data-audio-title="${escAttr(title)}"${artistHrefAttr}></app-audio-row>`,
                     );
                 }
             }

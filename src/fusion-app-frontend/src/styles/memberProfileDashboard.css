@@ -45,8 +45,10 @@
   align-self: start;
   position: sticky;
   top: 0;
+  padding-top: 9rem;
   min-height: 100vh;
   min-height: 100dvh;
+}
   max-height: 100vh;
   max-height: 100dvh;
   box-sizing: border-box;
@@ -56,9 +58,6 @@
   padding-right: 0.7rem;
 }
 
-.settings-profile-page .settings-profile-studio .studio-sidebar .studio-sidebar-footer {
-  margin-right: -0.7rem;
-}
 
 .settings-profile-page .settings-profile-studio .studio-sidebar .studio-nav {
   padding-right: 0;
@@ -110,6 +109,7 @@
   min-height: 0;
   height: auto;
   max-height: none;
+  position: relative;
 }
 
 /* Remove white topbar stripe; large Studio title in the workspace */
@@ -139,9 +139,11 @@
   .settings-profile-page .settings-profile-studio .studio-sidebar {
     position: fixed;
     top: 0;
+    padding-top: calc(1rem + env(safe-area-inset-top, 0px));
     max-height: 100vh;
     max-height: 100dvh;
   }
+
 }
 
 /* Overview CTAs — align with program view (#programIntroCTA1) */
@@ -939,18 +941,18 @@
   gap: 0.35rem;
   text-transform: none;
   letter-spacing: normal;
-  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border: 1px dashed color-mix(in srgb, var(--c2, #0f172a) 18%, transparent);
   border-radius: 6px;
 }
 .settings-profile-page .mpd-media-placeholder--detailed strong {
   font-size: 0.88rem;
-  color: rgba(255, 255, 255, 0.55);
+  color: color-mix(in srgb, var(--c2, #0f172a) 55%, transparent);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
 .settings-profile-page .mpd-media-placeholder--detailed small {
   font-size: 0.7rem;
-  color: rgba(255, 255, 255, 0.32);
+  color: color-mix(in srgb, var(--c2, #0f172a) 38%, transparent);
   line-height: 1.45;
   font-weight: 400;
 }
@@ -2813,6 +2815,49 @@
   color: #94a3b8;
 }
 
+.settings-profile-page .mpd-membership-manage-card {
+  border: 1px solid #e2e8f0;
+  border-radius: var(--studio-card-radius, 8px);
+  background: #fff;
+  padding: 1rem 1.1rem;
+}
+
+.settings-profile-page .mpd-membership-manage-card .mpd-membership-action-row {
+  margin-top: 0.75rem;
+  width: 100%;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.settings-profile-page .mpd-membership-manage-card .mpd-membership-action-row--plan {
+  margin-bottom: 0.65rem;
+}
+
+.settings-profile-page .mpd-membership-action-row__icon--plan::before {
+  content: '↻';
+  font-size: 1.05rem;
+}
+
+.settings-profile-page .mpd-membership-manage-card .mpd-membership-cancel-outline {
+  margin-top: 0;
+}
+
+.settings-profile-page .mpd-membership-legacy-note {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.82rem;
+}
+
+.settings-profile-page .mpd-membership-plan-updated {
+  margin: 0.75rem 0 0;
+  padding: 0.65rem 0.85rem;
+  border-radius: 6px;
+  background: #f0fdf4;
+  color: #166534;
+  font-size: 0.9rem;
+}
+
 .settings-profile-page .mpd-membership-cancel-card {
   border: 1px solid #e2e8f0;
   border-radius: var(--studio-card-radius, 8px);
@@ -2882,6 +2927,85 @@
   width: auto;
   flex: 1;
   min-width: 10rem;
+}
+
+.settings-profile-page .mpd-membership-change-plan-modal .mpd-membership-change-plan-modal__panel {
+  max-width: 32rem;
+}
+
+.settings-profile-page .mpd-membership-change-plan-modal__lead {
+  margin: 0 0 0.85rem;
+}
+
+.settings-profile-page .mpd-membership-change-plan-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-top: 0.5rem;
+}
+
+.settings-profile-page .mpd-membership-change-plan-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.settings-profile-page .mpd-membership-change-plan-option:hover:not(.mpd-membership-change-plan-option--current) {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.settings-profile-page .mpd-membership-change-plan-option--current {
+  background: #f8fafc;
+  cursor: default;
+  opacity: 0.85;
+}
+
+.settings-profile-page .mpd-membership-change-plan-option input {
+  margin-top: 0.2rem;
+  flex-shrink: 0;
+}
+
+.settings-profile-page .mpd-membership-change-plan-option__main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.settings-profile-page .mpd-membership-change-plan-option__main strong {
+  font-variation-settings: var(--fv-subtitle);
+}
+
+.settings-profile-page .mpd-membership-change-plan-option__kind {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+  font-variation-settings: var(--fv-label);
+}
+
+.settings-profile-page .mpd-membership-change-plan-modal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+
+.settings-profile-page .mpd-membership-change-plan-modal__actions .studio-btn-primary {
+  flex: 1;
+  min-width: 10rem;
+}
+
+.settings-profile-page .mpd-membership-change-plan-modal__actions .profile-gallery-access-modal__close {
+  flex: 1;
+  min-width: 8rem;
 }
 
 .settings-profile-page .mpd-payments-shell {
@@ -4116,15 +4240,20 @@ a.mpd-section-card:hover {
   text-decoration: underline;
 }
 
-/* — Right column: Publish card — */
+/* — Publish card (right column) — */
 .settings-profile-page .mpd-publish-card {
-  background: transparent;
-  border: 1px solid color-mix(in srgb, var(--c2) 14%, transparent);
-  border-radius: 4px;
-  padding: 1rem 1rem 1.15rem;
+  background: var(--c2, #0f172a);
+  color: var(--c3, #fff);
+  border: none;
+  border-radius: 8px;
+  padding: 1rem 1.1rem 1.15rem;
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
+}
+
+.settings-profile-page .mpd-publish-card .mpd-section-label {
+  color: rgba(255, 255, 255, 0.55);
 }
 
 .settings-profile-page .mpd-publish-select-wrap {
@@ -4138,25 +4267,25 @@ a.mpd-section-card:hover {
   font-variation-settings: var(--fv-label);
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: color-mix(in srgb, var(--c2) 55%, transparent);
+  color: rgba(255, 255, 255, 0.5);
 }
 
 .settings-profile-page .mpd-publish-select {
   min-height: 2.5rem;
   border-radius: 4px;
   font-size: 0.85rem;
-  border: 1px solid color-mix(in srgb, var(--c2) 18%, transparent);
+  border: 1px solid rgba(255, 255, 255, 0.15);
   padding: 0.45rem 0.65rem;
-  background: #fff;
-  color: var(--c2);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
 }
 
 .settings-profile-page .mpd-publish-save {
   width: 100%;
   min-height: 2.65rem;
   padding: 0.6rem 1rem;
-  background: var(--c2);
-  color: var(--c3, #fff);
+  background: var(--c3, #fff);
+  color: var(--c2, #0f172a);
   border: none;
   border-radius: 4px;
   font-size: 0.78rem;
@@ -4215,7 +4344,7 @@ a.mpd-section-card:hover {
   display: flex;
   align-items: center;
   gap: clamp(1rem, 2.5vw, 2rem);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid color-mix(in srgb, var(--c2) 14%, transparent);
   margin-bottom: 1.25rem;
   padding-bottom: 0;
 }
@@ -4229,7 +4358,7 @@ a.mpd-section-card:hover {
   border: 0;
   border-radius: 0;
   background: transparent;
-  color: rgba(255, 255, 255, 0.5);
+  color: color-mix(in srgb, var(--c2, #0f172a) 48%, transparent);
   font-size: 0.92rem;
   font-variation-settings: var(--fv-label);
   letter-spacing: 0.02em;
@@ -4237,7 +4366,7 @@ a.mpd-section-card:hover {
   transition: color 0.2s;
 }
 .settings-profile-page .mpd-identity-tab:hover {
-  color: rgba(255, 255, 255, 0.8);
+  color: color-mix(in srgb, var(--c2, #0f172a) 75%, transparent);
 }
 
 .settings-profile-page .mpd-identity-tab::after {
@@ -4253,7 +4382,7 @@ a.mpd-section-card:hover {
 }
 
 .settings-profile-page .mpd-identity-tab.is-active {
-  color: #fff;
+  color: var(--c2, #0f172a);
   font-variation-settings: var(--fv-nav-active);
 }
 
@@ -4388,20 +4517,28 @@ a.mpd-section-card:hover {
 .mpd-audio-capture-modal__scrim {
   position: absolute;
   inset: 0;
-  background: rgba(15, 23, 42, 0.45);
+  background: rgba(20, 18, 16, 0.45);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  animation: mpdAcFadeIn 0.2s ease;
 }
+
+@keyframes mpdAcFadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes mpdAcSlideIn { from { opacity: 0; transform: translateY(18px) scale(0.97); } to { opacity: 1; transform: none; } }
 
 .mpd-audio-capture-modal__panel {
   position: relative;
   z-index: 1;
-  width: min(100%, 28rem);
-  background: var(--bg, #faf3f4);
-  border: 1px solid var(--c2);
-  border-radius: 4px;
-  padding: 1.25rem 1.2rem 1.35rem;
-  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
-  color: var(--c2);
-  font-family: 'momochidori', system-ui, sans-serif;
+  width: min(100%, 26rem);
+  background: var(--bg, #f7f2ef);
+  border: none;
+  border-radius: 24px;
+  padding: 2rem 1.75rem 1.75rem;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.22);
+  color: var(--c2, #000);
+  font-family: 'momochidori-variable', 'momochidori', system-ui, sans-serif;
+  animation: mpdAcSlideIn 0.25s ease;
+  overflow: hidden;
 }
 
 .mpd-audio-capture-modal__head {
@@ -4409,36 +4546,58 @@ a.mpd-section-card:hover {
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
-  margin-bottom: 0.65rem;
+  margin-bottom: 0.35rem;
 }
 
 .mpd-audio-capture-modal__head h2 {
   margin: 0;
-  font-size: 1.15rem;
-  font-variation-settings: var(--fv-subtitle);
+  font-size: clamp(1.35rem, 2.5vw, 1.65rem);
+  font-variation-settings: var(--fv-title, "wght" 650);
+  letter-spacing: -0.02em;
+  line-height: 1.1;
 }
 
 .mpd-audio-capture-modal__x {
   border: 0;
   background: transparent;
-  font-size: 1.5rem;
+  font-size: 1.35rem;
   line-height: 1;
   cursor: pointer;
-  color: var(--c2);
-  padding: 0.1rem 0.25rem;
+  color: var(--c2, #000);
+  width: 2.1rem;
+  height: 2.1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  transition: background 0.18s ease;
+  flex-shrink: 0;
+}
+
+.mpd-audio-capture-modal__x:hover {
+  background: color-mix(in srgb, var(--c2) 8%, transparent);
 }
 
 .mpd-audio-capture-modal__lead {
-  margin: 0 0 1rem;
-  font-size: 0.82rem;
-  line-height: 1.45;
-  opacity: 0.82;
+  margin: 0 0 1.25rem;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  font-variation-settings: "wght" 450;
+  color: color-mix(in srgb, var(--c2, #000) 72%, transparent);
+  max-width: 22rem;
+}
+
+.mpd-audio-capture-modal__lead em {
+  font-style: italic;
+  font-variation-settings: "wght" 500;
+  color: var(--c2, #000);
 }
 
 .mpd-audio-capture-modal__meter {
-  height: 4px;
-  background: color-mix(in srgb, var(--c2) 12%, transparent);
-  margin-bottom: 0.65rem;
+  height: 3px;
+  background: color-mix(in srgb, var(--c2) 10%, transparent);
+  border-radius: 2px;
+  margin-bottom: 0.75rem;
   overflow: hidden;
 }
 
@@ -4446,28 +4605,32 @@ a.mpd-section-card:hover {
   display: block;
   height: 100%;
   width: 0%;
-  background: var(--c2);
+  background: var(--c4, #a2b792);
+  border-radius: 2px;
   transition: width 0.08s linear;
 }
 
 .mpd-audio-capture-modal__time {
-  font-size: 0.92rem;
-  font-variation-settings: var(--fv-label);
-  letter-spacing: 0.04em;
-  margin-bottom: 0.5rem;
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.55rem;
+  color: color-mix(in srgb, var(--c2, #000) 65%, transparent);
 }
 
 .mpd-audio-capture-modal__status {
   min-height: 1.25em;
   font-size: 0.78rem;
   margin-bottom: 0.75rem;
-  opacity: 0.85;
+  font-variation-settings: "wght" 500;
+  color: color-mix(in srgb, var(--c2, #000) 75%, transparent);
 }
 
 .mpd-audio-capture-modal__preview {
   width: 100%;
-  margin-bottom: 0.85rem;
+  margin-bottom: 1rem;
   accent-color: var(--c2);
+  border-radius: 0;
 }
 
 .mpd-audio-capture-modal__actions {
@@ -4475,6 +4638,70 @@ a.mpd-section-card:hover {
   flex-wrap: wrap;
   gap: 0.55rem;
   align-items: center;
+  padding-top: 0.25rem;
+}
+
+.mpd-audio-capture-modal__actions .mpd-upload-btn,
+.mpd-audio-capture-modal__actions .mpd-audio-record-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.7rem 1.15rem;
+  border: none;
+  background: #111;
+  color: #fff;
+  font-family: inherit;
+  font-size: clamp(0.62rem, 0.9vw, 0.75rem);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-variation-settings: var(--fv-nav-active, "wght" 550);
+  cursor: pointer;
+  border-radius: 999px;
+  transition: opacity 0.18s ease;
+}
+
+.mpd-audio-capture-modal__actions .mpd-upload-btn:hover,
+.mpd-audio-capture-modal__actions .mpd-audio-record-btn:hover {
+  opacity: 0.88;
+}
+
+.mpd-audio-capture-modal__actions .mpd-membership-cancel-outline {
+  padding: 0.65rem 1rem;
+  border: 1px solid var(--c2, #000);
+  background: transparent;
+  color: var(--c2, #000);
+  font-family: inherit;
+  font-size: clamp(0.62rem, 0.9vw, 0.75rem);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-variation-settings: var(--fv-nav-active, "wght" 550);
+  cursor: pointer;
+  border-radius: 999px;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.mpd-audio-capture-modal__actions .mpd-membership-cancel-outline:hover {
+  background: var(--c2, #000);
+  color: #fff;
+}
+
+.mpd-audio-capture-modal__actions .profile-gallery-access-modal__close {
+  padding: 0.65rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--c2, #000) 25%, transparent);
+  background: transparent;
+  color: var(--c2, #000);
+  font-family: inherit;
+  font-size: clamp(0.62rem, 0.9vw, 0.75rem);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-variation-settings: var(--fv-nav-active, "wght" 550);
+  cursor: pointer;
+  border-radius: 999px;
+  transition: background 0.18s ease;
+}
+
+.mpd-audio-capture-modal__actions .profile-gallery-access-modal__close:hover {
+  background: color-mix(in srgb, var(--c2, #000) 6%, transparent);
 }
 
 /* ── Audio inspiration blockquote ── */
@@ -4600,9 +4827,9 @@ a.mpd-section-card:hover {
 
 .mpd-audio-capture-modal__help {
   margin: 0.75rem 0;
-  padding: 0.75rem 1rem;
-  border: 1px solid color-mix(in srgb, var(--c2) 25%, transparent);
-  border-radius: 4px;
+  padding: 0.85rem 1rem;
+  border: none;
+  border-radius: 12px;
   background: color-mix(in srgb, var(--c2) 5%, transparent);
   font-size: clamp(0.75rem, 1vw, 0.85rem);
   line-height: 1.55;
@@ -4701,13 +4928,14 @@ a.mpd-section-card:hover {
   max-width: 400px;
   padding: 1.5rem;
   border-radius: 12px;
-  background: var(--bg, #1a1a2e);
+  background: var(--c2, #0f172a);
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
   animation: mpd-rn-slidein 0.25s ease;
   display: flex;
   flex-direction: column;
   gap: 0.8rem;
+  color: #fff;
 }
 @keyframes mpd-rn-slidein {
   from { opacity: 0; transform: translateY(16px) scale(0.97); }

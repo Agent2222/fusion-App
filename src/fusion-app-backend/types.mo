@@ -334,7 +334,15 @@ module {
     };
 
     /// Program card + detail page JSON (versioned) — mirrors `testData.allPrograms.programs`.
-    /// Locale JSON may include `programPage.applicationPaymentOptions` (one_time | bimonthly | annual — application form cards),
+    /// Locale JSON may include `programPage.applicationPaymentOptions` (one_time | monthly | quarterly | annual — application form cards),
+
+    /// Result of `applicationFeeDueForCaller` (dueCents is USD cents).
+    public type ApplicationFeeDue = {
+        dueCents : Nat;
+        reason : Text;
+        membershipTier : Text;
+        appCreditBalance : Nat;
+    };
     /// `programPage.programDetails.costs.applicationFee` (sidebar),
     /// `programPage.additionalInfo.applicationFee` (Application Fee dropdown),
     /// and `programPage.additionalInfo.aboutProgram` (About Program dropdown).
@@ -569,6 +577,82 @@ module {
         externalPaymentId : Text;
         externalChargeId : Text;
         externalReceiptUrl : Text;
+    };
+
+    /// Studio Finance → Promotions campaign cost tracking.
+    public type FinancePromotion = {
+        id : Text;
+        name : Text;
+        company : Text;
+        startIso : Text;
+        endIso : Text;
+        /// "platform" | "program"
+        target : Text;
+        programId : Text;
+        costCents : Nat;
+        status : Text;
+        createdAt : Text;
+        updatedAt : Text;
+        createdBy : Text;
+    };
+
+    /// Studio Finance → Programs team member (expenses + manual disbursements).
+    public type ProgramTeamMember = {
+        id : Text;
+        programId : Text;
+        principalText : Text;
+        /// "admin" | "staff" | "collaborator"
+        kind : Text;
+        ticketsCents : Nat;
+        localTravelCents : Nat;
+        partner1Cents : Nat;
+        partner2Cents : Nat;
+        partner3Cents : Nat;
+        /// Cached sum of active owed ledger entries
+        amountOwedCents : Nat;
+        /// Cached sum of active paid ledger entries
+        amountPaidCents : Nat;
+        /// 0–100 share of program profit for projected payout
+        payoutPercent : Nat;
+        createdAt : Text;
+        updatedAt : Text;
+        createdBy : Text;
+        /// "active" | "removed"
+        status : Text;
+    };
+
+    /// Manual owed line item for a program team member.
+    public type ProgramTeamOwedEntry = {
+        id : Text;
+        teamMemberId : Text;
+        programId : Text;
+        name : Text;
+        description : Text;
+        dateIso : Text;
+        amountCents : Nat;
+        createdAt : Text;
+        updatedAt : Text;
+        createdBy : Text;
+        /// "active" | "voided"
+        status : Text;
+    };
+
+    /// Manual paid disbursement line item for a program team member.
+    public type ProgramTeamPaidEntry = {
+        id : Text;
+        teamMemberId : Text;
+        programId : Text;
+        name : Text;
+        description : Text;
+        dateIso : Text;
+        amountCents : Nat;
+        /// "stripe" | "paypal" | "wire" | "cash" | "other"
+        paymentService : Text;
+        createdAt : Text;
+        updatedAt : Text;
+        createdBy : Text;
+        /// "active" | "voided"
+        status : Text;
     };
 
     /// Legacy ledger row (pre feeCents/staffNote) — stable upgrade migration only.

@@ -12,7 +12,7 @@ import {
 } from './emailFusionLayout.js';
 
 /**
- * @typedef {'artist' | 'journal' | 'program' | 'video'} EmailContentSourceType
+ * @typedef {'artist' | 'journal' | 'program' | 'video' | 'website'} EmailContentSourceType
  */
 
 /**
@@ -224,6 +224,45 @@ export const EMAIL_CAMPAIGN_TEMPLATES = {
             cta: { label: 'READ ENTRY', href: 'https://www.fusionart.world/journal' },
         }),
         notes: 'Bind a journal entry to pull image, title, and link.',
+    },
+    tpl_onboarding: {
+        id: 'tpl_onboarding',
+        name: 'Onboarding',
+        templateGroup: 'campaigns',
+        defaultEyebrow: 'Join the Network',
+        contentSourceTypes: ['website'],
+        defaultSubject: 'Your practice belongs in a wider context — Join FUSION',
+        defaultPreview:
+            'A curated network connecting artists, galleries, curators, and collectors through programs rooted in Japan.',
+        bodyHtml: renderFusionEmailFromSlots({
+            eyebrow: 'Join the Network',
+            heroImageUrl: generalSlots.heroImageUrl,
+            heroAlt: 'Fusion network — Japan',
+            pillLabel: 'MEMBERSHIP',
+            headlineHtml: 'Your practice<br>belongs in a<br>wider context.',
+            bodyHtml: [
+                fusionEmailParagraph(
+                    'Join a curated network connecting artists, galleries, curators, and collectors through programs rooted in Japan.',
+                    'lead',
+                ),
+                `<ul style="${FUSION_EMAIL_STYLES.bodyList}">
+<li>Artist profile + gallery system</li>
+<li>Residency &amp; program applications included</li>
+<li>Access to the network and platform updates</li>
+<li>Exclusive content and community</li>
+</ul>`,
+                fusionEmailParagraph(
+                    'Create your membership in under two minutes. Secure payment by PayPal or card — cancel anytime.',
+                    'last',
+                ),
+            ].join('\n'),
+            cta: {
+                label: 'JOIN FUSION',
+                href: 'https://fusionart.world/join-network',
+            },
+            footnote: 'Residency applications included · Cancel anytime',
+        }),
+        notes: 'Bind a Website / Network item for story focus; CTA links to /join-network.',
     },
     tpl_open_call: {
         id: 'tpl_open_call',

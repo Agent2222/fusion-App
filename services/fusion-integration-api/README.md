@@ -31,8 +31,13 @@ stripe listen --forward-to localhost:8787/webhooks/stripe
 | `CORS_ORIGINS` | no | With `CORS_STRICT`, comma-separated extra allowed origins (e.g. `https://….icp0.io`). Ignored when `CORS_STRICT` is unset. |
 | `INTEGRATION_API_KEY` | no | If set, require `Authorization: Bearer <token>` on POST routes |
 | `STRIPE_SECRET_KEY` | for Stripe | `sk_test_…` or `sk_live_…` |
-| `STRIPE_PRICE_ID` | for subscriptions | Recurring Price id (`price_…`) for membership (bi-monthly; default tier) |
-| `STRIPE_ANNUAL_PRICE_ID` | optional | Recurring Price id for **annual** tier when the client sends `subscriptionTier: "annual"` (e.g. program application). Example: `price_1TOO5UHMfdeKt5zM6b6dPmfr` |
+| `STRIPE_PRICE_ID` | for subscriptions | Legacy Stripe recurring Price id (`price_…`) when Stripe provider is selected |
+| `STRIPE_ANNUAL_PRICE_ID` | optional | Legacy Stripe annual Price id |
+| `PAYPAL_SUBSCRIPTION_MONTHLY_ID` | PayPal memberships | Monthly plan id ($30) for new checkouts |
+| `PAYPAL_SUBSCRIPTION_QUARTERLY_ID` | PayPal memberships | Quarterly plan id ($75) |
+| `PAYPAL_SUBSCRIPTION_ANNUAL_ID` | PayPal memberships | Annual plan id ($260); falls back to `PAYPAL_PLAN_ANNUAL_ID` |
+| `PAYPAL_PLAN_BIMONTHLY_ID` | legacy detection | Old bi-monthly plan id (Settings / revise detection only) |
+| `PAYPAL_PLAN_ANNUAL_ID` | optional fallback | Annual plan id if `PAYPAL_SUBSCRIPTION_ANNUAL_ID` unset |
 | `STRIPE_WEBHOOK_SECRET` | for webhooks | `whsec_…` from Stripe Dashboard or `stripe listen` |
 | `FUSION_BACKEND_CANISTER_ID` | to sync on-chain | fusion-app-backend canister id |
 | `INTEGRATION_IC_IDENTITY_PEM` | to sync on-chain (preferred) | Full PEM from `dfx identity export <name>` |
@@ -67,7 +72,11 @@ stripe listen --forward-to localhost:8787/webhooks/stripe
 ## Routes
 
 - `GET /health` — status flags (no secrets); includes `stripePrice`, `fusionCanister`, `stripeWebhook`, `storageBackend`, nested `storage: { active, aws, r2 }`, and legacy `s3` (active backend configured)
-- `POST /stripe/create-subscription` — body `{ principal?, email, metadata?, payFirst?, subscriptionTier? }` — `subscriptionTier` optional: `bimonthly` (default) or `annual` (uses `STRIPE_ANNUAL_PRICE_ID`). Creates/finds Customer, Subscription, returns `clientSecret` from the first invoice PaymentIntent
+- `GET /payments/config` — PayPal mode + `planMonthly` / `planQuarterly` / `planAnnual` / `planBimonthlyLegacy`
+- `POST /payments/subscription` — PayPal membership create (`subscriptionTier`: `monthly` | `quarterly` | `annual`)
+- `POST /payments/subscription/revise` — PayPal plan change (returns `approveUrl` for buyer re-consent)
+- `POST /payments/member-billing-summary` — PayPal tier labels for Settings Membership
+- `POST /stripe/create-subscription` — body `{ principal?, email, metadata?, payFirst?, subscriptionTier? }` — legacy Stripe path when provider is Stripe
 - `POST /stripe/subscription-status-by-email` — body `{ email }` — looks up Stripe customer by email, returns best subscription + `membershipActive` (`true` when status is `active` or `trialing`). Studio “Manage user” live check (API key required)
 - `POST /stripe/membership-revenue-summary` — no body — aggregates active/trialing Fusion membership subscriptions from Stripe into `mrrCents`, per-cadence cycle totals (`monthlyCents`, `bimonthlyCents`, `annualCents`), and subscriber counts. Studio Finance → Users (API key required)
 - `POST /stripe/sync-subscription-by-email` — body `{ email, principal }` — finds customer by email, pushes best subscription to the canister with `metadata.principal` (Studio after email check; API key required)
