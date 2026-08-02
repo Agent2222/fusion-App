@@ -637,26 +637,45 @@ function renderDetailsTab(escapeHtml, en, ja) {
  * @param {Record<string, unknown>} en
  * @param {Record<string, unknown>} ja
  */
+/**
+ * Default useGlobalPaymentOptionDetails to true when unset (for checkbox display).
+ * @param {Record<string, unknown>} localeRoot
+ */
+function withUseGlobalPaymentDefault(localeRoot) {
+    const root = { ...asObj(localeRoot) };
+    const pp = { ...asObj(root.programPage) };
+    const af = { ...asObj(pp.applicationForm) };
+    if (af.useGlobalPaymentOptionDetails === undefined) {
+        af.useGlobalPaymentOptionDetails = true;
+    }
+    pp.applicationForm = af;
+    root.programPage = pp;
+    return root;
+}
+
 function renderApplicationTab(escapeHtml, en, ja) {
+    const enCheck = withUseGlobalPaymentDefault(en);
+    const jaCheck = withUseGlobalPaymentDefault(ja);
     let html = `${panelSectionHeadHtml(escapeHtml, 'application')}
   <div class="studio-prog-editor-fields">
   <h4 class="studio-prog-subhead">Application form</h4>
-  <p class="studio-modal-hint">One-page apply: deposit, deadline, fee notice, selection process override. <strong>Application fee (cents)</strong> required for Stripe one-time payment.</p>
+  <p class="studio-modal-hint">One-page apply: deposit, deadline, selection process override. <strong>Application fee (cents)</strong> required for one-time payment.</p>
   ${rowLocale(escapeHtml, 'Deposit amount (display)', 'programPage.applicationForm.depositAmountDisplay', en, ja)}
   ${rowLocale(escapeHtml, 'Application fee amount (cents)', 'programPage.applicationForm.applicationFeeAmountCents', en, ja)}
   ${rowLocale(escapeHtml, 'Application deadline (ISO)', 'programPage.applicationForm.applicationDeadlineIso', en, ja)}
   ${rowLocale(escapeHtml, 'Application deadline (display)', 'programPage.applicationForm.applicationDeadlineDisplay', en, ja)}
-  ${rowLocale(escapeHtml, 'Fee notice (italic)', 'programPage.applicationForm.feeNoticeItalic', en, ja, 'textarea')}
   ${rowLocale(escapeHtml, 'Selection process override', 'programPage.applicationForm.selectionProcessOverride', en, ja, 'textarea')}
 
   <h4 class="studio-prog-subhead">Payment option cards</h4>
-  <p class="studio-modal-hint">Copy for payment cards on the application form.</p>`;
+  ${rowLocale(escapeHtml, 'Use global payment option details', 'programPage.applicationForm.useGlobalPaymentOptionDetails', enCheck, jaCheck, 'checkbox')}
+  <p class="studio-modal-hint">When checked, empty fields inherit Join Network (register modal) plan titles, prices, and bullets. Monthly on this form is the <strong>monthly + application</strong> add-on (different PayPal plan than Join).</p>`;
 
-    const payPlans = /** @type {const} */ (['one_time', 'bimonthly', 'annual']);
+    const payPlans = /** @type {const} */ (['one_time', 'monthly', 'quarterly', 'annual']);
     const payPlanLabel = {
-        one_time: '1. Single payment',
-        bimonthly: '2. Bimonthly subscription',
-        annual: '3. Annual subscription',
+        one_time: '1. Single application payment',
+        monthly: '2. Monthly + application',
+        quarterly: '3. Quarterly membership',
+        annual: '4. Annual membership',
     };
     for (const pk of payPlans) {
         html += `<p class="studio-prog-card-slot">${payPlanLabel[pk]}</p>`;

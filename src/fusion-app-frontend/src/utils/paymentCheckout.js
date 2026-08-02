@@ -323,6 +323,43 @@ export async function mountPayPalAdvancedOneTimeCheckout(mountEl, opts) {
 }
 
 /**
+ * PayPal subscription custom_id (127 char limit). Prefer principal / pending id / tier;
+ * do not pack email or names (email is on subscriber).
+ * Mirrors server `subscriptionCustomId` in paypalProvider.js.
+ *
+ * @param {Record<string, string | undefined | null>} [customData]
+ */
+export function buildPayPalSubscriptionCustomId(customData) {
+    const src = customData && typeof customData === 'object' ? customData : {};
+    /** @type {Record<string, string>} */
+    const essential = {};
+    const principal = String(src.principal || '').trim();
+    const pending = String(src.fusion_pending_id || '').trim();
+    const tier = String(src.tier || '')
+        .trim()
+        .toLowerCase();
+    if (principal) essential.principal = principal.slice(0, 63);
+    if (pending) essential.fusion_pending_id = pending.slice(0, 36);
+    if (
+        tier === 'monthly' ||
+        tier === 'quarterly' ||
+        tier === 'annual' ||
+        tier === 'bimonthly'
+    ) {
+        essential.tier = tier;
+    }
+    let json = JSON.stringify(essential);
+    if (json.length <= 127) return json;
+    /** @type {Record<string, string>} */
+    const minimal = {};
+    if (essential.principal) minimal.principal = essential.principal;
+    if (essential.fusion_pending_id) minimal.fusion_pending_id = essential.fusion_pending_id;
+    if (essential.tier) minimal.tier = essential.tier;
+    json = JSON.stringify(minimal);
+    return json.length <= 127 ? json : json.slice(0, 127);
+}
+
+/**
  * Embedded PayPal subscription buttons (popup approval — no full-page redirect).
  *
  * @param {HTMLElement} mountEl
@@ -338,7 +375,7 @@ export async function mountPayPalSubscriptionButtons(mountEl, opts) {
     mountEl.textContent = '';
     const container = document.createElement('div');
     mountEl.appendChild(container);
-    const customId = JSON.stringify(opts.customData || {}).slice(0, 127);
+    const customId = buildPayPalSubscriptionCustomId(opts.customData || {});
     await paypal
         .Buttons({
             style: paypalButtonStyle('subscribe'),

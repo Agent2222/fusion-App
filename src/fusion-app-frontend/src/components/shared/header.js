@@ -604,7 +604,7 @@ class HeaderComponent extends HTMLElement {
         if (ui.kind === 'guest') {
             slot.innerHTML = `
                         <button type="button" class="headerRectBtn" data-action="sign-in">${en ? 'SIGN-IN' : 'サインイン'}</button>
-                        <button type="button" class="headerRectBtn headerRectBtn--register" data-action="register">${en ? 'REGISTER' : '登録'}</button>`;
+                        <button type="button" class="headerRectBtn headerRectBtn--register" data-action="register">${en ? 'JOIN' : '参加'}</button>`;
             return;
         }
         if (ui.kind === 'admin' || ui.kind === 'staff') {
@@ -617,7 +617,7 @@ class HeaderComponent extends HTMLElement {
         if (ui.kind === 'needsRegistration') {
             slot.innerHTML = `
                         <button type="button" class="headerRectBtn" data-action="sign-out">${en ? 'SIGN OUT' : 'サインアウト'}</button>
-                        <button type="button" class="headerRectBtn headerRectBtn--register" data-action="register">${en ? 'REGISTER' : '登録'}</button>`;
+                        <button type="button" class="headerRectBtn headerRectBtn--register" data-action="register">${en ? 'JOIN' : '参加'}</button>`;
             return;
         }
         if (ui.kind === 'member') {

@@ -4,14 +4,26 @@
 import { studioFeatureAccess } from '../../utils/studioShellState.js';
 import {
     formatSubscriptionPeriodEnd,
+    studioEffectiveMembershipStatus,
+    studioMembershipCellLabel,
     studioMembershipDotClass,
     studioMembershipFilterMatch,
-    studioMembershipStatusLabel,
+    studioMembershipProvider,
+    studioMembershipStatusIsPaid,
+    studioMembershipTierShortLabel,
     studioStripeDashboardCustomerUrl,
     studioTrialState,
 } from '../../utils/studioMembershipPresentation.js';
 import { renderFinance, initFinance } from './financeSection.js';
 import { renderPermissions, initPermissions } from './permissionsSection.js';
+import {
+    APPLICANTS_PROGRAM_SELECT_STORAGE_KEY,
+    aggregateApplicantsByProgram,
+    applicantProgramCardsRailHtml,
+    buildApplicantProgramCardModel,
+    getApplicantIsProgramDraw,
+    sortApplicantProgramRows,
+} from './applicantsProgramCards.js';
 import { DEV_MODE, getPublicSiteOrigin } from '../../config.js';
 import { getFusionBackendActor, normalizeEarlyAccessCategory } from '../../utils/earlyAccessSubscribe.js';
 import {
@@ -162,6 +174,8 @@ import {
     studioStripeCheckEmailStorageKey,
     syncSubscriptionFromStripe,
     syncSubscriptionFromStripeByEmail,
+    syncPayPalSubscription,
+    fetchPayPalSubscriptionStatus,
 } from '../../utils/integrationApi.js';
 import { uploadBlobToS3 } from '../../utils/studioS3Upload.js';
 import { prepareImageFileForUpload } from '../../utils/imageUploadPrep.js';
@@ -523,13 +537,14 @@ function renderSubscribers() {
 
 function renderApplicants() {
     return `
-        <div class="studio-section-stack studio-category-page">
+        <div class="studio-section-stack studio-category-page studio-applicants-page">
             ${studioPageHeaderHtml({
                 title: 'Applicants',
                 subtitle: 'Program applications and pipeline',
                 countId: 'studio-applicants-header-count',
                 countLabel: 'in view',
             })}
+            <div class="studio-applicants-program-cards-rail" id="studio-applicants-program-cards" role="list" aria-label="Programs"></div>
             ${studioDataTabsHtml({
                 ariaLabel: 'Applicant status',
                 tabs: [
@@ -2289,13 +2304,12 @@ async function studioAlertGeneratedJoinInviteCode(code, audienceNote) {
     }
 }
 
-/** Canister row shows paid access (active/trialing) or manual exempt. */
+/** Canister row shows paid access (Stripe active/trialing or PayPal ACTIVE/APPROVED) or manual exempt. */
 function studioRowCanisterPaid(row) {
     if (!row || typeof row !== 'object') return false;
     if (row.membershipExemptManual) return true;
     if (studioTrialState(row) === 'active') return true;
-    const s = String(row.stripeSubscriptionStatus || '').toLowerCase();
-    return s === 'active' || s === 'trialing';
+    return studioMembershipStatusIsPaid(studioEffectiveMembershipStatus(row));
 }
 
 /**
@@ -3393,6 +3407,7 @@ async function initApplicants(mainEl) {
     const numbersEl = mainEl.querySelector('#studio-app-page-numbers');
     const countHeader = mainEl.querySelector('#studio-applicants-header-count');
     const searchInput = mainEl.querySelector('#studio-applicants-search');
+    const programCardsRail = mainEl.querySelector('#studio-applicants-program-cards');
 
     const appPerm = studioFeatureAccess('applicants');
     if (!appPerm.visible) {
@@ -3403,6 +3418,7 @@ async function initApplicants(mainEl) {
         }
         mainEl.querySelector('.studio-section-accordion')?.setAttribute('hidden', '');
         mainEl.querySelector('.studio-table-wrap')?.setAttribute('hidden', '');
+        programCardsRail?.setAttribute('hidden', '');
         pagination?.setAttribute('hidden', '');
         return;
     }
@@ -3410,9 +3426,17 @@ async function initApplicants(mainEl) {
 
     /** @type {object[]} */
     let allRows = [];
+    /** @type {object[]} */
+    let allPrograms = [];
+    /** @type {Set<string>} */
+    let programCardIds = new Set();
     let page = 0;
     /** @type {'all' | 'pending' | 'reviewing' | 'postInterviewReview' | 'needsInfo' | 'accepted' | 'rejected' | 'pulledOut' | 'tester'} */
     let statusTab = 'all';
+    /** @type {string | null} */
+    let selectedProgramId = null;
+    /** @type {Map<string, 'standard' | 'draw'>} */
+    const viewModeByProgramId = new Map();
     /** @type {Map<string, string>} */
     let applicantEmailToSlug = new Map();
     /** @type {{ id: string, name: string, email: string }[]} */
@@ -3446,6 +3470,29 @@ async function initApplicants(mainEl) {
         banner.textContent = base;
     }
 
+    const loadSelectedProgramId = () => {
+        try {
+            const raw = sessionStorage.getItem(APPLICANTS_PROGRAM_SELECT_STORAGE_KEY);
+            return raw && String(raw).trim() ? String(raw).trim() : null;
+        } catch {
+            return null;
+        }
+    };
+
+    const saveSelectedProgramId = (id) => {
+        try {
+            if (id) sessionStorage.setItem(APPLICANTS_PROGRAM_SELECT_STORAGE_KEY, id);
+            else sessionStorage.removeItem(APPLICANTS_PROGRAM_SELECT_STORAGE_KEY);
+        } catch {
+            /* ignore */
+        }
+    };
+
+    const selectedViewMode = () => {
+        if (!selectedProgramId) return 'standard';
+        return viewModeByProgramId.get(selectedProgramId) || 'standard';
+    };
+
     const syncStatusTabs = () => {
         mainEl.querySelectorAll('.studio-data-tabs__tab').forEach((btn) => {
             const v = btn.getAttribute('data-tab-value') || '';
@@ -3453,8 +3500,38 @@ async function initApplicants(mainEl) {
         });
     };
 
+    const paintProgramCards = () => {
+        if (!programCardsRail) return;
+        const byProgram = aggregateApplicantsByProgram(allRows);
+        const sorted = [...allPrograms].sort(sortApplicantProgramRows);
+        const models = [];
+        programCardIds = new Set();
+        for (const row of sorted) {
+            const id = String(row?.id || '').trim();
+            if (!id) continue;
+            const model = buildApplicantProgramCardModel(row, byProgram.get(id) || []);
+            programCardIds.add(model.id);
+            models.push(model);
+        }
+        if (selectedProgramId && !programCardIds.has(selectedProgramId)) {
+            selectedProgramId = null;
+            saveSelectedProgramId(null);
+        }
+        programCardsRail.innerHTML = applicantProgramCardsRailHtml(
+            models,
+            selectedProgramId,
+            viewModeByProgramId,
+        );
+    };
+
     const filteredRows = () => {
         let rows = allRows;
+        if (selectedProgramId) {
+            rows = rows.filter((r) => String(r.programId || '') === selectedProgramId);
+            if (selectedViewMode() === 'draw') {
+                rows = rows.filter((r) => getApplicantIsProgramDraw(r.payloadJson));
+            }
+        }
         if (statusTab === 'tester') {
             rows = rows.filter((r) => getApplicantIsTester(r.payloadJson));
         } else {
@@ -3505,7 +3582,16 @@ async function initApplicants(mainEl) {
         const start = page * APPLICANTS_PAGE_SIZE;
         const slice = rows.slice(start, start + APPLICANTS_PAGE_SIZE);
         if (!slice.length) {
-            tbody.innerHTML = `<tr><td colspan="10">${allRows.length ? 'No applicants match filters.' : 'No applicants.'}</td></tr>`;
+            let emptyMsg = allRows.length ? 'No applicants match filters.' : 'No applicants.';
+            if (selectedProgramId && selectedViewMode() === 'draw') {
+                const anyDraw = allRows.some(
+                    (r) =>
+                        String(r.programId || '') === selectedProgramId &&
+                        getApplicantIsProgramDraw(r.payloadJson),
+                );
+                if (!anyDraw) emptyMsg = 'No draw applicants yet.';
+            }
+            tbody.innerHTML = `<tr><td colspan="10">${emptyMsg}</td></tr>`;
         } else {
             const delBtn = (id) =>
                 canEditApplicants && canDeleteApplicants
@@ -3585,9 +3671,13 @@ async function initApplicants(mainEl) {
     };
 
     const reload = async () => {
-        allRows = await getApplicants();
+        const [applicants, programs] = await Promise.all([
+            getApplicants(),
+            getPrograms().catch(() => []),
+        ]);
+        allPrograms = Array.isArray(programs) ? programs : [];
         allRows = await Promise.all(
-            allRows.map(async (row) => ({
+            (Array.isArray(applicants) ? applicants : []).map(async (row) => ({
                 ...row,
                 slotSecured:
                     (await getApplicantSlotSecuredStudio(row.id, row.programId, row.payloadJson)) ||
@@ -3606,6 +3696,7 @@ async function initApplicants(mainEl) {
             applicantArtistOptions = [];
             populateApplicantArtistSelect();
         }
+        paintProgramCards();
         renderPage();
     };
 
@@ -4085,6 +4176,44 @@ async function initApplicants(mainEl) {
         renderPage();
     });
 
+    programCardsRail?.addEventListener('click', (e) => {
+        const t = e.target instanceof Element ? e.target : null;
+        if (!t) return;
+        const modeBtn = t.closest('[data-applicants-view-mode]');
+        if (modeBtn && programCardsRail.contains(modeBtn)) {
+            e.preventDefault();
+            e.stopPropagation();
+            const programId = modeBtn.getAttribute('data-applicants-program-id') || '';
+            const mode = modeBtn.getAttribute('data-applicants-view-mode') === 'draw' ? 'draw' : 'standard';
+            if (!programId || !programCardIds.has(programId)) return;
+            viewModeByProgramId.set(programId, mode);
+            if (selectedProgramId !== programId) {
+                selectedProgramId = programId;
+                saveSelectedProgramId(programId);
+            }
+            page = 0;
+            paintProgramCards();
+            renderPage();
+            return;
+        }
+        const selectBtn = t.closest('[data-applicants-program-select]');
+        if (selectBtn && programCardsRail.contains(selectBtn)) {
+            e.preventDefault();
+            const id = selectBtn.getAttribute('data-applicants-program-select') || '';
+            if (!id || !programCardIds.has(id)) return;
+            if (selectedProgramId === id) {
+                selectedProgramId = null;
+                saveSelectedProgramId(null);
+            } else {
+                selectedProgramId = id;
+                saveSelectedProgramId(id);
+            }
+            page = 0;
+            paintProgramCards();
+            renderPage();
+        }
+    });
+
     if (!canEditApplicants) {
         mainEl.querySelector('.studio-section-accordion')?.setAttribute('hidden', '');
     }
@@ -4131,6 +4260,7 @@ async function initApplicants(mainEl) {
         }
     });
 
+    selectedProgramId = loadSelectedProgramId();
     await reload();
 }
 
@@ -7326,9 +7456,13 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList, contact = n
     const curRole = row.role || 'artist';
     const curStatus = row.status || 'pending';
     const exempt = !!row.membershipExemptManual;
-    const stripeSt = row.stripeSubscriptionStatus || '—';
+    const effectiveSt = studioEffectiveMembershipStatus(row) || '—';
     const renews = formatSubscriptionPeriodEnd(row.stripeCurrentPeriodEnd);
-    const canisterMembershipLabel = exempt ? 'Manual exempt' : String(stripeSt);
+    const providerLabel = studioMembershipProvider(row) || '—';
+    const tierLabel = studioMembershipTierShortLabel(row.membershipTier) || '—';
+    const canisterMembershipLabel = exempt
+        ? 'Manual exempt'
+        : studioMembershipCellLabel(row);
     const accountUpdated = formatStudioAccountUpdatedAt(row.updatedAt);
     const accountUpdatedLabel = escapeHtml(accountUpdated.label);
     const contactFirst = String(contact?.firstName || '').trim();
@@ -7340,13 +7474,16 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList, contact = n
             ? `<p class="studio-muted studio-user-manage-billing-hint" id="studio-user-billing-hint">Client billing email (this browser): <code>${escapeHtml(billingHintStored)}</code></p>`
             : '<p class="studio-muted studio-user-manage-billing-hint" id="studio-user-billing-hint" hidden></p>';
 
-    const paypalSubId = String(
-        workingRaw.paypalSubscriptionId ?? workingRaw.paypal_subscription_id ?? '',
+    let paypalSubId = String(
+        row.paypalSubscriptionId ||
+            workingRaw.paypalSubscriptionId ||
+            workingRaw.paypal_subscription_id ||
+            '',
     ).trim();
 
     const body = `
       <div class="studio-user-manage-modal">
-        <p class="studio-muted studio-user-manage-legend">The Users table <strong>dot</strong> and <strong>Membership</strong> below reflect the <strong>canister</strong>. <strong>Live Stripe</strong> queries Stripe directly — use Push / Check to align the canister.</p>
+        <p class="studio-muted studio-user-manage-legend">The Users table <strong>dot</strong> and <strong>Membership</strong> below reflect the <strong>canister</strong>. Use <strong>Live PayPal</strong> (current) or <strong>Live Stripe</strong> (legacy) to verify billing, then Push to align the canister.</p>
         <section class="studio-user-manage-section">
           <h3 class="studio-user-manage-section-title">Identity</h3>
           <div class="studio-user-manage-principal-row">
@@ -7397,29 +7534,44 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList, contact = n
 
         <section class="studio-user-manage-section">
           <h3 class="studio-user-manage-section-title">Membership (canister)</h3>
-          <p class="studio-muted studio-user-manage-hint">Stored on-chain. Use <strong>Live Stripe</strong> below to verify billing in Stripe.</p>
+          <p class="studio-muted studio-user-manage-hint">Stored on-chain. Use <strong>Live PayPal</strong> or <strong>Live Stripe</strong> below to verify billing, then Push.</p>
           <div class="studio-user-manage-sync-actions">
             <button type="button" class="studio-btn-ghost" id="studio-user-refresh-canister">Refresh from canister</button>
             <button type="button" class="studio-btn-ghost" id="studio-user-push-subscription">Push subscription to canister</button>
           </div>
           <p id="studio-user-push-result" class="studio-muted studio-user-manage-push-result" hidden></p>
           <dl class="studio-user-manage-dl" id="studio-user-manage-membership-dl">
-            <dt>Cached subscription</dt><dd id="studio-user-cache-sub">${escapeHtml(String(stripeSt))}</dd>
-            <dt>Period end</dt><dd id="studio-user-cache-renew">${escapeHtml(String(renews))}</dd>
+            <dt>Provider</dt><dd id="studio-user-cache-provider">${escapeHtml(String(providerLabel))}</dd>
+            <dt>Cached subscription</dt><dd id="studio-user-cache-sub">${escapeHtml(String(effectiveSt))}</dd>
+            <dt>Plan tier</dt><dd id="studio-user-cache-tier">${escapeHtml(String(tierLabel))}</dd>
+            <dt>Period end</dt><dd id="studio-user-cache-renew">${escapeHtml(String(renews || '—'))}</dd>
+            <dt>PayPal subscription</dt><dd id="studio-user-cache-paypal-id">${escapeHtml(paypalSubId || '—')}</dd>
             <dt>Summary</dt><dd id="studio-user-cache-summary">${escapeHtml(canisterMembershipLabel)}</dd>
           </dl>
           <div class="studio-user-manage-control-row">
             <label class="studio-user-manage-label" for="studio-user-edit-membership">Billing override</label>
             <select id="studio-user-edit-membership" class="studio-select studio-user-manage-select" aria-label="Membership billing override">
-              <option value="standard" ${!exempt ? 'selected' : ''}>Standard — follow Stripe</option>
+              <option value="standard" ${!exempt ? 'selected' : ''}>Standard — follow billing provider</option>
               <option value="manual_exempt" ${exempt ? 'selected' : ''}>Manual exempt (complimentary)</option>
             </select>
           </div>
         </section>
 
+        <section class="studio-user-manage-section studio-user-manage-section--paypal">
+          <h3 class="studio-user-manage-section-title">Live PayPal (by subscription id)</h3>
+          <p class="studio-muted studio-user-manage-hint">Current memberships (monthly / quarterly / annual). Paste the PayPal subscription id (<code>I-…</code>) from the Business dashboard or member receipt. Requires Studio → Services integration URL + API key.</p>
+          <div class="studio-user-manage-stripe-row">
+            <label class="studio-user-manage-label studio-sr-only" for="studio-user-paypal-sub-id">PayPal subscription id</label>
+            <input type="text" id="studio-user-paypal-sub-id" class="studio-input studio-user-manage-email-input" placeholder="I-…" autocomplete="off" spellcheck="false" value="${escapeHtml(paypalSubId)}" />
+            <button type="button" class="studio-btn-primary" id="studio-user-paypal-check">Check PayPal</button>
+          </div>
+          <div id="studio-user-paypal-result" class="studio-user-manage-stripe-result" hidden></div>
+          <div id="studio-user-paypal-ids" class="studio-user-manage-stripe-ids" hidden></div>
+        </section>
+
         <section class="studio-user-manage-section studio-user-manage-section--stripe">
           <h3 class="studio-user-manage-section-title">Live Stripe (by email)</h3>
-          <p class="studio-muted studio-user-manage-hint">Not from the canister. Requires Studio → Services integration URL + API key.</p>
+          <p class="studio-muted studio-user-manage-hint">Legacy Stripe subscribers. Requires Studio → Services integration URL + API key.</p>
           <div class="studio-user-manage-stripe-row">
             <label class="studio-user-manage-label studio-sr-only" for="studio-user-stripe-email">Customer email</label>
             <input type="email" id="studio-user-stripe-email" class="studio-input studio-user-manage-email-input" placeholder="customer@email.com" autocomplete="off" />
@@ -7481,6 +7633,10 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList, contact = n
     const errEl = root.querySelector('#studio-user-edit-err');
     const checkBtn = root.querySelector('#studio-user-stripe-check');
     const emailInput = root.querySelector('#studio-user-stripe-email');
+    const paypalSubInput = root.querySelector('#studio-user-paypal-sub-id');
+    const paypalCheckBtn = root.querySelector('#studio-user-paypal-check');
+    const paypalResultEl = root.querySelector('#studio-user-paypal-result');
+    const paypalIdsEl = root.querySelector('#studio-user-paypal-ids');
     const stripeResultEl = root.querySelector('#studio-user-stripe-result');
     const syncWarnEl = root.querySelector('#studio-user-sync-warn');
     const pushResultEl = root.querySelector('#studio-user-push-result');
@@ -7489,7 +7645,11 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList, contact = n
     const reconnectToInput = root.querySelector('#studio-user-reconnect-to');
     const recoveryCodeResultEl = root.querySelector('#studio-user-recovery-code-result');
     const CHECK_LABEL = 'Check Stripe';
+    const PAYPAL_CHECK_LABEL = 'Check PayPal';
     const stripeCheckEmailLsKey = studioStripeCheckEmailStorageKey(principal);
+
+    const getPaypalSubIdFromInput = () =>
+        paypalSubInput instanceof HTMLInputElement ? paypalSubInput.value.trim() : '';
 
     const setSyncWarn = (text) => {
         if (!(syncWarnEl instanceof HTMLElement)) return;
@@ -7549,6 +7709,19 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList, contact = n
     const runPushSubscriptionToCanister = async (emailStr) =>
         pushSubscriptionToCanisterForStudioRow(principal, emailStr);
 
+    const runPushPayPalSubscriptionToCanister = async (subscriptionId) => {
+        const sid = String(subscriptionId || '').trim();
+        if (!sid) {
+            return { ok: false, reason: 'PayPal subscription id required' };
+        }
+        try {
+            const r = await syncPayPalSubscription({ principal, subscriptionId: sid });
+            return { ok: true, status: r?.status, subscriptionId: r?.subscriptionId || sid, tier: r?.tier };
+        } catch (e) {
+            return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+        }
+    };
+
     const refetchUserRowAndRefreshTable = async () => {
         let refreshErr = '';
         let up = null;
@@ -7556,6 +7729,10 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList, contact = n
             const rows = await getAccountsForStudio();
             up = rows.find((x) => x.principal === principal) ?? null;
             applyMembershipFromStudioRow(up);
+            if (up?.paypalSubscriptionId && paypalSubInput instanceof HTMLInputElement) {
+                paypalSubId = String(up.paypalSubscriptionId).trim();
+                if (!paypalSubInput.value.trim()) paypalSubInput.value = paypalSubId;
+            }
         } catch (e) {
             refreshErr = e instanceof Error ? e.message : String(e);
         }
@@ -7599,15 +7776,42 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList, contact = n
     });
 
     root.querySelector('#studio-user-push-subscription')?.addEventListener('click', async () => {
-        const emailStr = emailInput instanceof HTMLInputElement ? emailInput.value.trim() : '';
-        if (!emailStr.includes('@')) {
-            setPushResult('Enter a valid customer email in Live Stripe first.', true);
-            return;
-        }
         setPushResult('Pushing to canister…', true);
         setSyncWarn('');
         if (!getIntegrationBaseUrl()) {
             setPushResult('Set Integration API URL in Studio → Services.', true);
+            return;
+        }
+        const paypalId = getPaypalSubIdFromInput() || paypalSubId;
+        if (paypalId) {
+            const pp = await runPushPayPalSubscriptionToCanister(paypalId);
+            const { up, refreshErr } = await refetchUserRowAndRefreshTable();
+            if (refreshErr) {
+                setSyncWarn(`PayPal push ran; table refresh failed: ${refreshErr}`);
+            } else if (!pp.ok) {
+                setSyncWarn(`PayPal sync failed: ${pp.reason || 'unknown'}`);
+            } else if (up && !studioRowCanisterPaid(up)) {
+                setSyncWarn(
+                    `PayPal sync returned ${String(pp.status || '')}, but canister still shows unpaid. Check integration identity and canister logs.`,
+                );
+            } else {
+                setSyncWarn('');
+            }
+            const tierNote = pp.tier ? ` · tier ${pp.tier}` : '';
+            setPushResult(
+                pp.ok
+                    ? `PayPal pushed. Status ${String(pp.status || 'ok')}${tierNote}.`
+                    : `PayPal not synced. ${pp.reason || ''}`,
+                true,
+            );
+            return;
+        }
+        const emailStr = emailInput instanceof HTMLInputElement ? emailInput.value.trim() : '';
+        if (!emailStr.includes('@')) {
+            setPushResult(
+                'Enter a PayPal subscription id (I-…) above, or a Stripe customer email in Live Stripe.',
+                true,
+            );
             return;
         }
         const { emailRes, principalRes, anySynced } = await runPushSubscriptionToCanister(emailStr);
@@ -7660,7 +7864,10 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList, contact = n
         }
         setReconnectResult('Looking up…', true);
         try {
-            const data = await accountLookupByEmailForStudio(emailStr, paypalSubId);
+            const data = await accountLookupByEmailForStudio(
+                emailStr,
+                getPaypalSubIdFromInput() || paypalSubId,
+            );
             const stripe = data?.stripe && typeof data.stripe === 'object' ? data.stripe : null;
             const paypal = data?.paypal && typeof data.paypal === 'object' ? data.paypal : null;
             const lines = [];
@@ -7797,16 +8004,25 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList, contact = n
 
     const applyMembershipFromStudioRow = (upRow) => {
         if (!upRow) return;
-        const stripeStatus = upRow.stripeSubscriptionStatus || '—';
+        const status = studioEffectiveMembershipStatus(upRow) || '—';
         const renewIso = upRow.stripeCurrentPeriodEnd || '';
         const renewLabel = renewIso ? formatSubscriptionPeriodEnd(renewIso) : '—';
         const ex = !!upRow.membershipExemptManual;
-        const summ = ex ? 'Manual exempt' : String(stripeStatus);
+        const summ = ex ? 'Manual exempt' : studioMembershipCellLabel(upRow);
+        const provider = studioMembershipProvider(upRow) || '—';
+        const tier = studioMembershipTierShortLabel(upRow.membershipTier) || '—';
+        const ppId = String(upRow.paypalSubscriptionId || '').trim() || '—';
+        const ddProvider = root.querySelector('#studio-user-cache-provider');
         const ddSub = root.querySelector('#studio-user-cache-sub');
+        const ddTier = root.querySelector('#studio-user-cache-tier');
         const ddRenew = root.querySelector('#studio-user-cache-renew');
+        const ddPaypal = root.querySelector('#studio-user-cache-paypal-id');
         const ddSumm = root.querySelector('#studio-user-cache-summary');
-        if (ddSub) ddSub.textContent = String(stripeStatus);
+        if (ddProvider) ddProvider.textContent = String(provider);
+        if (ddSub) ddSub.textContent = String(status);
+        if (ddTier) ddTier.textContent = String(tier);
         if (ddRenew) ddRenew.textContent = renewLabel;
+        if (ddPaypal) ddPaypal.textContent = ppId;
         if (ddSumm) ddSumm.textContent = summ;
         const memSel = root.querySelector('#studio-user-edit-membership');
         if (memSel instanceof HTMLSelectElement) {
@@ -7815,6 +8031,7 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList, contact = n
         if (upRow.rawAccount && typeof upRow.rawAccount === 'object') {
             workingRaw = /** @type {Record<string, unknown>} */ (upRow.rawAccount);
         }
+        paypalSubId = String(upRow.paypalSubscriptionId || '').trim();
     };
 
     const showStripeErr = (msg) => {
@@ -7822,6 +8039,111 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList, contact = n
         stripeResultEl.hidden = false;
         stripeResultEl.innerHTML = `<p class="studio-muted studio-stripe-live-footnote">${escapeHtml(msg)}</p>`;
     };
+
+    const showPayPalErr = (msg) => {
+        if (!paypalResultEl) return;
+        paypalResultEl.hidden = false;
+        paypalResultEl.innerHTML = `<p class="studio-muted studio-stripe-live-footnote">${escapeHtml(msg)}</p>`;
+    };
+
+    const renderLivePayPalIds = (liveR) => {
+        if (!(paypalIdsEl instanceof HTMLElement)) return;
+        const sid = liveR.subscriptionId != null ? String(liveR.subscriptionId).trim() : '';
+        const planId = liveR.planId != null ? String(liveR.planId).trim() : '';
+        const email = liveR.subscriberEmail != null ? String(liveR.subscriberEmail).trim() : '';
+        if (!sid && !planId && !email) {
+            paypalIdsEl.hidden = true;
+            paypalIdsEl.innerHTML = '';
+            return;
+        }
+        const bits = [];
+        if (sid) {
+            bits.push(
+                `<div class="studio-user-manage-id-row"><span class="studio-muted">Subscription</span> <code>${escapeHtml(sid)}</code> <button type="button" class="studio-btn-ghost studio-btn-tiny" data-studio-copy="${escapeHtml(sid)}">Copy</button></div>`,
+            );
+        }
+        if (planId) {
+            bits.push(
+                `<div class="studio-user-manage-id-row"><span class="studio-muted">Plan</span> <code>${escapeHtml(planId)}</code></div>`,
+            );
+        }
+        if (email) {
+            bits.push(
+                `<div class="studio-user-manage-id-row"><span class="studio-muted">Subscriber</span> <code>${escapeHtml(email)}</code></div>`,
+            );
+        }
+        paypalIdsEl.innerHTML = bits.join('');
+        paypalIdsEl.hidden = false;
+    };
+
+    paypalCheckBtn?.addEventListener('click', async () => {
+        const sid = getPaypalSubIdFromInput();
+        if (!sid) {
+            showPayPalErr('Enter a PayPal subscription id (I-…).');
+            return;
+        }
+        if (paypalCheckBtn instanceof HTMLButtonElement) {
+            paypalCheckBtn.disabled = true;
+            paypalCheckBtn.textContent = 'Checking…';
+        }
+        if (paypalResultEl) paypalResultEl.hidden = true;
+        if (paypalIdsEl instanceof HTMLElement) {
+            paypalIdsEl.hidden = true;
+            paypalIdsEl.innerHTML = '';
+        }
+        setSyncWarn('');
+        try {
+            const r = await fetchPayPalSubscriptionStatus(sid);
+            if (!r || typeof r !== 'object' || r.ok === false) {
+                const msg =
+                    (r && typeof r === 'object' && (r.error || r.reason) && String(r.error || r.reason)) ||
+                    'Could not reach the integration API. Set URL + API key under Studio → Services.';
+                showPayPalErr(msg);
+                return;
+            }
+            const liveRec = /** @type {Record<string, unknown>} */ (r);
+            renderLivePayPalIds(liveRec);
+            const statusRaw = String(liveRec.status || '');
+            const active = studioMembershipStatusIsPaid(statusRaw);
+            const tierRaw = String(liveRec.tier || '');
+            const tierNote = tierRaw
+                ? ` · ${studioMembershipTierShortLabel(tierRaw) || tierRaw}`
+                : '';
+            if (paypalResultEl) {
+                paypalResultEl.hidden = false;
+                paypalResultEl.innerHTML = `
+                  <div class="studio-stripe-live-status">
+                    <span class="studio-stripe-live-badge ${active ? 'is-active' : 'is-inactive'}">${active ? 'Active' : 'Inactive'}</span>
+                    <span class="studio-stripe-live-raw studio-muted">${escapeHtml(statusRaw || '—')}${escapeHtml(tierNote)}</span>
+                  </div>
+                  <p class="studio-muted studio-stripe-live-footnote">Live PayPal — independent of table / canister cache until Push succeeds. Tier comes from plan id env map (monthly / quarterly / annual).</p>
+                `;
+            }
+
+            const pp = await runPushPayPalSubscriptionToCanister(sid);
+            const { up, refreshErr } = await refetchUserRowAndRefreshTable();
+            if (refreshErr) {
+                setSyncWarn(
+                    `Could not reload canister / table: ${refreshErr}. Live PayPal may still differ from what is stored.`,
+                );
+            } else if (!pp.ok) {
+                setSyncWarn(`PayPal check ok, but push failed: ${pp.reason || 'unknown'}`);
+            } else if (active && up && !studioRowCanisterPaid(up)) {
+                setSyncWarn(
+                    `PayPal shows active membership, but the canister still shows unpaid. Check integration service logs and adminSetIntegrationServicePrincipal.`,
+                );
+            } else {
+                setSyncWarn('');
+            }
+        } catch (e) {
+            showPayPalErr(e instanceof Error ? e.message : String(e));
+        } finally {
+            if (paypalCheckBtn instanceof HTMLButtonElement) {
+                paypalCheckBtn.disabled = false;
+                paypalCheckBtn.textContent = PAYPAL_CHECK_LABEL;
+            }
+        }
+    });
 
     checkBtn?.addEventListener('click', async () => {
         const email = emailInput instanceof HTMLInputElement ? emailInput.value.trim() : '';
@@ -7891,7 +8213,7 @@ function openStudioUserManageModal(row, onSaved, onRefreshUsersList, contact = n
                 setSyncWarn('No account row returned for this principal after refresh.');
             } else if (active && !studioRowCanisterPaid(up)) {
                 setSyncWarn(
-                    `Stripe shows active membership for this email, but the canister still shows "${String(up.stripeSubscriptionStatus || 'empty')}". ${anySynced ? '' : `Sync did not report success. ${syncDetail}`} Check integration service logs, integration identity (adminSetIntegrationServicePrincipal), and redeploy API if sync-by-email returns 404.`
+                    `Stripe shows active membership for this email, but the canister still shows "${String(studioEffectiveMembershipStatus(up) || 'empty')}". ${anySynced ? '' : `Sync did not report success. ${syncDetail}`} Check integration service logs, integration identity (adminSetIntegrationServicePrincipal), and redeploy API if sync-by-email returns 404.`
                 );
             } else {
                 setSyncWarn('');
@@ -7981,12 +8303,7 @@ async function initUsers(mainEl) {
     /** @type {Map<string, { firstName: string, lastName: string, fullName: string, email: string }>} */
     let contactByPrincipal = new Map();
 
-    const membershipCellHtml = (r) => {
-        if (r.membershipExemptManual) {
-            return escapeHtml('Exempt (manual)');
-        }
-        return escapeHtml(studioMembershipStatusLabel(r.stripeSubscriptionStatus));
-    };
+    const membershipCellHtml = (r) => escapeHtml(studioMembershipCellLabel(r));
 
     const mapAccountContactRows = (contacts) =>
         new Map(

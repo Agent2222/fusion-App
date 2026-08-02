@@ -94,7 +94,9 @@ After Motoko changes, run `dfx generate` and redeploy `fusion-app-backend`. New 
 - `integrationRecordPayPalSubscription` — integration service only
 - `membershipTierByPrincipal` + quarterly application credit maps; `applicationFeeDueForCaller`; `integrationSetMembershipTier`
 
-**Application fees:** guest one-time **$50**; active monthly / legacy bi-monthly **$35** per application; quarterly uses stackable application credits (+1 per calendar quarter while active); annual applications included while membership is active.
+**Application fees:** guest one-time **$50**. **TEMP:** all active memberships (monthly / quarterly / annual / legacy bi-monthly) submit free (`membership_temp` / `TEMP_WAIVE_MEMBER_APPLICATION_FEES`) until the credit system ships — flip the flag in Motoko + `applicationFeePolicy.js` when ready. Intended post-credits: monthly / legacy **$35** per application; quarterly stackable credits (+1/quarter); annual included while active. Full checklist (waive removal, credits, Program Award): [`FIXES_APPLICATION_CREDITS_AND_PROGRAM_AWARD.md`](./FIXES_APPLICATION_CREDITS_AND_PROGRAM_AWARD.md).
+
+**Studio Users / Manage account (PayPal):** membership status reads PayPal `ACTIVE`/`APPROVED` (not Stripe-only). Staff can **Check PayPal** / **Push** with subscription id `I-…` via `POST /payments/subscription/status` + `/sync` (tier inferred from plan env ids for monthly / quarterly / annual). Deploy backend for `adminListMembershipTiers` after Motoko update.
 
 ## Deploy checklist
 

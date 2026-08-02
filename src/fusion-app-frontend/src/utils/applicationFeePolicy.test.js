@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
     APPLICATION_FEE_GUEST_CENTS,
     APPLICATION_FEE_MEMBER_CENTS,
+    TEMP_WAIVE_MEMBER_APPLICATION_FEES,
     calendarQuarterKey,
     quarterKeyToIndex,
     quarterIndexToKey,
@@ -77,7 +78,7 @@ describe('computeApplicationFeeDue', () => {
         expect(r.reason).toBe('application_only');
     });
 
-    it('monthly → $35 (credits ignored)', () => {
+    it('monthly → free while TEMP_WAIVE_MEMBER_APPLICATION_FEES (else $35)', () => {
         const r = computeApplicationFeeDue({
             membershipAccess: 'ok',
             tier: 'monthly',
@@ -85,17 +86,27 @@ describe('computeApplicationFeeDue', () => {
             lastAccrued: '2026-Q1',
             currentQuarterKey: '2026-Q2',
         });
-        expect(r.dueCents).toBe(APPLICATION_FEE_MEMBER_CENTS);
-        expect(r.reason).toBe('member_fee');
+        if (TEMP_WAIVE_MEMBER_APPLICATION_FEES) {
+            expect(r.dueCents).toBe(0);
+            expect(r.reason).toBe('membership_temp');
+        } else {
+            expect(r.dueCents).toBe(APPLICATION_FEE_MEMBER_CENTS);
+            expect(r.reason).toBe('member_fee');
+        }
     });
 
-    it('legacy bimonthly → $35', () => {
+    it('legacy bimonthly → free while temp waive (else $35)', () => {
         const r = computeApplicationFeeDue({
             membershipAccess: 'ok',
             tier: 'bimonthly',
             currentQuarterKey: '2026-Q2',
         });
-        expect(r.dueCents).toBe(APPLICATION_FEE_MEMBER_CENTS);
+        if (TEMP_WAIVE_MEMBER_APPLICATION_FEES) {
+            expect(r.dueCents).toBe(0);
+            expect(r.reason).toBe('membership_temp');
+        } else {
+            expect(r.dueCents).toBe(APPLICATION_FEE_MEMBER_CENTS);
+        }
     });
 
     it('annual → $0', () => {
@@ -105,10 +116,12 @@ describe('computeApplicationFeeDue', () => {
             currentQuarterKey: '2026-Q2',
         });
         expect(r.dueCents).toBe(0);
-        expect(r.reason).toBe('annual');
+        expect(
+            TEMP_WAIVE_MEMBER_APPLICATION_FEES ? r.reason === 'membership_temp' : r.reason === 'annual',
+        ).toBe(true);
     });
 
-    it('quarterly with credit → $0; after consume next due is $35 when balance 0', () => {
+    it('quarterly → free while temp waive; credit math still accrues', () => {
         const withCredit = computeApplicationFeeDue({
             membershipAccess: 'ok',
             tier: 'quarterly',
@@ -117,8 +130,12 @@ describe('computeApplicationFeeDue', () => {
             currentQuarterKey: '2026-Q2',
         });
         expect(withCredit.dueCents).toBe(0);
-        expect(withCredit.reason).toBe('credit');
         expect(withCredit.appCreditBalance).toBe(1);
+        if (TEMP_WAIVE_MEMBER_APPLICATION_FEES) {
+            expect(withCredit.reason).toBe('membership_temp');
+        } else {
+            expect(withCredit.reason).toBe('credit');
+        }
 
         const afterSpend = computeApplicationFeeDue({
             membershipAccess: 'ok',
@@ -127,8 +144,13 @@ describe('computeApplicationFeeDue', () => {
             lastAccrued: '2026-Q2',
             currentQuarterKey: '2026-Q2',
         });
-        expect(afterSpend.dueCents).toBe(APPLICATION_FEE_MEMBER_CENTS);
-        expect(afterSpend.reason).toBe('member_fee');
+        if (TEMP_WAIVE_MEMBER_APPLICATION_FEES) {
+            expect(afterSpend.dueCents).toBe(0);
+            expect(afterSpend.reason).toBe('membership_temp');
+        } else {
+            expect(afterSpend.dueCents).toBe(APPLICATION_FEE_MEMBER_CENTS);
+            expect(afterSpend.reason).toBe('member_fee');
+        }
     });
 
     it('quarterly skip a quarter stacks credits', () => {
@@ -141,7 +163,9 @@ describe('computeApplicationFeeDue', () => {
         });
         expect(r.appCreditBalance).toBe(3);
         expect(r.dueCents).toBe(0);
-        expect(r.reason).toBe('credit');
+        expect(
+            TEMP_WAIVE_MEMBER_APPLICATION_FEES ? r.reason === 'membership_temp' : r.reason === 'credit',
+        ).toBe(true);
     });
 
     it('exempt → $0', () => {

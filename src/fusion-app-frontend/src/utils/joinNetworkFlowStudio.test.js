@@ -4,6 +4,7 @@ import { stagesForFlow } from './joinNetworkFlowFieldManifest.js';
 import {
     collectJoinNetworkFlowDraft,
     mergeJoinNetworkFlowBundle,
+    normalizeJoinNetworkFlowBundle,
 } from '../components/studio/sections/joinNetworkFlowStudio.js';
 
 describe('joinNetworkFlowStudio', () => {
@@ -29,7 +30,7 @@ describe('joinNetworkFlowStudio', () => {
             membership: {
                 value: {
                     en: {
-                        planBimonthly: {
+                        planMonthly: {
                             displayPrice: '$55',
                         },
                     },
@@ -37,10 +38,35 @@ describe('joinNetworkFlowStudio', () => {
             },
         };
         const merged = mergeJoinNetworkFlowBundle(base, draft);
-        expect(merged.membership.value.en.planBimonthly.displayPrice).toBe('$55');
-        expect(merged.membership.value.en.planBimonthly.title).toBe(
-            base.membership.value.en.planBimonthly.title,
+        expect(merged.membership.value.en.planMonthly.displayPrice).toBe('$55');
+        expect(merged.membership.value.en.planMonthly.title).toBe(
+            base.membership.value.en.planMonthly.title,
         );
+    });
+
+    it('normalizeJoinNetworkFlowBundle migrates planBimonthly to planMonthly', () => {
+        const legacy = {
+            membership: {
+                value: {
+                    en: {
+                        planBimonthly: { title: 'Legacy monthly', displayPrice: '$55' },
+                        planAnnual: { title: 'Annual' },
+                    },
+                },
+                payment: {
+                    en: {
+                        bimonthly: { amount: '$55.00', planKey: 'bi_monthly' },
+                        annual: { amount: '$260.00' },
+                    },
+                },
+            },
+        };
+        const normalized = normalizeJoinNetworkFlowBundle(legacy);
+        expect(normalized.membership.value.en.planMonthly.title).toBe('Legacy monthly');
+        expect(normalized.membership.value.en.planBimonthly).toBeUndefined();
+        expect(normalized.membership.payment.en.monthly.amount).toBe('$55.00');
+        expect(normalized.membership.payment.en.monthly.planKey).toBe('monthly');
+        expect(normalized.membership.payment.en.bimonthly).toBeUndefined();
     });
 
     it('round-trip: full draft merge replaces nested edits while keeping siblings', () => {

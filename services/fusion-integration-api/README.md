@@ -75,10 +75,13 @@ stripe listen --forward-to localhost:8787/webhooks/stripe
 - `GET /health` — status flags (no secrets); includes `stripePrice`, `fusionCanister`, `stripeWebhook`, `storageBackend`, nested `storage: { active, aws, r2 }`, and legacy `s3` (active backend configured)
 - `GET /payments/config` — PayPal mode + `planMonthly` / `planQuarterly` / `planAnnual` / `planBimonthlyLegacy`
 - `POST /payments/subscription` — PayPal membership create (`subscriptionTier`: `monthly` | `quarterly` | `annual`)
+- `POST /payments/subscription/link` — bind pay-first subscription to principal after II
+- `POST /payments/subscription/sync` — push PayPal subscription + inferred tier to canister (body `{ principal, subscriptionId }`)
+- `POST /payments/subscription/status` — Studio Live PayPal check (body `{ subscriptionId }`) — returns `status`, `tier` (`monthly`|`quarterly`|`annual`), `planId`, `subscriberEmail`; **no canister write**. Tier inference needs `PAYPAL_SUBSCRIPTION_MONTHLY_ID` / `_QUARTERLY_ID` / `_ANNUAL_ID` (or `PAYPAL_PLAN_ANNUAL_ID`) on the integration host. There is no PayPal list-by-email — staff paste `I-…` from the Business dashboard.
 - `POST /payments/subscription/revise` — PayPal plan change (returns `approveUrl` for buyer re-consent)
 - `POST /payments/member-billing-summary` — PayPal tier labels for Settings Membership
 - `POST /stripe/create-subscription` — body `{ principal?, email, metadata?, payFirst?, subscriptionTier? }` — legacy Stripe path when provider is Stripe
-- `POST /stripe/subscription-status-by-email` — body `{ email }` — looks up Stripe customer by email, returns best subscription + `membershipActive` (`true` when status is `active` or `trialing`). Studio “Manage user” live check (API key required)
+- `POST /stripe/subscription-status-by-email` — body `{ email }` — looks up Stripe customer by email, returns best subscription + `membershipActive` (`true` when status is `active` or `trialing`). Studio “Manage user” live Stripe check (API key required)
 - `POST /stripe/membership-revenue-summary` — no body — aggregates active/trialing Fusion membership subscriptions from Stripe into `mrrCents`, per-cadence cycle totals (`monthlyCents`, `bimonthlyCents`, `annualCents`), and subscriber counts. Studio Finance → Users (API key required)
 - `POST /stripe/sync-subscription-by-email` — body `{ email, principal }` — finds customer by email, pushes best subscription to the canister with `metadata.principal` (Studio after email check; API key required)
 - `POST /account/lookup-by-email` — body `{ email, paypalSubscriptionId? }` — Stripe subscription + principal hint from metadata; optional PayPal sub when id provided (Studio reconnect lookup; API key required)

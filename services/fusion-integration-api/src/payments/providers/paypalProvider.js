@@ -43,8 +43,26 @@ export function subscriptionCustomId(customData) {
     if (customData.fusion_pending_id) {
         essential.fusion_pending_id = safePayPalMetaValue(customData.fusion_pending_id, 36);
     }
+    const tierRaw = String(customData.tier || '')
+        .trim()
+        .toLowerCase();
+    if (
+        tierRaw === 'monthly' ||
+        tierRaw === 'quarterly' ||
+        tierRaw === 'annual' ||
+        tierRaw === 'bimonthly'
+    ) {
+        essential.tier = tierRaw;
+    }
     for (const [k, v] of Object.entries(customData)) {
-        if (k === 'principal' || k === 'fusion_pending_id' || k === 'pending_email') continue;
+        if (
+            k === 'principal' ||
+            k === 'fusion_pending_id' ||
+            k === 'pending_email' ||
+            k === 'tier'
+        ) {
+            continue;
+        }
         if (typeof k !== 'string' || !k.length) continue;
         essential[k.slice(0, 24)] = safePayPalMetaValue(v, 40);
     }
@@ -56,6 +74,7 @@ export function subscriptionCustomId(customData) {
     const minimal = {};
     if (essential.principal) minimal.principal = essential.principal;
     if (essential.fusion_pending_id) minimal.fusion_pending_id = essential.fusion_pending_id;
+    if (essential.tier) minimal.tier = essential.tier;
     return JSON.stringify(minimal).slice(0, 127);
 }
 

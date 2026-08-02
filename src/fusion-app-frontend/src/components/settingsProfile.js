@@ -90,6 +90,20 @@ import {
 } from "../utils/programPaymentMoney.js";
 import { canStartProgramPaymentPlan } from "../utils/paymentProvider.js";
 import { normalizeApplicantCategory } from "../utils/studioPlainForms.js";
+import {
+  applicationsIncludeTester,
+  canShowApplicationOnlyDisplayToggle,
+  countApplicationsFromRecord,
+  readApplicationOnlyDisplayPref,
+  shouldUseApplicantLightGate,
+  shouldUseApplicantStudioMode,
+  writeApplicationOnlyDisplayPref,
+} from "../utils/applicantStudioMode.js";
+import {
+  applicantJoinUnlockHtml,
+  buildApplicantJoinUnlockModel,
+  wireApplicantJoinUnlock,
+} from "../utils/applicantStudioJoinUnlock.js";
 import { studioIconHref } from "../utils/studioIconRegistry.js";
 import { syncMembershipAfterAccountRecovery } from "../utils/integrationApi.js";
 import {
@@ -99,6 +113,7 @@ import {
   startPlanChange,
   membershipTierFromPlanId,
 } from "../utils/membershipPlanChange.js";
+import { buildMembershipCreditsStripModel } from "../utils/membershipCreditsDisplay.js";
 import { formatStudioDate } from "../utils/studioDateFormat.js";
 import exploreProgramsIconUrl from "../assets/icons/fusion_dashboard_svg_icons/explore-programs.svg";
 import myProgramsIconUrl from "../assets/icons/fusion_dashboard_svg_icons/my-programs.svg";
@@ -293,6 +308,11 @@ const MPD_PANEL_CHROME = {
     shoutHtml: "Programs and opportunities.",
     hint:
       "Track applications and explore public programs that match your practice.",
+  },
+  "join-unlock": {
+    shoutHtml: "Unlock your studio.",
+    hint:
+      "Become a FUSION member to open your full profile and exclusive platform access. You can still track applications under Programs.",
   },
   membership: {
     shoutHtml: "Your membership keeps your practice visible.",
@@ -1867,6 +1887,93 @@ function setMpdProgramsTab(tab) {
     if (isActive) el.removeAttribute("hidden");
     else el.setAttribute("hidden", "");
   });
+  if (safeTarget === "explore") {
+    void hydrateExploreProgramCredits();
+  }
+}
+
+/**
+ * Application + program draw credits on Explore programs (quarterly / annual only).
+ */
+async function hydrateExploreProgramCredits() {
+  const strip = document.getElementById("mpd_program_credits");
+  if (!(strip instanceof HTMLElement)) return;
+  const appEl = document.getElementById("mpd_app_credits_value");
+  const drawEl = document.getElementById("mpd_draw_credits_value");
+  const nextEl = document.getElementById("mpd_credits_next_date");
+  const hintEl = document.getElementById("mpd_credits_next_hint");
+
+  let tier = "";
+  try {
+    tier = normalizeMembershipTier(await getMembershipTierForCaller());
+  } catch {
+    tier = "";
+  }
+  if (!tier && mpdMembershipBillingContext?.tier) {
+    tier = normalizeMembershipTier(mpdMembershipBillingContext.tier);
+  }
+
+  let appCreditBalance = 0;
+  if (tier === "quarterly") {
+    try {
+      appCreditBalance = await getQuarterlyAppCreditBalanceForCaller();
+    } catch {
+      appCreditBalance = 0;
+    }
+  }
+
+  /** @type {string} */
+  let periodEndIso = "";
+  if (tier === "annual") {
+    try {
+      const snap = await getAuthSnapshot();
+      if (snap.authenticated) {
+        const principal = snap.principal.toText();
+        const acc = await getAccountForCaller();
+        const accObj = acc && typeof acc === "object" ? acc : {};
+        const paypalSubId = String(
+          accObj.paypalSubscriptionId || accObj.paypal_subscription_id || "",
+        ).trim();
+        const stripeSubId = String(
+          accObj.stripeSubscriptionId || accObj.stripe_subscription_id || "",
+        ).trim();
+        const provider = paypalSubId ? "paypal" : stripeSubId ? "stripe" : "";
+        const subscriptionId = paypalSubId || stripeSubId;
+        if (provider && subscriptionId) {
+          const { fetchMemberBillingSummary } = await import("../utils/integrationApi.js");
+          const summary = await fetchMemberBillingSummary(principal, {
+            subscriptionId,
+            provider,
+          });
+          if (
+            summary &&
+            typeof summary === "object" &&
+            summary.ok &&
+            typeof summary.currentPeriodEnd === "string"
+          ) {
+            periodEndIso = String(summary.currentPeriodEnd).trim();
+          }
+        }
+      }
+    } catch {
+      periodEndIso = "";
+    }
+  }
+
+  const model = buildMembershipCreditsStripModel({
+    tier,
+    appCreditBalance,
+    periodEndIso,
+  });
+  if (!model) {
+    strip.hidden = true;
+    return;
+  }
+  strip.hidden = false;
+  if (appEl) appEl.textContent = model.applicationCreditsLabel;
+  if (drawEl) drawEl.textContent = model.drawCreditsLabel;
+  if (nextEl) nextEl.textContent = model.nextCreditsLabel;
+  if (hintEl) hintEl.textContent = model.nextCreditsHint;
 }
 
 function applyMpdPublicProgramFilters() {
@@ -3466,6 +3573,7 @@ async function hydratePublicProgramDiscoveryCards() {
         <p class="studio-muted">When Fusion publishes new public opportunities, they will appear here.</p>
       </div>
     `;
+    void hydrateExploreProgramCredits();
     return;
   }
   const grid = document.createElement("div");
@@ -3626,6 +3734,7 @@ async function hydratePublicProgramDiscoveryCards() {
   `;
   container.appendChild(noResults);
   applyMpdPublicProgramFilters();
+  void hydrateExploreProgramCredits();
 }
 
 async function syncResidencyApplyCta() {
@@ -3760,6 +3869,13 @@ export function generateSettingsProfileContent() {
 
   return `
         <div class="page settings-profile-page">
+            <app-join-network
+                id="joinNetworkHeaderBridge"
+                data-modal-type="membership"
+                data-header-bridge="true"
+                context="settings-profile"
+                active="true"
+            ></app-join-network>
             <app-profile-save-status id="settingsProfileFloatingSaveStatus" hidden aria-hidden="true"></app-profile-save-status>
             <div id="mpd_upload_overlay" class="mpd-upload-overlay" hidden aria-hidden="true">
                 <div class="mpd-upload-overlay__panel" role="status" aria-live="polite">
@@ -3798,6 +3914,13 @@ export function generateSettingsProfileContent() {
                     <div class="mpd-sidebar-cta-row" aria-label="Profile quick actions">
                         <a class="program-intro-cta mpd-program-intro-cta mpd-sidebar-cta" id="mpd_view_profile" href="#" target="_blank" rel="noopener noreferrer">View public profile &rarr;</a>
                         <button type="button" class="program-intro-cta mpd-program-intro-cta mpd-sidebar-cta" id="mpd_apply_residency" data-program-path="${MPD_APPLY_PROGRAM_PATH}" data-apply-open="true">Apply to Residency &rarr;</button>
+                        <button type="button" class="program-intro-cta mpd-program-intro-cta mpd-sidebar-cta mpd-sidebar-cta--become-member" id="mpd_become_member" hidden>Become a member</button>
+                    </div>
+                    <div class="mpd-application-only-toggle" id="mpdApplicationOnlyToggleWrap" hidden>
+                        <label class="mpd-application-only-toggle__label">
+                            <input type="checkbox" id="mpdApplicationOnlyToggle" />
+                            <span>Application only display</span>
+                        </label>
                     </div>
                     <div class="studio-nav-contact mpd-sidebar-contact" id="settingsProfileNavContact">
                         <p class="studio-nav-contact__headline">
@@ -4178,6 +4301,11 @@ export function generateSettingsProfileContent() {
                             </section>
                         </div>
 
+                        <!-- ═══ JOIN FUSION UNLOCK (applicant / locked nav) ═══ -->
+                        <div class="mpd-panel mpd-panel--join-unlock" id="mpd-panel-join-unlock" data-mpd-panel="join-unlock" hidden>
+                            <div id="mpdJoinUnlockMount" class="mpd-join-unlock-mount" aria-live="polite"></div>
+                        </div>
+
                         <!-- ═══ EXHIBITIONS & PROGRAMS ═══ -->
                         <div class="mpd-panel" id="mpd-panel-programs" data-mpd-panel="programs" hidden>
                             <section class="member-profile-dashboard__card mpd-programs-shell" id="mpd-programs">
@@ -4199,6 +4327,30 @@ export function generateSettingsProfileContent() {
 
                                 <div class="mpd-program-tab-panel" id="mpd-program-panel-explore" role="tabpanel" aria-labelledby="mpd-program-tab-explore" data-mpd-program-panel="explore">
                                 <div class="mpd-public-programs-discovery" id="mpd_public_programs_discovery">
+                                        <div class="mpd-program-credits" id="mpd_program_credits" hidden aria-live="polite">
+                                            <div class="mpd-program-credits__item">
+                                                <span class="mpd-program-credits__icon mpd-program-credits__icon--app" aria-hidden="true"></span>
+                                                <div class="mpd-program-credits__copy">
+                                                    <span class="mpd-program-credits__label">Application credits</span>
+                                                    <strong class="mpd-program-credits__value" id="mpd_app_credits_value">—</strong>
+                                                </div>
+                                            </div>
+                                            <div class="mpd-program-credits__item">
+                                                <span class="mpd-program-credits__icon mpd-program-credits__icon--draw" aria-hidden="true"></span>
+                                                <div class="mpd-program-credits__copy">
+                                                    <span class="mpd-program-credits__label">Program draw credits</span>
+                                                    <strong class="mpd-program-credits__value" id="mpd_draw_credits_value">—</strong>
+                                                </div>
+                                            </div>
+                                            <div class="mpd-program-credits__item mpd-program-credits__item--next">
+                                                <span class="mpd-program-credits__icon mpd-program-credits__icon--next" aria-hidden="true"></span>
+                                                <div class="mpd-program-credits__copy">
+                                                    <span class="mpd-program-credits__label">Next credits</span>
+                                                    <strong class="mpd-program-credits__value" id="mpd_credits_next_date">—</strong>
+                                                    <span class="mpd-program-credits__hint" id="mpd_credits_next_hint"></span>
+                                                </div>
+                                            </div>
+                                        </div>
                                         <div class="mpd-public-programs-toolbar">
                                             <div>
                                     <h3 class="mpd-public-programs-discovery__h">Explore programs</h3>
@@ -4692,6 +4844,14 @@ export default function initSettingsProfile() {
   let profileSaveInFlight = false;
   let mediaUploadRevision = 0;
   let baselineMediaUploadRevision = 0;
+  /** Restricted Applicant Studio chrome (locked nav + My programs + Join unlock). */
+  let applicantStudioActive = false;
+  /** needsSubscription with zero applications — Join unlock primary. */
+  let applicantLightGateActive = false;
+  let applicationOnlyDisplayPref = readApplicationOnlyDisplayPref();
+  /** @type {(() => void) | null} */
+  let joinUnlockCleanup = null;
+  let joinUnlockLoaded = false;
 
   const statusEl = document.getElementById("settingsProfileStatus");
   const formWrap = document.getElementById("settingsProfileFormWrap");
@@ -5355,10 +5515,10 @@ export default function initSettingsProfile() {
       schedEl.textContent = `Cancellation scheduled — access continues until ${mpdFormatLongDate(periodEnd)}.`;
     }
 
-    const hasSub =
-      Boolean(st) ||
+      const hasSub =
+        Boolean(st) ||
       Boolean(subscriptionId) ||
-      (ok && typeof s.subscriptionId === "string" && s.subscriptionId.trim());
+        (ok && typeof s.subscriptionId === "string" && s.subscriptionId.trim());
     const activeish = st === "active" || st === "trialing";
     const disableCancel =
       cancelAtEnd || st === "canceled" || st === "cancelled" || !hasSub;
@@ -5388,10 +5548,21 @@ export default function initSettingsProfile() {
 
   const validMpdPanels = () => {
     /** @type {string[]} */
-    const keys = ["studio-overview", "identity", "work", "programs", "media", "journal", "preview", "settings"];
+    const keys = ["studio-overview", "identity", "work", "programs", "media", "journal", "preview", "settings", "join-unlock"];
     if (DEV_MODE) keys.push("dev");
     return keys;
   };
+
+  const LOCKED_APPLICANT_PANELS = new Set([
+    "studio-overview",
+    "identity",
+    "work",
+    "media",
+    "journal",
+    "preview",
+    "settings",
+    "dev",
+  ]);
 
   /**
    * @param {string} key
@@ -5399,16 +5570,126 @@ export default function initSettingsProfile() {
   const applyMpdPanelChrome = (panelKey) => {
     const shoutEl = document.getElementById("settingsProfileShout");
     const hintEl = document.getElementById("settingsProfileHint");
+    const root = document.getElementById("mpd_root");
     const allowed = new Set(validMpdPanels());
     const k = allowed.has(panelKey) ? panelKey : "studio-overview";
     const c = MPD_PANEL_CHROME[k] ?? MPD_PANEL_CHROME["studio-overview"];
     if (shoutEl) shoutEl.innerHTML = c.shoutHtml;
     if (hintEl) hintEl.textContent = c.hint;
+    const joinUnlockFocus =
+      k === "join-unlock" && (applicantStudioActive || applicantLightGateActive);
+    root?.classList.toggle("mpd-root--join-unlock-focus", joinUnlockFocus);
+  };
+
+  const ensureJoinUnlockMounted = async () => {
+    const mount = document.getElementById("mpdJoinUnlockMount");
+    if (!(mount instanceof HTMLElement)) return;
+    if (joinUnlockCleanup) {
+      joinUnlockCleanup();
+      joinUnlockCleanup = null;
+    }
+    const loc =
+      typeof window.getLocale === "function" && window.getLocale() === "ja" ? "ja" : "en";
+    let pageBundle = null;
+    let flowBundle = null;
+    try {
+      pageBundle = await getContentBundleForStudio("join-network-page", { forStudio: false });
+    } catch {
+      pageBundle = null;
+    }
+    try {
+      flowBundle = await getContentBundleForStudio("join-network-flow", { forStudio: false });
+    } catch {
+      flowBundle = null;
+    }
+    const model = buildApplicantJoinUnlockModel(pageBundle, flowBundle, loc);
+    mount.innerHTML = applicantJoinUnlockHtml(model);
+    joinUnlockCleanup = wireApplicantJoinUnlock(mount, {
+      defaultTier: "quarterly",
+      getBillingEmail: () => {
+        const fromKnown = String(mpdKnownContactEmail || "").trim();
+        if (fromKnown.includes("@")) return fromKnown;
+        const input = document.getElementById("settingsProfileNavContactEmail");
+        if (input instanceof HTMLInputElement) {
+          const v = String(input.value || "").trim();
+          if (v.includes("@")) return v;
+        }
+        return "";
+      },
+    });
+    joinUnlockLoaded = true;
+  };
+
+  /**
+   * @param {{
+   *   applicantMode: boolean,
+   *   lightGate: boolean,
+   *   showTesterToggle: boolean,
+   * }} opts
+   */
+  const applyApplicantStudioChrome = (opts) => {
+    applicantStudioActive = !!opts.applicantMode;
+    applicantLightGateActive = !!opts.lightGate;
+    const root = document.getElementById("mpd_root");
+    root?.classList.toggle("mpd-root--applicant-studio", applicantStudioActive || applicantLightGateActive);
+
+    const viewProfile = document.getElementById("mpd_view_profile");
+    const applyResidency = document.getElementById("mpd_apply_residency");
+    const becomeMember = document.getElementById("mpd_become_member");
+    const restricted = applicantStudioActive || applicantLightGateActive;
+    if (viewProfile instanceof HTMLElement) viewProfile.hidden = restricted;
+    if (applyResidency instanceof HTMLElement) applyResidency.hidden = restricted;
+    if (becomeMember instanceof HTMLElement) becomeMember.hidden = !restricted;
+
+    document.querySelectorAll("#settingsProfileNav .mpd-nav-btn[data-mpd-panel]").forEach((btn) => {
+      if (!(btn instanceof HTMLElement)) return;
+      const panel = btn.getAttribute("data-mpd-panel") || "";
+      const locked = restricted && panel !== "programs" && LOCKED_APPLICANT_PANELS.has(panel);
+      btn.classList.toggle("mpd-nav-btn--locked", locked);
+      btn.toggleAttribute("aria-disabled", locked);
+      if (locked) btn.setAttribute("title", "Become a member to unlock");
+      else btn.removeAttribute("title");
+    });
+
+    const exploreTab = document.getElementById("mpd-program-tab-explore");
+    const paymentsTab = document.getElementById("mpd-program-tab-payments");
+    const myTab = document.getElementById("mpd-program-tab-my-programs");
+    if (exploreTab instanceof HTMLElement) exploreTab.hidden = applicantStudioActive || applicantLightGateActive;
+    if (paymentsTab instanceof HTMLElement) paymentsTab.hidden = applicantStudioActive || applicantLightGateActive;
+    if (myTab instanceof HTMLElement) myTab.hidden = applicantLightGateActive && !applicantStudioActive;
+
+    const toggleWrap = document.getElementById("mpdApplicationOnlyToggleWrap");
+    const toggleInput = /** @type {HTMLInputElement | null} */ (
+      document.getElementById("mpdApplicationOnlyToggle")
+    );
+    if (toggleWrap instanceof HTMLElement) {
+      toggleWrap.hidden = !opts.showTesterToggle;
+    }
+    if (toggleInput) {
+      toggleInput.checked = applicationOnlyDisplayPref;
+    }
+
+    const membershipActionsEl = document.getElementById("settingsProfileMembershipActions");
+    if (restricted && membershipActionsEl) {
+      membershipActionsEl.style.display = "none";
+      membershipActionsEl.setAttribute("hidden", "");
+    }
   };
 
   const showMpdPanel = (key) => {
+    let requested = key;
+    if (
+      (applicantStudioActive || applicantLightGateActive) &&
+      requested !== "programs" &&
+      requested !== "join-unlock"
+    ) {
+      requested = "join-unlock";
+    }
+    if (applicantLightGateActive && requested === "programs") {
+      requested = "join-unlock";
+    }
     const allowed = new Set(validMpdPanels());
-    const k = allowed.has(key) ? key : "studio-overview";
+    const k = allowed.has(requested) ? requested : "studio-overview";
     document.querySelectorAll("#mpd_root .mpd-panel").forEach((p) => {
       const id = p.getAttribute("data-mpd-panel");
       if (!id) return;
@@ -5416,10 +5697,20 @@ export default function initSettingsProfile() {
     });
     document.querySelectorAll("#mpd_root .mpd-nav-btn").forEach((b) => {
       const id = b.getAttribute("data-mpd-panel");
-      if (id) b.classList.toggle("is-active", id === k);
+      if (!id) return;
+      if ((applicantStudioActive || applicantLightGateActive) && id === "programs" && k === "programs") {
+        b.classList.toggle("is-active", true);
+      } else if ((applicantStudioActive || applicantLightGateActive) && k === "join-unlock") {
+        b.classList.toggle("is-active", id === "programs" ? false : false);
+        if (LOCKED_APPLICANT_PANELS.has(id)) b.classList.remove("is-active");
+      } else {
+        b.classList.toggle("is-active", id === k);
+      }
     });
     applyMpdPanelChrome(k);
     closeSettingsProfileMobileNav();
+    if (k === "join-unlock") void ensureJoinUnlockMounted();
+    if (k === "programs" && applicantStudioActive) setMpdProgramsTab("my-programs");
     requestAnimationFrame(() => {
       const footer = document.getElementById("footer");
       if (footer) {
@@ -5432,7 +5723,9 @@ export default function initSettingsProfile() {
         }, 300);
       }
     });
-    if (k === "settings") void hydrateMembershipPanel();
+    if (k === "settings" && !applicantStudioActive && !applicantLightGateActive) {
+      void hydrateMembershipPanel();
+    }
     try {
       if (
         typeof history !== "undefined" &&
@@ -6866,12 +7159,15 @@ export default function initSettingsProfile() {
       }
     }
 
+    applicationOnlyDisplayPref = readApplicationOnlyDisplayPref();
     if (!isTest && snap.authenticated) {
       try {
         mpdMembershipGate = await getMembershipAccessForCaller();
       } catch {
         mpdMembershipGate = "";
       }
+    } else if (isTest) {
+      mpdMembershipGate = "exempt";
     }
 
     if (!isTest && snap.authenticated && !adminViewingMemberPerspective) {
@@ -6881,28 +7177,17 @@ export default function initSettingsProfile() {
         renderNoAccountRecoveryHint(hint);
         setAccountRecoveryVisible(true);
         wireAccountRecoveryHandlers();
+        applyApplicantStudioChrome({
+          applicantMode: false,
+          lightGate: false,
+          showTesterToggle: false,
+        });
         if (formWrap) formWrap.setAttribute("hidden", "");
         setInitialProfileLoading(false);
         applySettingsProfileDocumentSeo(dashTitle);
         return;
       }
-      if (ens === "needsSubscription") {
-        const recSub = await getMyArtistRecord();
-        if (!recSub) {
-          if (hint) {
-            hint.textContent =
-              "Your account does not show an active membership yet. If you already paid, finish linking your payment to this Internet Identity login (Join), or refresh status from Stripe.";
-          }
-          if (membershipActionsEl) {
-            membershipActionsEl.style.display = "flex";
-            membershipActionsEl.removeAttribute("hidden");
-          }
-          if (formWrap) formWrap.setAttribute("hidden", "");
-          setInitialProfileLoading(false);
-          applySettingsProfileDocumentSeo(dashTitle);
-          return;
-        }
-      }
+      // needsSubscription without a linked artist: do not hard-stop — Applicant Studio / light gate below.
     }
 
     let rec = await getMyArtistRecord();
@@ -6914,6 +7199,36 @@ export default function initSettingsProfile() {
       }
       rec = await getMyArtistRecord();
     }
+
+    const applicationCount = rec
+      ? countApplicationsFromRecord(rec.applied_json ?? rec.appliedJson)
+      : 0;
+    const hasTesterApp = rec
+      ? applicationsIncludeTester(rec.applied_json ?? rec.appliedJson)
+      : false;
+    let isRealAdmin = false;
+    try {
+      isRealAdmin = await isRealAdminCaller();
+    } catch {
+      isRealAdmin = false;
+    }
+    const showTesterToggle = canShowApplicationOnlyDisplayToggle({
+      isRealAdmin,
+      hasTesterApplication: hasTesterApp,
+    });
+    const applicantMode = shouldUseApplicantStudioMode({
+      membershipGate: mpdMembershipGate,
+      applicationCount,
+      applicationOnlyDisplay: applicationOnlyDisplayPref,
+      applicationOnlyToggleVisible: showTesterToggle,
+    });
+    const lightGate = shouldUseApplicantLightGate({
+      membershipGate: mpdMembershipGate,
+      applicationCount,
+      applicationOnlyDisplay: applicationOnlyDisplayPref,
+      applicationOnlyToggleVisible: showTesterToggle,
+    });
+
     if (!rec) {
       if (adminViewingMemberPerspective) {
         if (hint) {
@@ -6943,6 +7258,28 @@ export default function initSettingsProfile() {
         applySettingsProfileDocumentSeo(dashTitle);
         return;
       }
+      // Light / applicant preview without linked artist: Join unlock only.
+      // Testers/admins with the toggle unchecked opt out of this restricted shell.
+      const forceRestrictedNoProfile =
+        applicationOnlyDisplayPref ||
+        (!showTesterToggle &&
+          (lightGate || mpdMembershipGate === "needsSubscription"));
+      if (forceRestrictedNoProfile) {
+        applyApplicantStudioChrome({
+          applicantMode: false,
+          lightGate: true,
+          showTesterToggle,
+        });
+        setInitialProfileLoading(false);
+        if (formWrap) formWrap.removeAttribute("hidden");
+        if (hint) {
+          hint.textContent =
+            "Become a FUSION member to unlock your full studio. You can track applications under Programs once you have applied.";
+        }
+        showMpdPanel("join-unlock");
+        applySettingsProfileDocumentSeo(dashTitle);
+        return;
+      }
       if (hint) {
         hint.textContent =
           "Your profile could not be loaded. Try refreshing the page. If you just subscribed, wait a moment and try again, or sign out and back in.";
@@ -6952,6 +7289,12 @@ export default function initSettingsProfile() {
       applySettingsProfileDocumentSeo(dashTitle);
       return;
     }
+
+    applyApplicantStudioChrome({
+      applicantMode,
+      lightGate: lightGate && !applicantMode,
+      showTesterToggle,
+    });
 
     const prof =
       rec.profile && typeof rec.profile === "object" ? rec.profile : {};
@@ -7085,12 +7428,25 @@ export default function initSettingsProfile() {
       /** @type {Record<string, unknown>} */ (localesState),
       activeLocale,
     );
-    setMpdProgramsTab("explore");
-    void hydratePublicProgramDiscoveryCards();
-    void syncResidencyApplyCta();
+    if (applicantStudioActive) {
+      setMpdProgramsTab("my-programs");
+    } else {
+      setMpdProgramsTab("explore");
+      void hydratePublicProgramDiscoveryCards();
+      void syncResidencyApplyCta();
+    }
 
-    showMpdPanel(panelKeyFromHash());
-    syncStudioOverview();
+    if (applicantLightGateActive) {
+      showMpdPanel("join-unlock");
+    } else if (applicantStudioActive) {
+      const hashKey = panelKeyFromHash();
+      showMpdPanel(hashKey === "join-unlock" ? "join-unlock" : "programs");
+    } else {
+      showMpdPanel(panelKeyFromHash());
+    }
+    if (!applicantStudioActive && !applicantLightGateActive) {
+      syncStudioOverview();
+    }
     syncMpdVisibilityUi(mpdBackendRosterVisibility);
 
     updateSettingsProfileUserId(snap, "sidebar");
@@ -7109,8 +7465,28 @@ export default function initSettingsProfile() {
   document
     .getElementById("settingsProfileFinishMembership")
     ?.addEventListener("click", () => {
-      window.dispatchEvent(new CustomEvent("fusion-open-join-network", { detail: {} }));
+      const email = String(mpdKnownContactEmail || "").trim();
+      window.dispatchEvent(
+        new CustomEvent("fusion-open-join-network", {
+          detail: {
+            mode: "resubscribe",
+            fromJoinNetworkPage: true,
+            stage: "payment",
+            subscriptionTier: "monthly",
+            ...(email.includes("@") ? { email } : {}),
+          },
+        }),
+      );
     });
+  document.getElementById("mpd_become_member")?.addEventListener("click", () => {
+    showMpdPanel("join-unlock");
+  });
+  document.getElementById("mpdApplicationOnlyToggle")?.addEventListener("change", (ev) => {
+    const checked = ev.target instanceof HTMLInputElement && ev.target.checked;
+    writeApplicationOnlyDisplayPref(checked);
+    applicationOnlyDisplayPref = checked;
+    void load({ force: true });
+  });
   if (_mpdSaveChoiceHandler) {
     window.removeEventListener("fusion-settings-profile-save-choice", _mpdSaveChoiceHandler);
   }

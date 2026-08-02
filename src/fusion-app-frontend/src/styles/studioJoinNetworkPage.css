@@ -323,9 +323,21 @@
 
 .studio-jnp__preview-plans {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 0.25rem;
   margin: 0.35rem 0;
+}
+
+.studio-jnp__plan-slot {
+  margin-top: 0.85rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid color-mix(in srgb, var(--c2, #111) 8%, transparent);
+}
+
+.studio-jnp__plan-slot:first-of-type {
+  margin-top: 0.5rem;
+  padding-top: 0;
+  border-top: 0;
 }
 
 .studio-jnp__preview-plan {
@@ -336,6 +348,18 @@
 .studio-jnp__preview-plan.is-on {
   border-color: #111;
   box-shadow: inset 0 0 0 1px #111;
+}
+
+.studio-jnp__preview-includes {
+    margin: 0 0 0.65rem;
+    padding-left: 1.1rem;
+    font-size: 0.72rem;
+    line-height: 1.4;
+    color: var(--studio-muted, #666);
+}
+
+.studio-jnp__preview-includes li {
+    margin: 0.15rem 0;
 }
 
 .studio-jnp__preview-cta {

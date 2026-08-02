@@ -234,7 +234,7 @@ module {
         #needsSubscription;
     };
 
-    /// Self-service profile link after membership is active (`ensureMyLinkedArtistProfile`).
+    /// Self-service profile link (`ensureMyLinkedArtistProfile` / `ensureMyLinkedArtistProfileForApplication`).
     public type EnsureLinkedProfileResult = {
         #ok;
         #alreadyLinked;

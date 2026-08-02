@@ -3,6 +3,13 @@
  * @see programPage.applicationForm in Studio (Programs → Manage).
  */
 
+import {
+    emptyPaymentOptionSlice,
+    joinNetworkPlansFromBundle,
+    readUseGlobalPaymentOptionDetails,
+    resolveApplicationPaymentOptions,
+} from './resolveApplicationPaymentOptions.js';
+
 /** @typedef {{ title: string, displayPrice: string, subtext: string, subtext2: string, includedBullets: string[] }} ApplicationPaymentOptionSlice */
 
 const PLAN_KEYS = /** @type {const} */ (['one_time', 'monthly', 'quarterly', 'annual', 'bimonthly']);
@@ -12,17 +19,7 @@ const PLAN_KEYS = /** @type {const} */ (['one_time', 'monthly', 'quarterly', 'an
  * @returns {ApplicationPaymentOptionSlice}
  */
 function parseOnePaymentOption(raw) {
-    const o = raw && typeof raw === 'object' && !Array.isArray(raw) ? /** @type {Record<string, unknown>} */ (raw) : {};
-    const bullets = o.includedBullets;
-    return {
-        title: String(o.title ?? '').trim(),
-        displayPrice: String(o.displayPrice ?? '').trim(),
-        subtext: String(o.subtext ?? '').trim(),
-        subtext2: String(o.subtext2 ?? '').trim(),
-        includedBullets: Array.isArray(bullets)
-            ? bullets.map((x) => String(x ?? '').trim()).filter(Boolean)
-            : [],
-    };
+    return emptyPaymentOptionSlice(raw);
 }
 
 /**
@@ -56,8 +53,25 @@ export function findApplicationDeadlineDateFromKeyDates(keyDates) {
 }
 
 /**
+ * @param {unknown} raw
+ * @returns {number | null}
+ */
+function parseApplicationFeeAmountCents(raw) {
+    if (raw == null) return null;
+    const n = typeof raw === 'number' ? raw : parseInt(String(raw).trim(), 10);
+    if (!Number.isFinite(n) || n < 50) return null;
+    return Math.round(n);
+}
+
+/**
  * @param {Record<string, unknown> | null | undefined} programPage
- * @param {{ programYear?: string, availableSlots?: number | null, totalSlots?: number | null }} [opts]
+ * @param {{
+ *   programYear?: string,
+ *   availableSlots?: number | null,
+ *   totalSlots?: number | null,
+ *   joinNetworkFlowBundle?: unknown,
+ *   locale?: 'en'|'ja',
+ * }} [opts]
  * @returns {{
  *   applicationFeeLine: string,
  *   depositAmountDisplay: string,
@@ -68,17 +82,11 @@ export function findApplicationDeadlineDateFromKeyDates(keyDates) {
  *   detailsSectionId: string,
  *   applicationFeeAmountCents: number | null,
  *   applicationPaymentOptions: Record<'one_time' | 'monthly' | 'quarterly' | 'annual' | 'bimonthly', ApplicationPaymentOptionSlice>,
+ *   useGlobalPaymentOptionDetails: boolean,
  *   availableSlots: number | null,
  *   totalSlots: number | null,
  * }}
  */
-function parseApplicationFeeAmountCents(raw) {
-    if (raw == null) return null;
-    const n = typeof raw === 'number' ? raw : parseInt(String(raw).trim(), 10);
-    if (!Number.isFinite(n) || n < 50) return null;
-    return Math.round(n);
-}
-
 export function buildProgramApplicationFormContext(programPage, opts = {}) {
     const pp = programPage && typeof programPage === 'object' ? programPage : {};
     const af =
@@ -89,7 +97,10 @@ export function buildProgramApplicationFormContext(programPage, opts = {}) {
         pp.programDetails && typeof pp.programDetails === 'object'
             ? /** @type {Record<string, unknown>} */ (pp.programDetails)
             : {};
-    const costs = details.costs && typeof details.costs === 'object' ? /** @type {Record<string, unknown>} */ (details.costs) : {};
+    const costs =
+        details.costs && typeof details.costs === 'object'
+            ? /** @type {Record<string, unknown>} */ (details.costs)
+            : {};
     const keyDates = Array.isArray(details.keyDates) ? details.keyDates : [];
     const addl =
         pp.additionalInfo && typeof pp.additionalInfo === 'object'
@@ -97,6 +108,7 @@ export function buildProgramApplicationFormContext(programPage, opts = {}) {
             : {};
 
     const year = String(opts.programYear ?? '').trim();
+    const locale = opts.locale === 'ja' ? 'ja' : 'en';
 
     let deadline = String(af.applicationDeadlineDisplay ?? '').trim();
     if (!deadline) {
@@ -108,18 +120,36 @@ export function buildProgramApplicationFormContext(programPage, opts = {}) {
 
     const deposit = String(af.depositAmountDisplay ?? '').trim();
     const applicationFeeAmountCents = parseApplicationFeeAmountCents(af.applicationFeeAmountCents);
+    const useGlobalPaymentOptionDetails = readUseGlobalPaymentOptionDetails(af);
 
-    const apoRoot = pp.applicationPaymentOptions && typeof pp.applicationPaymentOptions === 'object' ? pp.applicationPaymentOptions : {};
+    const apoRoot =
+        pp.applicationPaymentOptions && typeof pp.applicationPaymentOptions === 'object'
+            ? pp.applicationPaymentOptions
+            : {};
     /** @type {Record<'one_time' | 'monthly' | 'quarterly' | 'annual' | 'bimonthly', ApplicationPaymentOptionSlice>} */
-    const applicationPaymentOptions = emptyApplicationPaymentOptions();
+    const programOptions = emptyApplicationPaymentOptions();
     for (const k of PLAN_KEYS) {
-        applicationPaymentOptions[k] = parseOnePaymentOption(/** @type {Record<string, unknown>} */ (apoRoot)[k]);
+        programOptions[k] = parseOnePaymentOption(
+            /** @type {Record<string, unknown>} */ (apoRoot)[k],
+        );
     }
 
+    const joinPlans = joinNetworkPlansFromBundle(opts.joinNetworkFlowBundle, locale);
+    const resolved = resolveApplicationPaymentOptions({
+        programOptions,
+        joinPlans,
+        useGlobal: useGlobalPaymentOptionDetails,
+        locale,
+    });
+
     const as =
-        typeof opts?.availableSlots === 'number' && Number.isFinite(opts.availableSlots) ? opts.availableSlots : null;
+        typeof opts?.availableSlots === 'number' && Number.isFinite(opts.availableSlots)
+            ? opts.availableSlots
+            : null;
     const ts =
-        typeof opts?.totalSlots === 'number' && Number.isFinite(opts.totalSlots) ? opts.totalSlots : null;
+        typeof opts?.totalSlots === 'number' && Number.isFinite(opts.totalSlots)
+            ? opts.totalSlots
+            : null;
 
     return {
         applicationFeeLine: String(costs.applicationFee ?? '').trim(),
@@ -130,7 +160,14 @@ export function buildProgramApplicationFormContext(programPage, opts = {}) {
         selectionProcessOverride: String(af.selectionProcessOverride ?? '').trim(),
         detailsSectionId: 'programDetailsSection',
         applicationFeeAmountCents,
-        applicationPaymentOptions,
+        applicationPaymentOptions: {
+            ...programOptions,
+            one_time: resolved.one_time,
+            monthly: resolved.monthly,
+            quarterly: resolved.quarterly,
+            annual: resolved.annual,
+        },
+        useGlobalPaymentOptionDetails,
         availableSlots: as,
         totalSlots: ts,
     };

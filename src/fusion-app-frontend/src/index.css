@@ -2021,6 +2021,55 @@ button:hover {
   background: #0056b3;
 }
 
+/* Applicant Studio join unlock — kill global blue button hover (#007bff / #0056b3). */
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__plan,
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__plan:hover,
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__plan:focus,
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__plan:focus-visible,
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__plan:active {
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__plan:hover,
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__plan:focus,
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__plan:focus-visible,
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__plan:active {
+  background: #f3efe6 !important;
+  background-color: #f3efe6 !important;
+  color: #0f172a !important;
+}
+
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__plan.is-selected,
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__plan.is-selected:hover,
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__plan.is-selected:focus,
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__plan.is-selected:focus-visible,
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__plan.is-selected:active {
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__cta,
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__cta:hover,
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__cta:focus,
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__cta:focus-visible,
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__cta:active {
+  background: #0f172a !important;
+  background-color: #0f172a !important;
+  color: #ffffff !important;
+}
+
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__cta:hover,
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__cta:focus,
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__cta:focus-visible,
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__cta:active {
+  background: #1e293b !important;
+  background-color: #1e293b !important;
+  color: #ffffff !important;
+}
+
 /* Filter action + modal buttons — theme hovers (override global button styles above). */
 #filterSystem button.feed-filter-action-btn,
 .feed-filter-modal button.feed-filter-modal__option,

@@ -2694,6 +2694,10 @@ persistent actor {
     quarterlyAppCreditLastAccruedByPrincipal.put(p, curKey);
   };
 
+  /// TEMP: waive per-application fees for all active members until the credit system ships.
+  /// Guests still pay APP_FEE_GUEST_CENTS. Set false when monthly/quarterly credits are live.
+  private let TEMP_WAIVE_MEMBER_APPLICATION_FEES : Bool = true;
+
   private func applicationFeeDueForPrincipal(p : Principal, currentQuarterKey : Text) : Types.ApplicationFeeDue {
     switch (membershipAccessForPrincipal(p)) {
       case (#exempt) {
@@ -2714,7 +2718,10 @@ persistent actor {
           case (?n) { n };
           case null { 0 };
         };
-        if (tier == "annual") {
+        let t = if (tier.size() > 0) { tier } else { "monthly" };
+        if (TEMP_WAIVE_MEMBER_APPLICATION_FEES) {
+          { dueCents = 0; reason = "membership_temp"; membershipTier = t; appCreditBalance = bal }
+        } else if (tier == "annual") {
           { dueCents = 0; reason = "annual"; membershipTier = "annual"; appCreditBalance = bal }
         } else if (tier == "quarterly") {
           if (bal >= 1) {
@@ -2723,7 +2730,6 @@ persistent actor {
             { dueCents = APP_FEE_MEMBER_CENTS; reason = "member_fee"; membershipTier = "quarterly"; appCreditBalance = 0 }
           }
         } else {
-          let t = if (tier.size() > 0) { tier } else { "monthly" };
           { dueCents = APP_FEE_MEMBER_CENTS; reason = "member_fee"; membershipTier = t; appCreditBalance = bal }
         }
       };
@@ -3217,6 +3223,12 @@ persistent actor {
     _Iter.toArray(membershipTrialWindowByPrincipal.entries());
   };
 
+  /// Admin: membership plan tier per principal (monthly / quarterly / annual / bimonthly).
+  public shared query (msg) func adminListMembershipTiers() : async [(Principal, Text)] {
+    assertStudioAccountDirectoryVisible(msg.caller);
+    _Iter.toArray(membershipTierByPrincipal.entries());
+  };
+
   /// Admin: create a single-use 8-digit trial invite. Trial starts at redemption and expires after `trialMonths`.
   public shared (msg) func adminCreateTrialJoinInviteCode(role : Types.UserRole, trialMonths : Nat) : async Text {
     assertAdmin(msg.caller);
@@ -3382,8 +3394,9 @@ persistent actor {
     };
   };
 
-  /// Self-service: when membership is active (`#ok` or `#exempt`), create a minimal public roster row
+  /// Self-service: when membership is active (`#ok` or `#exempt`), create a minimal inactive roster row
   /// and set `linkedArtistId`. Idempotent if already linked. Used by profile settings + post-payment flows.
+  /// Application-only payers use `ensureMyLinkedArtistProfileForApplication` (allows `#needsSubscription`).
   private func accountContactEmailForPrincipal(p : Principal) : Text {
     switch (accountContactByPrincipal.get(p)) {
       case null { "" };
@@ -3408,6 +3421,55 @@ persistent actor {
     };
   };
 
+  /// Create or attach `m-{principal}` inactive artist + `linkedArtistId`. Caller already verified account/unlinked.
+  private func createOrLinkInactiveArtistSkeleton(p : Principal, acc : Types.UserAccountCore) : Types.EnsureLinkedProfileResult {
+    let pidText = Principal.toText(p);
+    let artistId = "m-" # pidText;
+    let now = nowText();
+    let contactEmail = accountContactEmailForPrincipal(p);
+    switch (artistsById.get(artistId)) {
+      case (?_) {
+        backfillArtistContactEmailIfEmpty(artistId, contactEmail);
+        let newCore : Types.UserAccountCore = {
+          acc with
+          linkedArtistId = ?artistId;
+          updatedAt = now;
+        };
+        accountsByPrincipal.put(p, newCore);
+        return #ok;
+      };
+      case null {};
+    };
+    let fo : Nat = 999_999;
+    let profile : Types.ArtistCore = {
+      id = artistId;
+      slug = artistId;
+      image = "";
+      featuredOrder = fo;
+      visibility = "inactive";
+      updatedAt = now;
+      contactEmail = contactEmail;
+      filter = null;
+      galleryFilter = null;
+    };
+    let localesJson : Text = "{\"en\":{},\"ja\":{}}";
+    let rec : Types.ArtistRecord = {
+      profile = profile;
+      localesJson = ?localesJson;
+      notesEncrypted = null;
+      imported = false;
+      accessCode = "";
+    };
+    putArtistRecord(rec);
+    let newCore : Types.UserAccountCore = {
+      acc with
+      linkedArtistId = ?artistId;
+      updatedAt = now;
+    };
+    accountsByPrincipal.put(p, newCore);
+    #ok
+  };
+
   public shared (msg) func ensureMyLinkedArtistProfile() : async Types.EnsureLinkedProfileResult {
     if (Principal.equal(msg.caller, anonPrincipal)) {
       return #noAccount;
@@ -3428,51 +3490,34 @@ persistent actor {
           case (#ok) {};
           case (#exempt) {};
         };
-        let pidText = Principal.toText(msg.caller);
-        let artistId = "m-" # pidText;
-        let now = nowText();
-        let contactEmail = accountContactEmailForPrincipal(msg.caller);
-        switch (artistsById.get(artistId)) {
-          case (?_) {
-            backfillArtistContactEmailIfEmpty(artistId, contactEmail);
-            let newCore : Types.UserAccountCore = {
-              acc with
-              linkedArtistId = ?artistId;
-              updatedAt = now;
-            };
-            accountsByPrincipal.put(msg.caller, newCore);
-            return #ok;
+        createOrLinkInactiveArtistSkeleton(msg.caller, acc)
+      };
+    };
+  };
+
+  /// Like `ensureMyLinkedArtistProfile`, but also allows `#needsSubscription` so one-time application
+  /// payers can submit and see My programs. Does not grant membership access. Profile stays `inactive`.
+  public shared (msg) func ensureMyLinkedArtistProfileForApplication() : async Types.EnsureLinkedProfileResult {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      return #noAccount;
+    };
+    switch (accountsByPrincipal.get(msg.caller)) {
+      case null { return #noAccount };
+      case (?acc) {
+        switch (acc.linkedArtistId) {
+          case (?aid) {
+            backfillArtistContactEmailIfEmpty(aid, accountContactEmailForPrincipal(msg.caller));
+            return #alreadyLinked;
           };
           case null {};
         };
-        let fo : Nat = 999_999;
-        let profile : Types.ArtistCore = {
-          id = artistId;
-          slug = artistId;
-          image = "";
-          featuredOrder = fo;
-          visibility = "inactive";
-          updatedAt = now;
-          contactEmail = contactEmail;
-          filter = null;
-          galleryFilter = null;
+        switch (membershipAccessForPrincipal(msg.caller)) {
+          case (#noAccount) { return #noAccount };
+          case (#needsSubscription) {};
+          case (#ok) {};
+          case (#exempt) {};
         };
-        let localesJson : Text = "{\"en\":{},\"ja\":{}}";
-        let rec : Types.ArtistRecord = {
-          profile = profile;
-          localesJson = ?localesJson;
-          notesEncrypted = null;
-          imported = false;
-          accessCode = "";
-        };
-        putArtistRecord(rec);
-        let newCore : Types.UserAccountCore = {
-          acc with
-          linkedArtistId = ?artistId;
-          updatedAt = now;
-        };
-        accountsByPrincipal.put(msg.caller, newCore);
-        return #ok;
+        createOrLinkInactiveArtistSkeleton(msg.caller, acc)
       };
     };
   };
@@ -5408,6 +5453,15 @@ persistent actor {
     programPaymentSummariesByKey.put(key, summary);
   };
 
+  public shared query (msg) func integrationHasProgramPayment(paymentId : Text) : async Bool {
+    assertIntegrationCaller(msg.caller);
+    if (paymentId.size() == 0) { return false };
+    switch (programPaymentLedgerById.get(paymentId)) {
+      case (?_) { true };
+      case null { false };
+    };
+  };
+
   public shared (msg) func integrationRecordProgramPayment(
     row : Types.ProgramPaymentLedgerRow,
     totalDueCents : Nat,
@@ -5621,20 +5675,23 @@ persistent actor {
     };
     applicantsById.put(key, applicant);
     // Consume one stacked quarterly application credit when available (fee-due path with reason=credit).
-    switch (membershipAccessForPrincipal(msg.caller)) {
-      case (#ok) {
-        if (membershipTierOf(msg.caller) == "quarterly") {
-          switch (quarterlyAppCreditBalanceByPrincipal.get(msg.caller)) {
-            case (?n) {
-              if (n >= 1) {
-                quarterlyAppCreditBalanceByPrincipal.put(msg.caller, n - 1);
+    // Skip while TEMP_WAIVE_MEMBER_APPLICATION_FEES — do not drain credits during the free-submit window.
+    if (not TEMP_WAIVE_MEMBER_APPLICATION_FEES) {
+      switch (membershipAccessForPrincipal(msg.caller)) {
+        case (#ok) {
+          if (membershipTierOf(msg.caller) == "quarterly") {
+            switch (quarterlyAppCreditBalanceByPrincipal.get(msg.caller)) {
+              case (?n) {
+                if (n >= 1) {
+                  quarterlyAppCreditBalanceByPrincipal.put(msg.caller, n - 1);
+                };
               };
+              case null {};
             };
-            case null {};
           };
         };
+        case _ {};
       };
-      case _ {};
     };
   };
 
@@ -7018,6 +7075,8 @@ persistent actor {
     switch (principalForArtistId(artistId)) {
       case (?p) { ?p };
       case null {
+        // Match acceptedApplicantRecordsForCaller: applicants may pay deposits after
+        // email match alone (no linkedArtistId yet). Studio slot-secured must resolve them.
         let targetEmail = trimContactEmail(rec.email);
         if (targetEmail.size() == 0) { return null };
         for ((principal, contact) in accountContactByPrincipal.entries()) {
@@ -7030,10 +7089,14 @@ persistent actor {
                       return ?principal;
                     };
                   };
-                  case null {};
+                  case null {
+                    return ?principal;
+                  };
                 };
               };
-              case null {};
+              case null {
+                return ?principal;
+              };
             };
           };
         };
@@ -7257,8 +7320,34 @@ persistent actor {
     assertStudioFeatureVisible(msg.caller, "applicants");
     if (applicantRecordHasManualDepositSubmitted(applicantId)) return true;
     if (applicantRecordIsFullySponsored(applicantId)) return true;
-    let artistId = applicantArtistId(applicantId);
-    let principal = switch (principalForArtistId(artistId)) {
+
+    // Prefer applicationId match — payments are keyed by the paying principal, which may only
+    // be linked via email (not linkedArtistId). Artist-id-only lookup missed those deposits.
+    for ((_, summary) in programPaymentSummariesByKey.entries()) {
+      if (
+        summary.applicationId == applicantId
+        and summary.programId == programId
+        and (
+          summary.depositStatus == "paid"
+          or summary.depositStatus == "paid_full"
+          or summary.totalDueCents == 0
+        )
+      ) {
+        return true;
+      };
+    };
+    for ((_, row) in programPaymentLedgerById.entries()) {
+      if (
+        row.applicationId == applicantId
+        and row.programId == programId
+        and (row.paymentType == "deposit" or row.paymentType == "full_payment" or row.paymentType == "staff_manual")
+        and (row.status == "succeeded" or row.status == "paid")
+      ) {
+        return true;
+      };
+    };
+
+    let principal = switch (principalForApplicantId(applicantId)) {
       case null { return false };
       case (?p) { p };
     };

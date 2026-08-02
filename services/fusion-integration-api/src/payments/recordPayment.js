@@ -39,12 +39,32 @@ export async function recordVerifiedPayPalOrder(order, deps = {}, metaOverride =
     const programId = safePayPalMetaValue(meta.programId, 120);
     const applicationId = safePayPalMetaValue(meta.applicationId, 240);
     const paymentType = safePayPalMetaValue(meta.paymentType, 80);
-    Principal.fromText(principalText);
-    if (!programId || !applicationId || !paymentType) {
-        throw new Error('PayPal order missing program payment metadata');
-    }
     const captureId = safePayPalMetaValue(capture.id, 120);
     const orderId = safePayPalMetaValue(order.id, 120);
+
+    // Confirm vs webhook race: the first path records + deletes pending meta; the second
+    // must not fail the applicant UX (or PayPal retries) when the ledger already has the order.
+    if (!principalText || !programId || !applicationId || !paymentType) {
+        if (orderId && typeof actor.integrationHasProgramPayment === 'function') {
+            try {
+                const already = await actor.integrationHasProgramPayment(orderId);
+                if (already) {
+                    return {
+                        receiptUrl: '',
+                        chargeId: captureId,
+                        amountCents: 0,
+                        paymentType: '',
+                        programId: '',
+                        alreadyRecorded: true,
+                    };
+                }
+            } catch (e) {
+                console.warn('[paypal] integrationHasProgramPayment failed:', e);
+            }
+        }
+        throw new Error('PayPal order missing program payment metadata');
+    }
+    Principal.fromText(principalText);
     const receiptUrl =
         (capture.links || []).find((l) => l.rel === 'self')?.href ||
         (order.links || []).find((l) => l.rel === 'self')?.href ||

@@ -43,24 +43,6 @@ export const testData = {
                 'Thank you for supporting artists and helping us build a thoughtful, global creative community.',
             footerQuestionsPrefix: 'Questions?',
             footerContactUs: 'Contact us',
-            trustBadges: [
-                {
-                    title: 'Secure & Encrypted',
-                    body: 'Your payment details are protected with industry-standard encryption.',
-                },
-                {
-                    title: 'Fair & Transparent',
-                    body: 'Clear pricing with no hidden fees—we believe in honest communication.',
-                },
-                {
-                    title: 'Global Community',
-                    body: 'Join artists from around the world in the Fusion network.',
-                },
-                {
-                    title: 'Artist Focused',
-                    body: 'Every dollar supports our mission to empower creative practitioners.',
-                },
-            ],
         },
         ja: {
             whatsIncludedBullets: [
@@ -79,24 +61,6 @@ export const testData = {
                 'アーティストを支え、思慮深いグローバルなクリエイティブコミュニティづくりにご協力いただきありがとうございます。',
             footerQuestionsPrefix: 'ご不明点は',
             footerContactUs: 'お問い合わせ',
-            trustBadges: [
-                {
-                    title: '安全・暗号化',
-                    body: 'お支払い情報は業界標準の暗号化で保護されます。',
-                },
-                {
-                    title: '公正・透明',
-                    body: '隠れた費用のない明確な料金設定です。',
-                },
-                {
-                    title: 'グローバルコミュニティ',
-                    body: '世界中のアーティストとつながる Fusion ネットワークへ。',
-                },
-                {
-                    title: 'アーティスト第一',
-                    body: 'すべての収益がクリエイティブ実践者を支える使命に役立ちます。',
-                },
-            ],
         },
     },
     /** Site setting `platformUpdateBanner` — public header notice (test mode; disabled by default). */
@@ -322,8 +286,7 @@ export const testData = {
                             applicationFeeAmountCents: 5000,
                             applicationDeadlineIso: "2026-09-05",
                             applicationDeadlineDisplay: "September 5, 2026",
-                            feeNoticeItalic:
-                                "The application fee for our artist residency program is designed to cover processing and administrative costs. This fee helps us manage the selection process, review applications thoroughly, and maintain the high standards of our residency experience. We appreciate your understanding and support in helping us create a vibrant community for artists worldwide.",
+                            useGlobalPaymentOptionDetails: true,
                             selectionProcessOverride: "",
                         },
                         applicationPaymentOptions: {
@@ -338,28 +301,25 @@ export const testData = {
                                 ],
                             },
                             monthly: {
-                                title: "Monthly + application",
-                                displayPrice: "$30",
-                                subtext: "Application fee included on first charge",
-                                subtext2: "Then $30 every month",
-                                includedBullets: [
-                                    "This application included",
-                                    "Ongoing platform membership",
-                                ],
+                                title: "",
+                                displayPrice: "",
+                                subtext: "",
+                                subtext2: "",
+                                includedBullets: [],
                             },
                             quarterly: {
-                                title: "Quarterly membership",
-                                displayPrice: "$75",
-                                subtext: "+1 stackable application credit per quarter",
-                                subtext2: "Free application when credit balance ≥ 1, else $35",
-                                includedBullets: ["Credits roll over", "Best for multiple applications per year"],
+                                title: "",
+                                displayPrice: "",
+                                subtext: "",
+                                subtext2: "",
+                                includedBullets: [],
                             },
                             annual: {
                                 title: "",
-                                displayPrice: "$260",
-                                subtext: "Applications included while membership is active",
-                                subtext2: "Renews every year",
-                                includedBullets: ["Best value for year-round access", "All recurring membership benefits"],
+                                displayPrice: "",
+                                subtext: "",
+                                subtext2: "",
+                                includedBullets: [],
                             },
                         },
                         additionalInfo: {
@@ -2491,6 +2451,11 @@ export const testData = {
                         every: 'per month',
                         subtext: 'Billed monthly',
                         subtext2: 'Flexible — cancel anytime from your profile',
+                        includedBullets: [
+                            'Artist profile + gallery system',
+                            'Residency eligibility',
+                            'Access to network and platform updates',
+                        ],
                     },
                     planQuarterly: {
                         title: 'Quarterly membership',
@@ -2498,6 +2463,11 @@ export const testData = {
                         every: 'per quarter',
                         subtext: 'One application credit per quarter',
                         subtext2: 'Unused credits roll over',
+                        includedBullets: [
+                            'One application credit per quarter',
+                            'Credits roll over and stack',
+                            'Artist profile + gallery system',
+                        ],
                     },
                     planAnnual: {
                         title: 'Annual membership',
@@ -2505,6 +2475,11 @@ export const testData = {
                         discount: '(10% discount)',
                         subtext: 'Best value — one year of full access',
                         subtext2: 'Renews every year',
+                        includedBullets: [
+                            'Applications included while active',
+                            'Best value for year-round access',
+                            'Artist profile + gallery system',
+                        ],
                     },
                 },
                 ja: {
@@ -2790,6 +2765,11 @@ export const testData = {
                         every: 'per month',
                         subtext: 'Billed monthly',
                         subtext2: 'Flexible — cancel anytime from your profile',
+                        includedBullets: [
+                            'Artist profile + gallery system',
+                            'Residency eligibility',
+                            'Access to network and platform updates',
+                        ],
                     },
                     planQuarterly: {
                         title: 'Quarterly membership',
@@ -2797,6 +2777,11 @@ export const testData = {
                         every: 'per quarter',
                         subtext: 'One application credit per quarter',
                         subtext2: 'Unused credits roll over',
+                        includedBullets: [
+                            'One application credit per quarter',
+                            'Credits roll over and stack',
+                            'Artist profile + gallery system',
+                        ],
                     },
                     planAnnual: {
                         title: 'Annual membership',
@@ -2804,6 +2789,11 @@ export const testData = {
                         discount: '(10% discount)',
                         subtext: 'Best value — one year of full access',
                         subtext2: 'Renews every year',
+                        includedBullets: [
+                            'Applications included while active',
+                            'Best value for year-round access',
+                            'Artist profile + gallery system',
+                        ],
                     },
                 },
                 ja: {
@@ -3089,6 +3079,11 @@ export const testData = {
                         every: 'per month',
                         subtext: 'Billed monthly',
                         subtext2: 'Flexible — cancel anytime from your profile',
+                        includedBullets: [
+                            'Artist profile + gallery system',
+                            'Residency eligibility',
+                            'Access to network and platform updates',
+                        ],
                     },
                     planQuarterly: {
                         title: 'Quarterly membership',
@@ -3096,6 +3091,11 @@ export const testData = {
                         every: 'per quarter',
                         subtext: 'One application credit per quarter',
                         subtext2: 'Unused credits roll over',
+                        includedBullets: [
+                            'One application credit per quarter',
+                            'Credits roll over and stack',
+                            'Artist profile + gallery system',
+                        ],
                     },
                     planAnnual: {
                         title: 'Annual membership',
@@ -3103,6 +3103,11 @@ export const testData = {
                         discount: '(10% discount)',
                         subtext: 'Best value — one year of full access',
                         subtext2: 'Renews every year',
+                        includedBullets: [
+                            'Applications included while active',
+                            'Best value for year-round access',
+                            'Artist profile + gallery system',
+                        ],
                     },
                 },
                 ja: {
@@ -3357,6 +3362,13 @@ export const testData = {
                 every: 'per month',
                 badge: 'POPULAR',
                 subtext: '',
+                includedBullets: [
+                    'Artist profile + gallery system',
+                    'Residency & program applications',
+                    'Exclusive content from the FUSION network',
+                    'Eligibility for sponsored residency placement',
+                    'Strategic development & positioning',
+                ],
             },
             planQuarterly: {
                 title: 'Quarterly',
@@ -3364,6 +3376,13 @@ export const testData = {
                 every: 'per quarter',
                 badge: '',
                 subtext: '',
+                includedBullets: [
+                    'One application credit per quarter',
+                    'Credits roll over and stack',
+                    'Artist profile + gallery system',
+                    'Exclusive content from the FUSION network',
+                    'Strategic development & positioning',
+                ],
             },
             planAnnual: {
                 title: 'Annual',
@@ -3371,6 +3390,13 @@ export const testData = {
                 every: 'per year',
                 badge: 'Save 10%',
                 subtext: '',
+                includedBullets: [
+                    'Applications included while membership is active',
+                    'Best value for year-round access',
+                    'Artist profile + gallery system',
+                    'Exclusive content from the FUSION network',
+                    'Strategic development & positioning',
+                ],
             },
             includesTitle: 'Your membership includes',
             includes: [
@@ -3420,6 +3446,13 @@ export const testData = {
                 every: '月額',
                 badge: '人気',
                 subtext: '',
+                includedBullets: [
+                    'アーティストプロフィールとギャラリーシステム',
+                    'レジデンシー・プログラム応募',
+                    'FUSIONネットワークの限定コンテンツ',
+                    'スポンサー付きレジデンシー応募資格',
+                    '戦略的な成長とポジショニング',
+                ],
             },
             planQuarterly: {
                 title: '四半期',
@@ -3427,6 +3460,13 @@ export const testData = {
                 every: '3か月ごと',
                 badge: '',
                 subtext: '',
+                includedBullets: [
+                    '四半期ごとに1回の応募クレジット',
+                    'クレジットは繰り越し・積み上げ',
+                    'アーティストプロフィールとギャラリーシステム',
+                    'FUSIONネットワークの限定コンテンツ',
+                    '戦略的な成長とポジショニング',
+                ],
             },
             planAnnual: {
                 title: '年間',
@@ -3434,6 +3474,13 @@ export const testData = {
                 every: '年額',
                 badge: '10%お得',
                 subtext: '',
+                includedBullets: [
+                    '有効期間中は応募料込み',
+                    '年間利用に最適なプラン',
+                    'アーティストプロフィールとギャラリーシステム',
+                    'FUSIONネットワークの限定コンテンツ',
+                    '戦略的な成長とポジショニング',
+                ],
             },
             includesTitle: 'メンバーシップに含まれるもの',
             includes: [

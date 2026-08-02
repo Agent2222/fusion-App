@@ -4095,9 +4095,19 @@ a.studio-app-payload-link:hover {
   gap: 1rem;
 }
 
+.studio-jnf-plan-slot .studio-prog-card-slot {
+  margin-bottom: 0.35rem;
+}
+
 @media (min-width: 720px) {
   .studio-jnf-plan-grid {
     grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (min-width: 1080px) {
+  .studio-jnf-plan-grid {
+    grid-template-columns: 1fr 1fr 1fr;
   }
 }
 
@@ -6843,6 +6853,36 @@ a.studio-app-payload-link:hover {
   font-variation-settings: var(--am-fv-text, var(--fv-label));
 }
 
+.studio-art-credits-placeholder__list {
+  list-style: none;
+  margin: 0.85rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.studio-art-credits-placeholder__list li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--am-border, #dedbd8);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.studio-art-credits-placeholder__list strong {
+  font-size: 0.84rem;
+  font-variation-settings: var(--fv-label);
+  color: var(--am-ink, #111);
+}
+
+.studio-art-credits-placeholder__list .studio-muted {
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
 .studio-artist-manage-main .studio-field span {
   font-size: 0.8rem;
   color: var(--am-ink, #111);
@@ -7697,4 +7737,226 @@ a.studio-app-payload-link:hover {
     margin-top: 1rem;
     padding-top: 0.85rem;
     border-top: 1px solid #e8e4e0;
+}
+
+/* —— Applicants: program overview cards —— */
+.studio-applicants-page .studio-applicants-program-cards-rail {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 0.65rem;
+    overflow-x: auto;
+    padding-bottom: 0.35rem;
+    margin: 0 0 0.85rem;
+    scrollbar-width: thin;
+}
+
+.studio-applicants-page .studio-applicants-program-cards-rail::-webkit-scrollbar {
+    height: 6px;
+}
+
+.studio-applicants-page .studio-applicants-program-cards-rail::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--c2, #0f172a) 22%, transparent);
+    border-radius: 999px;
+}
+
+.studio-applicants-page .studio-applicants-program-cards-divider {
+    flex: 0 0 auto;
+    align-self: center;
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--studio-muted, #64748b);
+    padding: 0 0.15rem;
+}
+
+.studio-applicants-page .studio-applicants-program-cards__empty {
+    margin: 0.25rem 0;
+}
+
+.studio-applicants-page .studio-applicants-program-card {
+    flex: 0 0 min(22rem, 88vw);
+    display: flex;
+    flex-direction: column;
+    border: 1px solid color-mix(in srgb, var(--c2, #0f172a) 12%, transparent);
+    border-radius: var(--studio-card-radius, 8px);
+    background: var(--studio-card-bg, #fff);
+    box-shadow: var(--studio-card-shadow, 0 1px 2px rgba(15, 23, 42, 0.06));
+    overflow: hidden;
+    transition:
+        border-color 0.15s ease,
+        box-shadow 0.15s ease;
+}
+
+.studio-applicants-page .studio-applicants-program-card:hover {
+    border-color: color-mix(in srgb, var(--c2, #0f172a) 22%, transparent);
+}
+
+.studio-applicants-page .studio-applicants-program-card.is-selected {
+    border-color: color-mix(in srgb, #d4a574 55%, var(--c2, #0f172a) 45%);
+    box-shadow:
+        var(--studio-card-shadow, 0 1px 2px rgba(15, 23, 42, 0.06)),
+        0 0 0 1px color-mix(in srgb, #d4a574 35%, transparent);
+}
+
+.studio-applicants-page .studio-applicants-program-card__select {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    text-align: left;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+}
+
+.studio-applicants-page .studio-applicants-program-card__select:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--c2, #0f172a) 48%, transparent);
+    outline-offset: -2px;
+}
+
+.studio-applicants-page .studio-applicants-program-card__media {
+    aspect-ratio: 16 / 9;
+    background: color-mix(in srgb, var(--c2, #0f172a) 6%, var(--studio-workspace-bg, #f8f7f5) 94%);
+    overflow: hidden;
+}
+
+.studio-applicants-page .studio-applicants-program-card__img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.studio-applicants-page .studio-applicants-program-card__placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.78rem;
+    color: var(--studio-muted, #64748b);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.studio-applicants-page .studio-applicants-program-card__body {
+    padding: 0.75rem 0.85rem 0.55rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.studio-applicants-page .studio-applicants-program-card__head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.studio-applicants-page .studio-applicants-program-card__title {
+    margin: 0;
+    font-size: 0.88rem;
+    line-height: 1.25;
+    font-variation-settings: var(--fv-label-strong);
+    color: var(--c2, #0f172a);
+}
+
+.studio-applicants-page .studio-applicants-program-card__status {
+    flex-shrink: 0;
+    font-size: 0.68rem;
+    line-height: 1.2;
+    padding: 0.2rem 0.45rem;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.studio-applicants-page .studio-applicants-program-card__status--active {
+    color: #166534;
+    background: #ecfdf3;
+    border-color: #bbf7d0;
+}
+
+.studio-applicants-page .studio-applicants-program-card__status--completed {
+    color: #475569;
+    background: #f1f5f9;
+    border-color: #e2e8f0;
+}
+
+.studio-applicants-page .studio-applicants-program-card__status--upcoming {
+    color: #92400e;
+    background: #fffbeb;
+    border-color: #fde68a;
+}
+
+.studio-applicants-page .studio-applicants-program-card__metrics {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.studio-applicants-page .studio-applicants-program-card__metric {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.08rem;
+}
+
+.studio-applicants-page .studio-applicants-program-card__metric span {
+    font-size: 0.68rem;
+    color: var(--studio-muted, #64748b);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.studio-applicants-page .studio-applicants-program-card__metric strong {
+    font-size: 1.05rem;
+    font-variation-settings: var(--fv-emphasis);
+    color: var(--c2, #0f172a);
+}
+
+.studio-applicants-page .studio-applicants-view-toggle {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.25rem;
+    margin: 0 0.75rem 0.75rem;
+    padding: 0.25rem;
+    border: 1px solid rgba(15, 23, 42, 0.18);
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.04);
+}
+
+.studio-applicants-page .studio-applicants-view-toggle__btn {
+    min-height: 2.1rem;
+    padding: 0.4rem 0.65rem;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--c2, #0f172a);
+    font-variation-settings: var(--fv-label);
+    font-size: 0.76rem;
+    line-height: 1.15;
+    cursor: pointer;
+    transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.studio-applicants-page .studio-applicants-view-toggle__btn.is-active {
+    background: var(--c2, #0f172a);
+    color: var(--c3, #fff);
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
+}
+
+.studio-applicants-page .studio-applicants-view-toggle__btn:focus-visible {
+    outline: 2px solid var(--c2, #0f172a);
+    outline-offset: 2px;
+}
+
+.studio-applicants-page .studio-applicants-view-toggle__btn:hover:not(.is-active) {
+    background: rgba(15, 23, 42, 0.06);
 }

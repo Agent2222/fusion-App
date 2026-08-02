@@ -7,6 +7,7 @@ import {
     applicationFeeDueForCaller,
     defaultApplicationPaymentGlobal,
     ensureMyLinkedArtistProfile,
+    ensureMyLinkedArtistProfileForApplication,
     getMembershipAccessForCaller,
     getMyArtistRecord,
     PROGRAM_APPLICATION_ERROR_CODE,
@@ -69,11 +70,6 @@ import popularCrownIcon from '../../assets/icons/fusion_svg_icons_b2/popular-cro
 import annualDiamondIcon from '../../assets/icons/fusion_svg_icons_b2/annual-diamond.svg';
 import benefitCheckIcon from '../../assets/icons/fusion_svg_icons_b2/benefit-check.svg';
 import calendarSlotsIcon from '../../assets/icons/fusion_svg_icons_b2/calendar-slots.svg';
-import secureShieldIcon from '../../assets/icons/fusion_svg_icons_b2/secure-shield.svg';
-import includedGiftIcon from '../../assets/icons/fusion_svg_icons_b2/included-gift.svg';
-import memberUserIcon from '../../assets/icons/fusion_svg_icons_b2/member-user.svg';
-import globalCommunityIcon from '../../assets/icons/fusion_svg_icons_b2/global-community.svg';
-import artistHeartIcon from '../../assets/icons/fusion_svg_icons_b2/artist-heart.svg';
 import secureLockIcon from '../../assets/icons/fusion_svg_icons_b2/secure-lock.svg';
 
 /** @type {Record<string, string>} */
@@ -83,11 +79,6 @@ const APP_FEE_ICONS = {
     annualDiamond: annualDiamondIcon,
     benefitCheck: benefitCheckIcon,
     calendarSlots: calendarSlotsIcon,
-    secureShield: secureShieldIcon,
-    includedGift: includedGiftIcon,
-    memberUser: memberUserIcon,
-    globalCommunity: globalCommunityIcon,
-    artistHeart: artistHeartIcon,
     secureLock: secureLockIcon,
 };
 
@@ -265,42 +256,9 @@ class ApplicationFormComponent extends HTMLElement {
                     const v = String(row[key] ?? '').trim();
                     if (v) base[loc][key] = v;
                 }
-                if (Array.isArray(row.trustBadges) && row.trustBadges.length > 0) {
-                    base[loc].trustBadges = row.trustBadges
-                        .map((item) => {
-                            if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
-                            const r = /** @type {Record<string, unknown>} */ (item);
-                            const title = String(r.title ?? '').trim();
-                            const body = String(r.body ?? '').trim();
-                            if (!title && !body) return null;
-                            return { title, body };
-                        })
-                        .filter(Boolean);
-                }
             }
         }
         this._applicationPaymentGlobal = base;
-        if (this.shadowRoot) this._hydrateWhatsIncludedForPlan();
-    }
-
-    /**
-     * @param {ShadowRoot | DocumentFragment | Element} root
-     * @param {string} text
-     */
-    _setFeeIntroBlocks(root, text) {
-        const wrap = root.querySelector('#app-fee-notice-italic');
-        if (!wrap) return;
-        wrap.replaceChildren();
-        const raw = String(text ?? '').trim();
-        if (!raw) return;
-        const chunks = raw.split(/\n\n+/).map((s) => s.trim()).filter(Boolean);
-        const parts = chunks.length ? chunks : [raw];
-        for (const para of parts) {
-            const p = document.createElement('p');
-            p.className = 'app-fee-intro';
-            p.textContent = para;
-            wrap.appendChild(p);
-        }
     }
 
     _hydrateProgramContextInDom() {
@@ -322,22 +280,9 @@ class ApplicationFormComponent extends HTMLElement {
             }
         }
 
-        const feeAmt = root.querySelector('#app-application-fee-amount');
-        if (feeAmt) {
-            const line = String(ctx.applicationFeeLine ?? '').trim();
-            if (line.includes(':')) {
-                const i = line.indexOf(':');
-                feeAmt.textContent = line.slice(i + 1).trim() || line;
-            } else {
-                feeAmt.textContent = line || '—';
-            }
-        }
-
-        this._setFeeIntroBlocks(root, String(ctx.feeNoticeItalic ?? '').trim() || L.defaultFeeNoticeItalic);
-
         this._hydratePaymentPlanCards();
-        this._hydrateWhatsIncludedForPlan();
         this._syncCohortSlotsInDom(root);
+        this._syncPaymentCheckoutVisibility();
     }
 
     /**
@@ -384,61 +329,38 @@ class ApplicationFormComponent extends HTMLElement {
     }
 
     /**
-     * Fills global + per-plan “what’s included” lists (locale + selected plan).
+     * Payment mounts when a concrete plan is selected.
+     * "Pay and submit" is for one-time / member fee only; membership plans use the
+     * subscription widget, then reveal "Submit application" after approval.
      */
-    _hydrateWhatsIncludedForPlan() {
+    _syncPaymentCheckoutVisibility() {
         const root = this.shadowRoot;
         if (!root) return;
-        const L = this._labels();
-        const locale = typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
-        const g =
-            this._applicationPaymentGlobal[locale] ||
-            this._applicationPaymentGlobal.en ||
-            defaultApplicationPaymentGlobal().en;
-        const globalBullets = Array.isArray(g?.whatsIncludedBullets) ? g.whatsIncludedBullets : [];
-
-        const globalHead = root.querySelector('#app-whats-included-global-head');
-        const planHead = root.querySelector('#app-whats-included-plan-head');
-        const globalUl = root.querySelector('#app-whats-included-global-ul');
-        const planUl = root.querySelector('#app-whats-included-plan-ul');
-        const planBlock = root.querySelector('#app-whats-included-plan-block');
-
-        if (globalHead) globalHead.textContent = L.whatsIncludedGlobalHeading;
-        if (planHead) planHead.textContent = L.whatsIncludedPlanHeading;
-
-        if (globalUl) {
-            const emptyText = globalBullets.length === 0 ? L.whatsIncludedGlobalEmpty : '';
-            this._fillBulletList(globalUl, globalBullets, {
-                emptyText,
-                emptyClass: 'app-whats-included-empty',
-            });
-        }
-
         const plan = this._paymentPlan;
-        const apo = this._programFormContext.applicationPaymentOptions;
-        const opt =
-            plan && apo && typeof apo === 'object' && plan in apo
-                ? /** @type {{ title?: string, displayPrice?: string, subtext?: string, subtext2?: string, includedBullets?: string[] }} */ (
-                      apo[plan]
-                  )
-                : null;
-        const planBullets = opt?.includedBullets?.length ? opt.includedBullets : [];
-
-        if (planUl && planBlock) {
-            if (!plan) {
-                planBlock.hidden = false;
-                this._fillBulletList(planUl, [], {
-                    pickPlan: true,
-                    emptyText: L.whatsIncludedPickPlan,
-                    pickPlanClass: 'app-whats-included-empty app-whats-included-pickplan',
-                });
-            } else if (planBullets.length === 0) {
-                planBlock.hidden = true;
-                planUl.innerHTML = '';
-            } else {
-                planBlock.hidden = false;
-                this._fillBulletList(planUl, planBullets);
+        const isMembershipPlan =
+            plan === 'monthly' || plan === 'quarterly' || plan === 'annual';
+        const showCheckout =
+            plan === 'one_time' || isMembershipPlan || plan === 'member_fee';
+        const showPaySubmit =
+            plan === 'one_time' ||
+            plan === 'member_fee' ||
+            (isMembershipPlan && !!this._fusionSubscriptionId);
+        for (const id of ['app-payment-placeholder', 'app-payment-hint-wrap']) {
+            const el = root.querySelector(`#${id}`);
+            if (el instanceof HTMLElement) {
+                el.hidden = !showCheckout;
             }
+        }
+        const payBtn = root.querySelector('#app-pay-submit');
+        if (payBtn instanceof HTMLElement) {
+            payBtn.hidden = !showPaySubmit;
+        }
+        const slotWrap = root.querySelector('.app-payment-slot-wrap');
+        if (slotWrap instanceof HTMLElement) {
+            slotWrap.hidden = !showCheckout;
+        }
+        if (!showCheckout) {
+            this._teardownStripePayment();
         }
     }
 
@@ -480,9 +402,6 @@ class ApplicationFormComponent extends HTMLElement {
         ]) {
             const v = String(g[key] ?? '').trim();
             if (v) base[key] = v;
-        }
-        if (Array.isArray(g.trustBadges) && g.trustBadges.length >= 3) {
-            base.trustBadges = g.trustBadges.slice(0, 3);
         }
         return base;
     }
@@ -595,23 +514,26 @@ class ApplicationFormComponent extends HTMLElement {
     }
 
     /**
+     * Fallback bullet when a plan has no includedBullets (CMS subtext lines render separately).
      * @param {'monthly' | 'quarterly' | 'annual'} tier
      * @returns {string}
      */
     _membershipEntitlementCopy(tier) {
         const L = this._labels();
-        const apo = this._programFormContext.applicationPaymentOptions;
-        const opt =
-            apo && typeof apo === 'object' && tier in apo
-                ? /** @type {{ subtext?: string, subtext2?: string }} */ (apo[tier])
-                : null;
-        const custom = [String(opt?.subtext ?? '').trim(), String(opt?.subtext2 ?? '').trim()]
-            .filter(Boolean)
-            .join(' ');
-        if (custom) return custom;
         if (tier === 'monthly') return L.planMonthlyEntitlement;
         if (tier === 'quarterly') return L.planQuarterlyEntitlement;
         return L.planAnnualEntitlement;
+    }
+
+    /**
+     * @param {Element | null} el
+     * @param {string} text
+     */
+    _setPlanSubLine(el, text) {
+        if (!(el instanceof HTMLElement)) return;
+        const t = String(text ?? '').trim();
+        el.textContent = t;
+        el.hidden = !t;
     }
 
     _hydratePaymentPlanCards() {
@@ -629,8 +551,11 @@ class ApplicationFormComponent extends HTMLElement {
         const primaryTitle = root.querySelector('#app-plan-one-time-title');
         const primaryPrice = root.querySelector('#app-plan-one-time-price');
         const primarySub = root.querySelector('#app-plan-one-time-sub');
+        const primarySub2 = root.querySelector('#app-plan-one-time-sub2');
         const one = o.one_time || {};
         const dispOne = String(one.displayPrice ?? '').trim();
+        const oneSub = String(one.subtext ?? '').trim();
+        const oneSub2 = String(one.subtext2 ?? '').trim();
         if (primaryTitle) {
             const priceStr = dispOne || this._formatUsdFromCents(guestCents);
             const titleBase = String(one.title ?? '').trim() || L.planOneTimeTitle;
@@ -642,8 +567,9 @@ class ApplicationFormComponent extends HTMLElement {
             primaryPrice.textContent = dispOne || this._formatUsdFromCents(guestCents);
         }
         if (primarySub) {
-            primarySub.textContent = String(one.subtext ?? '').trim() || L.planOneTimeSub;
+            primarySub.textContent = oneSub || L.planOneTimeSub;
         }
+        this._setPlanSubLine(primarySub2, oneSub2);
         if (primaryBtn instanceof HTMLElement) {
             const unavailable = guestCents == null;
             primaryBtn.toggleAttribute('disabled', unavailable);
@@ -692,7 +618,16 @@ class ApplicationFormComponent extends HTMLElement {
             const titleEl = root.querySelector(`#app-plan-${tier}-title`);
             const priceEl = root.querySelector(`#app-plan-${tier}-price`);
             const everyEl = root.querySelector(`#app-plan-${tier}-every`);
+            const sub2El = root.querySelector(`#app-plan-${tier}-sub2`);
             const bulletsEl = root.querySelector(`#app-plan-${tier}-bullets`);
+            const defaultEvery =
+                tier === 'monthly'
+                    ? L.planMonthlyEvery
+                    : tier === 'quarterly'
+                      ? L.planQuarterlyEvery
+                      : L.planAnnualEvery;
+            const sub1 = String(slice.subtext ?? '').trim();
+            const sub2 = String(slice.subtext2 ?? '').trim();
             if (titleEl) {
                 titleEl.textContent = String(slice.title ?? '').trim() || meta.label || tier;
             }
@@ -701,14 +636,12 @@ class ApplicationFormComponent extends HTMLElement {
                     String(slice.displayPrice ?? '').trim() ||
                     (meta.priceLine ? meta.priceLine.replace(/ per .+$/, '') : '—');
             }
+            // Studio "Subtext line 1" → under-price line; "Subtext line 2" → second caption.
+            const everyText = sub1 || sub2 || defaultEvery;
             if (everyEl) {
-                everyEl.textContent =
-                    tier === 'monthly'
-                        ? L.planMonthlyEvery
-                        : tier === 'quarterly'
-                          ? L.planQuarterlyEvery
-                          : L.planAnnualEvery;
+                everyEl.textContent = everyText;
             }
+            this._setPlanSubLine(sub2El, sub1 && sub2 && sub2 !== sub1 ? sub2 : '');
             const entitlement = this._membershipEntitlementCopy(tier);
             const bulletItems =
                 Array.isArray(slice.includedBullets) && slice.includedBullets.length
@@ -764,7 +697,6 @@ class ApplicationFormComponent extends HTMLElement {
 <p class="app-selection-process-heading">${esc(L.selectionProcessTitle)}</p>
 <p>${esc(L.selectionReview)}</p>
 <p>${esc(L.selectionEmail)}</p>
-<p>${esc(L.selectionInterview)}</p>
 <p>${esc(L.selectionFinal)}</p>
 <p>${esc(String(L.selectionDepositLine || '').replace(/\{\{deposit\}\}/g, String(deposit)).replace(/\{\{deadline\}\}/g, String(deadline)))}</p>
 <p>${esc(L.selectionSeeFaq)} <a href="${href}" class="app-inline-details-link">${esc(L.faqDetailsLinkText)}</a>.</p>
@@ -784,8 +716,6 @@ class ApplicationFormComponent extends HTMLElement {
                     '応募書類を拝見し、選考委員会が候補者を検討します。ポートフォリオ、経歴、レジデンシーへの適合を総合的に見ます。',
                 selectionEmail:
                     '書類選考を通過した候補者には、メールで面談のご案内をお送りします。',
-                selectionInterview:
-                    '面談では、実践の詳細や、このプログラムで目指すことをお伺いします。',
                 selectionFinal:
                     '最終選考の結果は、メールでご連絡します。定員に達するまで複数回の募集を行う場合があります。',
                 selectionDepositLine:
@@ -830,20 +760,6 @@ class ApplicationFormComponent extends HTMLElement {
                     'アーティストを支え、思慮深いグローバルなクリエイティブコミュニティづくりにご協力いただきありがとうございます。',
                 footerQuestionsPrefix: 'ご不明点は',
                 footerContactUs: 'お問い合わせ',
-                trustBadges: [
-                    {
-                        title: '安全な決済',
-                        body: 'お支払い情報は業界標準の暗号化で保護されます。',
-                    },
-                    {
-                        title: '透明な料金',
-                        body: '隠れた費用のない明確な料金設定です。表示どおりのお支払いです。',
-                    },
-                    {
-                        title: 'アーティスト第一',
-                        body: 'すべての収益がクリエイティブ実践者を支える使命に役立ちます。',
-                    },
-                ],
                 suggestedBadge: 'おすすめ',
                 planOneTimeTitle: 'レジデンシー応募 – {{price}}',
                 planOneTimeSub: '応募のみ',
@@ -934,9 +850,23 @@ class ApplicationFormComponent extends HTMLElement {
                 residencyGoalsByline: '（作品、視点の変化、つながり、言葉にしにくいものでも）',
                 submitError: '送信に失敗しました。もう一度お試しください。',
                 submitNoAccount:
-                    'この Internet Identity には Fusion のメンバーアカウントがありません。参加（Join）の登録を完了するか、アーティストとして紐づいたアカウントでサインインしてください。管理者だけの II では応募できません。',
+                    'このサインインには Fusion メンバーアカウントがありません。',
                 submitNoLinkedArtist:
-                    'アカウントに紐づくアーティストプロフィールがありません。Studio でロスターと紐づけてもらうか、アーティストとリンクされた II でサインインしてください。',
+                    'アカウントにアーティストプロフィールが紐づいていません。',
+                accountGateNoAccountTitle: '応募にはメンバーアカウントが必要です',
+                accountGateNoAccountBody:
+                    'いまの Internet Identity は、まだ Fusion のメンバーアカウントとつながっていません。そのため応募を送れません。',
+                accountGateNoAccountSolution:
+                    'このサインインで参加（Join）登録を完了するか、登録時に使った Internet Identity でサインインし直してから、もう一度お試しください。',
+                accountGateNoLinkedTitle: 'アーティストプロフィール未連携',
+                accountGateNoLinkedBody:
+                    'Fusion アカウントはありますが、アーティストプロフィールがまだ紐づいていません。',
+                accountGateNoLinkedSolution:
+                    'Fusion チームにロスター連携をご依頼いただくか、すでに紐づいている Internet Identity でサインインしてください。',
+                accountGateContactLead: 'ご不明点は',
+                accountGateContactCta: 'info@fusionart.world',
+                accountGateJoinCta: '参加する',
+                accountGateClose: '閉じる',
                 submitSuccess: '応募を受け付けました。',
                 submitting: '送信中…',
                 submitReceivedTitle: '応募を受け付けました。',
@@ -970,8 +900,6 @@ class ApplicationFormComponent extends HTMLElement {
             selectionReview:
                 'We review applications and shortlist candidates based on your materials, background, and fit for the residency.',
             selectionEmail: 'If you advance past the document review, we will email you to schedule an interview.',
-            selectionInterview:
-                'The interview is a conversation about your practice and what you hope to explore in the program.',
             selectionFinal:
                 'Final decisions are communicated by email. We may run more than one round of applications until the cohort is filled.',
             selectionDepositLine:
@@ -1016,20 +944,6 @@ class ApplicationFormComponent extends HTMLElement {
                 'Thank you for supporting artists and helping us build a thoughtful, global creative community.',
             footerQuestionsPrefix: 'Questions?',
             footerContactUs: 'Contact us',
-            trustBadges: [
-                {
-                    title: 'Secure payment',
-                    body: 'Your payment details are protected with industry-standard encryption.',
-                },
-                {
-                    title: 'Transparent fee',
-                    body: 'Clear pricing with no hidden fees. What you see is what you pay.',
-                },
-                {
-                    title: 'Artist focused',
-                    body: 'Every dollar supports our mission to empower creative practitioners.',
-                },
-            ],
                 suggestedBadge: 'Recommended',
                 planOneTimeTitle: 'Residency application – {{price}}',
                 planOneTimeSub: 'Application only',
@@ -1120,10 +1034,22 @@ class ApplicationFormComponent extends HTMLElement {
                 'If you joined this residency, what would you want to leave with — internally or externally?',
             residencyGoalsByline: '(This could be a body of work, a shift in perspective, a connection, or something intangible)',
             submitError: 'Could not submit. Please try again.',
-            submitNoAccount:
-                'This Internet Identity has no Fusion member account. Finish the Join / registration flow, or sign in with an identity linked to an artist. Admin-only identities (no member profile) cannot submit applications.',
-            submitNoLinkedArtist:
-                'Your account has no linked artist profile. Ask Fusion to link your roster row in Studio, or sign in with an identity that is linked to an artist.',
+            submitNoAccount: 'This sign-in is not linked to a Fusion member account.',
+            submitNoLinkedArtist: 'Your account is not linked to an artist profile.',
+            accountGateNoAccountTitle: 'A Fusion account is needed to apply',
+            accountGateNoAccountBody:
+                'You’re signed in, but this Internet Identity isn’t connected to a Fusion member account yet — so we can’t send your application.',
+            accountGateNoAccountSolution:
+                'Finish joining with this sign-in, or sign in with the Internet Identity you used to register. Then try again.',
+            accountGateNoLinkedTitle: 'Artist profile not linked',
+            accountGateNoLinkedBody:
+                'You have a Fusion account, but it isn’t linked to an artist profile yet.',
+            accountGateNoLinkedSolution:
+                'Ask the Fusion team to link your roster row, or sign in with the identity that’s already linked. Then try again.',
+            accountGateContactLead: 'Need help?',
+            accountGateContactCta: 'info@fusionart.world',
+            accountGateJoinCta: 'Join Fusion',
+            accountGateClose: 'Close',
             submitSuccess: 'Your application was received.',
             submitting: 'Submitting...',
             submitReceivedTitle: 'Your application was received.',
@@ -1347,6 +1273,107 @@ class ApplicationFormComponent extends HTMLElement {
         statusEl.classList.remove('is-success');
     }
 
+    /**
+     * Branded floating notice when submit is blocked by missing account / artist link.
+     * @param {'no_account' | 'no_linked_artist'} kind
+     */
+    _showAccountGateNotice(kind) {
+        const root = this.shadowRoot;
+        if (!root) return;
+        root.querySelector('.app-account-gate-overlay')?.remove();
+        const L = this._labels();
+        const isNoAccount = kind !== 'no_linked_artist';
+        const title = isNoAccount ? L.accountGateNoAccountTitle : L.accountGateNoLinkedTitle;
+        const body = isNoAccount ? L.accountGateNoAccountBody : L.accountGateNoLinkedBody;
+        const solution = isNoAccount
+            ? L.accountGateNoAccountSolution
+            : L.accountGateNoLinkedSolution;
+
+        const overlay = document.createElement('div');
+        overlay.className = 'app-account-gate-overlay';
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.setAttribute('aria-labelledby', 'app-account-gate-title');
+
+        const card = document.createElement('div');
+        card.className = 'app-account-gate-card';
+        card.innerHTML = `
+            <p class="app-account-gate-eyebrow">Fusion</p>
+            <h3 class="app-account-gate-title" id="app-account-gate-title"></h3>
+            <p class="app-account-gate-body"></p>
+            <p class="app-account-gate-solution"></p>
+            <p class="app-account-gate-contact">
+                <span class="app-account-gate-contact-lead"></span>
+                <a class="app-account-gate-mail" href="mailto:info@fusionart.world"></a>
+            </p>
+            <div class="app-account-gate-actions">
+                <a class="app-btn app-btn--primary app-account-gate-join" href="/join-network"></a>
+                <button type="button" class="app-btn app-btn--ghost app-account-gate-close"></button>
+            </div>
+        `;
+        const titleEl = card.querySelector('.app-account-gate-title');
+        const bodyEl = card.querySelector('.app-account-gate-body');
+        const solutionEl = card.querySelector('.app-account-gate-solution');
+        const leadEl = card.querySelector('.app-account-gate-contact-lead');
+        const mailEl = card.querySelector('.app-account-gate-mail');
+        const joinEl = card.querySelector('.app-account-gate-join');
+        const closeBtn = card.querySelector('.app-account-gate-close');
+        if (titleEl) titleEl.textContent = title;
+        if (bodyEl) bodyEl.textContent = body;
+        if (solutionEl) solutionEl.textContent = solution;
+        if (leadEl) leadEl.textContent = `${L.accountGateContactLead} `;
+        if (mailEl) mailEl.textContent = L.accountGateContactCta;
+        if (joinEl) joinEl.textContent = L.accountGateJoinCta;
+        if (closeBtn) closeBtn.textContent = L.accountGateClose;
+
+        overlay.appendChild(card);
+        root.appendChild(overlay);
+
+        const close = () => overlay.remove();
+        closeBtn?.addEventListener('click', close);
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) close();
+        });
+        overlay.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') close();
+        });
+        joinEl?.addEventListener('click', (e) => {
+            e.preventDefault();
+            close();
+            void import('../../router.js')
+                .then(({ navigate }) => {
+                    navigate('/join-network');
+                })
+                .catch(() => {
+                    window.location.assign('/join-network');
+                });
+        });
+        if (closeBtn instanceof HTMLElement) closeBtn.focus();
+    }
+
+    /**
+     * @param {unknown} err
+     * @returns {boolean} true when a gate notice was shown
+     */
+    _handleAccountGateError(err) {
+        const code =
+            err && typeof err === 'object' && 'code' in err
+                ? String(/** @type {{ code?: unknown }} */ (err).code ?? '')
+                : '';
+        const L = this._labels();
+        if (code === PROGRAM_APPLICATION_ERROR_CODE.NO_ACCOUNT) {
+            this._setFormStatusMessage(L.submitNoAccount, 'error');
+            this._showAccountGateNotice('no_account');
+            return true;
+        }
+        if (code === PROGRAM_APPLICATION_ERROR_CODE.NO_LINKED_ARTIST) {
+            this._setFormStatusMessage(L.submitNoLinkedArtist, 'error');
+            this._showAccountGateNotice('no_linked_artist');
+            return true;
+        }
+        return false;
+    }
+
     _touchDirty() {
         if (this.getAttribute('active') !== 'true') return;
         const wrap = document.getElementById('programApplicationWrap');
@@ -1492,9 +1519,10 @@ class ApplicationFormComponent extends HTMLElement {
     async _onSubscriptionCheckoutApproved() {
         const root = this.shadowRoot;
         const L = this._labels();
-        const payBtn = root?.querySelector('#app-pay-submit');
         this._stripePaymentReady = true;
+        this._syncPaymentPlanUi();
         this._syncPaymentHintChrome(root, { busy: false, text: L.subscriptionThenSubmitHint });
+        const payBtn = root?.querySelector('#app-pay-submit');
         if (payBtn instanceof HTMLElement) payBtn.disabled = false;
         const ph = root?.querySelector('#app-payment-placeholder');
         if (ph instanceof HTMLElement) ph.hidden = true;
@@ -1918,17 +1946,9 @@ class ApplicationFormComponent extends HTMLElement {
         try {
             await assertProgramApplicationSubmissionReady();
         } catch (preErr) {
-            const code = preErr && typeof preErr === 'object' && 'code' in preErr
-                ? String(/** @type {{ code?: unknown }} */ (preErr).code ?? '')
-                : '';
-            let line = L.submitError;
-            if (code === PROGRAM_APPLICATION_ERROR_CODE.NO_ACCOUNT) {
-                line = L.submitNoAccount;
-            } else if (code === PROGRAM_APPLICATION_ERROR_CODE.NO_LINKED_ARTIST) {
-                line = L.submitNoLinkedArtist;
-            }
+            if (this._handleAccountGateError(preErr)) return;
             if (statusEl) {
-                statusEl.textContent = line;
+                statusEl.textContent = L.submitError;
                 statusEl.classList.add('is-error');
             }
             return;
@@ -2300,7 +2320,13 @@ class ApplicationFormComponent extends HTMLElement {
                 const exploreBtn = t.closest('#app-explore-memberships-toggle');
                 if (exploreBtn && root.contains(exploreBtn)) {
                     this._membershipsExpanded = !this._membershipsExpanded;
+                    if (this._membershipsExpanded) {
+                        this._paymentPlan = null;
+                        this._checkoutPhase = null;
+                        this._teardownStripePayment();
+                    }
                     this._hydratePaymentPlanCards();
+                    this._syncPaymentPlanUi();
                     return;
                 }
                 const btn = t.closest('[data-app-payment-plan]');
@@ -2460,13 +2486,18 @@ class ApplicationFormComponent extends HTMLElement {
                 }
                 this._membershipGate = gate;
                 if (gate === 'ok' || gate === 'exempt') {
-                    const ens = await ensureMyLinkedArtistProfile();
+                    // Application path (allows needsSubscription skeletons); active members are #ok/#exempt.
+                    const ens = await ensureMyLinkedArtistProfileForApplication();
                     if (ens === 'ok' || ens === 'alreadyLinked') {
                         const programId = this.getAttribute('data-program-id') || '';
                         this._memberApplicationFee = await applicationFeeDueForCaller(programId);
                         const due = Number(this._memberApplicationFee?.dueCents);
-                        if (due === 0) {
+                        const reason = String(this._memberApplicationFee?.reason || '');
+                        // Free submit: annual / credit / exempt / TEMP membership_temp waive.
+                        if (due === 0 || reason === 'membership_temp') {
                             this._membershipFeeWaived = true;
+                            this._memberFeeOnly = false;
+                            this._paymentPlan = null;
                         } else if (due === APPLICATION_FEE_MEMBER_CENTS) {
                             this._memberFeeOnly = true;
                             this._paymentPlan = 'member_fee';
@@ -2562,8 +2593,6 @@ class ApplicationFormComponent extends HTMLElement {
         });
         const payBtn = root.querySelector('#app-pay-submit');
         if (payBtn instanceof HTMLElement) {
-            if (!plan) payBtn.setAttribute('hidden', '');
-            else payBtn.removeAttribute('hidden');
             const L = this._labels();
             if (this._planSubmitWithoutOneTime() && this._fusionSubscriptionId) {
                 payBtn.textContent = L.submitApplicationOnly;
@@ -2572,7 +2601,7 @@ class ApplicationFormComponent extends HTMLElement {
             }
         }
         this._hydratePaymentPlanCards();
-        this._hydrateWhatsIncludedForPlan();
+        this._syncPaymentCheckoutVisibility();
     }
 
     /**
@@ -2679,6 +2708,17 @@ class ApplicationFormComponent extends HTMLElement {
         const payload = this._collectPayload();
         this._setSubmittingState(true, L.submitting);
         try {
+            const ens = await ensureMyLinkedArtistProfileForApplication();
+            if (ens === 'noAccount') {
+                throw Object.assign(new Error(PROGRAM_APPLICATION_ERROR_CODE.NO_ACCOUNT), {
+                    code: PROGRAM_APPLICATION_ERROR_CODE.NO_ACCOUNT,
+                });
+            }
+            if (ens !== 'ok' && ens !== 'alreadyLinked') {
+                throw Object.assign(new Error(PROGRAM_APPLICATION_ERROR_CODE.NO_LINKED_ARTIST), {
+                    code: PROGRAM_APPLICATION_ERROR_CODE.NO_LINKED_ARTIST,
+                });
+            }
             await submitProgramApplication(programId, payload);
             syncPosthogConversionPerson({
                 email: payload.email,
@@ -2716,27 +2756,36 @@ class ApplicationFormComponent extends HTMLElement {
             const code = err && typeof err === 'object' && 'code' in err ? String(/** @type {{ code?: unknown }} */ (err).code) : '';
             const raw = err instanceof Error ? err.message : String(err);
             const blob = `${raw} ${err && typeof err === 'object' && 'message' in err ? String(/** @type {{ message?: unknown }} */ (err).message) : ''}`;
+            let gateErr = err;
+            if (!code && /No account for caller/i.test(blob)) {
+                gateErr = Object.assign(new Error(PROGRAM_APPLICATION_ERROR_CODE.NO_ACCOUNT), {
+                    code: PROGRAM_APPLICATION_ERROR_CODE.NO_ACCOUNT,
+                });
+            } else if (!code && /No linked artist on account/i.test(blob)) {
+                gateErr = Object.assign(new Error(PROGRAM_APPLICATION_ERROR_CODE.NO_LINKED_ARTIST), {
+                    code: PROGRAM_APPLICATION_ERROR_CODE.NO_LINKED_ARTIST,
+                });
+            }
+            const gated = this._handleAccountGateError(gateErr);
             let line = L.submitError;
-            if (code === PROGRAM_APPLICATION_ERROR_CODE.NO_ACCOUNT || /No account for caller/i.test(blob)) {
-                line = L.submitNoAccount;
-            } else if (code === PROGRAM_APPLICATION_ERROR_CODE.NO_LINKED_ARTIST || /No linked artist on account/i.test(blob)) {
-                line = L.submitNoLinkedArtist;
-            } else if (
-                raw &&
-                raw.length < 280 &&
-                !/Request ID:|Reject code:|ic0\.trap|Canister called/i.test(raw)
-            ) {
-                line = raw;
+            if (!gated) {
+                if (
+                    raw &&
+                    raw.length < 280 &&
+                    !/Request ID:|Reject code:|ic0\.trap|Canister called/i.test(raw)
+                ) {
+                    line = raw;
+                }
+                if (statusEl) {
+                    statusEl.textContent = line;
+                    statusEl.classList.add('is-error');
+                }
             }
             posthog.capture('program_application_failed', {
                 ...this._posthogApplicationBaseProps(),
                 error_code: code || 'unknown',
                 ...(this._paymentPlan ? { payment_plan: this._paymentPlan } : {}),
             });
-            if (statusEl) {
-                statusEl.textContent = line;
-                statusEl.classList.add('is-error');
-            }
             if (typeof console !== 'undefined' && console.error) {
                 console.error('[ApplicationForm]', err);
             }
@@ -2945,37 +2994,12 @@ class ApplicationFormComponent extends HTMLElement {
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;');
-        const trustBadges = Array.isArray(L.trustBadges) ? L.trustBadges : [];
-        const trustIcons = [I.secureShield, I.memberUser, I.artistHeart];
-        const trustRowHtml = [0, 1, 2]
-            .map((i) => {
-                const b = /** @type {{ title?: string, body?: string }} */ (trustBadges[i] || {});
-                return `<div class="app-fee-trust-item">
-                    <span class="app-fee-trust-icon-wrap">${appFeeIconHtml(trustIcons[i], 'app-fee-icon app-fee-icon--trust')}</span>
-                    <p class="app-fee-trust-title">${escHtml(b.title || '')}</p>
-                    <p class="app-fee-trust-body">${escHtml(b.body || '')}</p>
-                </div>`;
-            })
-            .join('');
         const productBullets = Array.isArray(L.productCardBullets) ? L.productCardBullets : [];
         const productBulletsHtml = productBullets
             .map(
                 (t) =>
                     `<li>${appFeeIconHtml(I.benefitCheck, 'app-fee-icon app-fee-icon--check')}<span>${escHtml(t)}</span></li>`,
             )
-            .join('');
-        const includedFeatures = Array.isArray(L.includedFeatureLabels)
-            ? L.includedFeatureLabels
-            : [];
-        const includedFeatureIcons = [I.paymentCard, I.secureLock, I.memberUser, I.includedGift];
-        const includedFeaturesHtml = includedFeatures
-            .map((label, i) => {
-                const icon = includedFeatureIcons[i] || I.benefitCheck;
-                return `<div class="app-whats-included-feature">
-                    <span class="app-whats-included-feature__icon">${appFeeIconHtml(icon, 'app-fee-icon app-fee-icon--feature')}</span>
-                    <span class="app-whats-included-feature__label">${escHtml(label)}</span>
-                </div>`;
-            })
             .join('');
         const disciplineOpts = Array.isArray(L.disciplineDatalistOptions) ? L.disciplineDatalistOptions : [];
         const disciplineDatalistHtml = disciplineOpts
@@ -3113,11 +3137,6 @@ class ApplicationFormComponent extends HTMLElement {
                     width: 0.95rem;
                     height: 0.95rem;
                     margin-top: 0.12rem;
-                }
-
-                .app-fee-icon--trust {
-                    width: 1.5rem;
-                    height: 1.5rem;
                 }
 
                 .app-fee-icon--plan {
@@ -3599,10 +3618,37 @@ class ApplicationFormComponent extends HTMLElement {
                     line-height: 1.2;
                 }
 
-                .app-payment-membership-every {
+                .app-payment-membership-every,
+                .app-payment-membership-sub2 {
                     font-size: clamp(0.74rem, 0.9vw, 0.84rem);
                     font-variation-settings: var(--fv-caption);
                     opacity: 0.9;
+                    display: block;
+                    max-width: 14rem;
+                    margin-inline: auto;
+                    line-height: 1.35;
+                }
+
+                .app-payment-membership-sub2 {
+                    margin-top: 0.2rem;
+                    opacity: 0.82;
+                }
+
+                .app-payment-membership-sub2[hidden] {
+                    display: none !important;
+                }
+
+                .app-payment-cta-sub2 {
+                    display: block;
+                    margin-top: 0.2rem;
+                    font-size: clamp(0.72rem, 0.88vw, 0.8rem);
+                    font-variation-settings: var(--fv-caption);
+                    opacity: 0.85;
+                    line-height: 1.35;
+                }
+
+                .app-payment-cta-sub2[hidden] {
+                    display: none !important;
                 }
 
                 .app-payment-membership-card .app-payment-plan-bullets {
@@ -3621,10 +3667,6 @@ class ApplicationFormComponent extends HTMLElement {
 
                     .app-whats-included-features {
                         grid-template-columns: repeat(2, minmax(0, 1fr));
-                    }
-
-                    .app-fee-trust-row {
-                        grid-template-columns: 1fr !important;
                     }
 
                     .app-fee-footer {
@@ -3979,55 +4021,6 @@ class ApplicationFormComponent extends HTMLElement {
                     opacity: 1;
                 }
 
-                .app-fee-trust-row {
-                    display: grid;
-                    grid-template-columns: repeat(3, 1fr);
-                    gap: clamp(0.85rem, 2vw, 1.5rem);
-                    margin: 0 0 clamp(1.5rem, 3vw, 2rem);
-                    padding: clamp(0.5rem, 1.5vw, 1rem) 0;
-                    border-top: 1px solid rgba(0, 0, 0, 0.08);
-                    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-                }
-
-                .app-fee-trust-item {
-                    text-align: center;
-                    padding: 0.35rem 0.25rem;
-                }
-
-                .app-fee-trust-icon-wrap {
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    width: 1.85rem;
-                    height: 1.85rem;
-                    margin: 0 auto 0.55rem;
-                    color: var(--c2);
-                }
-
-                .app-fee-trust-icon-wrap .app-fee-icon--trust {
-                    width: 1.65rem;
-                    height: 1.65rem;
-                }
-
-                .app-fee-trust-title {
-                    margin: 0 0 0.3rem;
-                    font-size: clamp(0.76rem, 0.92vw, 0.86rem);
-                    font-variation-settings: var(--fv-body-wide);
-                    font-weight: 600;
-                    color: var(--c2);
-                    line-height: 1.3;
-                }
-
-                .app-fee-trust-body {
-                    margin: 0 auto;
-                    font-size: clamp(0.68rem, 0.82vw, 0.76rem);
-                    font-variation-settings: var(--fv-caption);
-                    color: var(--c2);
-                    line-height: 1.4;
-                    opacity: 0.9;
-                    max-width: 12rem;
-                }
-
                 .app-fee-footer {
                     display: flex;
                     align-items: center;
@@ -4213,6 +4206,110 @@ class ApplicationFormComponent extends HTMLElement {
                 @keyframes app-validation-fade {
                     from { opacity: 0; }
                     to { opacity: 1; }
+                }
+
+                .app-account-gate-overlay {
+                    position: fixed;
+                    inset: 0;
+                    z-index: 2147483000;
+                    display: flex;
+                    align-items: center;
+                    justify-content: flex-end;
+                    padding: clamp(1rem, 4vw, 2.5rem);
+                    background: rgba(15, 23, 42, 0.28);
+                    animation: app-validation-fade 0.18s ease;
+                }
+
+                .app-account-gate-card {
+                    width: min(22.5rem, 100%);
+                    box-sizing: border-box;
+                    padding: 1.35rem 1.35rem 1.2rem;
+                    border: 1px solid rgba(250, 243, 244, 0.22);
+                    background: var(--c2, #0f172a);
+                    color: var(--c3, #faf3f4);
+                    box-shadow: 0 22px 60px rgba(15, 23, 42, 0.35);
+                    font-family: inherit;
+                }
+
+                .app-account-gate-eyebrow {
+                    margin: 0 0 0.55rem;
+                    font-size: 0.68rem;
+                    letter-spacing: 0.14em;
+                    text-transform: uppercase;
+                    font-variation-settings: var(--fv-label);
+                    opacity: 0.72;
+                }
+
+                .app-account-gate-title {
+                    margin: 0 0 0.55rem;
+                    font-size: clamp(1.05rem, 1.5vw, 1.22rem);
+                    line-height: 1.25;
+                    font-variation-settings: var(--fv-title);
+                }
+
+                .app-account-gate-body,
+                .app-account-gate-solution {
+                    margin: 0 0 0.65rem;
+                    font-size: clamp(0.84rem, 1vw, 0.92rem);
+                    line-height: 1.45;
+                    font-variation-settings: var(--fv-body);
+                    opacity: 0.92;
+                }
+
+                .app-account-gate-solution {
+                    opacity: 0.78;
+                }
+
+                .app-account-gate-contact {
+                    margin: 0 0 1.15rem;
+                    font-size: 0.8rem;
+                    line-height: 1.4;
+                    font-variation-settings: var(--fv-label);
+                }
+
+                .app-account-gate-mail {
+                    color: var(--c3, #faf3f4);
+                    text-decoration: underline;
+                    text-underline-offset: 0.14em;
+                }
+
+                .app-account-gate-mail:hover {
+                    opacity: 0.88;
+                }
+
+                .app-account-gate-actions {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 0.55rem;
+                    justify-content: flex-end;
+                }
+
+                .app-account-gate-card .app-btn--primary {
+                    background: var(--c3, #faf3f4);
+                    color: var(--c2, #0f172a);
+                    border-color: var(--c3, #faf3f4);
+                }
+
+                .app-account-gate-card .app-btn--primary:hover {
+                    background: transparent;
+                    color: var(--c3, #faf3f4);
+                }
+
+                .app-account-gate-card .app-btn--ghost {
+                    color: var(--c3, #faf3f4);
+                    border-color: rgba(250, 243, 244, 0.45);
+                }
+
+                .app-account-gate-card .app-btn--ghost:hover {
+                    background: rgba(250, 243, 244, 0.08);
+                }
+
+                @media (max-width: 720px) {
+                    .app-account-gate-overlay {
+                        justify-content: center;
+                        align-items: flex-end;
+                        padding: 0.85rem;
+                    }
                 }
 
                 .app-validation-modal {
@@ -4551,19 +4648,12 @@ class ApplicationFormComponent extends HTMLElement {
                         </div>
 
                         <div id="app-payment-section" class="app-form-card app-form-card--payment">
-                            <header class="app-fee-header">
-                                <h3 class="app-fee-title">${L.applicationFeeHeading}</h3>
-                                <p class="app-fee-price" id="app-application-fee-amount"></p>
-                                <div id="app-fee-notice-italic" class="app-fee-intro-wrap"></div>
-                            </header>
+                            <div class="app-fee-choose">
+                                <h4 class="app-fee-choose-title">${escHtml(L.choosePaymentHeading || L.applicationFeeHeading)}</h4>
+                            </div>
 
                             <div class="app-fee-meta-row">
                                 <div id="app-cohort-slots-payment" class="app-fee-meta-slots" hidden></div>
-                            </div>
-
-                            <div class="app-fee-choose">
-                                <h4 class="app-fee-choose-title">${escHtml(L.choosePaymentHeading || L.applicationFeeHeading)}</h4>
-                                <p class="app-fee-choose-sub">${escHtml(L.choosePaymentSubtext || L.paymentFeeLead)}</p>
                             </div>
 
                             <p id="app-member-fee-only-banner" class="app-member-fee-only-banner" hidden></p>
@@ -4585,6 +4675,7 @@ class ApplicationFormComponent extends HTMLElement {
                                     <button type="button" class="app-payment-cta app-payment-cta--primary" role="radio" aria-checked="false" data-app-payment-plan="one_time" id="app-plan-one-time">
                                         <span class="app-payment-cta-title" id="app-plan-one-time-title">${escHtml(L.planOneTimeTitle.replace('{{price}}', '$50'))}</span>
                                         <span class="app-payment-cta-sub" id="app-plan-one-time-sub">${escHtml(L.planOneTimeSub)}</span>
+                                        <span class="app-payment-cta-sub2" id="app-plan-one-time-sub2" hidden></span>
                                         <span class="app-payment-cta-price" id="app-plan-one-time-price" hidden></span>
                                     </button>
                                     <button type="button" class="app-payment-cta app-payment-cta--secondary" id="app-explore-memberships-toggle" aria-expanded="false">
@@ -4600,6 +4691,7 @@ class ApplicationFormComponent extends HTMLElement {
                                                 <span class="app-payment-membership-title" id="app-plan-monthly-title">${escHtml(L.planMonthlyTitle)}</span>
                                                 <span class="app-payment-membership-price" id="app-plan-monthly-price">${escHtml(L.planMonthlyPriceLine)}</span>
                                                 <span class="app-payment-membership-every" id="app-plan-monthly-every">${escHtml(L.planMonthlyEvery)}</span>
+                                                <span class="app-payment-membership-sub2" id="app-plan-monthly-sub2" hidden></span>
                                             </span>
                                             <ul class="app-payment-plan-bullets" id="app-plan-monthly-bullets"></ul>
                                         </span>
@@ -4614,6 +4706,7 @@ class ApplicationFormComponent extends HTMLElement {
                                                     <span class="app-payment-membership-title" id="app-plan-quarterly-title">${escHtml(L.planQuarterlyTitle)}</span>
                                                     <span class="app-payment-membership-price" id="app-plan-quarterly-price">${escHtml(L.planQuarterlyPriceLine)}</span>
                                                     <span class="app-payment-membership-every" id="app-plan-quarterly-every">${escHtml(L.planQuarterlyEvery)}</span>
+                                                    <span class="app-payment-membership-sub2" id="app-plan-quarterly-sub2" hidden></span>
                                                 </span>
                                                 <ul class="app-payment-plan-bullets" id="app-plan-quarterly-bullets"></ul>
                                             </span>
@@ -4627,6 +4720,7 @@ class ApplicationFormComponent extends HTMLElement {
                                                 <span class="app-payment-membership-title" id="app-plan-annual-title">${escHtml(L.planAnnualTitle)}</span>
                                                 <span class="app-payment-membership-price" id="app-plan-annual-price">${escHtml(L.planAnnualPriceLine)}</span>
                                                 <span class="app-payment-membership-every" id="app-plan-annual-every">${escHtml(L.planAnnualEvery)}</span>
+                                                <span class="app-payment-membership-sub2" id="app-plan-annual-sub2" hidden></span>
                                             </span>
                                             <ul class="app-payment-plan-bullets" id="app-plan-annual-bullets"></ul>
                                         </span>
@@ -4634,40 +4728,17 @@ class ApplicationFormComponent extends HTMLElement {
                                 </div>
                             </div>
 
-                            <div class="app-whats-included-panel">
-                                <div class="app-whats-included-panel__icon">
-                                    ${appFeeIconHtml(I.includedGift, 'app-fee-icon app-fee-icon--gift')}
-                                </div>
-                                <div class="app-whats-included-panel__content">
-                                    <h4 class="app-whats-included-panel__title">${escHtml(L.whatsIncludedSummary)}</h4>
-                                    <div class="app-whats-included-features" id="app-whats-included-features">${includedFeaturesHtml}</div>
-                                    <div class="app-whats-included-panel__cols" hidden>
-                                        <div class="app-whats-included-panel__col">
-                                            <p class="app-whats-included-subhead" id="app-whats-included-global-head"></p>
-                                            <ul id="app-whats-included-global-ul"></ul>
-                                        </div>
-                                        <div class="app-whats-included-panel__divider" aria-hidden="true"></div>
-                                        <div class="app-whats-included-panel__col" id="app-whats-included-plan-block">
-                                            <p class="app-whats-included-subhead" id="app-whats-included-plan-head"></p>
-                                            <ul id="app-whats-included-plan-ul"></ul>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="app-fee-trust-row">${trustRowHtml}</div>
-
-                            <div id="app-payment-placeholder" class="app-payment-placeholder">
+                            <div id="app-payment-placeholder" class="app-payment-placeholder" hidden>
                                 <div class="app-payment-placeholder-head">
                                     ${appFeeIconHtml(I.secureLock, 'app-fee-icon app-fee-icon--sm')}
                                     <p class="app-payment-placeholder-title">${escHtml(L.paymentPlaceholderTitle || L.paymentPlaceholderNoSelection)}</p>
                                 </div>
                                 <p class="app-payment-placeholder-sub">${escHtml(L.paymentPlaceholderSub || '')}</p>
                             </div>
-                            <div class="app-payment-slot-wrap">
+                            <div class="app-payment-slot-wrap" hidden>
                                 <slot name="app-stripe-mount"></slot>
                             </div>
-                            <div id="app-payment-hint-wrap" class="app-payment-hint-wrap" aria-busy="false">
+                            <div id="app-payment-hint-wrap" class="app-payment-hint-wrap" aria-busy="false" hidden>
                                 <div id="app-payment-loading" class="app-payment-loading" hidden aria-hidden="true">
                                     <span class="app-payment-spinner" role="presentation"></span>
                                 </div>

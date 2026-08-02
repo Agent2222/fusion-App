@@ -16,6 +16,35 @@ function esc(s) {
 }
 
 /** @returns {Record<string, any>} */
+function emptyPlanCard() {
+    return {
+        title: '',
+        displayPrice: '',
+        every: '',
+        badge: '',
+        subtext: '',
+        subtext2: '',
+        includedBullets: [''],
+    };
+}
+
+/**
+ * @param {unknown} raw
+ * @param {string[]} [fallbackBullets]
+ * @returns {string[]}
+ */
+function normalizePlanBullets(raw, fallbackBullets = []) {
+    const fromPlan = Array.isArray(raw)
+        ? raw.map((x) => String(x ?? '').trim()).filter(Boolean)
+        : [];
+    if (fromPlan.length) return fromPlan;
+    const fromFallback = Array.isArray(fallbackBullets)
+        ? fallbackBullets.map((x) => String(x ?? '').trim()).filter(Boolean)
+        : [];
+    return fromFallback.length ? fromFallback : [''];
+}
+
+/** @returns {Record<string, any>} */
 function emptyLocale() {
     return {
         seoTitle: '',
@@ -38,8 +67,9 @@ function emptyLocale() {
         accessCodeLabel: '',
         accessCodePlaceholder: '',
         planGroupLabel: '',
-        planBimonthly: { title: '', displayPrice: '', every: '', badge: '', subtext: '' },
-        planAnnual: { title: '', displayPrice: '', every: '', badge: '', subtext: '' },
+        planMonthly: emptyPlanCard(),
+        planQuarterly: emptyPlanCard(),
+        planAnnual: emptyPlanCard(),
         includesTitle: '',
         includes: [''],
         ctaLabel: '',
@@ -49,6 +79,44 @@ function emptyLocale() {
             { title: '', line: '' },
             { title: '', line: '' },
         ],
+    };
+}
+
+/**
+ * @param {Record<string, any>} src
+ * @param {Record<string, any>} basePlan
+ */
+function mergePlanCard(src, basePlan) {
+    const legacyShared = Array.isArray(src.includes)
+        ? src.includes.map((x) => String(x ?? '').trim()).filter(Boolean)
+        : [];
+    const legacyMonthly = src.planBimonthly && typeof src.planBimonthly === 'object' ? src.planBimonthly : null;
+    const monthlySrc =
+        src.planMonthly && typeof src.planMonthly === 'object'
+            ? src.planMonthly
+            : legacyMonthly || {};
+    /**
+     * @param {Record<string, any>} planSrc
+     * @param {boolean} seedFromShared
+     */
+    const mergeOne = (planSrc, seedFromShared) => {
+        const merged = { ...basePlan, ...planSrc };
+        merged.includedBullets = normalizePlanBullets(
+            planSrc.includedBullets,
+            seedFromShared ? legacyShared : [],
+        );
+        return merged;
+    };
+    return {
+        planMonthly: mergeOne(monthlySrc, true),
+        planQuarterly: mergeOne(
+            src.planQuarterly && typeof src.planQuarterly === 'object' ? src.planQuarterly : {},
+            true,
+        ),
+        planAnnual: mergeOne(
+            src.planAnnual && typeof src.planAnnual === 'object' ? src.planAnnual : {},
+            true,
+        ),
     };
 }
 
@@ -70,10 +138,12 @@ function normalizeBundle(raw) {
             title: String(src.proof?.[i]?.title ?? ''),
             line: String(src.proof?.[i]?.line ?? ''),
         }));
-        out.includes = Array.isArray(src.includes) && src.includes.length ? [...src.includes] : [''];
         out.roles = Array.isArray(src.roles) && src.roles.length ? [...src.roles] : [...base.roles];
-        out.planBimonthly = { ...base.planBimonthly, ...(src.planBimonthly || {}) };
-        out.planAnnual = { ...base.planAnnual, ...(src.planAnnual || {}) };
+        Object.assign(out, mergePlanCard(src, emptyPlanCard()));
+        // Keep legacy `includes` in sync with monthly for older readers; edit per-plan bullets in Studio.
+        out.includes = normalizePlanBullets(out.planMonthly?.includedBullets).filter(Boolean);
+        if (!out.includes.length) out.includes = [''];
+        delete out.planBimonthly;
         return out;
     };
     return { en: merge('en'), ja: merge('ja') };
@@ -117,16 +187,49 @@ export function renderJoinNetworkPageStudio() {
 
 /**
  * @param {Record<string, any>} loc
+ * @param {string} planKey
+ * @param {string} subhead
+ */
+function planCardFieldsHtml(loc, planKey, subhead) {
+    const plan = loc[planKey] || {};
+    const bullets = normalizePlanBullets(plan.includedBullets);
+    const benefitsHtml = bullets
+        .map(
+            (line, i) => `
+        <div class="studio-jnp__include-row">
+            <input class="studio-input" data-jnp="${planKey}.includedBullets.${i}" value="${esc(line)}" placeholder="Benefit ${i + 1}" />
+            <button type="button" class="studio-btn-ghost" data-jnp-remove-benefit="${planKey}:${i}" title="Remove">×</button>
+        </div>`,
+        )
+        .join('');
+    return `
+        <div class="studio-jnp__plan-slot">
+            <p class="studio-prog-card-slot">${esc(subhead)}</p>
+            <div class="studio-jnp__grid-2">
+                <label class="studio-jnp__field"><span>Title</span>
+                    <input class="studio-input" data-jnp="${planKey}.title" value="${esc(plan.title)}" /></label>
+                <label class="studio-jnp__field"><span>Display price</span>
+                    <input class="studio-input" data-jnp="${planKey}.displayPrice" value="${esc(plan.displayPrice)}" /></label>
+                <label class="studio-jnp__field"><span>Every</span>
+                    <input class="studio-input" data-jnp="${planKey}.every" value="${esc(plan.every)}" /></label>
+                <label class="studio-jnp__field"><span>Badge</span>
+                    <input class="studio-input" data-jnp="${planKey}.badge" value="${esc(plan.badge)}" /></label>
+                <label class="studio-jnp__field studio-jnp__field--full"><span>Subtext</span>
+                    <input class="studio-input" data-jnp="${planKey}.subtext" value="${esc(plan.subtext)}" /></label>
+                <label class="studio-jnp__field studio-jnp__field--full"><span>Subtext line 2</span>
+                    <input class="studio-input" data-jnp="${planKey}.subtext2" value="${esc(plan.subtext2)}" /></label>
+            </div>
+            <p class="studio-muted" style="margin-top:0.75rem">Benefits for this plan</p>
+            <div class="studio-jnp__includes" data-jnp-benefits="${planKey}">${benefitsHtml}</div>
+            <button type="button" class="studio-btn-ghost" data-jnp-add-benefit="${planKey}" style="margin-top:0.45rem">+ Add benefit</button>
+        </div>`;
+}
+
+/**
+ * @param {Record<string, any>} loc
  * @param {'en'|'ja'} locale
  */
 function fieldsHtml(loc, locale) {
-    const includes = (loc.includes || ['']).map(
-        (line, i) => `
-        <div class="studio-jnp__include-row">
-            <input class="studio-input" data-jnp="includes.${i}" value="${esc(line)}" placeholder="Benefit ${i + 1}" />
-            <button type="button" class="studio-btn-ghost" data-jnp-remove-include="${i}" title="Remove">×</button>
-        </div>`,
-    ).join('');
     const collage = (loc.collage || []).map(
         (c, i) => `
         <div class="studio-jnp__collage-row">
@@ -185,28 +288,12 @@ function fieldsHtml(loc, locale) {
         </section>
         <section class="studio-jnp__card">
             <h3>Plans &amp; benefits</h3>
-            <p class="studio-muted">General is preselected on the public page. Changing plans here updates the landing only (modal stays under Content).</p>
-            <div class="studio-jnp__grid-2">
-                <label class="studio-jnp__field"><span>General title</span>
-                    <input class="studio-input" data-jnp="planBimonthly.title" value="${esc(loc.planBimonthly?.title)}" /></label>
-                <label class="studio-jnp__field"><span>Price</span>
-                    <input class="studio-input" data-jnp="planBimonthly.displayPrice" value="${esc(loc.planBimonthly?.displayPrice)}" /></label>
-                <label class="studio-jnp__field"><span>Every</span>
-                    <input class="studio-input" data-jnp="planBimonthly.every" value="${esc(loc.planBimonthly?.every)}" /></label>
-                <label class="studio-jnp__field"><span>Badge</span>
-                    <input class="studio-input" data-jnp="planBimonthly.badge" value="${esc(loc.planBimonthly?.badge)}" /></label>
-                <label class="studio-jnp__field"><span>Annual title</span>
-                    <input class="studio-input" data-jnp="planAnnual.title" value="${esc(loc.planAnnual?.title)}" /></label>
-                <label class="studio-jnp__field"><span>Price</span>
-                    <input class="studio-input" data-jnp="planAnnual.displayPrice" value="${esc(loc.planAnnual?.displayPrice)}" /></label>
-                <label class="studio-jnp__field"><span>Every</span>
-                    <input class="studio-input" data-jnp="planAnnual.every" value="${esc(loc.planAnnual?.every)}" /></label>
-                <label class="studio-jnp__field"><span>Badge</span>
-                    <input class="studio-input" data-jnp="planAnnual.badge" value="${esc(loc.planAnnual?.badge)}" /></label>
-            </div>
-            <p class="studio-muted" style="margin-top:0.75rem">${esc(loc.includesTitle || 'Includes')}</p>
-            <div class="studio-jnp__includes" id="studio-jnp-includes">${includes}</div>
-            <button type="button" class="studio-btn-ghost" id="studio-jnp-add-include" style="margin-top:0.45rem">+ Add benefit</button>
+            <p class="studio-muted">Monthly is preselected on the public page. Add benefits under each plan — the live page swaps the list when a visitor selects a plan. Modal join copy stays under Content → join-network-flow.</p>
+            <label class="studio-jnp__field studio-jnp__field--full" style="margin-bottom:0.75rem"><span>Benefits list title</span>
+                <input class="studio-input" data-jnp="includesTitle" value="${esc(loc.includesTitle)}" placeholder="Your membership includes" /></label>
+            ${planCardFieldsHtml(loc, 'planMonthly', '1. Monthly')}
+            ${planCardFieldsHtml(loc, 'planQuarterly', '2. Quarterly')}
+            ${planCardFieldsHtml(loc, 'planAnnual', '3. Annual')}
         </section>
         <section class="studio-jnp__card">
             <h3>Proof strip</h3>
@@ -241,6 +328,19 @@ function previewHtml(loc) {
                 `<div><strong>${esc(p.title)}</strong><span>${esc(p.line)}</span></div>`,
         )
         .join('');
+    const mo = loc.planMonthly || {};
+    const qu = loc.planQuarterly || {};
+    const an = loc.planAnnual || {};
+    const planPreview = (plan, active) => `
+                    <div class="studio-jnp__preview-plan${active ? ' is-on' : ''}">
+                        <strong>${esc(plan.title)}</strong>
+                        <div>${esc(plan.displayPrice)} ${esc(plan.every)}</div>
+                        <small>${esc(plan.badge)}</small>
+                    </div>`;
+    const monthlyBenefits = normalizePlanBullets(mo.includedBullets)
+        .filter(Boolean)
+        .map((line) => `<li>${esc(line)}</li>`)
+        .join('');
     return `
         <div class="studio-jnp__preview-grid">
             <div>
@@ -254,17 +354,12 @@ function previewHtml(loc) {
                 <p>${esc(loc.formSubtitle)}</p>
                 <div class="studio-jnp__preview-roles">${roles}</div>
                 <div class="studio-jnp__preview-plans">
-                    <div class="studio-jnp__preview-plan is-on">
-                        <strong>${esc(loc.planBimonthly?.title)}</strong>
-                        <div>${esc(loc.planBimonthly?.displayPrice)} ${esc(loc.planBimonthly?.every)}</div>
-                        <small>${esc(loc.planBimonthly?.badge)}</small>
-                    </div>
-                    <div class="studio-jnp__preview-plan">
-                        <strong>${esc(loc.planAnnual?.title)}</strong>
-                        <div>${esc(loc.planAnnual?.displayPrice)} ${esc(loc.planAnnual?.every)}</div>
-                        <small>${esc(loc.planAnnual?.badge)}</small>
-                    </div>
+                    ${planPreview(mo, true)}
+                    ${planPreview(qu, false)}
+                    ${planPreview(an, false)}
                 </div>
+                <p class="studio-muted" style="margin:0.55rem 0 0.2rem;font-size:0.72rem">${esc(loc.includesTitle || 'Includes')} (monthly)</p>
+                <ul class="studio-jnp__preview-includes">${monthlyBenefits || '<li class="studio-muted">No benefits yet</li>'}</ul>
                 <div class="studio-jnp__preview-cta">${esc(loc.ctaLabel)}</div>
             </div>
         </div>
@@ -302,12 +397,6 @@ function setPath(obj, path, value) {
         /* handled above for nested objects */
     }
     const parentParts = path.split('.');
-    if (parentParts.length >= 2 && parentParts[0] === 'includes') {
-        const idx = Number(parentParts[1]);
-        if (!Array.isArray(obj.includes)) obj.includes = [];
-        obj.includes[idx] = value;
-        return;
-    }
     if (parentParts.length === 3 && (parentParts[0] === 'collage' || parentParts[0] === 'proof')) {
         const key = parentParts[0];
         const idx = Number(parentParts[1]);
@@ -317,9 +406,34 @@ function setPath(obj, path, value) {
         obj[key][idx][field] = value;
         return;
     }
-    if (parentParts.length === 2 && (parentParts[0] === 'planBimonthly' || parentParts[0] === 'planAnnual')) {
+    if (
+        parentParts.length === 3 &&
+        (parentParts[0] === 'planMonthly' ||
+            parentParts[0] === 'planQuarterly' ||
+            parentParts[0] === 'planAnnual') &&
+        parentParts[1] === 'includedBullets'
+    ) {
+        const planKey = parentParts[0];
+        const idx = Number(parentParts[2]);
+        if (!obj[planKey] || typeof obj[planKey] !== 'object') obj[planKey] = {};
+        if (!Array.isArray(obj[planKey].includedBullets)) obj[planKey].includedBullets = [];
+        obj[planKey].includedBullets[idx] = value;
+        if (planKey === 'planMonthly') {
+            obj.includes = normalizePlanBullets(obj[planKey].includedBullets).filter(Boolean);
+            if (!obj.includes.length) obj.includes = [''];
+        }
+        delete obj.planBimonthly;
+        return;
+    }
+    if (
+        parentParts.length === 2 &&
+        (parentParts[0] === 'planMonthly' ||
+            parentParts[0] === 'planQuarterly' ||
+            parentParts[0] === 'planAnnual')
+    ) {
         if (!obj[parentParts[0]]) obj[parentParts[0]] = {};
         obj[parentParts[0]][parentParts[1]] = value;
+        delete obj.planBimonthly;
         return;
     }
     obj[last] = value;
@@ -416,19 +530,51 @@ export async function initJoinNetworkPageStudio(mainEl) {
             });
         });
 
-        fieldsEl?.querySelector('#studio-jnp-add-include')?.addEventListener('click', () => {
-            if (!Array.isArray(data[locale].includes)) data[locale].includes = [];
-            data[locale].includes.push('');
-            setDirty(true);
-            renderFields();
+        fieldsEl?.querySelectorAll('[data-jnp-add-benefit]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const planKey = btn.getAttribute('data-jnp-add-benefit');
+                if (
+                    planKey !== 'planMonthly' &&
+                    planKey !== 'planQuarterly' &&
+                    planKey !== 'planAnnual'
+                ) {
+                    return;
+                }
+                if (!data[locale][planKey] || typeof data[locale][planKey] !== 'object') {
+                    data[locale][planKey] = emptyPlanCard();
+                }
+                if (!Array.isArray(data[locale][planKey].includedBullets)) {
+                    data[locale][planKey].includedBullets = [''];
+                }
+                data[locale][planKey].includedBullets.push('');
+                if (planKey === 'planMonthly') {
+                    data[locale].includes = [...data[locale][planKey].includedBullets];
+                }
+                setDirty(true);
+                renderFields();
+            });
         });
 
-        fieldsEl?.querySelectorAll('[data-jnp-remove-include]').forEach((btn) => {
+        fieldsEl?.querySelectorAll('[data-jnp-remove-benefit]').forEach((btn) => {
             btn.addEventListener('click', () => {
-                const i = Number(btn.getAttribute('data-jnp-remove-include'));
-                if (!Array.isArray(data[locale].includes)) return;
-                data[locale].includes.splice(i, 1);
-                if (!data[locale].includes.length) data[locale].includes = [''];
+                const raw = btn.getAttribute('data-jnp-remove-benefit') || '';
+                const [planKey, idxStr] = raw.split(':');
+                const i = Number(idxStr);
+                if (
+                    (planKey !== 'planMonthly' &&
+                        planKey !== 'planQuarterly' &&
+                        planKey !== 'planAnnual') ||
+                    !Number.isFinite(i)
+                ) {
+                    return;
+                }
+                const plan = data[locale][planKey];
+                if (!plan || !Array.isArray(plan.includedBullets)) return;
+                plan.includedBullets.splice(i, 1);
+                if (!plan.includedBullets.length) plan.includedBullets = [''];
+                if (planKey === 'planMonthly') {
+                    data[locale].includes = [...plan.includedBullets];
+                }
                 setDirty(true);
                 renderFields();
             });
@@ -469,10 +615,9 @@ export async function initJoinNetworkPageStudio(mainEl) {
         saveBtn.disabled = true;
         setStatus('Saving…');
         try {
-            await upsertContentPageStudio('join-network-page', {
-                en: data.en,
-                ja: data.ja,
-            });
+            const payload = normalizeBundle({ en: data.en, ja: data.ja });
+            await upsertContentPageStudio('join-network-page', payload);
+            data = payload;
             setDirty(false);
             setStatus('Saved.', 'ok');
         } catch (e) {

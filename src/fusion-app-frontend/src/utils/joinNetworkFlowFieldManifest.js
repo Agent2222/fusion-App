@@ -167,7 +167,7 @@ export const JNF_STAGE_LAYOUT = {
                     { key: 'line3Months', label: 'Access line' },
                     { key: 'lineRenew', label: 'Renew line' },
                     { key: 'amount', label: 'Amount (Stripe)' },
-                    { key: 'planKey', label: 'Default plan key', help: 'Use bi_monthly or annual' },
+                    { key: 'planKey', label: 'Default plan key', help: 'Use monthly, quarterly, or annual' },
                     { key: 'totalLabel', label: 'Total label' },
                     { key: 'cardNumberLabel', label: 'Card number label' },
                     { key: 'expiryLabel', label: 'Expiry label' },
@@ -234,8 +234,22 @@ export const JNF_STAGE_LAYOUT = {
     },
 };
 
+/** @type {readonly { id: 'planMonthly' | 'planQuarterly' | 'planAnnual', label: string }[]} */
+export const JNF_PLAN_TIERS = [
+    { id: 'planMonthly', label: '1. Monthly' },
+    { id: 'planQuarterly', label: '2. Quarterly' },
+    { id: 'planAnnual', label: '3. Annual' },
+];
+
+/** @type {readonly { id: 'monthly' | 'quarterly' | 'annual', label: string }[]} */
+export const JNF_PAYMENT_TIERS = [
+    { id: 'monthly', label: '1. Monthly' },
+    { id: 'quarterly', label: '2. Quarterly' },
+    { id: 'annual', label: '3. Annual' },
+];
+
 /** @type {JnfFieldDef[]} */
-export const JNF_PLAN_BIMONTHLY_FIELDS = [
+export const JNF_PLAN_CARD_FIELDS = [
     { key: 'title', label: 'Plan title' },
     { key: 'displayPrice', label: 'Display price' },
     { key: 'every', label: 'Billing frequency' },
@@ -244,20 +258,14 @@ export const JNF_PLAN_BIMONTHLY_FIELDS = [
 ];
 
 /** @type {JnfFieldDef[]} */
-export const JNF_PLAN_ANNUAL_FIELDS = [
-    { key: 'title', label: 'Plan title' },
-    { key: 'displayPrice', label: 'Display price' },
-    { key: 'discount', label: 'Discount badge' },
-    { key: 'subtext', label: 'Subtext line 1' },
-    { key: 'subtext2', label: 'Subtext line 2' },
-];
+export const JNF_PLAN_ANNUAL_EXTRA_FIELDS = [{ key: 'discount', label: 'Discount badge' }];
 
 /** @type {JnfFieldDef[]} */
 export const JNF_PAYMENT_TIER_FIELDS = [
     { key: 'finalPaymentPrice', label: 'Price display' },
     { key: 'finalPaymentStatement', label: 'Price statement' },
     { key: 'amount', label: 'Amount' },
-    { key: 'planKey', label: 'Plan key', help: 'bi_monthly or annual' },
+    { key: 'planKey', label: 'Plan key', help: 'monthly, quarterly, or annual' },
     { key: 'footerNote', label: 'Footer note 1' },
     { key: 'footerNote2', label: 'Footer note 2' },
 ];

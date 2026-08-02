@@ -5,6 +5,7 @@ import {
   getAllProgramsBlock,
   getApplicationPaymentGlobal,
   getArtists,
+  getContentBundleForStudio,
   getCurrentProgramSeason,
   getMyArtistRecord,
 } from "../utils/database.js";
@@ -653,11 +654,25 @@ async function applyProgramToDom(programPair) {
     typeof /** @type {{ setProgramFormContext?: (c: object) => void }} */ (formEl)
       .setProgramFormContext === "function"
   ) {
+    const locale =
+      typeof window.getLocale === "function" && window.getLocale() === "ja"
+        ? "ja"
+        : "en";
+    let joinNetworkFlowBundle = null;
+    try {
+      joinNetworkFlowBundle = await getContentBundleForStudio("join-network-flow", {
+        forStudio: false,
+      });
+    } catch {
+      joinNetworkFlowBundle = null;
+    }
     /** @type {{ setProgramFormContext: (c: object) => void }} */ (formEl).setProgramFormContext(
       buildProgramApplicationFormContext(programPageForForm, {
         programYear: current?.year != null ? String(current.year) : "",
         availableSlots,
         totalSlots,
+        joinNetworkFlowBundle,
+        locale,
       }),
     );
   }

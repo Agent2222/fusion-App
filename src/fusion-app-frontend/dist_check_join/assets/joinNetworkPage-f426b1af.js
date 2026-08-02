@@ -1,0 +1,82 @@
+import{v as H,a5 as C,q as T,l as L,e as B,f as F,$ as U,Y as O,an as J,ao as R,ap as D}from"./index-07736dff.js";const S=["Artist","Gallery","Curator","Collector"];function r(e){return String(e??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}function G(e){const t=String(e??"");return t?t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/&lt;(\/?(?:strong|em|b|i))&gt;/gi,"<$1>"):""}function V(){try{if(typeof window.getLocale=="function"&&window.getLocale()==="ja")return"ja"}catch{}return"en"}function z(e,t){const n=e&&typeof e=="object"?e:{},o=n[t]&&typeof n[t]=="object"?n[t]:null;return{...n.en&&typeof n.en=="object"?n.en:{},...o||{}}}function W(e){const t=String(e||"").toLowerCase();return t==="people"?'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="9" cy="8" r="2.4"/><circle cx="16" cy="9" r="2"/><path d="M4.5 18c.6-2.4 2.4-3.6 4.5-3.6s3.9 1.2 4.5 3.6"/><path d="M13.2 18c.35-1.55 1.4-2.45 2.8-2.45 1.2 0 2.15.7 2.55 1.9"/></svg>':t==="doc"?'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M8 3.5h6.2L18.5 8v12.5H8z"/><path d="M14.2 3.5V8H18.5"/><path d="M10.5 12h5M10.5 15.5h5"/></svg>':'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 8.5h16M5.5 8.5V18M18.5 8.5V18M4 5.5h16M8.5 5.5v3M15.5 5.5v3"/></svg>'}function I(e,t){const n=t==="quarterly"?"planQuarterly":t==="annual"?"planAnnual":"planMonthly",o=e[n]&&typeof e[n]=="object"?e[n]:{},c=Array.isArray(o.includedBullets)?o.includedBullets.map(g=>String(g??"").trim()).filter(Boolean):[];return c.length?c:(Array.isArray(e.includes)?e.includes:[]).map(g=>String(g??"").trim()).filter(Boolean)}function N(e){return e.map(t=>`<li>${r(t)}</li>`).join("")}function Q(e,t,n){const o=e.querySelector("#jnpIncludes");o instanceof HTMLElement&&(o.innerHTML=N(I(t,n)))}function x(e,t){const n=Array.isArray(e.roles)&&e.roles.length?e.roles:S,o=Array.isArray(e.collage)?e.collage:[],c=[0,1,2].map(s=>{const h=o[s]||{};return`<img data-jnp-collage="${s}" src="${r(h.src||"")}" alt="${r(h.alt||"")}" loading="lazy" decoding="async" />`}).join(""),g=N(I(e,"monthly")),a=(Array.isArray(e.proof)?e.proof:[]).map((s,h)=>{const _=["japan","people","doc"],u=s.icon||_[h]||"japan",f=s.line?`<span>${r(s.line)}</span>`:"<span></span>";return`
+            <div class="join-network-page__proof-item">
+                <span class="join-network-page__proof-icon">${W(u)}</span>
+                <div>
+                  <strong>${r(s.title)}</strong>
+                  ${f}
+                </div>
+            </div>`}).join(""),l=e.planMonthly||{},p=e.planQuarterly||{},i=e.planAnnual||{},d=e.paymentFooterHtml?G(e.paymentFooterHtml):r(e.paymentFooter||"Secure payment by PayPal or card · Cancel anytime"),m=l.badge?`<span class="join-network-page__plan-badge">${r(l.badge)}</span>`:"",y=i.badge?`<span class="join-network-page__plan-badge join-network-page__plan-badge--save">${r(i.badge)}</span>`:"";return`
+    <div class="join-network-page page-content" id="joinNetworkPageRoot" data-locale="${r(t)}">
+      <div class="join-network-page__main">
+        <section class="join-network-page__story" aria-label="Why join">
+          <h1 class="join-network-page__story-headline">${r(e.storyHeadline)}</h1>
+          <p class="join-network-page__story-sub">${r(e.storySubheadline)}</p>
+          <p class="join-network-page__story-sec">${r(e.storySecondary)}</p>
+          <div class="join-network-page__media">
+            <div class="join-network-page__collage">${c}</div>
+            <div class="join-network-page__audio" id="jnpAudioMount" hidden></div>
+          </div>
+        </section>
+        <section class="join-network-page__form-card" aria-label="Join FUSION">
+          <h2 class="join-network-page__form-title">${r(e.formTitle)}</h2>
+          <p class="join-network-page__form-sub">${r(e.formSubtitle)}</p>
+          <span class="join-network-page__label">${r(e.roleLabel||"I am a")}</span>
+          <div class="join-network-page__roles" id="jnpRoles" role="group">
+            ${n.map((s,h)=>`
+              <button type="button" class="join-network-page__role${h===0?" is-active":""}" data-jnp-role="${r(S[h]||s)}" aria-pressed="${h===0?"true":"false"}">${r(s)}</button>`).join("")}
+          </div>
+          <div class="join-network-page__fields">
+            <input type="text" id="jnpFirstName" name="firstName" autocomplete="given-name" placeholder="${r(e.firstNamePlaceholder||"First name")}" />
+            <input type="text" id="jnpLastName" name="lastName" autocomplete="family-name" placeholder="${r(e.lastNamePlaceholder||"Last name")}" />
+            <input class="join-network-page__field--full" type="email" id="jnpEmail" name="email" autocomplete="email" placeholder="${r(e.emailPlaceholder||"Email")}" />
+            <div class="join-network-page__field--full join-network-page__access">
+              <button type="button" class="join-network-page__access-toggle" id="jnpAccessToggle" aria-expanded="false" aria-controls="jnpAccessPanel">
+                ${r(e.accessCodePrompt||"Have an access code?")}
+              </button>
+              <div class="join-network-page__access-panel" id="jnpAccessPanel" hidden>
+                <label class="join-network-page__label" for="jnpAccessCode">${r(e.accessCodeLabel||"Access code (optional)")}</label>
+                <input type="text" id="jnpAccessCode" name="accessCode" inputmode="numeric" maxlength="8" placeholder="${r(e.accessCodePlaceholder||"8-digit code")}" autocomplete="one-time-code" />
+              </div>
+            </div>
+          </div>
+          <span class="join-network-page__label">${r(e.planGroupLabel||"Choose your membership")}</span>
+          <div class="join-network-page__plans" id="jnpPlans" role="radiogroup" aria-label="${r(e.planGroupLabel||"Choose your membership")}">
+            <button type="button" class="join-network-page__plan is-active" data-jnp-plan="monthly" role="radio" aria-checked="true" aria-pressed="true">
+              <span class="join-network-page__plan-radio" aria-hidden="true"></span>
+              <span class="join-network-page__plan-body">
+                ${m}
+                <p class="join-network-page__plan-title">${r(l.title||"Monthly")}</p>
+                <p class="join-network-page__plan-price">${r(l.displayPrice||"$30")} ${r(l.every||"per month")}</p>
+                <p class="join-network-page__plan-sub">${r(l.subtext||"")}</p>
+              </span>
+            </button>
+            <button type="button" class="join-network-page__plan" data-jnp-plan="quarterly" role="radio" aria-checked="false" aria-pressed="false">
+              <span class="join-network-page__plan-radio" aria-hidden="true"></span>
+              <span class="join-network-page__plan-body">
+                <p class="join-network-page__plan-title">${r(p.title||"Quarterly")}</p>
+                <p class="join-network-page__plan-price">${r(p.displayPrice||"$75")} ${r(p.every||"per quarter")}</p>
+                <p class="join-network-page__plan-sub">${r(p.subtext||"")}</p>
+              </span>
+            </button>
+            <button type="button" class="join-network-page__plan" data-jnp-plan="annual" role="radio" aria-checked="false" aria-pressed="false">
+              <span class="join-network-page__plan-radio" aria-hidden="true"></span>
+              <span class="join-network-page__plan-body">
+                <p class="join-network-page__plan-title">${r(i.title||"Annual")}</p>
+                <p class="join-network-page__plan-price">${r(i.displayPrice||"$260")} ${r(i.every||"per year")}</p>
+                ${y}
+                <p class="join-network-page__plan-sub">${r(i.subtext||"")}</p>
+              </span>
+            </button>
+          </div>
+          <ul class="join-network-page__includes" id="jnpIncludes" aria-label="${r(e.includesTitle||"Includes")}">${g}</ul>
+          <button type="button" class="join-network-page__cta" id="jnpCheckout">${r(e.ctaLabel||"Continue to secure checkout")}</button>
+          <p class="join-network-page__pay-foot">${d}</p>
+          <p class="join-network-page__err" id="jnpErr" role="alert"></p>
+        </section>
+      </div>
+      <section class="join-network-page__proof" aria-label="Membership highlights">${a}</section>
+      <div class="join-network-page__bridge" aria-hidden="true">
+        <app-join-network data-modal-type="membership" data-header-bridge="true" context="join-network" active="true"></app-join-network>
+      </div>
+    </div>
+  `}function $(){document.documentElement.setAttribute("data-fusion-page","join-network"),document.querySelectorAll("app-sound-environment").forEach(t=>{t instanceof HTMLElement&&(t.setAttribute("hidden",""),typeof t.setMasterEnabled=="function"&&t.setMasterEnabled(!1))});const e=document.getElementById("fusionSoundEnvHost");e instanceof HTMLElement&&(e.setAttribute("hidden",""),e.style.display="none")}function P(e){const t=String(e??"").trim();return!(!t||/^(blob:|data:)/i.test(t)||/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(t))}function A(e,t){P(t)&&e.add(String(t).trim())}function Y(e){var c;const t=new Set;if(!e||typeof e!="object")return[];const n=e;A(t,n.imageSrc),A(t,n.heroMediaSrc);const o=n.programPage&&typeof n.programPage=="object"?n.programPage:null;if(o){for(const a of Array.isArray(o.fadeGalleryImages)?o.fadeGalleryImages:[])A(t,a);for(const a of Array.isArray(o.stripGalleryImages)?o.stripGalleryImages:[])A(t,a);for(const a of Array.isArray(o.offeringCards)?o.offeringCards:[])for(const l of Array.isArray(a==null?void 0:a.gallery)?a.gallery:[])A(t,l);const g=(c=o.programDetails)==null?void 0:c.facilities;if(Array.isArray(g))for(const a of g)for(const l of Array.isArray(a==null?void 0:a.gallery)?a.gallery:[])A(t,l)}return[...t]}function Z(e){if(J(e)){const n=R(e,{fallbackToArtwork:!1});if(P(n))return n}const t=D(e);return P(t)?t:""}function K(e,t){const n=e.slice();for(let o=n.length-1;o>0;o-=1){const c=Math.floor(Math.random()*(o+1)),g=n[o];n[o]=n[c],n[c]=g}return n.slice(0,Math.max(0,Math.min(t,n.length)))}function q(e,t,n){const o=String(t||"").trim();if(!o)return Promise.resolve();const c=String(e.currentSrc||e.src||"").trim();if(c===o||c.endsWith(o)||o.endsWith(c))return n!=null&&n!==""&&(e.alt=n),Promise.resolve();const g=()=>new Promise(l=>{let p=!1;const i=()=>{p||(p=!0,e.removeEventListener("transitionend",d),window.clearTimeout(m),l())},d=y=>{y.target===e&&y.propertyName==="opacity"&&i()};e.addEventListener("transitionend",d);const m=window.setTimeout(i,500)}),a=()=>new Promise(l=>{let p=!1;const i=()=>{p||(p=!0,e.removeEventListener("load",i),e.removeEventListener("error",i),l())};e.addEventListener("load",i),e.addEventListener("error",i),e.src=o,n!=null&&n!==""&&(e.alt=n),e.complete&&i()});return(async()=>{e.classList.add("is-swapping"),await g(),await a(),e.offsetWidth,e.classList.remove("is-swapping")})()}async function X(e,t){var o;const n=[0,1,2].map(c=>e.querySelector(`[data-jnp-collage="${c}"]`)).filter(c=>c instanceof HTMLImageElement);if(!(n.length<3))try{const[c,g]=await Promise.all([B(),t?Promise.resolve(t):L()]),a=F(c),l=Array.isArray((o=a==null?void 0:a.programs)==null?void 0:o.en)?a.programs.en:[],p=[];for(const s of l)p.push(...Y(s));const i=[...new Set(p)],d=[];if(i.length){const s=i[Math.floor(Math.random()*i.length)];d.push(q(n[0],s,n[0].alt||"FUSION program"))}const m=(Array.isArray(g)?g:[]).map(s=>{var u,f;const h=Z(s);if(!h)return null;const _=String(((f=(u=s==null?void 0:s.locales)==null?void 0:u.en)==null?void 0:f.name)??"").trim()||String((s==null?void 0:s.slug)??"").trim()||"Artist";return{url:h,name:_,id:String((s==null?void 0:s.id)??_)}}).filter(Boolean);K(m,2).forEach((s,h)=>{const _=n[h+1];!_||!s||d.push(q(_,s.url,s.name))}),await Promise.all(d)}catch{}}async function ee(e,t){var o,c;const n=e.querySelector("#jnpAudioMount");if(n instanceof HTMLElement)try{const g=t||await L(),a=(Array.isArray(g)?g:[]).filter(m=>U(m));if(!a.length){n.hidden=!0,n.innerHTML="";return}const l=a[Math.floor(Math.random()*a.length)],p=O(l),i=String((l==null?void 0:l.slug)??"").trim(),d=document.createElement("app-audio-row");if(d.setAttribute("active","true"),d.setAttribute("data-layout","join-network"),i&&d.setAttribute("data-artist-href",`/profile/${i}`),p.length>1)d.setAttribute("data-audio-sources",JSON.stringify(p));else if(p.length===1)d.setAttribute("data-audio-src",p[0].url),d.setAttribute("data-audio-title",p[0].title||"Artist audio");else{const m=String(l.audioUrl??"").trim();if(!m){n.hidden=!0;return}const y=String(l.audioTitle??"").trim()||String(((c=(o=l==null?void 0:l.locales)==null?void 0:o.en)==null?void 0:c.name)??"").trim()||"Artist audio";d.setAttribute("data-audio-src",m),d.setAttribute("data-audio-title",y)}n.hidden=!1,n.replaceChildren(d)}catch{n.hidden=!0,n.innerHTML=""}}function ne(){return x({},"en")}async function ae(){var h,_;$();const e=V();let t={};try{t=await H("join-network-page",{forStudio:!1})}catch{try{const{testData:u}=await C(()=>import("./index-07736dff.js").then(f=>f.fZ),["assets/index-07736dff.js","assets/index-c3bcf116.css"]);t=u.joinNetworkPage||{}}catch{t={}}}const n=t&&typeof t=="object"?t.en:null;if(!(n&&typeof n=="object"&&!Array.isArray(n)&&String(n.storyHeadline||"").trim()))try{const{testData:u}=await C(()=>import("./index-07736dff.js").then(f=>f.fZ),["assets/index-07736dff.js","assets/index-c3bcf116.css"]);u.joinNetworkPage&&(t=u.joinNetworkPage)}catch{}const c=z(t,e);T({title:c.seoTitle||"Join FUSION | Membership",description:c.seoDescription||"Join a curated network connecting artists, galleries, curators, and collectors through programs rooted in Japan.",robots:"",homeOrganizationJsonLd:!1});const g=document.getElementById("mainContent");g&&(g.innerHTML=x(c,e));const a=document.getElementById("joinNetworkPageRoot");if(!a)return;$(),requestAnimationFrame($),(async()=>{let u=[];try{u=await L()}catch{u=[]}await Promise.all([X(a,u),ee(a,u)])})();let l=S[0],p="monthly";(h=a.querySelector("#jnpRoles"))==null||h.addEventListener("click",u=>{var j,w;const f=(w=(j=u.target)==null?void 0:j.closest)==null?void 0:w.call(j,"[data-jnp-role]");f instanceof HTMLButtonElement&&(l=f.getAttribute("data-jnp-role")||S[0],a.querySelectorAll("[data-jnp-role]").forEach(k=>{const b=k===f;k.classList.toggle("is-active",b),k.setAttribute("aria-pressed",b?"true":"false")}))}),(_=a.querySelector("#jnpPlans"))==null||_.addEventListener("click",u=>{var w,k;const f=(k=(w=u.target)==null?void 0:w.closest)==null?void 0:k.call(w,"[data-jnp-plan]");if(!(f instanceof HTMLButtonElement))return;const j=f.getAttribute("data-jnp-plan");j!=="monthly"&&j!=="quarterly"&&j!=="annual"||(p=j,a.querySelectorAll("[data-jnp-plan]").forEach(b=>{const v=b===f;b.classList.toggle("is-active",v),b.setAttribute("aria-pressed",v?"true":"false"),b.setAttribute("aria-checked",v?"true":"false")}),Q(a,c,p))});const i=a.querySelector("#jnpAccessToggle"),d=a.querySelector("#jnpAccessPanel"),m=a.querySelector("#jnpAccessCode");i==null||i.addEventListener("click",()=>{if(!d||!i)return;d.hasAttribute("hidden")?(d.removeAttribute("hidden"),i.setAttribute("aria-expanded","true"),i.classList.add("is-open"),m==null||m.focus()):(d.setAttribute("hidden",""),i.setAttribute("aria-expanded","false"),i.classList.remove("is-open"),m&&(m.value=""))});const y=a.querySelector("#jnpErr"),s=a.querySelector("#jnpCheckout");s==null||s.addEventListener("click",()=>{var b,v,E,M;y&&(y.textContent="");const u=String(((b=a.querySelector("#jnpFirstName"))==null?void 0:b.value)||"").trim(),f=String(((v=a.querySelector("#jnpLastName"))==null?void 0:v.value)||"").trim(),j=String(((E=a.querySelector("#jnpEmail"))==null?void 0:E.value)||"").trim(),w=String(((M=a.querySelector("#jnpAccessCode"))==null?void 0:M.value)||"").replace(/\D/g,"").slice(0,8);if(!l){y&&(y.textContent=e==="ja"?"役割を選択してください。":"Please select a role.");return}if(!u||!f){y&&(y.textContent=e==="ja"?"姓名を入力してください。":"Please enter your first and last name.");return}if(!j||!j.includes("@")){y&&(y.textContent=e==="ja"?"有効なメールを入力してください。":"Please enter a valid email.");return}const k=w.length===8;window.dispatchEvent(new CustomEvent("fusion-open-join-network",{detail:{firstName:u,lastName:f,email:j,accessCode:k?w:"",category:l,subscriptionTier:p,stage:k?"linkAccount":"payment",fromJoinNetworkPage:!0}}))})}export{ae as default,ne as generateJoinNetworkPageContent};

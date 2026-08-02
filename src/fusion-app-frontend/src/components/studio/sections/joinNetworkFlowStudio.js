@@ -6,8 +6,10 @@ import { applyStringPatches } from '../../../utils/studioPlainForms.js';
 import {
     JNF_FLOWS,
     JNF_PAYMENT_TIER_FIELDS,
-    JNF_PLAN_ANNUAL_FIELDS,
-    JNF_PLAN_BIMONTHLY_FIELDS,
+    JNF_PAYMENT_TIERS,
+    JNF_PLAN_ANNUAL_EXTRA_FIELDS,
+    JNF_PLAN_CARD_FIELDS,
+    JNF_PLAN_TIERS,
     JNF_STAGE_LAYOUT,
     JNF_STAGES,
     JNF_VALUE_LEGACY_FIELDS,
@@ -28,7 +30,7 @@ const editorStore = new WeakMap();
  * @property {JnfStageId} stage
  * @property {'en' | 'ja'} locale
  * @property {'band' | 'modal'} previewMode
- * @property {'bimonthly' | 'annual'} previewPlan
+ * @property {'monthly' | 'quarterly' | 'annual'} previewPlan
  * @property {string[]} globalBullets
  * @property {ReturnType<typeof setTimeout> | null} previewTimer
  * @property {boolean} dirtyGuardEnabled
@@ -98,14 +100,69 @@ function ensureLocaleBlock(state, flow, stage, locale) {
 }
 
 /**
+ * Migrate legacy bimonthly plan/payment keys to monthly; strip planBimonthly on output.
+ * @param {unknown} raw
+ * @returns {Record<string, unknown>}
+ */
+export function normalizeJoinNetworkFlowBundle(raw) {
+    const next = deepClone(raw && typeof raw === 'object' ? raw : {});
+    for (const flowVal of Object.values(/** @type {Record<string, unknown>} */ (next))) {
+        if (!flowVal || typeof flowVal !== 'object') continue;
+        const flow = /** @type {Record<string, unknown>} */ (flowVal);
+
+        const value = flow.value;
+        if (value && typeof value === 'object') {
+            for (const loc of ['en', 'ja']) {
+                const block = /** @type {Record<string, unknown>} */ (value)[loc];
+                if (!block || typeof block !== 'object') continue;
+                const legacy = block.planBimonthly;
+                if (legacy && typeof legacy === 'object') {
+                    const existing = block.planMonthly;
+                    block.planMonthly =
+                        existing && typeof existing === 'object'
+                            ? { .../** @type {Record<string, unknown>} */ (legacy), .../** @type {Record<string, unknown>} */ (existing) }
+                            : { .../** @type {Record<string, unknown>} */ (legacy) };
+                }
+                delete block.planBimonthly;
+            }
+        }
+
+        const payment = flow.payment;
+        if (payment && typeof payment === 'object') {
+            for (const loc of ['en', 'ja']) {
+                const block = /** @type {Record<string, unknown>} */ (payment)[loc];
+                if (!block || typeof block !== 'object') continue;
+                const legacy = block.bimonthly;
+                if (legacy && typeof legacy === 'object') {
+                    const existing = block.monthly;
+                    block.monthly =
+                        existing && typeof existing === 'object'
+                            ? { .../** @type {Record<string, unknown>} */ (legacy), .../** @type {Record<string, unknown>} */ (existing) }
+                            : { .../** @type {Record<string, unknown>} */ (legacy) };
+                }
+                delete block.bimonthly;
+                if (block.planKey === 'bi_monthly') block.planKey = 'monthly';
+                for (const tier of ['monthly', 'quarterly', 'annual']) {
+                    const tierObj = block[tier];
+                    if (tierObj && typeof tierObj === 'object' && /** @type {Record<string, unknown>} */ (tierObj).planKey === 'bi_monthly') {
+                        /** @type {Record<string, unknown>} */ (tierObj).planKey = 'monthly';
+                    }
+                }
+            }
+        }
+    }
+    return /** @type {Record<string, unknown>} */ (next);
+}
+
+/**
  * @param {Record<string, unknown>} bundle
  * @param {Record<string, unknown>} draft
  */
 export function mergeJoinNetworkFlowBundle(bundle, draft) {
     const next = deepClone(bundle && typeof bundle === 'object' ? bundle : {});
-    if (!draft || typeof draft !== 'object') return next;
+    if (!draft || typeof draft !== 'object') return normalizeJoinNetworkFlowBundle(next);
     deepMergeInto(/** @type {Record<string, unknown>} */ (next), draft);
-    return next;
+    return normalizeJoinNetworkFlowBundle(next);
 }
 
 /** @param {HTMLElement} container */
@@ -142,7 +199,7 @@ function syncPreview(root, rec) {
         locale: rec.locale,
         flowDraft: rec.state,
         globalBullets: rec.globalBullets,
-        selectedPlan: rec.previewPlan === 'annual' ? 'annual' : 'bi_monthly',
+        selectedPlan: rec.previewPlan,
         previewMode: rec.previewMode,
         context: rec.flow === 'access' ? 'artists' : 'home',
     });
@@ -314,8 +371,13 @@ function renderValueStage(editorCol, rec, root, block) {
 
     const planGrid = document.createElement('div');
     planGrid.className = 'studio-jnf-plan-grid';
-    planGrid.appendChild(renderPlanCard(rec, root, 'planBimonthly', 'Bimonthly', JNF_PLAN_BIMONTHLY_FIELDS, block));
-    planGrid.appendChild(renderPlanCard(rec, root, 'planAnnual', 'Annual', JNF_PLAN_ANNUAL_FIELDS, block));
+    for (const tier of JNF_PLAN_TIERS) {
+        const fields =
+            tier.id === 'planAnnual'
+                ? [...JNF_PLAN_CARD_FIELDS, ...JNF_PLAN_ANNUAL_EXTRA_FIELDS]
+                : JNF_PLAN_CARD_FIELDS;
+        planGrid.appendChild(renderPlanCard(rec, root, tier.id, tier.label, fields, block));
+    }
     editorCol.appendChild(planGrid);
 
     const includesCard = document.createElement('section');
@@ -334,8 +396,10 @@ function renderValueStage(editorCol, rec, root, block) {
             <p class="studio-muted">Used when a plan has no plan-specific bullets.</p>
             <div data-jnf-shared-includes></div>
             <div class="studio-jnf-copy-actions">
-                <button type="button" class="studio-btn-ghost" data-jnf-copy-shared="planBimonthly">Copy shared → Bimonthly</button>
-                <button type="button" class="studio-btn-ghost" data-jnf-copy-shared="planAnnual">Copy shared → Annual</button>
+                ${JNF_PLAN_TIERS.map(
+                    (tier) =>
+                        `<button type="button" class="studio-btn-ghost" data-jnf-copy-shared="${tier.id}">Copy shared → ${tier.label.replace(/^\d+\.\s*/, '')}</button>`,
+                ).join('')}
             </div>
         </div>
     `;
@@ -351,16 +415,13 @@ function renderValueStage(editorCol, rec, root, block) {
     includesCard.querySelector('.studio-jnf-refresh-global')?.addEventListener('click', () => {
         void loadGlobalBullets(root, rec);
     });
-    includesCard.querySelector('[data-jnf-copy-shared="planBimonthly"]')?.addEventListener('click', () => {
-        copySharedToPlan(rec, 'planBimonthly');
-        rec.hooks.markDirty();
-        renderStageBody(root.querySelector('[data-jnf-editor-col]'), rec, root);
-    });
-    includesCard.querySelector('[data-jnf-copy-shared="planAnnual"]')?.addEventListener('click', () => {
-        copySharedToPlan(rec, 'planAnnual');
-        rec.hooks.markDirty();
-        renderStageBody(root.querySelector('[data-jnf-editor-col]'), rec, root);
-    });
+    for (const tier of JNF_PLAN_TIERS) {
+        includesCard.querySelector(`[data-jnf-copy-shared="${tier.id}"]`)?.addEventListener('click', () => {
+            copySharedToPlan(rec, tier.id);
+            rec.hooks.markDirty();
+            renderStageBody(root.querySelector('[data-jnf-editor-col]'), rec, root);
+        });
+    }
     editorCol.appendChild(includesCard);
 
     const legacy = document.createElement('details');
@@ -383,7 +444,7 @@ function renderValueStage(editorCol, rec, root, block) {
 
 /**
  * @param {EditorRecord} rec
- * @param {'planBimonthly' | 'planAnnual'} planKey
+ * @param {'planMonthly' | 'planQuarterly' | 'planAnnual'} planKey
  */
 function copySharedToPlan(rec, planKey) {
     const block = localeBlock(rec.state, rec.flow, 'value', rec.locale);
@@ -396,18 +457,22 @@ function copySharedToPlan(rec, planKey) {
 /**
  * @param {EditorRecord} rec
  * @param {HTMLElement} root
- * @param {'planBimonthly' | 'planAnnual'} planId
- * @param {string} title
+ * @param {'planMonthly' | 'planQuarterly' | 'planAnnual'} planId
+ * @param {string} subheadLabel
  * @param {import('./joinNetworkFlowFieldManifest.js').JnfFieldDef[]} fields
  * @param {Record<string, unknown>} block
  */
-function renderPlanCard(rec, root, planId, title, fields, block) {
+function renderPlanCard(rec, root, planId, subheadLabel, fields, block) {
+    const slot = document.createElement('div');
+    slot.className = 'studio-jnf-plan-slot';
+
+    const subhead = document.createElement('p');
+    subhead.className = 'studio-prog-card-slot';
+    subhead.textContent = subheadLabel;
+    slot.appendChild(subhead);
+
     const card = document.createElement('section');
     card.className = 'studio-jnf-card studio-jnf-plan-card';
-    const h = document.createElement('h4');
-    h.className = 'studio-jnf-card-title';
-    h.textContent = title;
-    card.appendChild(h);
     const grid = document.createElement('div');
     grid.className = 'studio-form-grid studio-community__editorial studio-jnf-editorial';
     const planObj =
@@ -446,7 +511,8 @@ function renderPlanCard(rec, root, planId, title, fields, block) {
         },
     );
     card.appendChild(bulletsWrap);
-    return card;
+    slot.appendChild(card);
+    return slot;
 }
 
 /**
@@ -473,25 +539,30 @@ function renderPaymentStage(editorCol, rec, root, block) {
 
     const tierGrid = document.createElement('div');
     tierGrid.className = 'studio-jnf-plan-grid';
-    tierGrid.appendChild(renderPaymentTierCard(rec, root, 'bimonthly', 'Bimonthly tier', block));
-    tierGrid.appendChild(renderPaymentTierCard(rec, root, 'annual', 'Annual tier', block));
+    for (const tier of JNF_PAYMENT_TIERS) {
+        tierGrid.appendChild(renderPaymentTierCard(rec, root, tier.id, tier.label, block));
+    }
     editorCol.appendChild(tierGrid);
 }
 
 /**
  * @param {EditorRecord} rec
  * @param {HTMLElement} root
- * @param {'bimonthly' | 'annual'} tier
- * @param {string} title
+ * @param {'monthly' | 'quarterly' | 'annual'} tier
+ * @param {string} subheadLabel
  * @param {Record<string, unknown>} block
  */
-function renderPaymentTierCard(rec, root, tier, title, block) {
+function renderPaymentTierCard(rec, root, tier, subheadLabel, block) {
+    const slot = document.createElement('div');
+    slot.className = 'studio-jnf-plan-slot';
+
+    const subhead = document.createElement('p');
+    subhead.className = 'studio-prog-card-slot';
+    subhead.textContent = subheadLabel;
+    slot.appendChild(subhead);
+
     const card = document.createElement('section');
     card.className = 'studio-jnf-card studio-jnf-plan-card';
-    const h = document.createElement('h4');
-    h.className = 'studio-jnf-card-title';
-    h.textContent = title;
-    card.appendChild(h);
     const grid = document.createElement('div');
     grid.className = 'studio-form-grid studio-community__editorial studio-jnf-editorial';
     const tierObj =
@@ -508,7 +579,8 @@ function renderPaymentTierCard(rec, root, tier, title, block) {
         );
     }
     card.appendChild(grid);
-    return card;
+    slot.appendChild(card);
+    return slot;
 }
 
 /**
@@ -761,7 +833,7 @@ function wireChromeEvents(root, rec) {
 
         const planBtn = t.closest('[data-jnf-preview-plan]');
         if (planBtn) {
-            rec.previewPlan = /** @type {'bimonthly' | 'annual'} */ (planBtn.getAttribute('data-jnf-preview-plan') || 'bimonthly');
+            rec.previewPlan = /** @type {'monthly' | 'quarterly' | 'annual'} */ (planBtn.getAttribute('data-jnf-preview-plan') || 'monthly');
             renderChrome(root, rec);
             syncPreview(root, rec);
         }
@@ -777,8 +849,9 @@ export async function fillJoinNetworkFlowEditor(container, bundle, hooks) {
     container.innerHTML = '';
     container.className = 'studio-content-fields studio-content-fields--join-network-flow';
 
-    const state =
-        bundle && typeof bundle === 'object' ? /** @type {Record<string, unknown>} */ (deepClone(bundle)) : {};
+    const state = normalizeJoinNetworkFlowBundle(
+        bundle && typeof bundle === 'object' ? /** @type {Record<string, unknown>} */ (bundle) : {},
+    );
 
     /** @type {EditorRecord} */
     const rec = {
@@ -788,7 +861,7 @@ export async function fillJoinNetworkFlowEditor(container, bundle, hooks) {
         stage: 'band',
         locale: 'en',
         previewMode: 'band',
-        previewPlan: 'bimonthly',
+        previewPlan: 'monthly',
         globalBullets: [],
         previewTimer: null,
         dirtyGuardEnabled: false,
@@ -820,7 +893,8 @@ export async function fillJoinNetworkFlowEditor(container, bundle, hooks) {
                             <button type="button" class="studio-jnf-seg-btn is-active" data-jnf-preview-mode="modal">Modal</button>
                         </div>
                         <div class="studio-jnf-seg studio-jnf-seg--compact studio-jnf-preview-plan-seg">
-                            <button type="button" class="studio-jnf-seg-btn is-active" data-jnf-preview-plan="bimonthly">Bi-monthly</button>
+                            <button type="button" class="studio-jnf-seg-btn is-active" data-jnf-preview-plan="monthly">Monthly</button>
+                            <button type="button" class="studio-jnf-seg-btn" data-jnf-preview-plan="quarterly">Quarterly</button>
                             <button type="button" class="studio-jnf-seg-btn" data-jnf-preview-plan="annual">Annual</button>
                         </div>
                     </div>

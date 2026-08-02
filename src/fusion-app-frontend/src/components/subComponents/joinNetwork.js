@@ -1241,30 +1241,12 @@ class JoinNetworkComponent extends HTMLElement {
       const pb = this.shadowRoot?.querySelector("#jnPayBack");
       if (pb) pb.textContent = payment.backLabel || "← Back";
 
-      if (this._joinMode === "resubscribe") {
-        this._paymentAmountCents = parseMoneyToCents(payment.amount);
-        const priceStr =
-          typeof payment.finalPaymentPrice === "string" &&
-          payment.finalPaymentPrice.trim()
-            ? payment.finalPaymentPrice.trim()
-            : typeof payment.amount === "string"
-              ? payment.amount.replace(/\.00(?=\s*$)/, "").trim()
-              : "";
-        const stmtStr =
-          typeof payment.finalPaymentStatement === "string" &&
-          payment.finalPaymentStatement.trim()
-            ? payment.finalPaymentStatement.trim()
-            : String(payment.lineRenew || payment.line3Months || "").trim();
-        set("#jnFinalPaymentPrice", priceStr);
-        set("#final-payment-statement", stmtStr);
-        set("#jnPayFooter", payment.footerNote ?? "");
-        const pf2 = this.shadowRoot?.querySelector("#jnPayFooter2");
-        if (pf2) {
-          const t2 = payment.footerNote2 ?? "";
-          pf2.textContent = t2;
-          pf2.hidden = !String(t2).trim();
-        }
-      } else if (this._joinSubscriptionTier) {
+      if (
+        this._joinSubscriptionTier &&
+        JOIN_SUBSCRIPTION_TIERS.includes(this._joinSubscriptionTier)
+      ) {
+        // Full join + resubscribe (settings / applicant unlock) use tier slices —
+        // never the legacy top-level $50 / bi-monthly payment fields.
         this._applyPaymentCopyForTier(this._joinSubscriptionTier);
       } else {
         set("#jnFinalPaymentPrice", "—");
@@ -1422,7 +1404,6 @@ class JoinNetworkComponent extends HTMLElement {
     }
     if (stage === "payment") {
       if (
-        this._joinMode !== "resubscribe" &&
         this._joinSubscriptionTier &&
         JOIN_SUBSCRIPTION_TIERS.includes(this._joinSubscriptionTier)
       ) {
@@ -1446,15 +1427,7 @@ class JoinNetworkComponent extends HTMLElement {
       }
       // `_fillDialogCopy` ends with `_showStage(this._stage)` (e.g. on locale change). Re-running
       // prepare would tear down and create a second Subscription clientSecret — only init when needed.
-      const stillOnPayment = prev === "payment";
-      const nextKey = this._computeStripePrepareKeySync();
-      const canReuseStripe =
-        stillOnPayment &&
-        this._stripePaymentReady &&
-        this._stripePrepareKey === nextKey;
-      if (!canReuseStripe) {
-        void this._prepareStripePayment();
-      }
+      void this._maybePreparePaymentForStage(prev);
     }
     if (stage === "linkAccount") {
       void this._tryCompletePendingLink();
@@ -1463,11 +1436,118 @@ class JoinNetworkComponent extends HTMLElement {
 
   _computeStripePrepareKeySync() {
     const email = this._getEmailForSubscription();
-    const tierPart =
-      this._joinMode === "resubscribe"
-        ? "resubscribe"
-        : this._joinSubscriptionTier || "";
+    const tierPart = this._joinSubscriptionTier || "";
     return `${this._joinMode}|${this._modalType}|${email}|${tierPart}`;
+  }
+
+  /**
+   * @param {unknown} detail
+   * @returns {JoinSubscriptionTier}
+   */
+  _subscriptionTierFromDetail(detail) {
+    const t =
+      detail && typeof detail === "object"
+        ? /** @type {Record<string, unknown>} */ (detail).subscriptionTier
+        : null;
+    if (t === "annual" || t === "quarterly" || t === "monthly") return t;
+    return "monthly";
+  }
+
+  /**
+   * Keep entry + resubscribe billing email fields in sync.
+   * @param {unknown} email
+   * @returns {boolean}
+   */
+  _applyBillingEmailToForm(email) {
+    const em = String(email ?? "").trim();
+    if (!em.includes("@")) return false;
+    this._formEmail = em;
+    const root = this.shadowRoot;
+    const pay = root?.querySelector("#jnPayEmail");
+    const entry = root?.querySelector("#jnEmail");
+    if (pay instanceof HTMLInputElement) pay.value = em;
+    if (entry instanceof HTMLInputElement) entry.value = em;
+    return true;
+  }
+
+  /**
+   * Resubscribe / unlock: resolve billing email from account contact or stored checkout email.
+   * @returns {Promise<boolean>}
+   */
+  async _ensureResubscribeBillingEmail() {
+    if (this._getEmailForSubscription().includes("@")) return true;
+    try {
+      const { getMyAccountContactForCaller } = await import(
+        "../../utils/database.js"
+      );
+      const contact = await getMyAccountContactForCaller();
+      if (this._applyBillingEmailToForm(contact?.email)) return true;
+    } catch {
+      /* ignore */
+    }
+    try {
+      const { getIdentityIfAuthenticated } = await import(
+        "../../utils/icAuth.js"
+      );
+      const { getStoredBillingEmailForPrincipal } = await import(
+        "../../utils/integrationApi.js"
+      );
+      const identity = await getIdentityIfAuthenticated();
+      if (identity) {
+        const billing = getStoredBillingEmailForPrincipal(
+          identity.getPrincipal().toText(),
+        );
+        if (this._applyBillingEmailToForm(billing)) return true;
+      }
+    } catch {
+      /* ignore */
+    }
+    return this._getEmailForSubscription().includes("@");
+  }
+
+  /**
+   * @param {FlowStage} prevStage
+   */
+  async _maybePreparePaymentForStage(prevStage) {
+    const root = this.shadowRoot;
+    if (!root || this._stage !== "payment") return;
+
+    if (this._joinMode === "resubscribe") {
+      await this._ensureResubscribeBillingEmail();
+      if (this._stage !== "payment") return;
+      if (!this._getEmailForSubscription().includes("@")) {
+        const hint = root.querySelector("#jnPayStripeHint");
+        if (hint) {
+          hint.textContent =
+            "Enter the email for your membership billing to load checkout.";
+          hint.classList.remove("jn-pay-stripe-hint--busy");
+        }
+        const payBtn = root.querySelector("#jnPayComplete");
+        if (payBtn instanceof HTMLButtonElement) payBtn.disabled = true;
+        return;
+      }
+    }
+
+    const stillOnPayment = prevStage === "payment";
+    const nextKey = this._computeStripePrepareKeySync();
+    const canReuseStripe =
+      stillOnPayment &&
+      this._stripePaymentReady &&
+      this._stripePrepareKey === nextKey;
+    if (!canReuseStripe) {
+      await this._prepareStripePayment();
+    }
+  }
+
+  /** Re-run checkout mount when resubscribe billing email becomes valid. */
+  _onPayEmailChanged() {
+    if (this._stage !== "payment" || this._joinMode !== "resubscribe") return;
+    const email = this._getEmailForSubscription();
+    if (!email.includes("@")) return;
+    this._formEmail = email;
+    const nextKey = this._computeStripePrepareKeySync();
+    if (this._stripePaymentReady && this._stripePrepareKey === nextKey) return;
+    void this._prepareStripePayment();
   }
 
   /** Email for Stripe customer + metadata (entry field or resubscribe-only `#jnPayEmail`). */
@@ -1610,19 +1690,45 @@ class JoinNetworkComponent extends HTMLElement {
       if (actor && typeof actor.registerOrUpdateAccount === "function") {
         await actor.registerOrUpdateAccount(categoryToUserRole(cat));
       }
-      await (getActiveProvider() === "paypal"
-        ? linkPayPalSubscriptionToPrincipal({
+      const paypalSubId = String(this._fusionSubscriptionId || "").trim();
+      if (getActiveProvider() === "paypal") {
+        try {
+          await linkPayPalSubscriptionToPrincipal({
             fusionPendingId: this._fusionPendingId,
             email,
             principal,
-            subscriptionId: this._fusionSubscriptionId || undefined,
-          })
-        : linkSubscriptionToPrincipal({
-            fusionPendingId: this._fusionPendingId,
-            email,
-            principal,
-            subscriptionId: this._fusionSubscriptionId || undefined,
-          }));
+            subscriptionId: paypalSubId || undefined,
+          });
+        } catch (linkErr) {
+          if (DEV_MODE) console.warn("[JoinNetwork] PayPal link", linkErr);
+          // Soft-fail recovery: sync by subscription id once the account exists.
+          if (!paypalSubId) throw linkErr;
+        }
+        if (paypalSubId) {
+          try {
+            await syncPayPalSubscription({
+              principal,
+              subscriptionId: paypalSubId,
+            });
+          } catch (syncErr) {
+            if (DEV_MODE) console.warn("[JoinNetwork] PayPal sync after link", syncErr);
+            throw new Error(
+              mapIntegrationUserMessage(
+                syncErr instanceof Error
+                  ? syncErr.message
+                  : "PayPal paid, but membership did not sync to your account. Open Settings → Refresh subscription status, or contact support with your PayPal subscription id.",
+              ),
+            );
+          }
+        }
+      } else {
+        await linkSubscriptionToPrincipal({
+          fusionPendingId: this._fusionPendingId,
+          email,
+          principal,
+          subscriptionId: this._fusionSubscriptionId || undefined,
+        });
+      }
       setStoredBillingEmailForPrincipal(principal, email);
       clearPendingPaymentEmailLocal("join");
       try {
@@ -2044,7 +2150,7 @@ class JoinNetworkComponent extends HTMLElement {
    * @returns {boolean}
    */
   _canUseStripeForJoinTier() {
-    if (this._joinMode === "resubscribe") return true;
+    // Monthly / quarterly memberships are PayPal-first (same for resubscribe / unlock).
     const tier = this._joinSubscriptionTier || "monthly";
     return tier === "annual";
   }
@@ -2122,20 +2228,16 @@ class JoinNetworkComponent extends HTMLElement {
 
       if (myGen !== this._stripePrepareGen || this._stage !== "payment") return;
 
-      /** @type {JoinSubscriptionTier | undefined} */
-      let subscriptionTier;
-      if (this._joinMode === "resubscribe") {
-        subscriptionTier = undefined;
-      } else {
-        subscriptionTier = this._joinSubscriptionTier || "monthly";
+      /** @type {JoinSubscriptionTier} */
+      const subscriptionTier = this._joinSubscriptionTier || "monthly";
+      if (!this._joinSubscriptionTier) {
+        this._joinSubscriptionTier = subscriptionTier;
       }
 
       const payConfig = await fetchPaymentConfig();
       if (myGen !== this._stripePrepareGen || this._stage !== "payment") return;
 
-      const planId = subscriptionTier
-        ? planIdForTier(subscriptionTier, payConfig)
-        : "";
+      const planId = planIdForTier(subscriptionTier, payConfig);
       if (!planId) {
         const envHint =
           subscriptionTier === "annual"
@@ -2165,18 +2267,14 @@ class JoinNetworkComponent extends HTMLElement {
         });
       }
 
+      // Keep custom_id under PayPal's 127-char limit (principal / pending / tier only).
       /** @type {Record<string, string>} */
-      const customData = { pending_email: emailForSub };
+      const customData = { tier: subscriptionTier };
       if (payFirst) {
         customData.fusion_pending_id = fusionPendingId;
       } else if (principalOpt) {
         customData.principal = principalOpt;
       }
-      customData.category = cat || "";
-      customData.intent = this._modalType || "";
-      customData.first_name = this._formFirstName || "";
-      customData.last_name = this._formLastName || "";
-      customData.full_name = this._concatProfileFullName();
 
       if (hint) {
         hint.textContent = "Loading PayPal checkout…";
@@ -2343,14 +2441,10 @@ class JoinNetworkComponent extends HTMLElement {
 
       if (myGen !== this._stripePrepareGen || this._stage !== "payment") return;
 
-      /** @type {'annual' | undefined} */
-      let subscriptionTier;
-      if (this._joinMode === "resubscribe") {
-        subscriptionTier = undefined;
-      } else if (this._joinSubscriptionTier === "annual") {
-        subscriptionTier = "annual";
-      } else {
-        subscriptionTier = undefined;
+      /** @type {JoinSubscriptionTier} */
+      const subscriptionTier = this._joinSubscriptionTier || "monthly";
+      if (!this._joinSubscriptionTier) {
+        this._joinSubscriptionTier = subscriptionTier;
       }
 
       const [{ loadStripe }, subRes] = await Promise.all([
@@ -2361,7 +2455,7 @@ class JoinNetworkComponent extends HTMLElement {
           ...(this._joinMode === "resubscribe" && principalOpt
             ? { principal: principalOpt }
             : {}),
-          ...(subscriptionTier ? { subscriptionTier } : {}),
+          subscriptionTier,
           metadata: {
             category: cat || "",
             intent: this._modalType,
@@ -3467,8 +3561,11 @@ class JoinNetworkComponent extends HTMLElement {
       if (detail && detail.mode === "resubscribe") {
         this._joinExemptCodePath = false;
         this._joinMode = "resubscribe";
+        this._joinSubscriptionTier = this._subscriptionTierFromDetail(detail);
         this._stage = "payment";
         this._logoutIfDismissedWithoutJoin = false;
+        const em = String(detail.email ?? "").trim();
+        if (em.includes("@")) this._formEmail = em;
         void import("@stripe/stripe-js");
       } else {
         this._joinExemptCodePath = false;
@@ -3488,15 +3585,7 @@ class JoinNetworkComponent extends HTMLElement {
           if (ln) this._formLastName = ln;
           if (fn || ln) this._formFullName = `${fn} ${ln}`.trim();
           if (em) this._formEmail = em;
-          if (
-            detail.subscriptionTier === "annual" ||
-            detail.subscriptionTier === "quarterly" ||
-            detail.subscriptionTier === "monthly"
-          ) {
-            this._joinSubscriptionTier = detail.subscriptionTier;
-          } else {
-            this._joinSubscriptionTier = "monthly";
-          }
+          this._joinSubscriptionTier = this._subscriptionTierFromDetail(detail);
           const wantStage = String(detail.stage || "").trim();
           if (code.length === 8) {
             try {
@@ -3518,15 +3607,13 @@ class JoinNetworkComponent extends HTMLElement {
         _pendingLogoutIfDismissedWithoutAccount = false;
       }
     }
-    this._fillDialogCopy();
-    this._joinFlowCompleted = false;
+    // Prefill billing/entry emails before `_fillDialogCopy` → payment prepare.
+    this._applyBillingEmailToForm(this._formEmail);
     const fnEl = root.querySelector("#jnFirstName");
     const lnEl = root.querySelector("#jnLastName");
-    const email = root.querySelector("#jnEmail");
     const acEl = root.querySelector("#jnAccessCode");
     if (fnEl instanceof HTMLInputElement) fnEl.value = this._formFirstName;
     if (lnEl instanceof HTMLInputElement) lnEl.value = this._formLastName;
-    if (email instanceof HTMLInputElement) email.value = this._formEmail;
     if (acEl instanceof HTMLInputElement) {
       let persisted = "";
       try {
@@ -3545,6 +3632,8 @@ class JoinNetworkComponent extends HTMLElement {
     if (this._joinSubscriptionTier) {
       this._syncJoinPlanSelectionUi();
     }
+    this._fillDialogCopy();
+    this._joinFlowCompleted = false;
     this._lastFocused = document.activeElement;
     if (dlg && typeof dlg.showModal === "function") {
       dlg.showModal();
@@ -3567,7 +3656,9 @@ class JoinNetworkComponent extends HTMLElement {
       requestAnimationFrame(() => {
         const focusEl =
           this._stage === "payment"
-            ? root.querySelector("#jnPayComplete") || root.querySelector("#jnFirstName")
+            ? root.querySelector("#jnPayEmail") ||
+              root.querySelector("#jnPayComplete") ||
+              root.querySelector("#jnFirstName")
             : root.querySelector("#jnFirstName") || openBtn;
         focusEl?.focus?.();
       });
@@ -3746,6 +3837,18 @@ class JoinNetworkComponent extends HTMLElement {
       this._showStage("entry");
     });
 
+    const payEmailInput = root.querySelector("#jnPayEmail");
+    if (payEmailInput instanceof HTMLInputElement) {
+      payEmailInput.addEventListener("change", () => this._onPayEmailChanged());
+      payEmailInput.addEventListener("blur", () => this._onPayEmailChanged());
+      payEmailInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          this._onPayEmailChanged();
+        }
+      });
+    }
+
     root.querySelector("#jnPayBack")?.addEventListener("click", () => {
       this._showStage("value");
     });
@@ -3799,9 +3902,15 @@ class JoinNetworkComponent extends HTMLElement {
     const completePayment = async () => {
       const errEl = root.querySelector("#jnPayErr");
       if (errEl) errEl.textContent = "";
-      const email = this._formEmail.trim();
+      const email = this._getEmailForSubscription();
       const cat = this._getSelectedCategoryNormalized();
-      if (!email || !cat) {
+      if (this._joinMode === "resubscribe") {
+        if (!email.includes("@")) {
+          if (errEl) errEl.textContent = "Enter the email for your membership billing.";
+          return;
+        }
+        this._formEmail = email;
+      } else if (!email || !cat) {
         if (errEl)
           errEl.textContent = "Missing email or role. Go back to step 1.";
         return;

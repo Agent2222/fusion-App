@@ -265,19 +265,6 @@ function mergeApplicationPaymentGlobalLocaleBlock(block, target) {
         const v = String(o[key] ?? '').trim();
         if (v) target[key] = v;
     }
-    const trustBadges = o.trustBadges;
-    if (Array.isArray(trustBadges) && trustBadges.length > 0) {
-        target.trustBadges = trustBadges
-            .map((row) => {
-                if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
-                const r = /** @type {Record<string, unknown>} */ (row);
-                const title = String(r.title ?? '').trim();
-                const body = String(r.body ?? '').trim();
-                if (!title && !body) return null;
-                return { title, body };
-            })
-            .filter(Boolean);
-    }
 }
 
 /**
@@ -2351,6 +2338,18 @@ export async function submitProgramApplication(programId, payloadFields) {
     if (!pid) throw new Error('programId required');
     const submittedAt = new Date().toISOString();
     const payloadJson = JSON.stringify(payloadFields);
+    // Ensure inactive skeleton exists for application-only (and member) submitters.
+    const ens = await ensureMyLinkedArtistProfileForApplication();
+    if (ens === 'noAccount') {
+        const e = /** @type {Error & { code?: string }} */ (new Error(PROGRAM_APPLICATION_ERROR_CODE.NO_ACCOUNT));
+        e.code = PROGRAM_APPLICATION_ERROR_CODE.NO_ACCOUNT;
+        throw e;
+    }
+    if (ens !== 'ok' && ens !== 'alreadyLinked') {
+        const e = /** @type {Error & { code?: string }} */ (new Error(PROGRAM_APPLICATION_ERROR_CODE.NO_LINKED_ARTIST));
+        e.code = PROGRAM_APPLICATION_ERROR_CODE.NO_LINKED_ARTIST;
+        throw e;
+    }
     if (getDataSource() === 'test') {
         const id = getProfileSettingsDevArtistId();
         if (!id) {
@@ -2401,13 +2400,18 @@ export async function submitProgramApplication(programId, payloadFields) {
  * @returns {Promise<void>}
  */
 export async function assertProgramApplicationSubmissionReady() {
+    const ens = await ensureMyLinkedArtistProfileForApplication();
+    if (ens === 'noAccount') {
+        const e = /** @type {Error & { code?: string }} */ (new Error(PROGRAM_APPLICATION_ERROR_CODE.NO_ACCOUNT));
+        e.code = PROGRAM_APPLICATION_ERROR_CODE.NO_ACCOUNT;
+        throw e;
+    }
+    if (ens !== 'ok' && ens !== 'alreadyLinked') {
+        const e = /** @type {Error & { code?: string }} */ (new Error(PROGRAM_APPLICATION_ERROR_CODE.NO_LINKED_ARTIST));
+        e.code = PROGRAM_APPLICATION_ERROR_CODE.NO_LINKED_ARTIST;
+        throw e;
+    }
     if (getDataSource() === 'test') {
-        const id = getProfileSettingsDevArtistId();
-        if (!id) {
-            const e = /** @type {Error & { code?: string }} */ (new Error(PROGRAM_APPLICATION_ERROR_CODE.NO_LINKED_ARTIST));
-            e.code = PROGRAM_APPLICATION_ERROR_CODE.NO_LINKED_ARTIST;
-            throw e;
-        }
         return;
     }
     const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
@@ -2853,39 +2857,57 @@ export async function syncMyAccountContactFromJoinContextIfNeeded() {
     }
 }
 
+/**
+ * @param {unknown} raw
+ * @returns {'ok' | 'alreadyLinked' | 'needsSubscription' | 'noAccount'}
+ */
+function interpretEnsureLinkedProfileResult(raw) {
+    if (raw && typeof raw === 'object') {
+        if ('ok' in raw) return 'ok';
+        if ('alreadyLinked' in raw) return 'alreadyLinked';
+        if ('needsSubscription' in raw) return 'needsSubscription';
+        if ('noAccount' in raw) return 'noAccount';
+    }
+    return 'ok';
+}
+
+async function ensureLinkedArtistProfileTestMode() {
+    let id = getProfileSettingsDevArtistId();
+    if (id) {
+        const artists = await getArtists();
+        if (artists.some((x) => x.id === id)) return 'alreadyLinked';
+    }
+    const ts = new Date().toISOString();
+    const nid = `mpd-local-${
+        typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID().slice(0, 8) : String(Date.now())
+    }`;
+    const { getProfileSetupDraft } = await import('./profileSetupDraft.js');
+    const contactEmail = String(getProfileSetupDraft().email || '').trim();
+    const minimal = normalizeArtistDefaults({
+        id: nid,
+        slug: nid,
+        image: '',
+        featuredOrder: 999_999,
+        visibility: 'inactive',
+        updatedAt: ts,
+        locales: { en: {}, ja: {} },
+        imported: false,
+        accessCode: '',
+        contactEmail,
+    });
+    const overlay = readStudioLs(LS_ARTISTS_OVERLAY) || {};
+    overlay[nid] = minimal;
+    writeStudioLs(LS_ARTISTS_OVERLAY, overlay);
+    setProfileSettingsDevArtistId(nid);
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('fusion-data-source-change', { detail: { source: 'test' } }));
+    }
+    return 'ok';
+}
+
 export async function ensureMyLinkedArtistProfile() {
     if (getDataSource() === 'test') {
-        let id = getProfileSettingsDevArtistId();
-        if (id) {
-            const artists = await getArtists();
-            if (artists.some((x) => x.id === id)) return 'alreadyLinked';
-        }
-        const ts = new Date().toISOString();
-        const nid = `mpd-local-${
-            typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID().slice(0, 8) : String(Date.now())
-        }`;
-        const { getProfileSetupDraft } = await import('./profileSetupDraft.js');
-        const contactEmail = String(getProfileSetupDraft().email || '').trim();
-        const minimal = normalizeArtistDefaults({
-            id: nid,
-            slug: nid,
-            image: '',
-            featuredOrder: 999_999,
-            visibility: 'public',
-            updatedAt: ts,
-            locales: { en: {}, ja: {} },
-            imported: false,
-            accessCode: '',
-            contactEmail,
-        });
-        const overlay = readStudioLs(LS_ARTISTS_OVERLAY) || {};
-        overlay[nid] = minimal;
-        writeStudioLs(LS_ARTISTS_OVERLAY, overlay);
-        setProfileSettingsDevArtistId(nid);
-        if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('fusion-data-source-change', { detail: { source: 'test' } }));
-        }
-        return 'ok';
+        return ensureLinkedArtistProfileTestMode();
     }
     const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
     const actor = await getAuthenticatedFusionBackendActor();
@@ -2895,13 +2917,33 @@ export async function ensureMyLinkedArtistProfile() {
     }
     await syncMyAccountContactFromJoinContextIfNeeded();
     const raw = await actor.ensureMyLinkedArtistProfile();
-    if (raw && typeof raw === 'object') {
-        if ('ok' in raw) return 'ok';
-        if ('alreadyLinked' in raw) return 'alreadyLinked';
-        if ('needsSubscription' in raw) return 'needsSubscription';
-        if ('noAccount' in raw) return 'noAccount';
+    return interpretEnsureLinkedProfileResult(raw);
+}
+
+/**
+ * Link an inactive artist skeleton for program application (allows needsSubscription).
+ * After Motoko deploy, run `dfx generate fusion-app-backend` so the actor method exists.
+ * @returns {Promise<'ok' | 'alreadyLinked' | 'needsSubscription' | 'noAccount'>}
+ */
+export async function ensureMyLinkedArtistProfileForApplication() {
+    if (getDataSource() === 'test') {
+        return ensureLinkedArtistProfileTestMode();
     }
-    return 'ok';
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor) return 'noAccount';
+    await syncMyAccountContactFromJoinContextIfNeeded();
+    if (typeof actor.ensureMyLinkedArtistProfileForApplication === 'function') {
+        const raw = await actor.ensureMyLinkedArtistProfileForApplication();
+        return interpretEnsureLinkedProfileResult(raw);
+    }
+    // Fallback before bindings refresh: try membership-gated ensure, then soft-fail.
+    if (typeof actor.ensureMyLinkedArtistProfile === 'function') {
+        const raw = await actor.ensureMyLinkedArtistProfile();
+        const r = interpretEnsureLinkedProfileResult(raw);
+        if (r === 'ok' || r === 'alreadyLinked') return r;
+    }
+    return 'needsSubscription';
 }
 
 /**
@@ -7373,6 +7415,10 @@ function normalizeAccountDateText(raw) {
  *   stripeCurrentPeriodEnd?: string,
  *   stripeCustomerId?: string,
  *   stripeSubscriptionId?: string,
+ *   paypalSubscriptionId?: string,
+ *   paypalSubscriptionStatus?: string,
+ *   paymentProvider?: string,
+ *   membershipTier?: string,
  *   membershipExemptManual?: boolean,
  *   trialStartedAtSec?: string,
  *   trialEndsAtSec?: string,
@@ -7412,6 +7458,27 @@ export async function getAccountsForStudio() {
             /* older canister */
         }
     }
+    /** @type {Map<string, string>} */
+    const tierByPrincipal = new Map();
+    if (typeof actor.adminListMembershipTiers === 'function') {
+        try {
+            const tierRows = await actor.adminListMembershipTiers();
+            if (Array.isArray(tierRows)) {
+                for (const row of tierRows) {
+                    const p = row?.[0];
+                    const tier = row?.[1];
+                    const pStr =
+                        p && typeof p === 'object' && 'toText' in p && typeof p.toText === 'function'
+                            ? p.toText()
+                            : String(p ?? '');
+                    const t = String(tier ?? '').trim().toLowerCase();
+                    if (pStr && t) tierByPrincipal.set(pStr, t);
+                }
+            }
+        } catch {
+            /* older canister — run dfx generate after deploy */
+        }
+    }
     const raw = await actor.listAccounts();
     const rows = normalizeListAccountRows(raw);
     /** @type {StudioAccountRow[]} */
@@ -7448,6 +7515,12 @@ export async function getAccountsForStudio() {
             stripeCurrentPeriodEnd: unwrapOpt(a.stripeCurrentPeriodEnd ?? a.stripe_current_period_end),
             stripeCustomerId: unwrapOpt(a.stripeCustomerId ?? a.stripe_customer_id),
             stripeSubscriptionId: unwrapOpt(a.stripeSubscriptionId ?? a.stripe_subscription_id),
+            paypalSubscriptionId: unwrapOpt(a.paypalSubscriptionId ?? a.paypal_subscription_id),
+            paypalSubscriptionStatus: unwrapOpt(
+                a.paypalSubscriptionStatus ?? a.paypal_subscription_status,
+            ),
+            paymentProvider: unwrapOpt(a.paymentProvider ?? a.payment_provider),
+            membershipTier: tierByPrincipal.get(pStr) || '',
             membershipExemptManual: Boolean(a.membershipExemptManual ?? a.membership_exempt_manual),
             trialStartedAtSec: trialByPrincipal.get(pStr)?.startedAtSec
                 ? String(trialByPrincipal.get(pStr)?.startedAtSec)

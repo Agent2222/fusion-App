@@ -88,8 +88,8 @@ import {
     countMembershipMetrics,
     formatSubscriptionPeriodEnd,
     studioMembershipBadgeHtml,
+    studioMembershipCellLabel,
     studioMembershipFilterMatch,
-    studioMembershipStatusLabel,
     studioStripeDashboardCustomerUrl,
 } from '../../utils/studioMembershipPresentation.js';
 import {
@@ -1325,11 +1325,7 @@ export async function initFinance(mainEl) {
                 } else if (custId || subId) {
                     providerCell = 'Stripe';
                 }
-                const membershipLabel = r.membershipExemptManual
-                    ? 'Exempt (manual)'
-                    : studioMembershipStatusLabel(
-                          r.paypalSubscriptionStatus || r.stripeSubscriptionStatus,
-                      );
+                const membershipLabel = studioMembershipCellLabel(r);
                 return `<tr>
                     <td>${studioMembershipBadgeHtml(r, escapeHtml)}</td>
                     <td>${escapeHtml(name)}</td>

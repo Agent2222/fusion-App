@@ -4,20 +4,13 @@
 import '../styles/joinNetworkPage.css';
 import '../components/subComponents/joinNetwork.js';
 import '../components/subComponents/audioRow.js';
-import {
-    filterProgramsBlockToPublicListing,
-    getAllProgramsBlock,
-    getArtists,
-    getContentBundleForStudio,
-} from '../utils/database.js';
+import { getArtists, getContentBundleForStudio } from '../utils/database.js';
 import {
     artistHasPublicPlayableAudio,
     getApprovedAudioEntries,
-    getArtistCardArtworkUrl,
-    getArtistCardProfileUrl,
-    isArtistHeroProfileImageApproved,
 } from '../utils/artistCardImageMode.js';
 import { applyDocumentSeo } from '../utils/documentSeo.js';
+import { startJoinCollageRotation } from '../utils/joinCollageRotate.js';
 
 const ROLE_KEYS = ['Artist', 'Gallery', 'Curator', 'Collector'];
 
@@ -73,6 +66,44 @@ function proofIcon(kind) {
 }
 
 /**
+ * Benefits for a plan; falls back to legacy shared `includes` when plan bullets are empty.
+ * @param {Record<string, any>} copy
+ * @param {'monthly'|'quarterly'|'annual'} plan
+ * @returns {string[]}
+ */
+function benefitsForPlan(copy, plan) {
+    const key =
+        plan === 'quarterly' ? 'planQuarterly' : plan === 'annual' ? 'planAnnual' : 'planMonthly';
+    const planObj = copy[key] && typeof copy[key] === 'object' ? copy[key] : {};
+    const fromPlan = Array.isArray(planObj.includedBullets)
+        ? planObj.includedBullets.map((x) => String(x ?? '').trim()).filter(Boolean)
+        : [];
+    if (fromPlan.length) return fromPlan;
+    return (Array.isArray(copy.includes) ? copy.includes : [])
+        .map((x) => String(x ?? '').trim())
+        .filter(Boolean);
+}
+
+/**
+ * @param {string[]} lines
+ * @returns {string}
+ */
+function includesListHtml(lines) {
+    return lines.map((line) => `<li>${esc(line)}</li>`).join('');
+}
+
+/**
+ * @param {HTMLElement} root
+ * @param {Record<string, any>} copy
+ * @param {'monthly'|'quarterly'|'annual'} plan
+ */
+function syncIncludesList(root, copy, plan) {
+    const ul = root.querySelector('#jnpIncludes');
+    if (!(ul instanceof HTMLElement)) return;
+    ul.innerHTML = includesListHtml(benefitsForPlan(copy, plan));
+}
+
+/**
  * @param {Record<string, any>} copy
  * @param {'en'|'ja'} loc
  */
@@ -85,10 +116,7 @@ function pageHtml(copy, loc) {
             return `<img data-jnp-collage="${i}" src="${esc(c.src || '')}" alt="${esc(c.alt || '')}" loading="lazy" decoding="async" />`;
         })
         .join('');
-    const includes = (Array.isArray(copy.includes) ? copy.includes : [])
-        .filter(Boolean)
-        .map((line) => `<li>${esc(line)}</li>`)
-        .join('');
+    const includes = includesListHtml(benefitsForPlan(copy, 'monthly'));
     const proof = (Array.isArray(copy.proof) ? copy.proof : [])
         .map((p, i) => {
             const icons = ['japan', 'people', 'doc'];
@@ -186,7 +214,7 @@ function pageHtml(copy, loc) {
               </span>
             </button>
           </div>
-          <ul class="join-network-page__includes" aria-label="${esc(copy.includesTitle || 'Includes')}">${includes}</ul>
+          <ul class="join-network-page__includes" id="jnpIncludes" aria-label="${esc(copy.includesTitle || 'Includes')}">${includes}</ul>
           <button type="button" class="join-network-page__cta" id="jnpCheckout">${esc(copy.ctaLabel || 'Continue to secure checkout')}</button>
           <p class="join-network-page__pay-foot">${payFoot}</p>
           <p class="join-network-page__err" id="jnpErr" role="alert"></p>
@@ -213,205 +241,6 @@ function suppressSoundEnvironment() {
     if (host instanceof HTMLElement) {
         host.setAttribute('hidden', '');
         host.style.display = 'none';
-    }
-}
-
-/** @param {unknown} url */
-function isUsableImageUrl(url) {
-    const u = String(url ?? '').trim();
-    if (!u) return false;
-    if (/^(blob:|data:)/i.test(u)) return false;
-    if (/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(u)) return false;
-    return true;
-}
-
-/**
- * @param {Set<string>} out
- * @param {unknown} url
- */
-function pushImageUrl(out, url) {
-    if (isUsableImageUrl(url)) out.add(String(url).trim());
-}
-
-/**
- * Collect program card + gallery stills (skips video heroes).
- * @param {unknown} program
- * @returns {string[]}
- */
-function collectProgramImageUrls(program) {
-    const out = new Set();
-    if (!program || typeof program !== 'object') return [];
-    const p = /** @type {Record<string, any>} */ (program);
-    pushImageUrl(out, p.imageSrc);
-    pushImageUrl(out, p.heroMediaSrc);
-    const page = p.programPage && typeof p.programPage === 'object' ? p.programPage : null;
-    if (page) {
-        for (const u of Array.isArray(page.fadeGalleryImages) ? page.fadeGalleryImages : []) {
-            pushImageUrl(out, u);
-        }
-        for (const u of Array.isArray(page.stripGalleryImages) ? page.stripGalleryImages : []) {
-            pushImageUrl(out, u);
-        }
-        for (const card of Array.isArray(page.offeringCards) ? page.offeringCards : []) {
-            for (const u of Array.isArray(card?.gallery) ? card.gallery : []) {
-                pushImageUrl(out, u);
-            }
-        }
-        const facilities = page.programDetails?.facilities;
-        if (Array.isArray(facilities)) {
-            for (const f of facilities) {
-                for (const u of Array.isArray(f?.gallery) ? f.gallery : []) {
-                    pushImageUrl(out, u);
-                }
-            }
-        }
-    }
-    return [...out];
-}
-
-/**
- * Prefer approved profile headshot when available; otherwise artwork.
- * @param {unknown} artist
- * @returns {string}
- */
-function artistCollageImageUrl(artist) {
-    if (isArtistHeroProfileImageApproved(artist)) {
-        const profile = getArtistCardProfileUrl(artist, { fallbackToArtwork: false });
-        if (isUsableImageUrl(profile)) return profile;
-    }
-    const artwork = getArtistCardArtworkUrl(artist);
-    return isUsableImageUrl(artwork) ? artwork : '';
-}
-
-/**
- * @template T
- * @param {T[]} items
- * @param {number} n
- * @returns {T[]}
- */
-function pickRandomUnique(items, n) {
-    const copy = items.slice();
-    for (let i = copy.length - 1; i > 0; i -= 1) {
-        const j = Math.floor(Math.random() * (i + 1));
-        const tmp = copy[i];
-        copy[i] = copy[j];
-        copy[j] = tmp;
-    }
-    return copy.slice(0, Math.max(0, Math.min(n, copy.length)));
-}
-
-/**
- * Fade out → swap src → fade in once the new image has loaded.
- * @param {HTMLImageElement} img
- * @param {string} url
- * @param {string} [alt]
- * @returns {Promise<void>}
- */
-function swapCollageImage(img, url, alt) {
-    const next = String(url || '').trim();
-    if (!next) return Promise.resolve();
-
-    const current = String(img.currentSrc || img.src || '').trim();
-    if (current === next || current.endsWith(next) || next.endsWith(current)) {
-        if (alt != null && alt !== '') img.alt = alt;
-        return Promise.resolve();
-    }
-
-    const waitOpacity = () =>
-        new Promise((resolve) => {
-            let done = false;
-            const finish = () => {
-                if (done) return;
-                done = true;
-                img.removeEventListener('transitionend', onEnd);
-                window.clearTimeout(fallback);
-                resolve();
-            };
-            const onEnd = (/** @type {TransitionEvent} */ e) => {
-                if (e.target === img && e.propertyName === 'opacity') finish();
-            };
-            img.addEventListener('transitionend', onEnd);
-            const fallback = window.setTimeout(finish, 500);
-        });
-
-    const waitLoad = () =>
-        new Promise((resolve) => {
-            let done = false;
-            const finish = () => {
-                if (done) return;
-                done = true;
-                img.removeEventListener('load', finish);
-                img.removeEventListener('error', finish);
-                resolve();
-            };
-            img.addEventListener('load', finish);
-            img.addEventListener('error', finish);
-            img.src = next;
-            if (alt != null && alt !== '') img.alt = alt;
-            if (img.complete) finish();
-        });
-
-    return (async () => {
-        img.classList.add('is-swapping');
-        await waitOpacity();
-        await waitLoad();
-        // Ensure the browser paints opacity:0 before fading back in.
-        void img.offsetWidth;
-        img.classList.remove('is-swapping');
-    })();
-}
-
-/**
- * Left: random program gallery / program image.
- * Right two: random artist profile (if available) or artwork — distinct artists when possible.
- * @param {HTMLElement} root
- * @param {unknown[]} [artistsPrefetch]
- */
-async function hydrateCollageImages(root, artistsPrefetch) {
-    const imgs = /** @type {HTMLImageElement[]} */ (
-        [0, 1, 2].map((i) => root.querySelector(`[data-jnp-collage="${i}"]`)).filter((el) => el instanceof HTMLImageElement)
-    );
-    if (imgs.length < 3) return;
-
-    try {
-        const [block, artists] = await Promise.all([
-            getAllProgramsBlock(),
-            artistsPrefetch ? Promise.resolve(artistsPrefetch) : getArtists(),
-        ]);
-        const publicBlock = filterProgramsBlockToPublicListing(block);
-        const programs = Array.isArray(publicBlock?.programs?.en) ? publicBlock.programs.en : [];
-        const programPool = [];
-        for (const p of programs) {
-            programPool.push(...collectProgramImageUrls(p));
-        }
-        const uniquePrograms = [...new Set(programPool)];
-        /** @type {Promise<void>[]} */
-        const swaps = [];
-        if (uniquePrograms.length) {
-            const left = uniquePrograms[Math.floor(Math.random() * uniquePrograms.length)];
-            swaps.push(swapCollageImage(imgs[0], left, imgs[0].alt || 'FUSION program'));
-        }
-
-        const artistPool = (Array.isArray(artists) ? artists : [])
-            .map((a) => {
-                const url = artistCollageImageUrl(a);
-                if (!url) return null;
-                const name =
-                    String(/** @type {any} */ (a)?.locales?.en?.name ?? '').trim() ||
-                    String(/** @type {any} */ (a)?.slug ?? '').trim() ||
-                    'Artist';
-                return { url, name, id: String(/** @type {any} */ (a)?.id ?? name) };
-            })
-            .filter(Boolean);
-        const picked = pickRandomUnique(/** @type {{ url: string, name: string, id: string }[]} */ (artistPool), 2);
-        picked.forEach((item, i) => {
-            const img = imgs[i + 1];
-            if (!img || !item) return;
-            swaps.push(swapCollageImage(img, item.url, item.name));
-        });
-        await Promise.all(swaps);
-    } catch {
-        /* keep CMS / default collage srcs */
     }
 }
 
@@ -529,7 +358,12 @@ export default async function initJoinNetworkPage() {
         } catch {
             artists = [];
         }
-        await Promise.all([hydrateCollageImages(root, artists), mountRandomArtistAudio(root, artists)]);
+        startJoinCollageRotation(root, {
+            attrName: 'data-jnp-collage',
+            artistsPrefetch: artists,
+            intervalMs: 10000,
+        });
+        await mountRandomArtistAudio(root, artists);
     })();
 
     /** @type {string} */
@@ -560,6 +394,7 @@ export default async function initJoinNetworkPage() {
             el.setAttribute('aria-pressed', on ? 'true' : 'false');
             el.setAttribute('aria-checked', on ? 'true' : 'false');
         });
+        syncIncludesList(root, copy, plan);
     });
 
     const accessToggle = /** @type {HTMLButtonElement | null} */ (root.querySelector('#jnpAccessToggle'));

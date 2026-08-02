@@ -3,6 +3,13 @@
 export const APPLICATION_FEE_GUEST_CENTS = 5000;
 export const APPLICATION_FEE_MEMBER_CENTS = 3500;
 
+/**
+ * Temporary: active memberships (monthly / quarterly / annual / legacy) may submit
+ * applications with no per-application fee until the credit system is finished.
+ * Guests still pay the guest fee. Flip to `false` when credits ship.
+ */
+export const TEMP_WAIVE_MEMBER_APPLICATION_FEES = true;
+
 /** @typedef {'monthly' | 'quarterly' | 'annual' | 'bimonthly' | ''} MembershipTier */
 
 /**
@@ -112,6 +119,17 @@ export function computeApplicationFeeDue(args) {
         tier,
         membershipActive: true,
     });
+    const membershipTier = tier || 'monthly';
+
+    // TEMP: all active members submit free until credits are complete.
+    if (TEMP_WAIVE_MEMBER_APPLICATION_FEES) {
+        return {
+            dueCents: 0,
+            reason: 'membership_temp',
+            membershipTier,
+            appCreditBalance: accrued.balance,
+        };
+    }
 
     if (tier === 'annual') {
         return {
@@ -141,7 +159,7 @@ export function computeApplicationFeeDue(args) {
     return {
         dueCents: APPLICATION_FEE_MEMBER_CENTS,
         reason: 'member_fee',
-        membershipTier: tier || 'monthly',
+        membershipTier,
         appCreditBalance: accrued.balance,
     };
 }

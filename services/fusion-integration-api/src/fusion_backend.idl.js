@@ -86,6 +86,7 @@ export const idlFactory = ({ IDL }) => {
             [],
             [],
         ),
+        integrationHasProgramPayment: IDL.Func([IDL.Text], [IDL.Bool], ['query']),
         integrationRecordProgramPayment: IDL.Func(
             [ProgramPaymentLedgerRow, IDL.Nat, IDL.Nat, IDL.Nat, IDL.Bool, IDL.Nat],
             [],

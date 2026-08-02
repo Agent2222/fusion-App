@@ -1145,6 +1145,43 @@ export async function syncPayPalSubscription(opts) {
 }
 
 /**
+ * Studio Live PayPal check (no canister write).
+ * @param {string} subscriptionId
+ * @returns {Promise<{
+ *   ok?: boolean,
+ *   membershipActive?: boolean,
+ *   status?: string,
+ *   subscriptionId?: string,
+ *   planId?: string,
+ *   tier?: string,
+ *   subscriberEmail?: string | null,
+ *   error?: string,
+ *   reason?: string,
+ * }>}
+ */
+export async function fetchPayPalSubscriptionStatus(subscriptionId) {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const sid = String(subscriptionId || '').trim();
+    if (!sid) throw new Error('PayPal subscription id required.');
+    const res = await fetch(`${base}/payments/subscription/status`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify({ subscriptionId: sid }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        throw new Error(
+            mapIntegrationUserMessage(
+                data.error || data.reason || `PayPal status HTTP ${res.status}`,
+                res.status,
+            ),
+        );
+    }
+    return data;
+}
+
+/**
  * @param {string} subscriptionId
  */
 export async function cancelPayPalSubscriptionAtPeriodEnd(subscriptionId) {

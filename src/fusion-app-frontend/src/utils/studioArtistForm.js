@@ -469,6 +469,7 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
       <button type="button" class="studio-tabs__tab" role="tab" aria-selected="false" aria-controls="studio-art-panel-preview" id="studio-art-tab-preview">Preview</button>
       <button type="button" class="studio-tabs__tab" role="tab" aria-selected="false" aria-controls="studio-art-panel-links" id="studio-art-tab-links">Links &amp; SEO</button>
       <button type="button" class="studio-tabs__tab" role="tab" aria-selected="false" aria-controls="studio-art-panel-programs" id="studio-art-tab-programs">Programs</button>
+      <button type="button" class="studio-tabs__tab" role="tab" aria-selected="false" aria-controls="studio-art-panel-credits" id="studio-art-tab-credits">Credits</button>
       <button type="button" class="studio-tabs__tab" role="tab" aria-selected="false" aria-controls="studio-art-panel-blindspots" id="studio-art-tab-blindspots">Blindspots</button>
       <button type="button" class="studio-tabs__tab" role="tab" aria-selected="false" aria-controls="studio-art-panel-advanced" id="studio-art-tab-advanced">Advanced</button>
     </div>
@@ -689,6 +690,34 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
               <tr><td colspan="5" class="studio-muted">Loading programs…</td></tr>
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <div id="studio-art-panel-credits" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-art-tab-credits" hidden>
+        <div class="studio-artist-panel-head">
+          <h3>Credits</h3>
+          <p>Manage application credits, program draw credits, view credits, and invitations for this artist. Full controls arrive in a later release.</p>
+        </div>
+        <div class="studio-art-credits-placeholder" role="status">
+          <p class="studio-banner studio-banner--placeholder">Credits management is coming soon.</p>
+          <ul class="studio-art-credits-placeholder__list">
+            <li>
+              <strong>Application credits</strong>
+              <span class="studio-muted">Balance used when applying to programs (e.g. quarterly membership accrual).</span>
+            </li>
+            <li>
+              <strong>Program draw credits</strong>
+              <span class="studio-muted">Entries into upcoming program draws.</span>
+            </li>
+            <li>
+              <strong>View credits</strong>
+              <span class="studio-muted">Access or visibility credits for restricted content.</span>
+            </li>
+            <li>
+              <strong>Invitations</strong>
+              <span class="studio-muted">Staff-issued invites and remaining invitation capacity.</span>
+            </li>
+          </ul>
         </div>
       </div>
 
