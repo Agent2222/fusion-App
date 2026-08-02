@@ -47,6 +47,8 @@ export function registerPaymentRoutes(app, opts) {
             mode: getPayPalMode(),
             configured: isPayPalConfigured(),
             planMonthly: process.env.PAYPAL_SUBSCRIPTION_MONTHLY_ID || '',
+            planMonthlyApplication:
+                process.env.PAYPAL_SUBSCRIPTION_MONTHLY_APPLICATION_ID || '',
             planQuarterly: process.env.PAYPAL_SUBSCRIPTION_QUARTERLY_ID || '',
             planAnnual:
                 process.env.PAYPAL_SUBSCRIPTION_ANNUAL_ID ||

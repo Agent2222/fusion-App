@@ -8,11 +8,11 @@ import {
     getStripeMode,
 } from './studioServicesConfig.js';
 
-/** @type {{ provider: string, paypalClientId: string, mode: string, configured?: boolean, planMonthly?: string, planQuarterly?: string, planAnnual?: string, planBimonthlyLegacy?: string, planBimonthly?: string } | null} */
+/** @type {{ provider: string, paypalClientId: string, mode: string, configured?: boolean, planMonthly?: string, planMonthlyApplication?: string, planQuarterly?: string, planAnnual?: string, planBimonthlyLegacy?: string, planBimonthly?: string } | null} */
 let _cached = null;
 
 /**
- * @returns {Promise<{ provider: 'paypal'|'stripe', paypalClientId: string, mode: string, configured: boolean, planMonthly: string, planQuarterly: string, planAnnual: string, planBimonthlyLegacy: string, planBimonthly: string }>}
+ * @returns {Promise<{ provider: 'paypal'|'stripe', paypalClientId: string, mode: string, configured: boolean, planMonthly: string, planMonthlyApplication: string, planQuarterly: string, planAnnual: string, planBimonthlyLegacy: string, planBimonthly: string }>}
  */
 export async function fetchPaymentConfig() {
     const activeProvider = getActivePaymentProviderSetting();
@@ -30,6 +30,7 @@ export async function fetchPaymentConfig() {
                     mode: getStripeMode() === 'live' ? 'live' : 'sandbox',
                     configured: Boolean(data.configured ?? data.paypalClientId ?? getPayPalClientIdResolved()),
                     planMonthly: String(data.planMonthly || ''),
+                    planMonthlyApplication: String(data.planMonthlyApplication || ''),
                     planQuarterly: String(data.planQuarterly || ''),
                     planAnnual: String(data.planAnnual || ''),
                     planBimonthlyLegacy: String(
@@ -49,6 +50,7 @@ export async function fetchPaymentConfig() {
         mode: getStripeMode() === 'live' ? 'live' : 'sandbox',
         configured: Boolean(getPayPalClientIdResolved()),
         planMonthly: '',
+        planMonthlyApplication: '',
         planQuarterly: '',
         planAnnual: '',
         planBimonthlyLegacy: '',

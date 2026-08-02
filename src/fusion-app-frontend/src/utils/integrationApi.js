@@ -1084,7 +1084,7 @@ export async function confirmPayPalOneTimePayment(orderId) {
 }
 
 /**
- * @param {{ principal?: string, email: string, metadata?: Record<string, string>, payFirst?: boolean, subscriptionTier?: 'monthly' | 'quarterly' | 'annual' | 'bimonthly' }} opts
+ * @param {{ principal?: string, email: string, metadata?: Record<string, string>, payFirst?: boolean, subscriptionTier?: 'monthly' | 'monthly_application' | 'quarterly' | 'annual' | 'bimonthly' }} opts
  */
 export async function createPayPalSubscription(opts) {
     const base = getIntegrationBaseUrl();

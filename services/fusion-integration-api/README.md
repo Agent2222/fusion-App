@@ -33,7 +33,8 @@ stripe listen --forward-to localhost:8787/webhooks/stripe
 | `STRIPE_SECRET_KEY` | for Stripe | `sk_test_…` or `sk_live_…` |
 | `STRIPE_PRICE_ID` | for subscriptions | Legacy Stripe recurring Price id (`price_…`) when Stripe provider is selected |
 | `STRIPE_ANNUAL_PRICE_ID` | optional | Legacy Stripe annual Price id |
-| `PAYPAL_SUBSCRIPTION_MONTHLY_ID` | PayPal memberships | Monthly plan id ($30) for new checkouts |
+| `PAYPAL_SUBSCRIPTION_MONTHLY_ID` | PayPal memberships | Monthly plan id ($30) for join / Settings |
+| `PAYPAL_SUBSCRIPTION_MONTHLY_APPLICATION_ID` | PayPal application | Monthly + application add-on plan for program apply checkout |
 | `PAYPAL_SUBSCRIPTION_QUARTERLY_ID` | PayPal memberships | Quarterly plan id ($75) |
 | `PAYPAL_SUBSCRIPTION_ANNUAL_ID` | PayPal memberships | Annual plan id ($260); falls back to `PAYPAL_PLAN_ANNUAL_ID` |
 | `PAYPAL_PLAN_BIMONTHLY_ID` | legacy detection | Old bi-monthly plan id (Settings / revise detection only) |

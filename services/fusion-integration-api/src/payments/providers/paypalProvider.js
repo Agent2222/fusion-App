@@ -204,6 +204,9 @@ export function paypalPlanIdForTier(tier) {
     const t = String(tier || '')
         .trim()
         .toLowerCase();
+    if (t === 'monthly_application') {
+        return process.env.PAYPAL_SUBSCRIPTION_MONTHLY_APPLICATION_ID || '';
+    }
     if (t === 'monthly') {
         return process.env.PAYPAL_SUBSCRIPTION_MONTHLY_ID || '';
     }
@@ -228,6 +231,9 @@ export function membershipTierFromPayPalPlanId(planId) {
     const id = String(planId || '').trim();
     if (!id) return '';
     if (id === String(process.env.PAYPAL_SUBSCRIPTION_MONTHLY_ID || '').trim()) return 'monthly';
+    if (id === String(process.env.PAYPAL_SUBSCRIPTION_MONTHLY_APPLICATION_ID || '').trim()) {
+        return 'monthly';
+    }
     if (id === String(process.env.PAYPAL_SUBSCRIPTION_QUARTERLY_ID || '').trim()) return 'quarterly';
     if (
         id === String(process.env.PAYPAL_SUBSCRIPTION_ANNUAL_ID || '').trim() ||
@@ -267,8 +273,15 @@ export async function createPayPalSubscription(reqBody) {
     let tier = typeof tierRaw === 'string' ? tierRaw.trim().toLowerCase() : '';
     // Migrate legacy default: new checkouts default to monthly
     if (!tier || tier === 'bimonthly' || tier === 'bi_monthly') tier = 'monthly';
-    if (tier !== 'monthly' && tier !== 'quarterly' && tier !== 'annual') {
-        throw new Error('Invalid subscriptionTier (use monthly, quarterly, or annual)');
+    if (
+        tier !== 'monthly' &&
+        tier !== 'monthly_application' &&
+        tier !== 'quarterly' &&
+        tier !== 'annual'
+    ) {
+        throw new Error(
+            'Invalid subscriptionTier (use monthly, monthly_application, quarterly, or annual)',
+        );
     }
     const planId = paypalPlanIdForTier(tier);
     if (!planId) {
@@ -277,9 +290,13 @@ export async function createPayPalSubscription(reqBody) {
                 ? 'PAYPAL_SUBSCRIPTION_ANNUAL_ID'
                 : tier === 'quarterly'
                   ? 'PAYPAL_SUBSCRIPTION_QUARTERLY_ID'
-                  : 'PAYPAL_SUBSCRIPTION_MONTHLY_ID';
+                  : tier === 'monthly_application'
+                    ? 'PAYPAL_SUBSCRIPTION_MONTHLY_APPLICATION_ID'
+                    : 'PAYPAL_SUBSCRIPTION_MONTHLY_ID';
         throw new Error(`${envName} not configured`);
     }
+    /** Motoko / billing summary tier (application add-on still stores as monthly). */
+    const membershipTier = tier === 'monthly_application' ? 'monthly' : tier;
     const principalRaw = reqBody?.principal;
     const principal =
         typeof principalRaw === 'string' && principalRaw.trim() ? principalRaw.trim().slice(0, 500) : '';
@@ -298,7 +315,7 @@ export async function createPayPalSubscription(reqBody) {
     /** @type {Record<string, string>} */
     const customData = {
         pending_email: email.trim().slice(0, 500),
-        tier: tier.slice(0, 16),
+        tier: membershipTier.slice(0, 16),
     };
     if (payFirstPending) {
         customData.fusion_pending_id = fusionPendingId;

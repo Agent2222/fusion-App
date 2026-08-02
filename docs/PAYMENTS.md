@@ -30,7 +30,8 @@ No backend changes are required for Card Fields — same `POST /payments/one-tim
 | `PAYPAL_CLIENT_SECRET` | Server OAuth |
 | `PAYPAL_MODE` | `sandbox` or `live` |
 | `PAYPAL_WEBHOOK_ID` | Webhook signature verification (when implemented) |
-| `PAYPAL_SUBSCRIPTION_MONTHLY_ID` | Membership monthly plan ($30) — new checkouts |
+| `PAYPAL_SUBSCRIPTION_MONTHLY_ID` | Membership monthly plan ($30) — join / Settings |
+| `PAYPAL_SUBSCRIPTION_MONTHLY_APPLICATION_ID` | Monthly + application add-on plan — program application checkout |
 | `PAYPAL_SUBSCRIPTION_QUARTERLY_ID` | Membership quarterly plan ($75) — new checkouts |
 | `PAYPAL_SUBSCRIPTION_ANNUAL_ID` | Membership annual plan ($260) — new checkouts |
 | `PAYPAL_PLAN_ANNUAL_ID` | Fallback annual plan id if `PAYPAL_SUBSCRIPTION_ANNUAL_ID` unset |

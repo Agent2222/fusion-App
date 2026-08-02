@@ -93,11 +93,20 @@ export function membershipTierFromPlanId(planId, config) {
 
 /**
  * @param {string} tier
- * @param {{ planMonthly?: string, planQuarterly?: string, planAnnual?: string }} config
+ * @param {{ planMonthly?: string, planMonthlyApplication?: string, planQuarterly?: string, planAnnual?: string }} config
  */
 export function planIdForTier(tier, config) {
-    const t = normalizeMembershipTier(tier);
+    const raw = String(tier || '')
+        .trim()
+        .toLowerCase();
     const c = config || {};
+    if (raw === 'monthly_application') {
+        return (
+            String(c.planMonthlyApplication || '').trim() ||
+            String(c.planMonthly || '').trim()
+        );
+    }
+    const t = normalizeMembershipTier(tier);
     if (t === 'annual') return String(c.planAnnual || '').trim();
     if (t === 'quarterly') return String(c.planQuarterly || '').trim();
     if (t === 'monthly') return String(c.planMonthly || '').trim();

@@ -338,14 +338,17 @@ export const testData = {
                                 ],
                             },
                             monthly: {
-                                title: "",
+                                title: "Monthly + application",
                                 displayPrice: "$30",
-                                subtext: "$35 application fee after subscribe",
-                                subtext2: "Renews every month",
-                                includedBullets: ["Ongoing platform membership", "Apply with member pricing"],
+                                subtext: "Application fee included on first charge",
+                                subtext2: "Then $30 every month",
+                                includedBullets: [
+                                    "This application included",
+                                    "Ongoing platform membership",
+                                ],
                             },
                             quarterly: {
-                                title: "",
+                                title: "Quarterly membership",
                                 displayPrice: "$75",
                                 subtext: "+1 stackable application credit per quarter",
                                 subtext2: "Free application when credit balance ≥ 1, else $35",
