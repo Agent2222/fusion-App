@@ -2267,9 +2267,12 @@ class JoinNetworkComponent extends HTMLElement {
         });
       }
 
-      // Keep custom_id under PayPal's 127-char limit (principal / pending / tier only).
+      // Keep custom_id under PayPal's 127-char limit (principal / pending / tier / short plan_id).
       /** @type {Record<string, string>} */
-      const customData = { tier: subscriptionTier };
+      const customData = {
+        tier: subscriptionTier,
+        plan_id: String(planId).slice(0, 40),
+      };
       if (payFirst) {
         customData.fusion_pending_id = fusionPendingId;
       } else if (principalOpt) {

@@ -31,6 +31,9 @@ describe('studioProgramLocaleForm', () => {
     it('renderProgramLocaleFormHtml includes tab panels and field rows', () => {
         const html = renderProgramLocaleFormHtml(esc, { focus: 'A', id: 'Test' }, { focus: 'B' });
         expect(html).toContain('data-prog-panel="basics"');
+        expect(html).toContain('data-prog-panel="draw"');
+        expect(html).toContain('data-prog-draw="active"');
+        expect(html).toContain('data-prog-draw="totalSlots"');
         expect(html).toContain('studio-prog-field-row');
         expect(html).toContain('studio-prog-editor-lang-toggle');
         expect(html).toContain('data-prog-key-dates');

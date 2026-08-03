@@ -343,6 +343,44 @@ module {
         membershipTier : Text;
         appCreditBalance : Nat;
     };
+
+    /// Accrue-then-return snapshot for Settings Explore / Studio Credits.
+    public type ApplicationCreditsInfo = {
+        balance : Nat;
+        membershipTier : Text;
+        lastAccruedKey : Text;
+        nextAccrualHint : Text;
+    };
+
+    /// Program Award entry balance (separate from application credits).
+    public type AwardCreditsInfo = {
+        balance : Nat;
+        membershipTier : Text;
+        lastGrantedKey : Text;
+        nextGrantHint : Text;
+    };
+
+    /// Member path for a program: formal application vs Program Award (mutually exclusive).
+    /// Stored as Text: "" | "application" | "award".
+    public type ProgramAwardEntry = {
+        id : Text;
+        programId : Text;
+        principalText : Text;
+        status : Text;
+        enteredAt : Text;
+        updatedAt : Text;
+        paidEntry : Bool;
+    };
+
+    public type CreditLedgerEntry = {
+        id : Text;
+        principalText : Text;
+        kind : Text;
+        amount : Nat;
+        direction : Text;
+        note : Text;
+        createdAt : Text;
+    };
     /// `programPage.programDetails.costs.applicationFee` (sidebar),
     /// `programPage.additionalInfo.applicationFee` (Application Fee dropdown),
     /// and `programPage.additionalInfo.aboutProgram` (About Program dropdown).
@@ -359,6 +397,16 @@ module {
         /// Public deposit line (e.g. currency + amount); also mirrored in locale `programPage.applicationForm.depositAmountDisplay` by the Studio app when saving.
         depositAmountDisplay : Text;
         localesJson : Text;
+    };
+
+    /// Program Draw / Award operational config (sidecar keyed by program id — keeps `ProgramRecord` upgrade-safe).
+    /// Further fields (entry fee, cycle, criteria) will extend this type later via a V1 migrate if needed.
+    public type ProgramDrawConfig = {
+        programId : Text;
+        active : Bool;
+        /// Cap for draw / award entries this cycle (default 100 in the Studio UI).
+        totalSlots : Nat;
+        updatedAt : Text;
     };
 
     public type JournalRecord = {
@@ -861,6 +909,8 @@ module {
         artistAudioApprovedIdsStable : ?[Text];
         artistsStable : [(Text, ArtistRecord)];
         programsStable : [(Text, ProgramRecord)];
+        /// Program Draw / Award config by program id; optional for backups before this field existed.
+        programDrawConfigStable : ?[(Text, ProgramDrawConfig)];
         journalsStable : [(Text, JournalRecord)];
         editionsStable : [(Text, EditionRecord)];
         contentPagesStable : [(Text, ContentPageRecord)];

@@ -1,15 +1,9 @@
 /**
- * Explore-programs membership credit strip (application + program draw).
- * Draw balances are stubbed until canister draw credits ship.
+ * Explore-programs membership credit strip (application credits + Program Award entries).
  */
 
 import { normalizeMembershipTier } from './membershipPlanChange.js';
-
-/**
- * Stub draw allowance per active period (until Motoko draw credits exist).
- * Quarterly / annual each grant 1 draw credit per billing period.
- */
-export const STUB_DRAW_CREDITS_PER_PERIOD = 1;
+import { calendarQuarterKey, calendarYearKey } from './applicationFeePolicy.js';
 
 /**
  * @param {Date} [now]
@@ -17,7 +11,7 @@ export const STUB_DRAW_CREDITS_PER_PERIOD = 1;
  */
 export function nextUtcQuarterStart(now = new Date()) {
     const y = now.getUTCFullYear();
-    const m = now.getUTCMonth(); // 0–11
+    const m = now.getUTCMonth();
     const qStartMonth = Math.floor(m / 3) * 3;
     let nextY = y;
     let nextM = qStartMonth + 3;
@@ -63,55 +57,106 @@ export function formatCreditDateLabel(date) {
 }
 
 /**
+ * Shared model for Explore strip + membership included bullets.
  * @param {{
  *   tier: string,
+ *   access?: string,
  *   appCreditBalance?: number,
- *   drawCreditBalance?: number | null,
+ *   awardEntryBalance?: number | null,
  *   periodEndIso?: string,
+ *   nextAccrualHint?: string,
  *   now?: Date,
+ *   showForMonthly?: boolean,
  * }} args
  * @returns {{
  *   visible: boolean,
- *   tier: 'quarterly' | 'annual' | '',
+ *   tier: 'monthly' | 'quarterly' | 'annual' | 'bimonthly' | '',
+ *   access: string,
  *   applicationCreditsLabel: string,
+ *   awardEntriesLabel: string,
  *   drawCreditsLabel: string,
  *   nextCreditsLabel: string,
  *   nextCreditsHint: string,
+ *   appCreditBalance: number,
+ *   awardEntryBalance: number,
+ *   quarterKey: string,
+ *   yearKey: string,
  * } | null}
  */
 export function buildMembershipCreditsStripModel(args) {
+    const access = String(args.access || '')
+        .trim()
+        .toLowerCase();
     const tier = normalizeMembershipTier(args.tier);
-    if (tier !== 'quarterly' && tier !== 'annual') {
-        return null;
-    }
+    const showMonthly = Boolean(args.showForMonthly);
     const now = args.now instanceof Date ? args.now : new Date();
     const appBal = Math.max(0, Math.round(Number(args.appCreditBalance) || 0));
-    const drawBal =
-        args.drawCreditBalance == null
-            ? STUB_DRAW_CREDITS_PER_PERIOD
-            : Math.max(0, Math.round(Number(args.drawCreditBalance) || 0));
+    const awardBal = Math.max(0, Math.round(Number(args.awardEntryBalance) || 0));
+    const apiHint = String(args.nextAccrualHint || '').trim();
+
+    if (access === 'exempt') {
+        return {
+            visible: true,
+            tier: /** @type {'monthly' | 'quarterly' | 'annual' | 'bimonthly' | ''} */ (tier || ''),
+            access: 'exempt',
+            applicationCreditsLabel: String(Math.max(1, appBal)),
+            awardEntriesLabel: String(awardBal),
+            drawCreditsLabel: String(awardBal),
+            nextCreditsLabel: apiHint || 'Included',
+            nextCreditsHint:
+                'Complimentary membership includes formal applications. No included Program Award credits — purchase available when a cycle is active.',
+            appCreditBalance: Math.max(1, appBal),
+            awardEntryBalance: awardBal,
+            quarterKey: calendarQuarterKey(now),
+            yearKey: calendarYearKey(now),
+        };
+    }
+
+    if (tier !== 'quarterly' && tier !== 'annual' && !(showMonthly && tier === 'monthly')) {
+        return null;
+    }
 
     const nextDate =
         tier === 'quarterly'
             ? nextUtcQuarterStart(now)
-            : nextAnnualCreditDate(args.periodEndIso, now);
+            : tier === 'annual'
+              ? nextAnnualCreditDate(args.periodEndIso, now)
+              : null;
 
-    const applicationCreditsLabel =
-        tier === 'annual'
-            ? 'Included'
-            : String(appBal);
+    let nextCreditsHint =
+        'Credits apply to formal program applications only. Program Award entries are separate.';
+    if (tier === 'quarterly') {
+        nextCreditsHint =
+            '+1 application credit and +1 Program Award entry when membership renews each quarter. Credits apply to formal applications only.';
+    } else if (tier === 'annual') {
+        nextCreditsHint =
+            '+4 application credits and +4 Program Award entries when membership renews each year (stackable).';
+    } else if (tier === 'monthly') {
+        nextCreditsHint =
+            'No included application credits — $35 per formal application. Buy a $50 Program Award entry on an active cycle.';
+    }
 
-    const nextCreditsHint =
-        tier === 'quarterly'
-            ? 'New application and draw credits each calendar quarter'
-            : 'Draw credit renews with your annual membership period';
+    let nextCreditsLabel = nextDate ? formatCreditDateLabel(nextDate) : '—';
+    if (apiHint) {
+        // Prefer canister hint when it looks like a date/key; keep formatted date otherwise.
+        if (/^\d{4}(-Q[1-4])?$/.test(apiHint) || apiHint.toLowerCase() === 'included') {
+            nextCreditsLabel = apiHint;
+        }
+    }
 
     return {
         visible: true,
-        tier,
-        applicationCreditsLabel,
-        drawCreditsLabel: String(drawBal),
-        nextCreditsLabel: formatCreditDateLabel(nextDate),
+        tier: /** @type {'monthly' | 'quarterly' | 'annual' | 'bimonthly' | ''} */ (tier || ''),
+        access: access || 'ok',
+        applicationCreditsLabel: String(appBal),
+        awardEntriesLabel: String(awardBal),
+        /** @deprecated use awardEntriesLabel */
+        drawCreditsLabel: String(awardBal),
+        nextCreditsLabel,
         nextCreditsHint,
+        appCreditBalance: appBal,
+        awardEntryBalance: awardBal,
+        quarterKey: calendarQuarterKey(now),
+        yearKey: calendarYearKey(now),
     };
 }

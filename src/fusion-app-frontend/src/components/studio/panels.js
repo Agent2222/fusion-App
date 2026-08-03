@@ -19,9 +19,13 @@ import { renderPermissions, initPermissions } from './permissionsSection.js';
 import {
     APPLICANTS_PROGRAM_SELECT_STORAGE_KEY,
     aggregateApplicantsByProgram,
+    applicantDrawDetailSectionHtml,
     applicantProgramCardsRailHtml,
+    buildApplicantDrawDetailModel,
     buildApplicantProgramCardModel,
     getApplicantIsProgramDraw,
+    loadDrawActiveByProgramId,
+    saveDrawActiveByProgramId,
     sortApplicantProgramRows,
 } from './applicantsProgramCards.js';
 import { DEV_MODE, getPublicSiteOrigin } from '../../config.js';
@@ -102,6 +106,10 @@ import {
     studioReinterpretWithPrompt,
     upsertEditionStudio,
     upsertProgramStudio,
+    getProgramDrawConfigStudio,
+    listProgramDrawConfigsStudio,
+    upsertProgramDrawConfigStudio,
+    listProgramAwardEntriesStudio,
     normalizeProgramVisibility,
     upsertSubscriberRow,
     saveArtistTestOverlayJson,
@@ -207,7 +215,9 @@ import {
     bindProgramLocaleTranslate,
     bindProgramModalTabs,
     bindStudioProgGalleryUrlPreviews,
+    collectProgramDrawFromForm,
     collectProgramLocalesFromForm,
+    DEFAULT_PROGRAM_DRAW_CONFIG,
     mergeKeyDatesSeed,
     renderProgramLocaleFormHtml,
 } from '../../utils/studioProgramLocaleForm.js';
@@ -217,6 +227,7 @@ import {
     initArtistManageTabs,
     initArtistPreviewTab,
     initArtistBlindspotsTab,
+    bindArtistCreditsPanel,
     patchManageFormWorldFields,
     renderArtistManageModalHtml,
     syncStudioPublicWorldSource,
@@ -598,6 +609,7 @@ function renderApplicants() {
                     </div>
                 </div>
             </details>
+            <div id="studio-applicants-draw-detail-host"></div>
             <div class="studio-table-wrap studio-table-wrap--sticky-head">
                 <table class="studio-table studio-table--dense">
                     <thead>
@@ -1989,6 +2001,7 @@ function openStudioArtistManageFromRow(tableRow, afterSave, hostEl, listSurface 
         initArtistManageTabs(root);
         initArtistPreviewTab(root, full);
         initArtistBlindspotsTab(root, full);
+        bindArtistCreditsPanel(root, full);
         void initArtistProgramsTab(root, full);
         initAssetPreviews();
         syncStudioPublicWorldSource(
@@ -3437,6 +3450,13 @@ async function initApplicants(mainEl) {
     let selectedProgramId = null;
     /** @type {Map<string, 'standard' | 'draw'>} */
     const viewModeByProgramId = new Map();
+    /** @type {Record<string, boolean>} session fallback when canister draw config missing */
+    let drawActiveByProgramId = loadDrawActiveByProgramId();
+    /** @type {Map<string, { active: boolean, totalSlots: number }>} */
+    let drawConfigByProgramId = new Map();
+    /** @type {Map<string, number>} entered award counts by program id */
+    let awardEnteredCountByProgramId = new Map();
+    const drawDetailHost = mainEl.querySelector('#studio-applicants-draw-detail-host');
     /** @type {Map<string, string>} */
     let applicantEmailToSlug = new Map();
     /** @type {{ id: string, name: string, email: string }[]} */
@@ -3491,6 +3511,53 @@ async function initApplicants(mainEl) {
     const selectedViewMode = () => {
         if (!selectedProgramId) return 'standard';
         return viewModeByProgramId.get(selectedProgramId) || 'standard';
+    };
+
+    const syncDrawDetailPanel = () => {
+        if (!(drawDetailHost instanceof HTMLElement)) return;
+        const show =
+            Boolean(selectedProgramId) &&
+            selectedViewMode() === 'draw' &&
+            programCardIds.has(String(selectedProgramId || ''));
+        if (!show) {
+            drawDetailHost.innerHTML = '';
+            drawDetailHost.hidden = true;
+            return;
+        }
+        const programId = String(selectedProgramId || '');
+        const programRow = allPrograms.find((p) => String(p?.id || '') === programId);
+        const programTitle = programRow
+            ? getProgramDisplayNameFromRow(programRow)
+            : programId;
+        const fromPayload = allRows.filter(
+            (r) =>
+                String(r.programId || '') === programId &&
+                getApplicantIsProgramDraw(r.payloadJson) &&
+                !getApplicantIsTester(r.payloadJson),
+        ).length;
+        const claimedSlots = Math.max(
+            fromPayload,
+            Number(awardEnteredCountByProgramId.get(programId)) || 0,
+        );
+        const cfg = drawConfigByProgramId.get(programId);
+        const drawActive =
+            cfg != null ? Boolean(cfg.active) : Boolean(drawActiveByProgramId[programId]);
+        const totalSlots =
+            cfg != null && Number.isFinite(Number(cfg.totalSlots)) && Number(cfg.totalSlots) > 0
+                ? Math.floor(Number(cfg.totalSlots))
+                : undefined;
+        const model = buildApplicantDrawDetailModel({
+            programId,
+            programTitle,
+            claimedSlots,
+            totalSlots,
+            drawActive,
+        });
+        drawDetailHost.hidden = false;
+        drawDetailHost.innerHTML = applicantDrawDetailSectionHtml(model);
+        const section = drawDetailHost.querySelector('#studio-applicants-draw-detail');
+        if (section instanceof HTMLElement) section.hidden = false;
+        // Active toggle removed — Programs → Edit → Program Award is the sole write surface.
     };
 
     const syncStatusTabs = () => {
@@ -3657,6 +3724,7 @@ async function initApplicants(mainEl) {
             });
         }
         syncStatusTabs();
+        syncDrawDetailPanel();
         paintPageNumbers(pages);
         if (pagination && pageLabel) {
             if (total > APPLICANTS_PAGE_SIZE) {
@@ -3671,11 +3739,43 @@ async function initApplicants(mainEl) {
     };
 
     const reload = async () => {
-        const [applicants, programs] = await Promise.all([
+        const [applicants, programs, drawConfigs] = await Promise.all([
             getApplicants(),
             getPrograms().catch(() => []),
+            listProgramDrawConfigsStudio().catch(() => new Map()),
         ]);
         allPrograms = Array.isArray(programs) ? programs : [];
+        drawConfigByProgramId = new Map();
+        awardEnteredCountByProgramId = new Map();
+        if (drawConfigs instanceof Map) {
+            for (const [id, row] of drawConfigs) {
+                drawConfigByProgramId.set(String(id), {
+                    active: Boolean(row?.active),
+                    totalSlots:
+                        Number.isFinite(Number(row?.totalSlots)) && Number(row.totalSlots) > 0
+                            ? Math.floor(Number(row.totalSlots))
+                            : DEFAULT_PROGRAM_DRAW_CONFIG.totalSlots,
+                });
+                drawActiveByProgramId = {
+                    ...drawActiveByProgramId,
+                    [String(id)]: Boolean(row?.active),
+                };
+            }
+            saveDrawActiveByProgramId(drawActiveByProgramId);
+            await Promise.all(
+                [...drawConfigByProgramId.keys()].map(async (pid) => {
+                    try {
+                        const entries = await listProgramAwardEntriesStudio(pid);
+                        const entered = (Array.isArray(entries) ? entries : []).filter(
+                            (e) => String(e?.status || '') === 'entered',
+                        ).length;
+                        awardEnteredCountByProgramId.set(pid, entered);
+                    } catch {
+                        awardEnteredCountByProgramId.set(pid, 0);
+                    }
+                }),
+            );
+        }
         allRows = await Promise.all(
             (Array.isArray(applicants) ? applicants : []).map(async (row) => ({
                 ...row,
@@ -5730,7 +5830,7 @@ async function initPrograms(mainEl) {
         });
     };
 
-    const openProgramModal = (existing, onSave) => {
+    const openProgramModal = async (existing, onSave) => {
         const p = existing || {
             id: '',
             routeLink: '',
@@ -5764,9 +5864,23 @@ async function initPrograms(mainEl) {
         } catch {
             /* keep blank */
         }
+        let drawCfg = { ...DEFAULT_PROGRAM_DRAW_CONFIG };
+        if (existing?.id) {
+            try {
+                const stored = await getProgramDrawConfigStudio(String(existing.id));
+                if (stored) {
+                    drawCfg = {
+                        active: Boolean(stored.active),
+                        totalSlots: stored.totalSlots || DEFAULT_PROGRAM_DRAW_CONFIG.totalSlots,
+                    };
+                }
+            } catch {
+                /* defaults */
+            }
+        }
         const routeLinkKind = getFieldKind('program-hero', 'routeLink');
         const cardImgKind = getFieldKind('all-programs', 'programs.en.0.imageSrc');
-        const panelsHtml = renderProgramLocaleFormHtml(escapeHtml, enObj, jaObj);
+        const panelsHtml = renderProgramLocaleFormHtml(escapeHtml, enObj, jaObj, drawCfg);
         const visCur = normalizeProgramVisibility(p.visibility);
         const visOptions = ['public', 'private', 'none']
             .map(
@@ -5915,9 +6029,11 @@ async function initPrograms(mainEl) {
             setDepositInLocale(en);
             setDepositInLocale(ja);
             const localesJson = JSON.stringify({ en, ja });
+            const drawFields = collectProgramDrawFromForm(localeFormRoot);
+            const programId = String(fd.get('id') || '').trim();
             try {
                 await upsertProgramStudio({
-                    id: String(fd.get('id') || ''),
+                    id: programId,
                     routeLink: String(fd.get('routeLink') || ''),
                     featuredOrder: Number(fd.get('featuredOrder') || 0),
                     visibility: String(fd.get('visibility') || ''),
@@ -5925,6 +6041,18 @@ async function initPrograms(mainEl) {
                     depositAmountDisplay,
                     localesJson,
                 });
+                try {
+                    await upsertProgramDrawConfigStudio({
+                        programId,
+                        active: drawFields.active,
+                        totalSlots: drawFields.totalSlots,
+                    });
+                } catch (drawErr) {
+                    const msg = drawErr instanceof Error ? drawErr.message : String(drawErr);
+                    alert(
+                        `Program saved, but draw settings failed: ${msg}\n\nDeploy fusion-app-backend and run dfx generate if the draw API is missing.`,
+                    );
+                }
                 chrome?.markSaved();
                 close();
                 onSave();

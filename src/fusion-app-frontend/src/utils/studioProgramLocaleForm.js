@@ -3,6 +3,13 @@
  */
 
 import { withSeoImageAlt } from './mediaAltSeo.js';
+import { DRAW_SLOT_GOAL_DEFAULT } from './applicantsDrawModel.js';
+
+/** Default Program Draw sidecar when no config is stored yet. */
+export const DEFAULT_PROGRAM_DRAW_CONFIG = Object.freeze({
+    active: false,
+    totalSlots: DRAW_SLOT_GOAL_DEFAULT,
+});
 
 /**
  * @param {unknown} v
@@ -131,6 +138,14 @@ export const PROGRAM_EDITOR_TABS = [
         sectionTitle: 'FAQ & Legal',
         sectionHelper: 'FAQ entries, program notes, and refund policy.',
     },
+    {
+        id: 'draw',
+        label: 'Program Award',
+        subtitle: 'Slots & award settings',
+        sectionTitle: 'Program Award',
+        sectionHelper:
+            'Configure award slots and whether the Program Award is active. Sole editor for active status — Applicants Award mode is read-only.',
+    },
 ];
 
 /** @type {Record<string, string>} */
@@ -181,20 +196,25 @@ function fieldInputIcon(path, label) {
 /**
  * @param {(s: string) => string} escapeHtml
  * @param {string} panelId
+ * @param {{ localeToggle?: boolean }} [opts]
  */
-function panelSectionHeadHtml(escapeHtml, panelId) {
+function panelSectionHeadHtml(escapeHtml, panelId, opts = {}) {
     const meta = PROGRAM_EDITOR_TABS.find((t) => t.id === panelId);
     const title = meta?.sectionTitle || panelId;
     const helper = meta?.sectionHelper || '';
+    const localeToggle = opts.localeToggle !== false;
+    const langToggle = localeToggle
+        ? `<div class="studio-prog-editor-lang-toggle" role="group" aria-label="Editing language">
+      <button type="button" class="studio-prog-editor-lang-btn is-active" data-prog-lang="en">ENGLISH</button>
+      <button type="button" class="studio-prog-editor-lang-btn" data-prog-lang="ja">日本語</button>
+    </div>`
+        : '';
     return `<div class="studio-prog-editor-section-head">
     <div class="studio-prog-editor-section-head__copy">
       <h3 class="studio-prog-editor-section-title">${esc(escapeHtml, title)}</h3>
       <p class="studio-prog-editor-section-helper">${esc(escapeHtml, helper)}</p>
     </div>
-    <div class="studio-prog-editor-lang-toggle" role="group" aria-label="Editing language">
-      <button type="button" class="studio-prog-editor-lang-btn is-active" data-prog-lang="en">ENGLISH</button>
-      <button type="button" class="studio-prog-editor-lang-btn" data-prog-lang="ja">日本語</button>
-    </div>
+    ${langToggle}
   </div>`;
 }
 
@@ -742,14 +762,84 @@ function renderFaqTab(escapeHtml, en, ja) {
 }
 
 /**
+ * Program-level Draw tab (not EN/JA localized).
+ * @param {(s: string) => string} escapeHtml
+ * @param {{ active?: boolean, totalSlots?: number } | null | undefined} drawCfg
+ */
+function renderDrawTab(escapeHtml, drawCfg) {
+    const active = Boolean(drawCfg?.active);
+    const slotsRaw = Number(drawCfg?.totalSlots);
+    const totalSlots =
+        Number.isFinite(slotsRaw) && slotsRaw > 0
+            ? Math.floor(slotsRaw)
+            : DEFAULT_PROGRAM_DRAW_CONFIG.totalSlots;
+    return `${panelSectionHeadHtml(escapeHtml, 'draw', { localeToggle: false })}
+  <div class="studio-prog-editor-fields studio-prog-editor-fields--program-level">
+  <h4 class="studio-prog-subhead">Award cycle</h4>
+  <p class="studio-modal-hint">These settings apply to the whole program (not per language). Formal applications and Program Award entries are mutually exclusive.</p>
+  <div class="studio-prog-field-row studio-prog-field-row--check">
+    <div class="studio-prog-field-row__meta">
+      <span class="studio-prog-field-row__label">Program Award active</span>
+      <span class="studio-prog-field-row__helper">When on, the public program page surfaces a Program Award entry control.</span>
+    </div>
+    <div class="studio-prog-field-row__control">
+      <label class="studio-prog-field-row__check">
+        <input type="checkbox" data-prog-draw="active" ${active ? 'checked' : ''} />
+        <span>Active</span>
+      </label>
+    </div>
+    <span class="studio-prog-field-row__translate-spacer" aria-hidden="true"></span>
+  </div>
+  <div class="studio-prog-field-row">
+    <div class="studio-prog-field-row__meta">
+      <span class="studio-prog-field-row__label">Total award slots</span>
+      <span class="studio-prog-field-row__helper">Cap for Program Award entries this cycle (default ${DEFAULT_PROGRAM_DRAW_CONFIG.totalSlots}).</span>
+    </div>
+    <div class="studio-prog-field-row__control">
+      <div class="studio-prog-field-row__input-wrap">
+        <input
+          type="number"
+          min="1"
+          step="1"
+          class="studio-prog-editor-input"
+          data-prog-draw="totalSlots"
+          value="${esc(escapeHtml, String(totalSlots))}"
+        />
+      </div>
+    </div>
+    <span class="studio-prog-field-row__translate-spacer" aria-hidden="true"></span>
+  </div>
+  </div>`;
+}
+
+/**
+ * Read program-level draw fields from the editor form.
+ * @param {ParentNode} root
+ * @returns {{ active: boolean, totalSlots: number }}
+ */
+export function collectProgramDrawFromForm(root) {
+    const activeEl = root.querySelector('[data-prog-draw="active"]');
+    const slotsEl = root.querySelector('[data-prog-draw="totalSlots"]');
+    const active = activeEl instanceof HTMLInputElement ? activeEl.checked : false;
+    const slotsRaw = slotsEl instanceof HTMLInputElement ? Number(slotsEl.value) : NaN;
+    const totalSlots =
+        Number.isFinite(slotsRaw) && slotsRaw > 0
+            ? Math.floor(slotsRaw)
+            : DEFAULT_PROGRAM_DRAW_CONFIG.totalSlots;
+    return { active, totalSlots };
+}
+
+/**
  * @param {(s: string) => string} escapeHtml
  * @param {unknown} enRaw
  * @param {unknown} jaRaw
+ * @param {{ active?: boolean, totalSlots?: number } | null} [drawCfg]
  * @returns {string} Tab panels HTML only (shell provides nav chrome)
  */
-export function renderProgramLocaleFormHtml(escapeHtml, enRaw, jaRaw) {
+export function renderProgramLocaleFormHtml(escapeHtml, enRaw, jaRaw, drawCfg = null) {
     const en = asObj(enRaw);
     const ja = asObj(jaRaw);
+    const draw = drawCfg && typeof drawCfg === 'object' ? drawCfg : DEFAULT_PROGRAM_DRAW_CONFIG;
 
     const panels = [
         { id: 'basics', html: renderBasicsTab(escapeHtml, en, ja) },
@@ -757,6 +847,7 @@ export function renderProgramLocaleFormHtml(escapeHtml, enRaw, jaRaw) {
         { id: 'details', html: renderDetailsTab(escapeHtml, en, ja) },
         { id: 'application', html: renderApplicationTab(escapeHtml, en, ja) },
         { id: 'faq', html: renderFaqTab(escapeHtml, en, ja) },
+        { id: 'draw', html: renderDrawTab(escapeHtml, draw) },
     ];
 
     return panels.map((p, i) => tabPanelHtml(p.id, p.html, i === 0, escapeHtml)).join('');

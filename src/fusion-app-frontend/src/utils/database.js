@@ -2526,6 +2526,259 @@ export async function getQuarterlyAppCreditBalanceForCaller() {
 }
 
 /**
+ * Accrue-then-return application credits (preferred for Explore / forms).
+ * @returns {Promise<{ balance: number, membershipTier: string, lastAccruedKey: string, nextAccrualHint: string }>}
+ */
+export async function getApplicationCreditsForCaller() {
+    const { calendarQuarterKey } = await import('./applicationFeePolicy.js');
+    const quarterKey = calendarQuarterKey();
+    if (getDataSource() === 'test') {
+        return {
+            balance: 4,
+            membershipTier: 'annual',
+            lastAccruedKey: String(new Date().getUTCFullYear()),
+            nextAccrualHint: '',
+        };
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.getApplicationCreditsForCaller !== 'function') {
+        const bal = await getQuarterlyAppCreditBalanceForCaller();
+        return { balance: bal, membershipTier: '', lastAccruedKey: '', nextAccrualHint: '' };
+    }
+    try {
+        const r = await actor.getApplicationCreditsForCaller(quarterKey);
+        return {
+            balance: Number(r?.balance ?? 0) || 0,
+            membershipTier: String(r?.membershipTier || ''),
+            lastAccruedKey: String(r?.lastAccruedKey || ''),
+            nextAccrualHint: String(r?.nextAccrualHint || ''),
+        };
+    } catch {
+        return { balance: 0, membershipTier: '', lastAccruedKey: '', nextAccrualHint: '' };
+    }
+}
+
+/**
+ * @returns {Promise<{ balance: number, membershipTier: string, lastGrantedKey: string, nextGrantHint: string }>}
+ */
+export async function getAwardCreditsForCaller() {
+    const { calendarQuarterKey } = await import('./applicationFeePolicy.js');
+    const quarterKey = calendarQuarterKey();
+    if (getDataSource() === 'test') {
+        return {
+            balance: 4,
+            membershipTier: 'annual',
+            lastGrantedKey: `A-${new Date().getUTCFullYear()}`,
+            nextGrantHint: '',
+        };
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.getAwardCreditsForCaller !== 'function') {
+        return { balance: 0, membershipTier: '', lastGrantedKey: '', nextGrantHint: '' };
+    }
+    try {
+        const r = await actor.getAwardCreditsForCaller(quarterKey);
+        return {
+            balance: Number(r?.balance ?? 0) || 0,
+            membershipTier: String(r?.membershipTier || ''),
+            lastGrantedKey: String(r?.lastGrantedKey || ''),
+            nextGrantHint: String(r?.nextGrantHint || ''),
+        };
+    } catch {
+        return { balance: 0, membershipTier: '', lastGrantedKey: '', nextGrantHint: '' };
+    }
+}
+
+/** @param {string} programId */
+export async function getMyProgramPath(programId) {
+    const id = String(programId || '').trim();
+    if (!id) return '';
+    if (getDataSource() === 'test') return '';
+    try {
+        const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+        const actor = await getAuthenticatedFusionBackendActor();
+        if (!actor || typeof actor.getMyProgramPath !== 'function') return '';
+        return String((await actor.getMyProgramPath(id)) || '');
+    } catch {
+        return '';
+    }
+}
+
+/**
+ * @param {string} programId
+ * @param {{ paidEntryReceipt?: boolean }} [opts]
+ */
+export async function enterProgramAward(programId, opts = {}) {
+    const id = String(programId || '').trim();
+    if (!id) throw new Error('programId required');
+    const { calendarQuarterKey } = await import('./applicationFeePolicy.js');
+    if (getDataSource() === 'test') {
+        return {
+            id: `test|${id}`,
+            programId: id,
+            principalText: 'test',
+            status: 'entered',
+            enteredAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            paidEntry: Boolean(opts.paidEntryReceipt),
+        };
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.enterProgramAward !== 'function') {
+        throw new Error('enterProgramAward missing — deploy backend and run dfx generate.');
+    }
+    return actor.enterProgramAward(id, Boolean(opts.paidEntryReceipt), calendarQuarterKey());
+}
+
+/** @param {string} programId */
+export async function exitProgramAward(programId) {
+    const id = String(programId || '').trim();
+    if (!id) throw new Error('programId required');
+    if (getDataSource() === 'test') return;
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.exitProgramAward !== 'function') {
+        throw new Error('exitProgramAward missing — deploy backend and run dfx generate.');
+    }
+    await actor.exitProgramAward(id);
+}
+
+/** @param {string} programId */
+export async function getMyProgramAwardEntry(programId) {
+    const id = String(programId || '').trim();
+    if (!id) return null;
+    if (getDataSource() === 'test') return null;
+    try {
+        const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+        const actor = await getAuthenticatedFusionBackendActor();
+        if (!actor || typeof actor.getMyProgramAwardEntry !== 'function') return null;
+        return unwrapOpt(await actor.getMyProgramAwardEntry(id));
+    } catch {
+        return null;
+    }
+}
+
+/** @param {string} programId */
+export async function listProgramAwardEntriesStudio(programId) {
+    const id = String(programId || '').trim();
+    if (!id) return [];
+    if (getDataSource() === 'test') return [];
+    try {
+        const actor = await getStudioAuthenticatedActor();
+        if (!actor || typeof actor.listProgramAwardEntries !== 'function') return [];
+        const rows = await actor.listProgramAwardEntries(id);
+        return Array.isArray(rows) ? rows : [];
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * @param {string} artistId
+ * @returns {Promise<string>}
+ */
+export async function adminFindPrincipalForArtistStudio(artistId) {
+    const id = String(artistId || '').trim();
+    if (!id) return '';
+    if (getDataSource() === 'test') return '';
+    try {
+        const actor = await getStudioAuthenticatedActor();
+        if (!actor || typeof actor.adminFindPrincipalForArtist !== 'function') return '';
+        const opt = await actor.adminFindPrincipalForArtist(id);
+        const p = unwrapOpt(opt);
+        return p != null ? String(p.toText ? p.toText() : p) : '';
+    } catch {
+        return '';
+    }
+}
+
+/**
+ * @param {string} principalText
+ * @returns {Promise<{ balance: number, membershipTier: string, lastAccruedKey: string }>}
+ */
+export async function adminGetApplicationCreditsStudio(principalText) {
+    const p = String(principalText || '').trim();
+    if (!p) return { balance: 0, membershipTier: '', lastAccruedKey: '' };
+    if (getDataSource() === 'test') {
+        return { balance: 2, membershipTier: 'quarterly', lastAccruedKey: '2026-Q2' };
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminGetApplicationCredits !== 'function') {
+        return { balance: 0, membershipTier: '', lastAccruedKey: '' };
+    }
+    const { Principal } = await import('@dfinity/principal');
+    const r = await actor.adminGetApplicationCredits(Principal.fromText(p));
+    return {
+        balance: Number(r?.balance ?? 0) || 0,
+        membershipTier: String(r?.membershipTier || ''),
+        lastAccruedKey: String(r?.lastAccruedKey || ''),
+    };
+}
+
+/**
+ * @param {string} principalText
+ */
+export async function adminGetAwardCreditsStudio(principalText) {
+    const p = String(principalText || '').trim();
+    if (!p) return { balance: 0, membershipTier: '', lastGrantedKey: '' };
+    if (getDataSource() === 'test') {
+        return { balance: 1, membershipTier: 'quarterly', lastGrantedKey: '2026-Q2' };
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminGetAwardCredits !== 'function') {
+        return { balance: 0, membershipTier: '', lastGrantedKey: '' };
+    }
+    const { Principal } = await import('@dfinity/principal');
+    const r = await actor.adminGetAwardCredits(Principal.fromText(p));
+    return {
+        balance: Number(r?.balance ?? 0) || 0,
+        membershipTier: String(r?.membershipTier || ''),
+        lastGrantedKey: String(r?.lastGrantedKey || ''),
+    };
+}
+
+/**
+ * @param {string} principalText
+ * @param {{ credit?: number, debit?: number, note?: string }} adj
+ */
+export async function adminAdjustApplicationCreditsStudio(principalText, adj) {
+    const p = String(principalText || '').trim();
+    if (!p) throw new Error('principal required');
+    const credit = Math.max(0, Math.floor(Number(adj?.credit) || 0));
+    const debit = Math.max(0, Math.floor(Number(adj?.debit) || 0));
+    const note = String(adj?.note || 'studio_adjust').slice(0, 200);
+    if (getDataSource() === 'test') return Math.max(0, credit - debit);
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminAdjustApplicationCredits !== 'function') {
+        throw new Error('adminAdjustApplicationCredits missing — deploy backend and run dfx generate.');
+    }
+    const { Principal } = await import('@dfinity/principal');
+    return Number(await actor.adminAdjustApplicationCredits(Principal.fromText(p), credit, debit, note));
+}
+
+/**
+ * @param {string} principalText
+ * @param {{ credit?: number, debit?: number, note?: string }} adj
+ */
+export async function adminAdjustAwardCreditsStudio(principalText, adj) {
+    const p = String(principalText || '').trim();
+    if (!p) throw new Error('principal required');
+    const credit = Math.max(0, Math.floor(Number(adj?.credit) || 0));
+    const debit = Math.max(0, Math.floor(Number(adj?.debit) || 0));
+    const note = String(adj?.note || 'studio_adjust').slice(0, 200);
+    if (getDataSource() === 'test') return Math.max(0, credit - debit);
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminAdjustAwardCredits !== 'function') {
+        throw new Error('adminAdjustAwardCredits missing — deploy backend and run dfx generate.');
+    }
+    const { Principal } = await import('@dfinity/principal');
+    return Number(await actor.adminAdjustAwardCredits(Principal.fromText(p), credit, debit, note));
+}
+
+/**
  * Caller account (role, linked artist id, membership fields). Test mode returns a stub.
  * @returns {Promise<Record<string, unknown> | null>}
  */
@@ -6136,6 +6389,145 @@ export async function upsertProgramStudio(p) {
     });
 }
 
+const LS_PROGRAM_DRAW_CONFIG = 'fusion.studio.programDrawConfig.v1';
+
+/**
+ * @typedef {{
+ *   programId: string,
+ *   active: boolean,
+ *   totalSlots: number,
+ *   updatedAt: string,
+ * }} ProgramDrawConfigRow
+ */
+
+/**
+ * @param {unknown} raw
+ * @returns {ProgramDrawConfigRow | null}
+ */
+function mapProgramDrawConfig(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const r = /** @type {Record<string, unknown>} */ (raw);
+    const programId = String(r.programId ?? r.program_id ?? '').trim();
+    if (!programId) return null;
+    const totalRaw = Number(r.totalSlots ?? r.total_slots ?? 100);
+    const totalSlots = Number.isFinite(totalRaw) && totalRaw > 0 ? Math.floor(totalRaw) : 100;
+    return {
+        programId,
+        active: Boolean(r.active),
+        totalSlots,
+        updatedAt: String(r.updatedAt ?? r.updated_at ?? ''),
+    };
+}
+
+/**
+ * @param {string} programId
+ * @returns {Promise<ProgramDrawConfigRow | null>}
+ */
+export async function getProgramDrawConfigStudio(programId) {
+    const id = String(programId || '').trim();
+    if (!id) return null;
+    if (getDataSource() === 'test') {
+        try {
+            const map = readStudioLs(LS_PROGRAM_DRAW_CONFIG) || {};
+            return mapProgramDrawConfig(map[id] || null);
+        } catch {
+            return null;
+        }
+    }
+    try {
+        const actor = await getStudioAuthenticatedActor();
+        if (!actor || typeof actor.getProgramDrawConfig !== 'function') return null;
+        const opt = await actor.getProgramDrawConfig(id);
+        return mapProgramDrawConfig(unwrapOpt(opt));
+    } catch {
+        return null;
+    }
+}
+
+/** Public (anonymous) read of program award/draw config. */
+export async function getProgramDrawConfigPublic(programId) {
+    const id = String(programId || '').trim();
+    if (!id) return null;
+    if (getDataSource() === 'test') {
+        return getProgramDrawConfigStudio(id);
+    }
+    try {
+        const actor = await getFusionBackendActor();
+        if (!actor || typeof actor.getProgramDrawConfig !== 'function') return null;
+        const opt = await actor.getProgramDrawConfig(id);
+        return mapProgramDrawConfig(unwrapOpt(opt));
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * @returns {Promise<Map<string, ProgramDrawConfigRow>>}
+ */
+export async function listProgramDrawConfigsStudio() {
+    /** @type {Map<string, ProgramDrawConfigRow>} */
+    const out = new Map();
+    if (getDataSource() === 'test') {
+        const map = readStudioLs(LS_PROGRAM_DRAW_CONFIG) || {};
+        if (map && typeof map === 'object') {
+            for (const [k, v] of Object.entries(map)) {
+                const row = mapProgramDrawConfig({ ...v, programId: k });
+                if (row) out.set(row.programId, row);
+            }
+        }
+        return out;
+    }
+    try {
+        const actor = await getStudioAuthenticatedActor();
+        if (!actor || typeof actor.listProgramDrawConfigs !== 'function') return out;
+        const rows = await actor.listProgramDrawConfigs();
+        if (!Array.isArray(rows)) return out;
+        for (const pair of rows) {
+            const id =
+                pair?.[0] != null
+                    ? String(pair[0])
+                    : '';
+            const row = mapProgramDrawConfig(pair?.[1] ? { ...pair[1], programId: id || pair[1].programId } : null);
+            if (row) out.set(row.programId, row);
+        }
+    } catch {
+        /* older canister */
+    }
+    return out;
+}
+
+/**
+ * @param {{ programId: string, active?: boolean, totalSlots?: number }} cfg
+ */
+export async function upsertProgramDrawConfigStudio(cfg) {
+    const programId = String(cfg?.programId || '').trim();
+    if (!programId) throw new Error('programId required');
+    const totalRaw = Number(cfg?.totalSlots);
+    const totalSlots =
+        Number.isFinite(totalRaw) && totalRaw > 0 ? Math.floor(totalRaw) : 100;
+    const updatedAt = new Date().toISOString();
+    const row = {
+        programId,
+        active: Boolean(cfg?.active),
+        totalSlots,
+        updatedAt,
+    };
+    if (getDataSource() === 'test') {
+        const map = readStudioLs(LS_PROGRAM_DRAW_CONFIG) || {};
+        map[programId] = row;
+        writeStudioLs(LS_PROGRAM_DRAW_CONFIG, map);
+        return row;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.upsertProgramDrawConfig !== 'function') {
+        throw new Error(
+            'upsertProgramDrawConfig missing — deploy fusion-app-backend and run dfx generate.',
+        );
+    }
+    await actor.upsertProgramDrawConfig(row);
+    return row;
+}
+
 /**
  * @param {string} programId
  */
@@ -6148,6 +6540,15 @@ export async function deleteProgramStudio(programId) {
         block.programs.en = (block.programs.en || []).filter((x) => x.id !== id);
         block.programs.ja = (block.programs.ja || []).filter((x) => x.id !== id);
         writeStudioLs(LS_PROGRAMS_BLOCK, block);
+        try {
+            const map = readStudioLs(LS_PROGRAM_DRAW_CONFIG) || {};
+            if (map && typeof map === 'object' && id in map) {
+                delete map[id];
+                writeStudioLs(LS_PROGRAM_DRAW_CONFIG, map);
+            }
+        } catch {
+            /* ignore */
+        }
         return true;
     }
     const actor = await getStudioAuthenticatedActor();
@@ -7419,6 +7820,7 @@ function normalizeAccountDateText(raw) {
  *   paypalSubscriptionStatus?: string,
  *   paymentProvider?: string,
  *   membershipTier?: string,
+ *   membershipPlanId?: string,
  *   membershipExemptManual?: boolean,
  *   trialStartedAtSec?: string,
  *   trialEndsAtSec?: string,
@@ -7479,6 +7881,27 @@ export async function getAccountsForStudio() {
             /* older canister — run dfx generate after deploy */
         }
     }
+    /** @type {Map<string, string>} */
+    const planIdByPrincipal = new Map();
+    if (typeof actor.adminListMembershipPlanIds === 'function') {
+        try {
+            const planRows = await actor.adminListMembershipPlanIds();
+            if (Array.isArray(planRows)) {
+                for (const row of planRows) {
+                    const p = row?.[0];
+                    const planId = row?.[1];
+                    const pStr =
+                        p && typeof p === 'object' && 'toText' in p && typeof p.toText === 'function'
+                            ? p.toText()
+                            : String(p ?? '');
+                    const id = String(planId ?? '').trim();
+                    if (pStr && id) planIdByPrincipal.set(pStr, id);
+                }
+            }
+        } catch {
+            /* older canister */
+        }
+    }
     const raw = await actor.listAccounts();
     const rows = normalizeListAccountRows(raw);
     /** @type {StudioAccountRow[]} */
@@ -7521,6 +7944,7 @@ export async function getAccountsForStudio() {
             ),
             paymentProvider: unwrapOpt(a.paymentProvider ?? a.payment_provider),
             membershipTier: tierByPrincipal.get(pStr) || '',
+            membershipPlanId: planIdByPrincipal.get(pStr) || '',
             membershipExemptManual: Boolean(a.membershipExemptManual ?? a.membership_exempt_manual),
             trialStartedAtSec: trialByPrincipal.get(pStr)?.startedAtSec
                 ? String(trialByPrincipal.get(pStr)?.startedAtSec)

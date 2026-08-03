@@ -1,14 +1,13 @@
-/** Application fee amounts and quarterly credit accrual (mirrors Motoko rules). */
+/** Application fee amounts and application credit accrual (mirrors Motoko rules). */
 
 export const APPLICATION_FEE_GUEST_CENTS = 5000;
 export const APPLICATION_FEE_MEMBER_CENTS = 3500;
+export const ANNUAL_APP_CREDITS_PER_YEAR = 4;
 
 /**
- * Temporary: active memberships (monthly / quarterly / annual / legacy) may submit
- * applications with no per-application fee until the credit system is finished.
- * Guests still pay the guest fee. Flip to `false` when credits ship.
+ * Must match Motoko `TEMP_WAIVE_MEMBER_APPLICATION_FEES`. Live credits use `false`.
  */
-export const TEMP_WAIVE_MEMBER_APPLICATION_FEES = true;
+export const TEMP_WAIVE_MEMBER_APPLICATION_FEES = false;
 
 /** @typedef {'monthly' | 'quarterly' | 'annual' | 'bimonthly' | ''} MembershipTier */
 
@@ -20,6 +19,14 @@ export function calendarQuarterKey(date = new Date()) {
     const y = date.getUTCFullYear();
     const q = Math.floor(date.getUTCMonth() / 3) + 1;
     return `${y}-Q${q}`;
+}
+
+/**
+ * @param {Date} [date]
+ * @returns {string} `YYYY`
+ */
+export function calendarYearKey(date = new Date()) {
+    return String(date.getUTCFullYear());
 }
 
 /**
@@ -46,7 +53,7 @@ export function quarterIndexToKey(index) {
 }
 
 /**
- * Pure accrual catch-up (max 40 quarters).
+ * Pure accrual catch-up for quarterly (max 40 quarters).
  * @param {{ balance: number, lastAccrued: string, currentKey: string, tier: string, membershipActive: boolean }} args
  */
 export function accrueQuarterlyCreditsState(args) {
@@ -84,11 +91,36 @@ export function accrueQuarterlyCreditsState(args) {
 }
 
 /**
+ * Pure annual grant once per calendar year.
+ * @param {{ balance: number, lastGrantedYear: string, yearKey: string, tier: string, membershipActive: boolean }} args
+ */
+export function accrueAnnualCreditsState(args) {
+    const tier = String(args.tier || '').toLowerCase();
+    const membershipActive = Boolean(args.membershipActive);
+    let balance = Math.max(0, Math.round(Number(args.balance) || 0));
+    let lastGrantedYear = String(args.lastGrantedYear || '').trim();
+    const yearKey = String(args.yearKey || '').trim() || calendarYearKey();
+
+    if (tier !== 'annual' || !membershipActive || yearKey.length !== 4) {
+        return { balance, lastGrantedYear, granted: 0 };
+    }
+    if (lastGrantedYear === yearKey) {
+        return { balance, lastGrantedYear, granted: 0 };
+    }
+    return {
+        balance: balance + ANNUAL_APP_CREDITS_PER_YEAR,
+        lastGrantedYear: yearKey,
+        granted: ANNUAL_APP_CREDITS_PER_YEAR,
+    };
+}
+
+/**
  * @param {{
  *   membershipAccess: 'ok' | 'exempt' | 'needsSubscription' | 'noAccount' | string,
  *   tier: MembershipTier | string,
  *   appCreditBalance?: number,
  *   lastAccrued?: string,
+ *   lastAnnualGrantedYear?: string,
  *   currentQuarterKey?: string,
  * }} args
  */
@@ -112,54 +144,63 @@ export function computeApplicationFeeDue(args) {
     }
 
     const tier = String(args.tier || '').toLowerCase();
-    const accrued = accrueQuarterlyCreditsState({
-        balance: Number(args.appCreditBalance) || 0,
-        lastAccrued: String(args.lastAccrued || ''),
-        currentKey: args.currentQuarterKey || calendarQuarterKey(),
-        tier,
-        membershipActive: true,
-    });
+    const quarterKey = args.currentQuarterKey || calendarQuarterKey();
+    let balance = Math.max(0, Math.round(Number(args.appCreditBalance) || 0));
+    let lastAccrued = String(args.lastAccrued || '');
+
+    if (tier === 'quarterly') {
+        const accrued = accrueQuarterlyCreditsState({
+            balance,
+            lastAccrued,
+            currentKey: quarterKey,
+            tier,
+            membershipActive: true,
+        });
+        balance = accrued.balance;
+        lastAccrued = accrued.lastAccrued;
+    } else if (tier === 'annual') {
+        const accrued = accrueAnnualCreditsState({
+            balance,
+            lastGrantedYear: String(args.lastAnnualGrantedYear || ''),
+            yearKey: calendarYearKey(),
+            tier,
+            membershipActive: true,
+        });
+        balance = accrued.balance;
+    }
+
     const membershipTier = tier || 'monthly';
 
-    // TEMP: all active members submit free until credits are complete.
     if (TEMP_WAIVE_MEMBER_APPLICATION_FEES) {
         return {
             dueCents: 0,
             reason: 'membership_temp',
             membershipTier,
-            appCreditBalance: accrued.balance,
+            appCreditBalance: balance,
         };
     }
 
-    if (tier === 'annual') {
-        return {
-            dueCents: 0,
-            reason: 'annual',
-            membershipTier: 'annual',
-            appCreditBalance: accrued.balance,
-        };
-    }
-    if (tier === 'quarterly') {
-        if (accrued.balance >= 1) {
+    if (tier === 'quarterly' || tier === 'annual') {
+        if (balance >= 1) {
             return {
                 dueCents: 0,
                 reason: 'credit',
-                membershipTier: 'quarterly',
-                appCreditBalance: accrued.balance,
+                membershipTier: tier,
+                appCreditBalance: balance,
             };
         }
         return {
             dueCents: APPLICATION_FEE_MEMBER_CENTS,
             reason: 'member_fee',
-            membershipTier: 'quarterly',
+            membershipTier: tier,
             appCreditBalance: 0,
         };
     }
-    // monthly, bimonthly (legacy), unknown active → $35
+
     return {
         dueCents: APPLICATION_FEE_MEMBER_CENTS,
         reason: 'member_fee',
         membershipTier,
-        appCreditBalance: accrued.balance,
+        appCreditBalance: balance,
     };
 }

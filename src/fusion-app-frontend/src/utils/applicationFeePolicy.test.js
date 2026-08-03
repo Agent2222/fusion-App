@@ -109,16 +109,36 @@ describe('computeApplicationFeeDue', () => {
         }
     });
 
-    it('annual → $0', () => {
-        const r = computeApplicationFeeDue({
+    it('annual → credit when balance accrues, else member fee', () => {
+        const withCredit = computeApplicationFeeDue({
             membershipAccess: 'ok',
             tier: 'annual',
+            appCreditBalance: 0,
+            lastAnnualGrantedYear: '',
             currentQuarterKey: '2026-Q2',
         });
-        expect(r.dueCents).toBe(0);
-        expect(
-            TEMP_WAIVE_MEMBER_APPLICATION_FEES ? r.reason === 'membership_temp' : r.reason === 'annual',
-        ).toBe(true);
+        if (TEMP_WAIVE_MEMBER_APPLICATION_FEES) {
+            expect(withCredit.dueCents).toBe(0);
+            expect(withCredit.reason).toBe('membership_temp');
+        } else {
+            expect(withCredit.dueCents).toBe(0);
+            expect(withCredit.reason).toBe('credit');
+            expect(withCredit.appCreditBalance).toBe(4);
+        }
+
+        const spent = computeApplicationFeeDue({
+            membershipAccess: 'ok',
+            tier: 'annual',
+            appCreditBalance: 0,
+            lastAnnualGrantedYear: String(new Date().getUTCFullYear()),
+            currentQuarterKey: '2026-Q2',
+        });
+        if (TEMP_WAIVE_MEMBER_APPLICATION_FEES) {
+            expect(spent.dueCents).toBe(0);
+        } else {
+            expect(spent.dueCents).toBe(APPLICATION_FEE_MEMBER_CENTS);
+            expect(spent.reason).toBe('member_fee');
+        }
     });
 
     it('quarterly → free while temp waive; credit math still accrues', () => {

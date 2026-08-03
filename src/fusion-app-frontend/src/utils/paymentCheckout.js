@@ -338,6 +338,7 @@ export function buildPayPalSubscriptionCustomId(customData) {
     const tier = String(src.tier || '')
         .trim()
         .toLowerCase();
+    const planId = String(src.plan_id || src.planId || '').trim();
     if (principal) essential.principal = principal.slice(0, 63);
     if (pending) essential.fusion_pending_id = pending.slice(0, 36);
     if (
@@ -348,7 +349,13 @@ export function buildPayPalSubscriptionCustomId(customData) {
     ) {
         essential.tier = tier;
     }
+    if (planId) essential.plan_id = planId.slice(0, 40);
     let json = JSON.stringify(essential);
+    if (json.length <= 127) return json;
+    /** @type {Record<string, string>} */
+    const withPlan = { ...essential };
+    delete withPlan.pending_email;
+    json = JSON.stringify(withPlan);
     if (json.length <= 127) return json;
     /** @type {Record<string, string>} */
     const minimal = {};
@@ -356,6 +363,11 @@ export function buildPayPalSubscriptionCustomId(customData) {
     if (essential.fusion_pending_id) minimal.fusion_pending_id = essential.fusion_pending_id;
     if (essential.tier) minimal.tier = essential.tier;
     json = JSON.stringify(minimal);
+    if (json.length <= 127 && essential.plan_id) {
+        const withPlanId = { ...minimal, plan_id: essential.plan_id };
+        const j2 = JSON.stringify(withPlanId);
+        if (j2.length <= 127) return j2;
+    }
     return json.length <= 127 ? json : json.slice(0, 127);
 }
 

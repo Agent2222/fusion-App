@@ -95,6 +95,79 @@ export async function getIntegrationActor() {
 }
 
 /**
+ * Infer Fusion membership tier from a Stripe subscription price / env price ids.
+ * Legacy `STRIPE_PRICE_ID` maps to bi-monthly ($50 / 2 months).
+ * @param {import('stripe').Stripe.Subscription} subscription
+ * @returns {'' | 'monthly' | 'quarterly' | 'annual' | 'bimonthly'}
+ */
+export function membershipTierFromStripeSubscription(subscription) {
+    const rawPrice = subscription?.items?.data?.[0]?.price;
+    if (!rawPrice) return '';
+    const price = typeof rawPrice === 'string' ? { id: rawPrice } : rawPrice;
+    const priceId = typeof price.id === 'string' ? price.id : '';
+    if (process.env.STRIPE_ANNUAL_PRICE_ID && priceId === process.env.STRIPE_ANNUAL_PRICE_ID) {
+        return 'annual';
+    }
+    if (process.env.STRIPE_MONTHLY_PRICE_ID && priceId === process.env.STRIPE_MONTHLY_PRICE_ID) {
+        return 'monthly';
+    }
+    if (process.env.STRIPE_QUARTERLY_PRICE_ID && priceId === process.env.STRIPE_QUARTERLY_PRICE_ID) {
+        return 'quarterly';
+    }
+    if (process.env.STRIPE_PRICE_ID && priceId === process.env.STRIPE_PRICE_ID) {
+        return 'bimonthly';
+    }
+    const recurring = /** @type {{ interval?: string, interval_count?: number } | null | undefined} */ (
+        price.recurring
+    );
+    if (!recurring) return '';
+    const interval = recurring.interval;
+    const count = recurring.interval_count || 1;
+    if (interval === 'month' && count === 1) return 'monthly';
+    if (interval === 'month' && count === 2) return 'bimonthly';
+    if (interval === 'month' && count === 3) return 'quarterly';
+    if (interval === 'year' && count === 1) return 'annual';
+    return '';
+}
+
+/**
+ * @param {import('stripe').Stripe.Subscription} subscription
+ * @returns {string}
+ */
+export function stripePriceIdFromSubscription(subscription) {
+    const rawPrice = subscription?.items?.data?.[0]?.price;
+    if (!rawPrice) return '';
+    if (typeof rawPrice === 'string') return rawPrice.trim();
+    return typeof rawPrice.id === 'string' ? rawPrice.id.trim() : '';
+}
+
+/**
+ * @param {object} actor
+ * @param {import('@dfinity/principal').Principal} p
+ * @param {string} tier
+ */
+async function setMembershipTierOnCanister(actor, p, tier) {
+    const t = String(tier || '')
+        .trim()
+        .toLowerCase();
+    if (!t || !['monthly', 'quarterly', 'annual', 'bimonthly'].includes(t)) return;
+    if (typeof actor.integrationSetMembershipTier !== 'function') {
+        console.warn(
+            '[canister] integrationSetMembershipTier missing from IDL — redeploy fusion-integration-api',
+        );
+        return;
+    }
+    try {
+        await actor.integrationSetMembershipTier(p, t);
+    } catch (e) {
+        console.warn(
+            '[canister] integrationSetMembershipTier failed:',
+            e instanceof Error ? e.message : e,
+        );
+    }
+}
+
+/**
  * @param {import('stripe').Stripe.Subscription} subscription
  * @param {string} [customerId]
  */
@@ -128,13 +201,21 @@ export async function pushSubscriptionToCanister(subscription, customerId) {
         typeof cpe === 'number' && Number.isFinite(cpe)
             ? new Date(cpe * 1000).toISOString()
             : '';
+    const priceId = stripePriceIdFromSubscription(subscription);
+    const metaTier =
+        typeof subscription.metadata?.tier === 'string'
+            ? subscription.metadata.tier.trim().toLowerCase()
+            : '';
     await actor.integrationRecordStripeSubscription(
         p,
         cid ? [cid] : [],
         [subscription.id],
         [subscription.status],
         periodEndIso ? [periodEndIso] : [],
+        priceId ? [priceId] : [],
     );
+    const tier = membershipTierFromStripeSubscription(subscription) || metaTier;
+    await setMembershipTierOnCanister(actor, p, tier);
 }
 
 /**
@@ -170,18 +251,19 @@ export async function pushPayPalSubscriptionToCanister(subscription) {
         subscription.billing_info?.next_billing_time ||
         subscription.billing_info?.last_payment?.time ||
         '';
+    const planId = String(
+        subscription.plan_id || meta.plan_id || meta.planId || '',
+    ).trim();
     await actor.integrationRecordPayPalSubscription(
         p,
         [subscription.id],
         [status],
         periodEnd ? [periodEnd] : [],
+        planId ? [planId] : [],
     );
+    /** Prefer live plan_id over custom_id tier (plan revise can change plan without updating meta). */
     let tier = '';
-    if (typeof meta.tier === 'string' && meta.tier.trim()) {
-        tier = meta.tier.trim().toLowerCase();
-    }
-    const planId = String(subscription.plan_id || '').trim();
-    if (!tier && planId) {
+    if (planId) {
         try {
             const { membershipTierFromPayPalPlanId } = await import(
                 './payments/providers/paypalProvider.js'
@@ -191,18 +273,8 @@ export async function pushPayPalSubscriptionToCanister(subscription) {
             /* ignore */
         }
     }
-    if (
-        tier &&
-        typeof actor.integrationSetMembershipTier === 'function' &&
-        ['monthly', 'quarterly', 'annual', 'bimonthly'].includes(tier)
-    ) {
-        try {
-            await actor.integrationSetMembershipTier(p, tier);
-        } catch (e) {
-            console.warn(
-                '[canister] integrationSetMembershipTier failed:',
-                e instanceof Error ? e.message : e,
-            );
-        }
+    if (!tier && typeof meta.tier === 'string' && meta.tier.trim()) {
+        tier = meta.tier.trim().toLowerCase();
     }
+    await setMembershipTierOnCanister(actor, p, tier);
 }

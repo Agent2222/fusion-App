@@ -54,12 +54,18 @@ export function subscriptionCustomId(customData) {
     ) {
         essential.tier = tierRaw;
     }
+    const planIdRaw = String(customData.plan_id || customData.planId || '').trim();
+    if (planIdRaw) {
+        essential.plan_id = safePayPalMetaValue(planIdRaw, 40);
+    }
     for (const [k, v] of Object.entries(customData)) {
         if (
             k === 'principal' ||
             k === 'fusion_pending_id' ||
             k === 'pending_email' ||
-            k === 'tier'
+            k === 'tier' ||
+            k === 'plan_id' ||
+            k === 'planId'
         ) {
             continue;
         }
@@ -75,7 +81,13 @@ export function subscriptionCustomId(customData) {
     if (essential.principal) minimal.principal = essential.principal;
     if (essential.fusion_pending_id) minimal.fusion_pending_id = essential.fusion_pending_id;
     if (essential.tier) minimal.tier = essential.tier;
-    return JSON.stringify(minimal).slice(0, 127);
+    json = JSON.stringify(minimal);
+    if (json.length <= 127 && essential.plan_id) {
+        const withPlan = { ...minimal, plan_id: essential.plan_id };
+        const j2 = JSON.stringify(withPlan);
+        if (j2.length <= 127) return j2;
+    }
+    return json.slice(0, 127);
 }
 
 /**
@@ -335,6 +347,8 @@ export async function createPayPalSubscription(reqBody) {
     const customData = {
         pending_email: email.trim().slice(0, 500),
         tier: membershipTier.slice(0, 16),
+        // Short plan id for fallback when PayPal resource omits plan_id on early fetch.
+        plan_id: planId.slice(0, 40),
     };
     if (payFirstPending) {
         customData.fusion_pending_id = fusionPendingId;

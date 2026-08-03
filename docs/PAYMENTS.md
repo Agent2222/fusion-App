@@ -80,7 +80,7 @@ Use PayPal Developer Dashboard or the `user-paypal` MCP in Cursor:
 | `POST /stripe/sync-subscription*` | Stripe legacy |
 | `POST /stripe/subscription-status-by-email` | Stripe legacy |
 | `POST /stripe/cancel-subscription-at-period-end` | Stripe legacy |
-| `POST /stripe/membership-revenue-summary` | Stripe legacy MRR |
+| `POST /stripe/membership-revenue-summary` | Stripe legacy MRR (optional Finance supplement only) |
 
 Deprecated for **new** sessions: `POST /stripe/create-subscription`, `POST /stripe/create-payment-intent`, `POST /stripe/program-payment-intent`, `POST /stripe/program-payment-plan`.
 
@@ -91,12 +91,15 @@ After Motoko changes, run `dfx generate` and redeploy `fusion-app-backend`. New 
 - `MembershipFields`: `paypalSubscriptionId`, `paypalSubscriptionStatus`, `paymentProvider`
 - `ProgramPaymentLedgerRow`: `paymentProvider`, `externalPaymentId`, `externalChargeId`, `externalReceiptUrl`
 - `ProgramPaymentPlan`: `paymentProvider`, `paypalSubscriptionId`
-- `integrationRecordPayPalSubscription` — integration service only
-- `membershipTierByPrincipal` + quarterly application credit maps; `applicationFeeDueForCaller`; `integrationSetMembershipTier`
+- `integrationRecordPayPalSubscription` / `integrationRecordStripeSubscription` — accept optional `planOrPriceId` (PayPal `P-…` / Stripe `price_…`); stored in `membershipPlanIdByPrincipal`
+- `membershipTierByPrincipal` + quarterly application credit maps; `applicationFeeDueForCaller`; `integrationSetMembershipTier` (called on every subscribe/sync from plan/price id)
+- `adminListMembershipPlanIds` — Studio list of captured plan/price ids
 
-**Application fees:** guest one-time **$50**. **TEMP:** all active memberships (monthly / quarterly / annual / legacy bi-monthly) submit free (`membership_temp` / `TEMP_WAIVE_MEMBER_APPLICATION_FEES`) until the credit system ships — flip the flag in Motoko + `applicationFeePolicy.js` when ready. Intended post-credits: monthly / legacy **$35** per application; quarterly stackable credits (+1/quarter); annual included while active. Full checklist (waive removal, credits, Program Award): [`FIXES_APPLICATION_CREDITS_AND_PROGRAM_AWARD.md`](./FIXES_APPLICATION_CREDITS_AND_PROGRAM_AWARD.md).
+**Application fees:** guest one-time **$50**. Active members: monthly / legacy bi-monthly **$35** per formal application; quarterly **+1** stackable application credit per calendar quarter; annual **4** stackable application credits per membership year. When balance ≥ 1, submit is free (`credit`) and consumes one credit; when balance is 0, member fee is **$35**. Program Award entries are separate (not application credits) and mutually exclusive with a formal application for the same program. See [`FIXES_APPLICATION_CREDITS_AND_PROGRAM_AWARD.md`](./FIXES_APPLICATION_CREDITS_AND_PROGRAM_AWARD.md). If `TEMP_WAIVE_MEMBER_APPLICATION_FEES` is still `true` in Motoko + `applicationFeePolicy.js`, all active members submit free (`membership_temp`) — flip both to `false` when credits are live.
 
 **Studio Users / Manage account (PayPal):** membership status reads PayPal `ACTIVE`/`APPROVED` (not Stripe-only). Staff can **Check PayPal** / **Push** with subscription id `I-…` via `POST /payments/subscription/status` + `/sync` (tier inferred from plan env ids for monthly / quarterly / annual). Deploy backend for `adminListMembershipTiers` after Motoko update.
+
+**Studio Finance → Users (membership revenue):** headline **Normalized MRR** is computed in the frontend from canister accounts + `membershipTier` (monthly $30, quarterly $75→$25, annual $260→~$21.67, legacy bi-monthly $50/2mo→$25), including PayPal and Stripe members. `POST /stripe/membership-revenue-summary` is only an optional supplement / drift note — not the primary revenue source. ARR = MRR × 12. Exempt and non-paying accounts are excluded.
 
 ## Deploy checklist
 

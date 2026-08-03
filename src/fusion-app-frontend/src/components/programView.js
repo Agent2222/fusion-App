@@ -522,6 +522,7 @@ export function generateProgramViewContent() {
                         </div>
                         <app-program-fade-gallery id="programFadeGallery"></app-program-fade-gallery>
                         <app-program-details id="programDetailsSection" active="true"></app-program-details>
+                        <div id="programAwardEntryHost" class="program-award-entry-host" hidden></div>
                         <div id="programApplicationWrap" class="program-application-wrap" hidden inert>
                             <app-application-form id="programApplicationSection" active="false" data-program-id=""></app-application-form>
                         </div>
@@ -924,6 +925,17 @@ async function applyProgramToDom(programPair) {
 
   if (programId) {
     wireProgramApplicationSection(programId, applicationsOpen);
+    const awardHost = document.getElementById('programAwardEntryHost');
+    if (awardHost instanceof HTMLElement) {
+      void import('./subComponents/programAwardEntry.js')
+        .then(({ mountProgramAwardEntryPanel }) =>
+          mountProgramAwardEntryPanel(programId, awardHost),
+        )
+        .catch(() => {
+          awardHost.hidden = true;
+          awardHost.innerHTML = '';
+        });
+    }
   }
 }
 

@@ -2871,6 +2871,66 @@ html[data-theme='dark'] .join-fusion-page__err {
   }
 }
 
+.program-award-entry-host {
+  width: min(100%, 42rem);
+  margin: 0 auto 3rem;
+  padding: 0 1rem;
+}
+
+.program-award-entry-host[hidden] {
+  display: none !important;
+}
+
+.program-award-entry {
+  border-top: 1px solid rgba(15, 23, 42, 0.12);
+  padding: 1.75rem 0 0.5rem;
+}
+
+.program-award-entry__eyebrow {
+  margin: 0 0 0.35rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(15, 23, 42, 0.55);
+}
+
+.program-award-entry__heading {
+  margin: 0 0 0.5rem;
+  font-size: 1.35rem;
+}
+
+.program-award-entry__lede,
+.program-award-entry__status,
+.program-award-entry__hint,
+.program-award-entry__msg {
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: rgba(15, 23, 42, 0.78);
+}
+
+.program-award-entry__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.5rem;
+  padding: 0.55rem 1.1rem;
+  border: 1px solid rgba(15, 23, 42, 0.2);
+  background: #111;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.program-award-entry__btn--secondary {
+  background: transparent;
+  color: #111;
+}
+
+.program-award-entry__pay {
+  margin-bottom: 0.75rem;
+}
+
 .program-intro-cta {
   cursor: pointer;
 }

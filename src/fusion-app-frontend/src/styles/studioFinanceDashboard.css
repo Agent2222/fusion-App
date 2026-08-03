@@ -741,6 +741,174 @@
   grid-template-columns: minmax(12rem, 18rem);
 }
 
+/* Normalized MRR dashboard (Finance → Users) */
+.studio-finance-page .studio-finance-mrr-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.studio-finance-page .studio-finance-mrr-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.85rem 0 0.15rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--c2, #0f172a) 10%, transparent);
+}
+
+.studio-finance-page .studio-finance-mrr-hero--compact {
+  padding: 0.35rem 0 0.55rem;
+  border-bottom: none;
+}
+
+.studio-finance-page .studio-finance-mrr-hero__label {
+  font-size: 0.68rem;
+  font-variation-settings: var(--fv-label-strong);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--studio-muted, #64748b);
+}
+
+.studio-finance-page .studio-finance-mrr-hero__value {
+  font-size: clamp(1.65rem, 3vw, 2.15rem);
+  line-height: 1.1;
+  font-variation-settings: var(--fv-subtitle);
+  color: var(--c2, #0f172a);
+  font-weight: 650;
+}
+
+.studio-finance-page .studio-finance-mrr-hero--compact .studio-finance-mrr-hero__value {
+  font-size: 1.35rem;
+}
+
+.studio-finance-page .studio-finance-mrr-hero__sub {
+  font-size: 0.82rem;
+  color: var(--studio-muted, #64748b);
+}
+
+.studio-finance-page .studio-finance-mrr-hero__explainer {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--studio-muted, #64748b);
+  max-width: 42rem;
+}
+
+.studio-finance-page .studio-finance-mrr-tier-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.studio-finance-page .studio-finance-mrr-tier-grid--compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.studio-finance-page .studio-finance-mrr-tier-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--c2, #0f172a) 12%, transparent);
+  background: color-mix(in srgb, var(--studio-card-bg, #fff) 88%, var(--studio-workspace-bg, #f8fafc) 12%);
+}
+
+.studio-finance-page .studio-finance-mrr-tier-card.is-empty {
+  opacity: 0.55;
+}
+
+.studio-finance-page .studio-finance-mrr-tier-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.studio-finance-page .studio-finance-mrr-tier-card__head h4 {
+  margin: 0;
+  font-size: 0.8rem;
+  font-variation-settings: var(--fv-label-strong);
+  color: var(--c2, #0f172a);
+}
+
+.studio-finance-page .studio-finance-mrr-tier-card__count {
+  font-size: 0.72rem;
+  color: var(--studio-muted, #64748b);
+  white-space: nowrap;
+}
+
+.studio-finance-page .studio-finance-mrr-tier-card__mrr {
+  margin: 0.25rem 0 0;
+  font-size: 1.15rem;
+  font-variation-settings: var(--fv-subtitle);
+  color: var(--c2, #0f172a);
+  font-weight: 650;
+}
+
+.studio-finance-page .studio-finance-mrr-tier-card__hint {
+  margin: 0;
+  font-size: 0.68rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--studio-muted, #64748b);
+}
+
+.studio-finance-page .studio-finance-mrr-tier-card__cadence {
+  margin: 0.2rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: var(--studio-muted, #64748b);
+}
+
+.studio-finance-page .studio-finance-mrr-providers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem 0.75rem;
+  padding-top: 0.15rem;
+}
+
+.studio-finance-page .studio-finance-mrr-providers__label {
+  font-size: 0.68rem;
+  font-variation-settings: var(--fv-label-strong);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--studio-muted, #64748b);
+}
+
+.studio-finance-page .studio-finance-mrr-providers strong {
+  font-size: 0.86rem;
+  font-weight: 550;
+  color: var(--c2, #0f172a);
+}
+
+.studio-finance-page .studio-finance-mrr-stripe-note {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.studio-finance-page .studio-finance-mrr-compact {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-bottom: 0.65rem;
+}
+
+@media (max-width: 900px) {
+  .studio-finance-page .studio-finance-mrr-tier-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .studio-finance-page .studio-finance-mrr-tier-grid,
+  .studio-finance-page .studio-finance-mrr-tier-grid--compact {
+    grid-template-columns: 1fr;
+  }
+}
+
 .studio-finance-page .studio-finance-program-table-scroll {
   overflow-x: auto;
   max-width: 100%;

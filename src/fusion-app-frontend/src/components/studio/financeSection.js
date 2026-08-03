@@ -90,6 +90,7 @@ import {
     studioMembershipBadgeHtml,
     studioMembershipCellLabel,
     studioMembershipFilterMatch,
+    studioMembershipTierShortLabel,
     studioStripeDashboardCustomerUrl,
 } from '../../utils/studioMembershipPresentation.js';
 import {
@@ -99,7 +100,11 @@ import {
 } from '../../utils/studioShellState.js';
 import { studioIconHref } from '../../utils/studioIconRegistry.js';
 import { getStripePublishableKeyResolved } from '../../utils/studioServicesConfig.js';
-import { formatMembershipRevenueStatHtml } from '../../utils/membershipRevenueMoney.js';
+import {
+    buildMembershipRevenueDashboardModel,
+    formatMembershipRevenueDashboardHtml,
+    mergeStripeSubscriptionTiersIntoAccounts,
+} from '../../utils/membershipRevenueMoney.js';
 import { openStudioModal } from '../../utils/studioModal.js';
 import { openApplicantEmailModal } from './applicantEmailModal.js';
 
@@ -327,12 +332,13 @@ export function renderFinance() {
                                         <th>Name</th>
                                         <th>Email</th>
                                         <th>Membership</th>
+                                        <th>Type</th>
                                         <th>Renews</th>
                                         <th>Provider</th>
                                         <th>Principal</th>
                                     </tr>
                                 </thead>
-                                <tbody id="studio-finance-users-tbody"><tr><td colspan="7">Loading…</td></tr></tbody>
+                                <tbody id="studio-finance-users-tbody"><tr><td colspan="8">Loading…</td></tr></tbody>
                             </table>
                         </div>
                     </section>
@@ -1095,8 +1101,21 @@ export async function initFinance(mainEl) {
     const promotionsCanEdit = studioFinanceCategoryAccess('Promotions').canEdit;
     /** @type {Map<string, { firstName: string, lastName: string, fullName: string, email: string }>} */
     let contactByPrincipal = new Map();
-    /** @type {Record<string, unknown>} */
-    let membershipRevenue = { ok: false };
+    /** @type {unknown} */
+    let membershipRevenueStripe = { ok: false };
+    /** @type {ReturnType<typeof buildMembershipRevenueDashboardModel> | null} */
+    let membershipRevenueModel = null;
+
+    const rebuildMembershipRevenueModel = () => {
+        allAccounts = mergeStripeSubscriptionTiersIntoAccounts(
+            allAccounts,
+            membershipRevenueStripe,
+        );
+        membershipRevenueModel = buildMembershipRevenueDashboardModel(
+            allAccounts,
+            membershipRevenueStripe,
+        );
+    };
     /** @type {object[]} */
     let financePromotions = [];
     /** @type {Map<string, object[]>} */
@@ -1206,13 +1225,14 @@ export async function initFinance(mainEl) {
             `);
         }
         if (enabledChips.has('users') && studioFinanceCategoryAccess('Users').visible) {
+            const paying = membershipRevenueModel?.payingMembers ?? m.active;
             parts.push(`
                 <div class="studio-finance-category-block" data-finance-category-block="Users">
                     <h3>Users — membership</h3>
-                    <p class="studio-muted">Fusion / Join subscription status on the canister.</p>
-                    ${formatMembershipRevenueStatHtml(membershipRevenue, escapeHtml, { compact: true })}
+                    <p class="studio-muted">Normalized MRR from canister memberships (PayPal + Stripe). ${escapeHtml(String(paying))} paying.</p>
+                    ${formatMembershipRevenueDashboardHtml(membershipRevenueModel, escapeHtml, { compact: true })}
                     <div class="mpd-payments-overview-grid">
-                        ${metricCard('Active', m.active, 'Active or trialing')}
+                        ${metricCard('Active', m.active, 'Active or trialing (canister)')}
                         ${metricCard('Past due', m.pastDue, 'Needs billing attention')}
                         ${metricCard('Exempt', m.exempt, 'Manual complimentary')}
                         ${metricCard('No subscription', m.none, 'No subscription')}
@@ -1262,22 +1282,27 @@ export async function initFinance(mainEl) {
 
     const renderUsersRevenueStat = () => {
         if (!usersRevenueStat) return;
-        usersRevenueStat.innerHTML = formatMembershipRevenueStatHtml(membershipRevenue, escapeHtml);
+        rebuildMembershipRevenueModel();
+        usersRevenueStat.innerHTML = formatMembershipRevenueDashboardHtml(
+            membershipRevenueModel,
+            escapeHtml,
+        );
     };
 
     const renderUsersSummary = () => {
         if (!usersSummary) return;
         const m = countMembershipMetrics(allAccounts);
+        const paying = membershipRevenueModel?.payingMembers ?? m.active;
         usersSummary.innerHTML = `
             <section class="member-profile-dashboard__card">
                 <div class="mpd-payments-section-head">
                     <h3>Membership summary</h3>
-                    <span class="studio-muted">${m.total} accounts on canister</span>
+                    <span class="studio-muted">${m.total} accounts · ${paying} paying (MRR universe)</span>
                 </div>
                 <div class="mpd-payments-overview-grid">
-                    ${metricCard('Active', m.active, 'Active or trialing')}
+                    ${metricCard('Active', m.active, 'Active or trialing (same as MRR paying)')}
                     ${metricCard('Past due', m.pastDue, 'Needs billing attention')}
-                    ${metricCard('Exempt', m.exempt, 'Manual complimentary')}
+                    ${metricCard('Exempt', m.exempt, 'Manual complimentary — excluded from MRR')}
                     ${metricCard('No subscription', m.none, 'No subscription')}
                 </div>
             </section>
@@ -1300,7 +1325,7 @@ export async function initFinance(mainEl) {
         });
 
         if (!rows.length) {
-            usersTbody.innerHTML = `<tr><td colspan="7">${allAccounts.length ? 'No accounts match filters.' : 'No accounts on this canister yet.'}</td></tr>`;
+            usersTbody.innerHTML = `<tr><td colspan="8">${allAccounts.length ? 'No accounts match filters.' : 'No accounts on this canister yet.'}</td></tr>`;
             return;
         }
 
@@ -1326,11 +1351,17 @@ export async function initFinance(mainEl) {
                     providerCell = 'Stripe';
                 }
                 const membershipLabel = studioMembershipCellLabel(r);
+                const tierRaw = studioMembershipTierShortLabel(
+                    String(r.membershipTier || r.tier || ''),
+                );
+                const typeLabel =
+                    tierRaw === 'Annual' ? 'Annually' : tierRaw || '—';
                 return `<tr>
                     <td>${studioMembershipBadgeHtml(r, escapeHtml)}</td>
                     <td>${escapeHtml(name)}</td>
                     <td>${escapeHtml(email)}</td>
                     <td>${escapeHtml(membershipLabel)}</td>
+                    <td>${escapeHtml(typeLabel)}</td>
                     <td><span class="studio-muted" title="${escapeHtml(r.stripeCurrentPeriodEnd || r.paypalCurrentPeriodEnd || '')}">${escapeHtml(renews)}</span></td>
                     <td>${providerCell}</td>
                     <td><span class="studio-identity-short" title="${escapeHtml(r.principal)}">${escapeHtml(shortPrincipalDisplay(r.principal))}</span></td>
@@ -3143,10 +3174,11 @@ export async function initFinance(mainEl) {
             }
             allAccounts = await getAccountsForStudio();
             try {
-                membershipRevenue = await fetchMembershipRevenueSummary();
+                membershipRevenueStripe = await fetchMembershipRevenueSummary();
             } catch {
-                membershipRevenue = { ok: false };
+                membershipRevenueStripe = { ok: false };
             }
+            rebuildMembershipRevenueModel();
             renderUsersRevenueStat();
             renderUsersSummary();
             renderUsersTable();
@@ -3245,22 +3277,29 @@ export async function initFinance(mainEl) {
                 }),
             );
             try {
-                membershipRevenue = await fetchMembershipRevenueSummary();
-                if (!membershipRevenue.ok) {
+                membershipRevenueStripe = await fetchMembershipRevenueSummary();
+                if (
+                    membershipRevenueStripe &&
+                    typeof membershipRevenueStripe === 'object' &&
+                    /** @type {{ ok?: unknown }} */ (membershipRevenueStripe).ok !== true
+                ) {
                     const reason =
-                        typeof membershipRevenue.reason === 'string'
-                            ? membershipRevenue.reason
-                            : typeof membershipRevenue.error === 'string'
-                              ? membershipRevenue.error
-                              : 'Membership revenue unavailable';
-                    loadWarnings.push(reason);
+                        typeof /** @type {{ reason?: unknown }} */ (membershipRevenueStripe).reason ===
+                        'string'
+                            ? String(/** @type {{ reason: string }} */ (membershipRevenueStripe).reason)
+                            : typeof /** @type {{ error?: unknown }} */ (membershipRevenueStripe)
+                                    .error === 'string'
+                              ? String(/** @type {{ error: string }} */ (membershipRevenueStripe).error)
+                              : '';
+                    if (reason) {
+                        loadWarnings.push(`Stripe MRR supplement: ${reason}`);
+                    }
                 }
             } catch (revenueErr) {
-                membershipRevenue = { ok: false };
-                loadWarnings.push(
-                    revenueErr instanceof Error ? revenueErr.message : String(revenueErr),
-                );
+                membershipRevenueStripe = { ok: false };
+                /* Canister-normalized MRR still works without Stripe summary */
             }
+            rebuildMembershipRevenueModel();
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             allAccounts = [];

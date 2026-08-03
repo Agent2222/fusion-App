@@ -62,15 +62,23 @@ export const idlFactory = ({ IDL }) => {
             ['query'],
         ),
         integrationRecordStripeSubscription: IDL.Func(
-            [IDL.Principal, IDL.Opt(IDL.Text), IDL.Opt(IDL.Text), IDL.Opt(IDL.Text), IDL.Opt(IDL.Text)],
+            [
+                IDL.Principal,
+                IDL.Opt(IDL.Text),
+                IDL.Opt(IDL.Text),
+                IDL.Opt(IDL.Text),
+                IDL.Opt(IDL.Text),
+                IDL.Opt(IDL.Text),
+            ],
             [],
             [],
         ),
         integrationRecordPayPalSubscription: IDL.Func(
-            [IDL.Principal, IDL.Opt(IDL.Text), IDL.Opt(IDL.Text), IDL.Opt(IDL.Text)],
+            [IDL.Principal, IDL.Opt(IDL.Text), IDL.Opt(IDL.Text), IDL.Opt(IDL.Text), IDL.Opt(IDL.Text)],
             [],
             [],
         ),
+        integrationSetMembershipTier: IDL.Func([IDL.Principal, IDL.Text], [], []),
         integrationGetProgram: IDL.Func(
             [IDL.Text],
             [IDL.Opt(ProgramRecord)],

@@ -58,6 +58,8 @@ persistent actor {
   stable var artistFilterCohortYearsStable : [(Text, [Nat])] = [];
 
   stable var programsStable : [(Text, Types.ProgramRecord)] = [];
+  /// Program Draw / Award config keyed by program id (sidecar — do not fold into ProgramRecord).
+  stable var programDrawConfigStable : [(Text, Types.ProgramDrawConfig)] = [];
   stable var journalsStable : [(Text, Types.JournalRecord)] = [];
   /// `/journal` row list (4 fields) — stable name matches pre–sortOrder mainnet; `postupgrade` copies into `journalLayoutRows` with sortOrder/featured.
   stable var journalLayoutStable : [Types.JournalLayoutRowV4] = [];
@@ -87,10 +89,26 @@ persistent actor {
 
   /// Membership billing tier: monthly | quarterly | annual | bimonthly (legacy).
   stable var membershipTierStable : [(Principal, Text)] = [];
-  /// Stackable quarterly application credits (unused roll over).
+  /// Provider plan/price id (PayPal `P-…` or Stripe `price_…`) captured on subscribe/sync.
+  stable var membershipPlanIdStable : [(Principal, Text)] = [];
+  /// Stackable application credits (unused roll over). Used for quarterly + annual grants.
   stable var quarterlyAppCreditBalanceStable : [(Principal, Nat)] = [];
-  /// Last accrued calendar quarter key (`YYYY-Qn`) per principal.
+  /// Last accrued calendar quarter key (`YYYY-Qn`) per principal (quarterly tier).
   stable var quarterlyAppCreditLastAccruedStable : [(Principal, Text)] = [];
+  /// Last annual app-credit grant period key (`YYYY`) per principal.
+  stable var annualAppCreditLastGrantedStable : [(Principal, Text)] = [];
+  /// Program Award entry balances (separate from application credits).
+  stable var awardEntryBalanceStable : [(Principal, Nat)] = [];
+  /// Last award-entry grant key: `YYYY-Qn` (quarterly) or `A-YYYY` (annual).
+  stable var awardEntryLastGrantedStable : [(Principal, Text)] = [];
+  /// Composite `principalText|programId` → path: "application" | "award".
+  stable var programPathStable : [(Text, Text)] = [];
+  /// Program Award entries keyed by `principalText|programId`.
+  stable var programAwardEntriesStable : [(Text, Types.ProgramAwardEntry)] = [];
+  /// Principal → award win period key (`YYYY`) — one win per membership year.
+  stable var awardWinPeriodStable : [(Principal, Text)] = [];
+  /// Recent credit ledger (app + award); capped on append.
+  stable var creditLedgerStable : [Types.CreditLedgerEntry] = [];
 
   /// Join invite codes (8-digit) — admin-generated; deactivated after first successful redemption.
   stable var joinInvitesStable : [(Text, Types.JoinInviteRecord)] = [];
@@ -272,6 +290,9 @@ persistent actor {
   transient var programsById : _HashMap.HashMap<Text, Types.ProgramRecord> =
     _HashMap.HashMap<Text, Types.ProgramRecord>(0, Text.equal, Text.hash);
 
+  transient var programDrawConfigById : _HashMap.HashMap<Text, Types.ProgramDrawConfig> =
+    _HashMap.HashMap<Text, Types.ProgramDrawConfig>(0, Text.equal, Text.hash);
+
   transient var journalsById : _HashMap.HashMap<Text, Types.JournalRecord> =
     _HashMap.HashMap<Text, Types.JournalRecord>(0, Text.equal, Text.hash);
 
@@ -323,11 +344,34 @@ persistent actor {
   transient var membershipTierByPrincipal : _HashMap.HashMap<Principal, Text> =
     _HashMap.HashMap<Principal, Text>(0, Principal.equal, Principal.hash);
 
+  transient var membershipPlanIdByPrincipal : _HashMap.HashMap<Principal, Text> =
+    _HashMap.HashMap<Principal, Text>(0, Principal.equal, Principal.hash);
+
   transient var quarterlyAppCreditBalanceByPrincipal : _HashMap.HashMap<Principal, Nat> =
     _HashMap.HashMap<Principal, Nat>(0, Principal.equal, Principal.hash);
 
   transient var quarterlyAppCreditLastAccruedByPrincipal : _HashMap.HashMap<Principal, Text> =
     _HashMap.HashMap<Principal, Text>(0, Principal.equal, Principal.hash);
+
+  transient var annualAppCreditLastGrantedByPrincipal : _HashMap.HashMap<Principal, Text> =
+    _HashMap.HashMap<Principal, Text>(0, Principal.equal, Principal.hash);
+
+  transient var awardEntryBalanceByPrincipal : _HashMap.HashMap<Principal, Nat> =
+    _HashMap.HashMap<Principal, Nat>(0, Principal.equal, Principal.hash);
+
+  transient var awardEntryLastGrantedByPrincipal : _HashMap.HashMap<Principal, Text> =
+    _HashMap.HashMap<Principal, Text>(0, Principal.equal, Principal.hash);
+
+  transient var programPathByKey : _HashMap.HashMap<Text, Text> =
+    _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
+
+  transient var programAwardEntriesById : _HashMap.HashMap<Text, Types.ProgramAwardEntry> =
+    _HashMap.HashMap<Text, Types.ProgramAwardEntry>(0, Text.equal, Text.hash);
+
+  transient var awardWinPeriodByPrincipal : _HashMap.HashMap<Principal, Text> =
+    _HashMap.HashMap<Principal, Text>(0, Principal.equal, Principal.hash);
+
+  transient var creditLedgerBuf : Buffer.Buffer<Types.CreditLedgerEntry> = Buffer.Buffer<Types.CreditLedgerEntry>(0);
 
   transient var siteSettingsByKey : _HashMap.HashMap<Text, Text> =
     _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
@@ -520,11 +564,35 @@ persistent actor {
   for (entry in membershipTierStable.vals()) {
     membershipTierByPrincipal.put(entry.0, entry.1);
   };
+  for (entry in membershipPlanIdStable.vals()) {
+    membershipPlanIdByPrincipal.put(entry.0, entry.1);
+  };
   for (entry in quarterlyAppCreditBalanceStable.vals()) {
     quarterlyAppCreditBalanceByPrincipal.put(entry.0, entry.1);
   };
   for (entry in quarterlyAppCreditLastAccruedStable.vals()) {
     quarterlyAppCreditLastAccruedByPrincipal.put(entry.0, entry.1);
+  };
+  for (entry in annualAppCreditLastGrantedStable.vals()) {
+    annualAppCreditLastGrantedByPrincipal.put(entry.0, entry.1);
+  };
+  for (entry in awardEntryBalanceStable.vals()) {
+    awardEntryBalanceByPrincipal.put(entry.0, entry.1);
+  };
+  for (entry in awardEntryLastGrantedStable.vals()) {
+    awardEntryLastGrantedByPrincipal.put(entry.0, entry.1);
+  };
+  for (entry in programPathStable.vals()) {
+    programPathByKey.put(entry.0, entry.1);
+  };
+  for (entry in programAwardEntriesStable.vals()) {
+    programAwardEntriesById.put(entry.0, entry.1);
+  };
+  for (entry in awardWinPeriodStable.vals()) {
+    awardWinPeriodByPrincipal.put(entry.0, entry.1);
+  };
+  for (e in creditLedgerStable.vals()) {
+    creditLedgerBuf.add(e);
   };
 
   for (entry in artistsStable.vals()) {
@@ -552,6 +620,9 @@ persistent actor {
 
   for (entry in programsStable.vals()) {
     programsById.put(entry.0, entry.1);
+  };
+  for (entry in programDrawConfigStable.vals()) {
+    programDrawConfigById.put(entry.0, entry.1);
   };
   for (entry in journalsStable.vals()) {
     journalsById.put(entry.0, entry.1);
@@ -1341,6 +1412,20 @@ persistent actor {
     };
   };
 
+  private func putMembershipPlanIdForPrincipal(p : Principal, t : ?Text) {
+    switch (t) {
+      case null { ignore membershipPlanIdByPrincipal.remove(p) };
+      case (?raw) {
+        let s = Text.trim(raw, #char ' ');
+        if (s.size() == 0) {
+          ignore membershipPlanIdByPrincipal.remove(p);
+        } else {
+          membershipPlanIdByPrincipal.put(p, s);
+        };
+      };
+    };
+  };
+
   private func putUserAccountFull(p : Principal, u : Types.UserAccount) {
     let core : Types.UserAccountCore = {
       role = u.role;
@@ -1726,6 +1811,7 @@ persistent actor {
     membershipStripePeriodEndStable := _Iter.toArray(membershipStripePeriodEndByPrincipal.entries());
     artistsStable := _Iter.toArray(artistsById.entries());
     programsStable := _Iter.toArray(programsById.entries());
+    programDrawConfigStable := _Iter.toArray(programDrawConfigById.entries());
     journalsStable := _Iter.toArray(journalsById.entries());
     editionsStable := _Iter.toArray(editionsById.entries());
     contentPagesStable := _Iter.toArray(contentBySlug.entries());
@@ -1741,8 +1827,16 @@ persistent actor {
     programTeamPaidEntriesStable := _Iter.toArray(programTeamPaidEntriesById.entries());
     programTeamPaidFundedByStable := _Iter.toArray(programTeamPaidFundedByById.entries());
     membershipTierStable := _Iter.toArray(membershipTierByPrincipal.entries());
+    membershipPlanIdStable := _Iter.toArray(membershipPlanIdByPrincipal.entries());
     quarterlyAppCreditBalanceStable := _Iter.toArray(quarterlyAppCreditBalanceByPrincipal.entries());
     quarterlyAppCreditLastAccruedStable := _Iter.toArray(quarterlyAppCreditLastAccruedByPrincipal.entries());
+    annualAppCreditLastGrantedStable := _Iter.toArray(annualAppCreditLastGrantedByPrincipal.entries());
+    awardEntryBalanceStable := _Iter.toArray(awardEntryBalanceByPrincipal.entries());
+    awardEntryLastGrantedStable := _Iter.toArray(awardEntryLastGrantedByPrincipal.entries());
+    programPathStable := _Iter.toArray(programPathByKey.entries());
+    programAwardEntriesStable := _Iter.toArray(programAwardEntriesById.entries());
+    awardWinPeriodStable := _Iter.toArray(awardWinPeriodByPrincipal.entries());
+    creditLedgerStable := Buffer.toArray(creditLedgerBuf);
     programPaymentLedgerStable := [];
     programPaymentPlansStableV2 := _Iter.toArray(programPaymentPlansById.entries());
     programPaymentPlansStable := [];
@@ -1972,6 +2066,12 @@ persistent actor {
     };
     programsStable := [];
 
+    programDrawConfigById := _HashMap.HashMap<Text, Types.ProgramDrawConfig>(0, Text.equal, Text.hash);
+    for (entry in programDrawConfigStable.vals()) {
+      programDrawConfigById.put(entry.0, entry.1);
+    };
+    programDrawConfigStable := [];
+
     journalsById := _HashMap.HashMap<Text, Types.JournalRecord>(0, Text.equal, Text.hash);
     for (entry in journalsStable.vals()) {
       journalsById.put(entry.0, entry.1);
@@ -2094,6 +2194,16 @@ persistent actor {
     };
     membershipTierStable := [];
 
+    membershipPlanIdByPrincipal := _HashMap.HashMap<Principal, Text>(
+      membershipPlanIdStable.size(),
+      Principal.equal,
+      Principal.hash,
+    );
+    for (entry in membershipPlanIdStable.vals()) {
+      membershipPlanIdByPrincipal.put(entry.0, entry.1);
+    };
+    membershipPlanIdStable := [];
+
     quarterlyAppCreditBalanceByPrincipal := _HashMap.HashMap<Principal, Nat>(
       quarterlyAppCreditBalanceStable.size(),
       Principal.equal,
@@ -2113,6 +2223,63 @@ persistent actor {
       quarterlyAppCreditLastAccruedByPrincipal.put(entry.0, entry.1);
     };
     quarterlyAppCreditLastAccruedStable := [];
+
+    annualAppCreditLastGrantedByPrincipal := _HashMap.HashMap<Principal, Text>(
+      annualAppCreditLastGrantedStable.size(),
+      Principal.equal,
+      Principal.hash,
+    );
+    for (entry in annualAppCreditLastGrantedStable.vals()) {
+      annualAppCreditLastGrantedByPrincipal.put(entry.0, entry.1);
+    };
+    annualAppCreditLastGrantedStable := [];
+
+    awardEntryBalanceByPrincipal := _HashMap.HashMap<Principal, Nat>(
+      awardEntryBalanceStable.size(),
+      Principal.equal,
+      Principal.hash,
+    );
+    for (entry in awardEntryBalanceStable.vals()) {
+      awardEntryBalanceByPrincipal.put(entry.0, entry.1);
+    };
+    awardEntryBalanceStable := [];
+
+    awardEntryLastGrantedByPrincipal := _HashMap.HashMap<Principal, Text>(
+      awardEntryLastGrantedStable.size(),
+      Principal.equal,
+      Principal.hash,
+    );
+    for (entry in awardEntryLastGrantedStable.vals()) {
+      awardEntryLastGrantedByPrincipal.put(entry.0, entry.1);
+    };
+    awardEntryLastGrantedStable := [];
+
+    programPathByKey := _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
+    for (entry in programPathStable.vals()) {
+      programPathByKey.put(entry.0, entry.1);
+    };
+    programPathStable := [];
+
+    programAwardEntriesById := _HashMap.HashMap<Text, Types.ProgramAwardEntry>(0, Text.equal, Text.hash);
+    for (entry in programAwardEntriesStable.vals()) {
+      programAwardEntriesById.put(entry.0, entry.1);
+    };
+    programAwardEntriesStable := [];
+
+    awardWinPeriodByPrincipal := _HashMap.HashMap<Principal, Text>(
+      awardWinPeriodStable.size(),
+      Principal.equal,
+      Principal.hash,
+    );
+    for (entry in awardWinPeriodStable.vals()) {
+      awardWinPeriodByPrincipal.put(entry.0, entry.1);
+    };
+    awardWinPeriodStable := [];
+
+    creditLedgerBuf := Buffer.Buffer<Types.CreditLedgerEntry>(creditLedgerStable.size());
+    for (e in creditLedgerStable.vals()) {
+      creditLedgerBuf.add(e);
+    };
 
     programPaymentPlansById := _HashMap.HashMap<Text, Types.ProgramPaymentPlan>(0, Text.equal, Text.hash);
     reloadProgramPaymentPlansFromStables();
@@ -2313,6 +2480,11 @@ persistent actor {
       programsById.put(entry.0, entry.1);
     };
 
+    programDrawConfigById := _HashMap.HashMap<Text, Types.ProgramDrawConfig>(0, Text.equal, Text.hash);
+    for (entry in programDrawConfigStable.vals()) {
+      programDrawConfigById.put(entry.0, entry.1);
+    };
+
     journalsById := _HashMap.HashMap<Text, Types.JournalRecord>(0, Text.equal, Text.hash);
     for (entry in journalsStable.vals()) {
       journalsById.put(entry.0, entry.1);
@@ -2440,6 +2612,7 @@ persistent actor {
       artistAudioApprovedIdsStable = ?approvedAudioIdsSorted();
       artistsStable = _Iter.toArray(artistsById.entries());
       programsStable = _Iter.toArray(programsById.entries());
+      programDrawConfigStable = ?(_Iter.toArray(programDrawConfigById.entries()));
       journalsStable = _Iter.toArray(journalsById.entries());
       editionsStable = _Iter.toArray(editionsById.entries());
       contentPagesStable = _Iter.toArray(contentBySlug.entries());
@@ -2504,6 +2677,10 @@ persistent actor {
     };
     artistsStable := snapshot.artistsStable;
     programsStable := snapshot.programsStable;
+    programDrawConfigStable := switch (snapshot.programDrawConfigStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
     journalsStable := snapshot.journalsStable;
     editionsStable := snapshot.editionsStable;
     contentPagesStable := snapshot.contentPagesStable;
@@ -2653,6 +2830,80 @@ persistent actor {
     Nat.toText(year) # "-Q" # Nat.toText(q)
   };
 
+  private let CREDIT_LEDGER_MAX : Nat = 500;
+  private let ANNUAL_APP_CREDITS_PER_YEAR : Nat = 4;
+  private let ANNUAL_AWARD_ENTRIES_PER_YEAR : Nat = 4;
+
+  private func appCreditBalanceOf(p : Principal) : Nat {
+    switch (quarterlyAppCreditBalanceByPrincipal.get(p)) {
+      case (?n) { n };
+      case null { 0 };
+    }
+  };
+
+  private func awardEntryBalanceOf(p : Principal) : Nat {
+    switch (awardEntryBalanceByPrincipal.get(p)) {
+      case (?n) { n };
+      case null { 0 };
+    }
+  };
+
+  private func pathKey(p : Principal, programId : Text) : Text {
+    Principal.toText(p) # "|" # programId
+  };
+
+  private func appendCreditLedger(
+    principalText : Text,
+    kind : Text,
+    amount : Nat,
+    direction : Text,
+    note : Text,
+  ) {
+    let entry : Types.CreditLedgerEntry = {
+      id = principalText # "|" # kind # "|" # nowText();
+      principalText = principalText;
+      kind = kind;
+      amount = amount;
+      direction = direction;
+      note = note;
+      createdAt = nowText();
+    };
+    creditLedgerBuf.add(entry);
+    if (creditLedgerBuf.size() > CREDIT_LEDGER_MAX) {
+      let arr = Buffer.toArray(creditLedgerBuf);
+      let start = arr.size() - CREDIT_LEDGER_MAX;
+      creditLedgerBuf := Buffer.Buffer<Types.CreditLedgerEntry>(CREDIT_LEDGER_MAX);
+      var i = start;
+      while (i < arr.size()) {
+        creditLedgerBuf.add(arr[i]);
+        i += 1;
+      };
+    };
+  };
+
+  /// Complimentary / exempt members always show at least one application credit.
+  /// Does not grant Program Award entries (purchase path remains available).
+  private func ensureExemptAppCredit(p : Principal) {
+    switch (membershipAccessForPrincipal(p)) {
+      case (#exempt) {
+        let bal = appCreditBalanceOf(p);
+        if (bal < 1) {
+          quarterlyAppCreditBalanceByPrincipal.put(p, 1);
+          appendCreditLedger(Principal.toText(p), "app_grant", 1, "credit", "exempt_floor");
+        };
+      };
+      case _ {};
+    };
+  };
+
+  private func yearKeyFromQuarterKey(quarterKey : Text) : Text {
+    let k = Text.trim(quarterKey, #char ' ');
+    let chars = Text.toArray(k);
+    if (chars.size() >= 4) {
+      Char.toText(chars[0]) # Char.toText(chars[1]) # Char.toText(chars[2]) # Char.toText(chars[3])
+    } else { k }
+  };
+
   /// Accrue stackable quarterly application credits up through `currentQuarterKey`.
   private func accrueQuarterlyAppCredits(p : Principal, currentQuarterKey : Text) {
     let tier = membershipTierOf(p);
@@ -2666,10 +2917,7 @@ persistent actor {
       case null { return };
       case (?i) { i };
     };
-    let bal0 = switch (quarterlyAppCreditBalanceByPrincipal.get(p)) {
-      case (?n) { n };
-      case null { 0 };
-    };
+    let bal0 = appCreditBalanceOf(p);
     let lastKey = switch (quarterlyAppCreditLastAccruedByPrincipal.get(p)) {
       case (?k) { k };
       case null { "" };
@@ -2677,12 +2925,14 @@ persistent actor {
     if (lastKey.size() == 0) {
       quarterlyAppCreditBalanceByPrincipal.put(p, bal0 + 1);
       quarterlyAppCreditLastAccruedByPrincipal.put(p, curKey);
+      appendCreditLedger(Principal.toText(p), "app_grant", 1, "credit", "quarterly_accrual");
       return;
     };
     let lastIdx = switch (quarterKeyToIndex(lastKey)) {
       case null {
         quarterlyAppCreditBalanceByPrincipal.put(p, bal0 + 1);
         quarterlyAppCreditLastAccruedByPrincipal.put(p, curKey);
+        appendCreditLedger(Principal.toText(p), "app_grant", 1, "credit", "quarterly_accrual");
         return;
       };
       case (?i) { i };
@@ -2692,42 +2942,106 @@ persistent actor {
     if (gap > 40) { gap := 40 };
     quarterlyAppCreditBalanceByPrincipal.put(p, bal0 + gap);
     quarterlyAppCreditLastAccruedByPrincipal.put(p, curKey);
+    appendCreditLedger(Principal.toText(p), "app_grant", gap, "credit", "quarterly_accrual");
   };
 
-  /// TEMP: waive per-application fees for all active members until the credit system ships.
-  /// Guests still pay APP_FEE_GUEST_CENTS. Set false when monthly/quarterly credits are live.
-  private let TEMP_WAIVE_MEMBER_APPLICATION_FEES : Bool = true;
+  /// Grant 4 annual application credits once per calendar year key (`YYYY`).
+  private func accrueAnnualAppCredits(p : Principal, yearKey : Text) {
+    let tier = membershipTierOf(p);
+    if (tier != "annual") { return };
+    switch (membershipAccessForPrincipal(p)) {
+      case (#ok) {};
+      case _ { return };
+    };
+    let yk = Text.trim(yearKey, #char ' ');
+    if (yk.size() != 4) { return };
+    let last = switch (annualAppCreditLastGrantedByPrincipal.get(p)) {
+      case (?k) { k };
+      case null { "" };
+    };
+    if (last == yk) { return };
+    let bal0 = appCreditBalanceOf(p);
+    quarterlyAppCreditBalanceByPrincipal.put(p, bal0 + ANNUAL_APP_CREDITS_PER_YEAR);
+    annualAppCreditLastGrantedByPrincipal.put(p, yk);
+    appendCreditLedger(Principal.toText(p), "app_grant", ANNUAL_APP_CREDITS_PER_YEAR, "credit", "annual_grant");
+  };
+
+  private func accrueAwardEntries(p : Principal, currentQuarterKey : Text, yearKey : Text) {
+    switch (membershipAccessForPrincipal(p)) {
+      case (#ok) {};
+      case _ { return };
+    };
+    let tier = membershipTierOf(p);
+    let last = switch (awardEntryLastGrantedByPrincipal.get(p)) {
+      case (?k) { k };
+      case null { "" };
+    };
+    let bal0 = awardEntryBalanceOf(p);
+    if (tier == "quarterly") {
+      let curKey = Text.trim(currentQuarterKey, #char ' ');
+      let curIdx = switch (quarterKeyToIndex(curKey)) {
+        case null { return };
+        case (?i) { i };
+      };
+      if (last == curKey) { return };
+      let grant = switch (quarterKeyToIndex(last)) {
+        case null { 1 };
+        case (?li) {
+          if (li >= curIdx) { 0 } else {
+            var gap = curIdx - li;
+            if (gap > 40) { gap := 40 };
+            gap
+          }
+        };
+      };
+      if (grant == 0) { return };
+      awardEntryBalanceByPrincipal.put(p, bal0 + grant);
+      awardEntryLastGrantedByPrincipal.put(p, curKey);
+      appendCreditLedger(Principal.toText(p), "award_grant", grant, "credit", "quarterly_award");
+    } else if (tier == "annual") {
+      let yk = Text.trim(yearKey, #char ' ');
+      if (yk.size() != 4) { return };
+      let grantKey = "A-" # yk;
+      if (last == grantKey) { return };
+      awardEntryBalanceByPrincipal.put(p, bal0 + ANNUAL_AWARD_ENTRIES_PER_YEAR);
+      awardEntryLastGrantedByPrincipal.put(p, grantKey);
+      appendCreditLedger(Principal.toText(p), "award_grant", ANNUAL_AWARD_ENTRIES_PER_YEAR, "credit", "annual_award");
+    };
+  };
+
+  private func accrueAllCredits(p : Principal, currentQuarterKey : Text) {
+    let yearKey = yearKeyFromQuarterKey(currentQuarterKey);
+    accrueQuarterlyAppCredits(p, currentQuarterKey);
+    accrueAnnualAppCredits(p, yearKey);
+    accrueAwardEntries(p, currentQuarterKey, yearKey);
+  };
+
+  /// TEMP waive off — live credit / member-fee matrix.
+  private let TEMP_WAIVE_MEMBER_APPLICATION_FEES : Bool = false;
 
   private func applicationFeeDueForPrincipal(p : Principal, currentQuarterKey : Text) : Types.ApplicationFeeDue {
     switch (membershipAccessForPrincipal(p)) {
       case (#exempt) {
+        ensureExemptAppCredit(p);
         {
           dueCents = 0;
           reason = "exempt";
           membershipTier = membershipTierOf(p);
-          appCreditBalance = switch (quarterlyAppCreditBalanceByPrincipal.get(p)) {
-            case (?n) { n };
-            case null { 0 };
-          };
+          appCreditBalance = appCreditBalanceOf(p);
         }
       };
       case (#ok) {
-        accrueQuarterlyAppCredits(p, currentQuarterKey);
+        accrueAllCredits(p, currentQuarterKey);
         let tier = membershipTierOf(p);
-        let bal = switch (quarterlyAppCreditBalanceByPrincipal.get(p)) {
-          case (?n) { n };
-          case null { 0 };
-        };
+        let bal = appCreditBalanceOf(p);
         let t = if (tier.size() > 0) { tier } else { "monthly" };
         if (TEMP_WAIVE_MEMBER_APPLICATION_FEES) {
           { dueCents = 0; reason = "membership_temp"; membershipTier = t; appCreditBalance = bal }
-        } else if (tier == "annual") {
-          { dueCents = 0; reason = "annual"; membershipTier = "annual"; appCreditBalance = bal }
-        } else if (tier == "quarterly") {
+        } else if (tier == "quarterly" or tier == "annual") {
           if (bal >= 1) {
-            { dueCents = 0; reason = "credit"; membershipTier = "quarterly"; appCreditBalance = bal }
+            { dueCents = 0; reason = "credit"; membershipTier = t; appCreditBalance = bal }
           } else {
-            { dueCents = APP_FEE_MEMBER_CENTS; reason = "member_fee"; membershipTier = "quarterly"; appCreditBalance = 0 }
+            { dueCents = APP_FEE_MEMBER_CENTS; reason = "member_fee"; membershipTier = t; appCreditBalance = 0 }
           }
         } else {
           { dueCents = APP_FEE_MEMBER_CENTS; reason = "member_fee"; membershipTier = t; appCreditBalance = bal }
@@ -2765,23 +3079,174 @@ persistent actor {
 
   public shared query (msg) func getQuarterlyAppCreditBalanceForCaller() : async Nat {
     if (Principal.equal(msg.caller, anonPrincipal)) { return 0 };
-    switch (quarterlyAppCreditBalanceByPrincipal.get(msg.caller)) {
-      case (?n) { n };
-      case null { 0 };
+    appCreditBalanceOf(msg.caller)
+  };
+
+  private func nextAccrualHintForTier(tier : Text, lastKey : Text, currentQuarterKey : Text) : Text {
+    if (tier == "quarterly") {
+      switch (quarterKeyToIndex(Text.trim(currentQuarterKey, #char ' '))) {
+        case null { "" };
+        case (?i) { quarterIndexToKey(i + 1) };
+      }
+    } else if (tier == "annual") {
+      let yk = yearKeyFromQuarterKey(currentQuarterKey);
+      switch (Nat.fromText(yk)) {
+        case null { "" };
+        case (?y) { Nat.toText(y + 1) };
+      }
+    } else { "" }
+  };
+
+  /// Accrue then return application credit snapshot for Settings / forms.
+  public shared (msg) func getApplicationCreditsForCaller(currentQuarterKey : Text) : async Types.ApplicationCreditsInfo {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      return { balance = 0; membershipTier = ""; lastAccruedKey = ""; nextAccrualHint = "" };
+    };
+    accrueAllCredits(msg.caller, currentQuarterKey);
+    ensureExemptAppCredit(msg.caller);
+    let tier = membershipTierOf(msg.caller);
+    let last = if (tier == "annual") {
+      switch (annualAppCreditLastGrantedByPrincipal.get(msg.caller)) {
+        case (?k) { k };
+        case null { "" };
+      }
+    } else {
+      switch (quarterlyAppCreditLastAccruedByPrincipal.get(msg.caller)) {
+        case (?k) { k };
+        case null { "" };
+      }
+    };
+    let access = membershipAccessForPrincipal(msg.caller);
+    let nextHint = switch (access) {
+      case (#exempt) { "Included" };
+      case _ { nextAccrualHintForTier(tier, last, currentQuarterKey) };
+    };
+    {
+      balance = appCreditBalanceOf(msg.caller);
+      membershipTier = tier;
+      lastAccruedKey = last;
+      nextAccrualHint = nextHint;
     }
   };
 
-  /// Integration API: set membership billing tier after PayPal sync / revise.
+  public shared (msg) func getAwardCreditsForCaller(currentQuarterKey : Text) : async Types.AwardCreditsInfo {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      return { balance = 0; membershipTier = ""; lastGrantedKey = ""; nextGrantHint = "" };
+    };
+    accrueAllCredits(msg.caller, currentQuarterKey);
+    let tier = membershipTierOf(msg.caller);
+    let last = switch (awardEntryLastGrantedByPrincipal.get(msg.caller)) {
+      case (?k) { k };
+      case null { "" };
+    };
+    {
+      balance = awardEntryBalanceOf(msg.caller);
+      membershipTier = tier;
+      lastGrantedKey = last;
+      nextGrantHint = nextAccrualHintForTier(tier, last, currentQuarterKey);
+    }
+  };
+
+  /// Resolve account principal linked to an artist id (for Studio Credits).
+  public shared query (msg) func adminFindPrincipalForArtist(artistId : Text) : async ?Principal {
+    assertStaffOrAdmin(msg.caller);
+    let aid = Text.trim(artistId, #char ' ');
+    if (aid.size() == 0) { return null };
+    for ((p, core) in accountsByPrincipal.entries()) {
+      switch (core.linkedArtistId) {
+        case (?id) {
+          if (id == aid) { return ?p };
+        };
+        case null {};
+      };
+    };
+    null
+  };
+
+  public shared query (msg) func adminGetApplicationCredits(p : Principal) : async Types.ApplicationCreditsInfo {
+    assertStaffOrAdmin(msg.caller);
+    let tier = membershipTierOf(p);
+    let last = if (tier == "annual") {
+      switch (annualAppCreditLastGrantedByPrincipal.get(p)) {
+        case (?k) { k };
+        case null { "" };
+      }
+    } else {
+      switch (quarterlyAppCreditLastAccruedByPrincipal.get(p)) {
+        case (?k) { k };
+        case null { "" };
+      }
+    };
+    { balance = appCreditBalanceOf(p); membershipTier = tier; lastAccruedKey = last; nextAccrualHint = "" }
+  };
+
+  public shared query (msg) func adminGetAwardCredits(p : Principal) : async Types.AwardCreditsInfo {
+    assertStaffOrAdmin(msg.caller);
+    let tier = membershipTierOf(p);
+    let last = switch (awardEntryLastGrantedByPrincipal.get(p)) {
+      case (?k) { k };
+      case null { "" };
+    };
+    { balance = awardEntryBalanceOf(p); membershipTier = tier; lastGrantedKey = last; nextGrantHint = "" }
+  };
+
+  public shared (msg) func adminAdjustApplicationCredits(p : Principal, creditAmount : Nat, debitAmount : Nat, note : Text) : async Nat {
+    assertStaffOrAdmin(msg.caller);
+    var bal = appCreditBalanceOf(p);
+    if (creditAmount > 0) {
+      bal += creditAmount;
+      appendCreditLedger(Principal.toText(p), "app_admin", creditAmount, "credit", note);
+    };
+    if (debitAmount > 0) {
+      if (debitAmount > bal) { bal := 0 } else { bal -= debitAmount };
+      appendCreditLedger(Principal.toText(p), "app_admin", debitAmount, "debit", note);
+    };
+    quarterlyAppCreditBalanceByPrincipal.put(p, bal);
+    bal
+  };
+
+  public shared (msg) func adminAdjustAwardCredits(p : Principal, creditAmount : Nat, debitAmount : Nat, note : Text) : async Nat {
+    assertStaffOrAdmin(msg.caller);
+    var bal = awardEntryBalanceOf(p);
+    if (creditAmount > 0) {
+      bal += creditAmount;
+      appendCreditLedger(Principal.toText(p), "award_admin", creditAmount, "credit", note);
+    };
+    if (debitAmount > 0) {
+      if (debitAmount > bal) { bal := 0 } else { bal -= debitAmount };
+      appendCreditLedger(Principal.toText(p), "award_admin", debitAmount, "debit", note);
+    };
+    awardEntryBalanceByPrincipal.put(p, bal);
+    bal
+  };
+
+  public shared query (msg) func adminListCreditLedgerForPrincipal(principalText : Text, limit : Nat) : async [Types.CreditLedgerEntry] {
+    assertStaffOrAdmin(msg.caller);
+    let arr = Buffer.toArray(creditLedgerBuf);
+    let buf = Buffer.Buffer<Types.CreditLedgerEntry>(0);
+    var i = arr.size();
+    var n = 0;
+    let maxN = if (limit == 0 or limit > 100) { 50 } else { limit };
+    while (i > 0 and n < maxN) {
+      i -= 1;
+      if (arr[i].principalText == principalText) {
+        buf.add(arr[i]);
+        n += 1;
+      };
+    };
+    Buffer.toArray(buf)
+  };
+
+  /// Integration API: set membership billing tier after PayPal sync / revise; grants included credits.
   public shared (msg) func integrationSetMembershipTier(memberPrincipal : Principal, tier : Text) : async () {
     assertIntegrationCaller(msg.caller);
     let t = normalizeMembershipTierText(tier);
     if (t.size() == 0) { Debug.trap("Invalid membership tier") };
     membershipTierByPrincipal.put(memberPrincipal, t);
-    if (t == "quarterly") {
-      // Grant first credit for current period when first becoming quarterly (key from FE on next fee-due).
-      // If lastAccrued empty and balance 0, leave accrual to applicationFeeDue / explicit call.
-      ignore t;
-    };
+    // Accrual uses FE quarter key on next call; seed annual/quarterly with a best-effort year from now.
+    let approxYear = Nat.toText(1970 + (nowSec() / (365 * 24 * 60 * 60)));
+    let qGuess = approxYear # "-Q1";
+    accrueAllCredits(memberPrincipal, qGuess);
   };
 
   /// Admin-only: set full account for any principal (e.g. promote staff).
@@ -2835,6 +3300,14 @@ persistent actor {
     switch (membershipStripePeriodEndByPrincipal.get(fromP)) {
       case null {};
       case (?end) { membershipStripePeriodEndByPrincipal.put(toP, end) };
+    };
+    switch (membershipTierByPrincipal.get(fromP)) {
+      case null {};
+      case (?tier) { membershipTierByPrincipal.put(toP, tier) };
+    };
+    switch (membershipPlanIdByPrincipal.get(fromP)) {
+      case null {};
+      case (?planId) { membershipPlanIdByPrincipal.put(toP, planId) };
     };
     switch (membershipTrialWindowByPrincipal.get(fromP)) {
       case null {
@@ -3055,6 +3528,7 @@ persistent actor {
     stripeSubscriptionId : ?Text,
     stripeSubscriptionStatus : ?Text,
     stripeCurrentPeriodEnd : ?Text,
+    planOrPriceId : ?Text,
   ) : async () {
     assertIntegrationCaller(msg.caller);
     switch (accountsByPrincipal.get(memberPrincipal)) {
@@ -3091,6 +3565,7 @@ persistent actor {
       case null { };
       case (?pe) { putStripePeriodEndForPrincipal(memberPrincipal, ?pe) };
     };
+    putMembershipPlanIdForPrincipal(memberPrincipal, planOrPriceId);
     let stripeCanceled = switch (m1.stripeSubscriptionStatus) {
       case null { false };
       case (?s) { s == "canceled" or s == "cancelled" };
@@ -3104,6 +3579,7 @@ persistent actor {
     paypalSubscriptionId : ?Text,
     paypalSubscriptionStatus : ?Text,
     paypalCurrentPeriodEnd : ?Text,
+    planOrPriceId : ?Text,
   ) : async () {
     assertIntegrationCaller(msg.caller);
     switch (accountsByPrincipal.get(memberPrincipal)) {
@@ -3137,6 +3613,7 @@ persistent actor {
       case null { };
       case (?pe) { putStripePeriodEndForPrincipal(memberPrincipal, ?pe) };
     };
+    putMembershipPlanIdForPrincipal(memberPrincipal, planOrPriceId);
     let paypalCanceled = switch (m1.paypalSubscriptionStatus) {
       case null { false };
       case (?s) { s == "CANCELLED" or s == "EXPIRED" };
@@ -3227,6 +3704,12 @@ persistent actor {
   public shared query (msg) func adminListMembershipTiers() : async [(Principal, Text)] {
     assertStudioAccountDirectoryVisible(msg.caller);
     _Iter.toArray(membershipTierByPrincipal.entries());
+  };
+
+  /// Admin: provider plan/price id per principal (PayPal `P-…` or Stripe `price_…`).
+  public shared query (msg) func adminListMembershipPlanIds() : async [(Principal, Text)] {
+    assertStudioAccountDirectoryVisible(msg.caller);
+    _Iter.toArray(membershipPlanIdByPrincipal.entries());
   };
 
   /// Admin: create a single-use 8-digit trial invite. Trial starts at redemption and expires after `trialMonths`.
@@ -5674,19 +6157,26 @@ persistent actor {
       emailOutreachJson = "[]";
     };
     applicantsById.put(key, applicant);
-    // Consume one stacked quarterly application credit when available (fee-due path with reason=credit).
-    // Skip while TEMP_WAIVE_MEMBER_APPLICATION_FEES — do not drain credits during the free-submit window.
+    let pk = pathKey(msg.caller, programId);
+    switch (programPathByKey.get(pk)) {
+      case (?path) {
+        if (path == "award") {
+          Debug.trap("Exit Program Award for this program before submitting a formal application");
+        };
+      };
+      case null {};
+    };
+    programPathByKey.put(pk, "application");
+    // Consume one application credit when available (quarterly / annual).
     if (not TEMP_WAIVE_MEMBER_APPLICATION_FEES) {
       switch (membershipAccessForPrincipal(msg.caller)) {
         case (#ok) {
-          if (membershipTierOf(msg.caller) == "quarterly") {
-            switch (quarterlyAppCreditBalanceByPrincipal.get(msg.caller)) {
-              case (?n) {
-                if (n >= 1) {
-                  quarterlyAppCreditBalanceByPrincipal.put(msg.caller, n - 1);
-                };
-              };
-              case null {};
+          let tier = membershipTierOf(msg.caller);
+          if (tier == "quarterly" or tier == "annual") {
+            let n = appCreditBalanceOf(msg.caller);
+            if (n >= 1) {
+              quarterlyAppCreditBalanceByPrincipal.put(msg.caller, n - 1);
+              appendCreditLedger(Principal.toText(msg.caller), "app_consume", 1, "debit", "submit_application");
             };
           };
         };
@@ -6511,8 +7001,240 @@ persistent actor {
     assertAdmin(msg.caller);
     switch (programsById.remove(programId)) {
       case null { false };
-      case (?_) { true };
+      case (?_) {
+        ignore programDrawConfigById.remove(programId);
+        true
+      };
     };
+  };
+
+  /// Program Draw / Award config for a program (defaults applied by Studio when missing).
+  public query func getProgramDrawConfig(programId : Text) : async ?Types.ProgramDrawConfig {
+    programDrawConfigById.get(programId)
+  };
+
+  public shared query (msg) func listProgramDrawConfigs() : async [(Text, Types.ProgramDrawConfig)] {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "programs");
+    _Iter.toArray(programDrawConfigById.entries())
+  };
+
+  public shared (msg) func upsertProgramDrawConfig(cfg : Types.ProgramDrawConfig) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "programs");
+    if (cfg.programId.size() == 0) {
+      Debug.trap("programId required");
+    };
+    switch (programsById.get(cfg.programId)) {
+      case null { Debug.trap("Unknown program id") };
+      case (?_) {};
+    };
+    let totalSlots = if (cfg.totalSlots == 0) { 1 } else { cfg.totalSlots };
+    programDrawConfigById.put(
+      cfg.programId,
+      {
+        programId = cfg.programId;
+        active = cfg.active;
+        totalSlots = totalSlots;
+        updatedAt = cfg.updatedAt;
+      },
+    );
+  };
+
+  public shared query (msg) func getMyProgramPath(programId : Text) : async Text {
+    if (Principal.equal(msg.caller, anonPrincipal)) { return "" };
+    switch (programPathByKey.get(pathKey(msg.caller, programId))) {
+      case (?p) { p };
+      case null { "" };
+    }
+  };
+
+  private func countActiveAwardEntries(programId : Text) : Nat {
+    var n = 0;
+    for ((_, e) in programAwardEntriesById.entries()) {
+      if (e.programId == programId and e.status == "entered") {
+        n += 1;
+      };
+    };
+    n
+  };
+
+  /// Enter Program Award for a program (consumes 1 award entry unless paidEntryReceipt).
+  public shared (msg) func enterProgramAward(
+    programId : Text,
+    paidEntryReceipt : Bool,
+    currentQuarterKey : Text,
+  ) : async Types.ProgramAwardEntry {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      Debug.trap("Anonymous caller");
+    };
+    if (programId.size() == 0) { Debug.trap("programId required") };
+    switch (programsById.get(programId)) {
+      case null { Debug.trap("Unknown program") };
+      case (?_) {};
+    };
+    let cfg = switch (programDrawConfigById.get(programId)) {
+      case null { Debug.trap("Program Award is not configured") };
+      case (?c) { c };
+    };
+    if (not cfg.active) { Debug.trap("Program Award is not active") };
+    let yearKey = yearKeyFromQuarterKey(currentQuarterKey);
+    switch (awardWinPeriodByPrincipal.get(msg.caller)) {
+      case (?w) {
+        if (w == yearKey) {
+          Debug.trap("Already won a Program Award this year");
+        };
+      };
+      case null {};
+    };
+    let pk = pathKey(msg.caller, programId);
+    switch (programPathByKey.get(pk)) {
+      case (?path) {
+        if (path == "application") {
+          Debug.trap("Already applying to this program — leave the application path before entering Program Award");
+        };
+        if (path == "award") {
+          switch (programAwardEntriesById.get(pk)) {
+            case (?existing) {
+              if (existing.status == "entered") { return existing };
+            };
+            case null {};
+          };
+        };
+      };
+      case null {};
+    };
+    if (countActiveAwardEntries(programId) >= cfg.totalSlots) {
+      Debug.trap("Program Award slots are full");
+    };
+    accrueAllCredits(msg.caller, currentQuarterKey);
+    if (not paidEntryReceipt) {
+      let bal = awardEntryBalanceOf(msg.caller);
+      if (bal < 1) { Debug.trap("No Program Award entries available") };
+      awardEntryBalanceByPrincipal.put(msg.caller, bal - 1);
+      appendCreditLedger(Principal.toText(msg.caller), "award_consume", 1, "debit", "enter_award");
+    };
+    let now = nowText();
+    let entry : Types.ProgramAwardEntry = {
+      id = pk;
+      programId = programId;
+      principalText = Principal.toText(msg.caller);
+      status = "entered";
+      enteredAt = now;
+      updatedAt = now;
+      paidEntry = paidEntryReceipt;
+    };
+    programAwardEntriesById.put(pk, entry);
+    programPathByKey.put(pk, "award");
+    entry
+  };
+
+  /// Exit Program Award (does not refund consumed entry). Clears path for formal apply.
+  public shared (msg) func exitProgramAward(programId : Text) : async () {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      Debug.trap("Anonymous caller");
+    };
+    let pk = pathKey(msg.caller, programId);
+    switch (programAwardEntriesById.get(pk)) {
+      case null { Debug.trap("No Program Award entry for this program") };
+      case (?e) {
+        if (e.status != "entered") { Debug.trap("Not currently entered") };
+        programAwardEntriesById.put(
+          pk,
+          {
+            e with
+            status = "exited";
+            updatedAt = nowText();
+          },
+        );
+      };
+    };
+    ignore programPathByKey.remove(pk);
+  };
+
+  public shared query (msg) func listProgramAwardEntries(programId : Text) : async [Types.ProgramAwardEntry] {
+    assertStaffOrAdmin(msg.caller);
+    let buf = Buffer.Buffer<Types.ProgramAwardEntry>(0);
+    for ((_, e) in programAwardEntriesById.entries()) {
+      if (e.programId == programId) {
+        buf.add(e);
+      };
+    };
+    Buffer.toArray(buf)
+  };
+
+  public shared query (msg) func getMyProgramAwardEntry(programId : Text) : async ?Types.ProgramAwardEntry {
+    if (Principal.equal(msg.caller, anonPrincipal)) { return null };
+    programAwardEntriesById.get(pathKey(msg.caller, programId))
+  };
+
+  /// Mark winner for a program; enforces one win per calendar year. Optional gift to another principal.
+  public shared (msg) func adminSelectProgramAwardWinner(
+    programId : Text,
+    winnerPrincipal : Principal,
+    yearKey : Text,
+  ) : async () {
+    assertStaffOrAdmin(msg.caller);
+    let yk = Text.trim(yearKey, #char ' ');
+    if (yk.size() != 4) { Debug.trap("yearKey must be YYYY") };
+    switch (awardWinPeriodByPrincipal.get(winnerPrincipal)) {
+      case (?w) {
+        if (w == yk) { Debug.trap("Winner already has a win this year") };
+      };
+      case null {};
+    };
+    let pk = pathKey(winnerPrincipal, programId);
+    switch (programAwardEntriesById.get(pk)) {
+      case null { Debug.trap("Winner has no award entry for this program") };
+      case (?e) {
+        if (e.status != "entered") { Debug.trap("Winner is not currently entered") };
+        programAwardEntriesById.put(
+          pk,
+          {
+            e with
+            status = "selected";
+            updatedAt = nowText();
+          },
+        );
+      };
+    };
+    awardWinPeriodByPrincipal.put(winnerPrincipal, yk);
+    for ((id, e) in programAwardEntriesById.entries()) {
+      if (e.programId == programId and e.status == "entered" and id != pk) {
+        programAwardEntriesById.put(
+          id,
+          {
+            e with
+            status = "not_selected";
+            updatedAt = nowText();
+          },
+        );
+      };
+    };
+  };
+
+  /// Gift an existing win period from one principal to another (clears donor win flag for that year).
+  public shared (msg) func adminGiftAwardWin(
+    fromPrincipal : Principal,
+    toPrincipal : Principal,
+    yearKey : Text,
+  ) : async () {
+    assertStaffOrAdmin(msg.caller);
+    let yk = Text.trim(yearKey, #char ' ');
+    switch (awardWinPeriodByPrincipal.get(fromPrincipal)) {
+      case null { Debug.trap("Source has no win recorded") };
+      case (?w) {
+        if (w != yk) { Debug.trap("Source win year mismatch") };
+      };
+    };
+    switch (awardWinPeriodByPrincipal.get(toPrincipal)) {
+      case (?w) {
+        if (w == yk) { Debug.trap("Target already has a win this year") };
+      };
+      case null {};
+    };
+    ignore awardWinPeriodByPrincipal.remove(fromPrincipal);
+    awardWinPeriodByPrincipal.put(toPrincipal, yk);
   };
 
   // ===== Journal =====

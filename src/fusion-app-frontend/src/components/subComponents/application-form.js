@@ -667,14 +667,19 @@ class ApplicationFormComponent extends HTMLElement {
         if (memberCreditEl instanceof HTMLElement) {
             const bal = this._memberApplicationFee?.appCreditBalance;
             const tier = String(this._memberApplicationFee?.membershipTier || '').toLowerCase();
+            const reason = String(this._memberApplicationFee?.reason || '');
             if (
                 this._membershipFeeWaived &&
-                tier === 'quarterly' &&
+                reason === 'credit' &&
+                (tier === 'quarterly' || tier === 'annual') &&
                 typeof bal === 'number' &&
-                bal >= 0
+                bal >= 1
             ) {
                 memberCreditEl.removeAttribute('hidden');
                 memberCreditEl.textContent = L.memberQuarterlyCreditNote.replace('{{count}}', String(bal));
+            } else if (this._awardPathBlocked) {
+                memberCreditEl.removeAttribute('hidden');
+                memberCreditEl.textContent = L.awardPathBlocked || '';
             } else {
                 memberCreditEl.setAttribute('hidden', '');
             }
@@ -961,10 +966,14 @@ class ApplicationFormComponent extends HTMLElement {
                 planAnnualTitle: 'Annual membership',
                 planAnnualPriceLine: '$260',
                 planAnnualEvery: 'per year',
-                planAnnualEntitlement: 'Applications included while membership is active',
+                planAnnualEntitlement:
+                    '4 stackable application credits per year; free if balance ≥ 1 else $35',
                 memberFeeOnlyBanner:
-                    'Your membership includes platform access. Pay the {{fee}} application fee below to submit.',
-                memberQuarterlyCreditNote: 'You have {{count}} application credit(s) available this quarter.',
+                    'No application credits left. Pay the {{fee}} member application fee below to submit, or wait for your next credit.',
+                memberQuarterlyCreditNote:
+                    'This submit uses 1 application credit ({{count}} available before submit).',
+                awardPathBlocked:
+                    'You are entered in the Program Award for this program. Exit the award before submitting a formal application.',
                 monthlySubThenFeeHint:
                     'Subscription approved. Click submit to finish your application.',
                 subscriptionThenSubmitHint: 'Subscription approved. Click submit to finish your application.',
@@ -1070,7 +1079,7 @@ class ApplicationFormComponent extends HTMLElement {
                 feeInfoP1:
                     'The application fee covers processing and review of your residency application. You can apply as a guest or join Fusion with a membership for ongoing platform access.',
                 feeInfoP2:
-                    'Members on Monthly pay a $35 application fee per submission. Quarterly members earn one stackable application credit each quarter. Annual members include applications while their membership is active.',
+                    'Members on Monthly pay a $35 application fee per submission. Quarterly members earn one stackable application credit each quarter. Annual members receive 4 stackable application credits per year. Program Award entries are separate and cannot be combined with a formal application for the same program.',
                 feeInfoP3:
                     'After payment completes and your application is sent, manage your membership anytime from your profile dashboard.',
         };
@@ -2426,6 +2435,18 @@ class ApplicationFormComponent extends HTMLElement {
             this._teardownStripePayment();
             return;
         }
+        if (this._awardPathBlocked) {
+            if (pay instanceof HTMLElement) pay.setAttribute('hidden', '');
+            if (updatesWrap instanceof HTMLElement) updatesWrap.setAttribute('hidden', '');
+            if (freeWrap instanceof HTMLElement) freeWrap.setAttribute('hidden', '');
+            if (banner instanceof HTMLElement) {
+                banner.removeAttribute('hidden');
+                banner.textContent = L.awardPathBlocked || '';
+            }
+            if (lead) lead.textContent = L.awardPathBlocked || L.lead2;
+            this._teardownStripePayment();
+            return;
+        }
         if (this._membershipFeeWaived) {
             if (pay instanceof HTMLElement) pay.setAttribute('hidden', '');
             if (updatesWrap instanceof HTMLElement) updatesWrap.setAttribute('hidden', '');
@@ -2460,6 +2481,7 @@ class ApplicationFormComponent extends HTMLElement {
         this._memberFeeOnly = false;
         this._memberApplicationFee = null;
         this._membershipGate = 'unknown';
+        this._awardPathBlocked = false;
         try {
             const snap = await getAuthSnapshot();
             if (!snap.authenticated) {
@@ -2486,15 +2508,25 @@ class ApplicationFormComponent extends HTMLElement {
                 }
                 this._membershipGate = gate;
                 if (gate === 'ok' || gate === 'exempt') {
-                    // Application path (allows needsSubscription skeletons); active members are #ok/#exempt.
                     const ens = await ensureMyLinkedArtistProfileForApplication();
                     if (ens === 'ok' || ens === 'alreadyLinked') {
                         const programId = this.getAttribute('data-program-id') || '';
+                        try {
+                            const { getMyProgramPath } = await import('../../utils/database.js');
+                            const path = await getMyProgramPath(programId);
+                            if (path === 'award') {
+                                this._awardPathBlocked = true;
+                            }
+                        } catch {
+                            /* ignore */
+                        }
                         this._memberApplicationFee = await applicationFeeDueForCaller(programId);
                         const due = Number(this._memberApplicationFee?.dueCents);
                         const reason = String(this._memberApplicationFee?.reason || '');
-                        // Free submit: annual / credit / exempt / TEMP membership_temp waive.
-                        if (due === 0 || reason === 'membership_temp') {
+                        if (this._awardPathBlocked) {
+                            this._membershipFeeWaived = false;
+                            this._memberFeeOnly = false;
+                        } else if (due === 0 || reason === 'membership_temp' || reason === 'credit' || reason === 'exempt') {
                             this._membershipFeeWaived = true;
                             this._memberFeeOnly = false;
                             this._paymentPlan = null;
@@ -2511,6 +2543,7 @@ class ApplicationFormComponent extends HTMLElement {
             this._membershipFeeWaived = false;
             this._memberFeeOnly = false;
             this._memberApplicationFee = null;
+            this._awardPathBlocked = false;
         }
         this._syncApplicationFeeUi();
         await this._prefillFromArtist();

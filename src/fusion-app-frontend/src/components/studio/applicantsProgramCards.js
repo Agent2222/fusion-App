@@ -1,20 +1,46 @@
 /**
  * Studio Applicants — program overview cards (pipeline metrics + Standard/Draw mode).
  */
+import { buildApplicantDrawDetailModel } from '../../utils/applicantsDrawModel.js';
 import { getProgramDisplayNameFromRow } from '../../utils/database.js';
 import { firstNonEmptyString } from '../../utils/localeFallback.js';
+import { formatUsdFromCents } from '../../utils/programPaymentMoney.js';
 import { getApplicantIsTester } from '../../utils/studioPlainForms.js';
 import { escapeHtml } from '../../utils/textPreview.js';
 
 export const APPLICANTS_PROGRAM_SELECT_STORAGE_KEY = 'studio-applicants-selected-program-v1';
 
+export {
+    APPLICANTS_DRAW_ACTIVE_STORAGE_KEY,
+    DRAW_ENTRY_FEE_CENTS,
+    DRAW_SLOT_GOAL_DEFAULT,
+    buildApplicantDrawDetailModel,
+    loadDrawActiveByProgramId,
+    saveDrawActiveByProgramId,
+} from '../../utils/applicantsDrawModel.js';
+
 /**
- * Stub until program-draw applications are wired. Reserved payload key: programDraw.
- * @param {unknown} [_payloadJson]
+ * True when applicant payload marks a Program Award entry (or legacy programDraw flag).
+ * @param {unknown} payloadJson
  * @returns {boolean}
  */
-export function getApplicantIsProgramDraw(_payloadJson) {
-    return false;
+export function getApplicantIsProgramDraw(payloadJson) {
+    try {
+        const raw =
+            typeof payloadJson === 'string'
+                ? JSON.parse(payloadJson)
+                : payloadJson && typeof payloadJson === 'object'
+                  ? payloadJson
+                  : null;
+        if (!raw || typeof raw !== 'object') return false;
+        const o = /** @type {Record<string, unknown>} */ (raw);
+        if (o.programAward === true || o.programDraw === true) return true;
+        if (String(o.path || '').toLowerCase() === 'award') return true;
+        if (String(o.applicationPath || '').toLowerCase() === 'award') return true;
+        return false;
+    } catch {
+        return false;
+    }
 }
 
 /**
@@ -133,7 +159,7 @@ export function applicantProgramCardHtml(item, opts = {}) {
         </button>
         <div class="studio-applicants-view-toggle" role="group" aria-label="Applicant view for ${escapeHtml(item.title)}">
             ${modeBtn('standard', 'Standard')}
-            ${modeBtn('draw', 'Draw')}
+            ${modeBtn('draw', 'Program Award')}
         </div>
     </div>`;
 }
@@ -143,6 +169,78 @@ export function applicantProgramCardHtml(item, opts = {}) {
  * @param {string | null} selectedProgramId
  * @param {Map<string, 'standard' | 'draw'>} viewModeByProgramId
  */
+/**
+ * Markup for Studio Applicants → Program Award detail (Award mode). Active/slots are read-only.
+ * @param {ReturnType<typeof buildApplicantDrawDetailModel>} model
+ */
+export function applicantDrawDetailSectionHtml(model) {
+    const m = model && typeof model === 'object' ? model : buildApplicantDrawDetailModel({});
+    const revenueLabel = formatUsdFromCents(m.revenueCents);
+    const goalLine = `${m.claimedSlots} / ${m.totalSlots} slots claimed · ${m.progressPct}% to goal`;
+    const activeLabel = m.drawActive ? 'Active' : 'Inactive';
+    return `
+      <section
+        class="studio-applicants-draw"
+        id="studio-applicants-draw-detail"
+        data-draw-program-id="${escapeHtml(m.programId)}"
+        aria-labelledby="studio-applicants-draw-heading"
+        hidden
+      >
+        <header class="studio-applicants-draw__header">
+          <div class="studio-applicants-draw__intro">
+            <p class="studio-applicants-draw__eyebrow">Program Award</p>
+            <h3 class="studio-applicants-draw__heading" id="studio-applicants-draw-heading">${escapeHtml(m.programTitle)}</h3>
+            <p class="studio-applicants-draw__lede">
+              Ops view for this cycle. Edit active status and slot totals in Programs → Edit → Program Award.
+              Formal applications and award entries are mutually exclusive for the same program.
+            </p>
+          </div>
+          <div class="studio-applicants-draw__active studio-applicants-draw__active--readonly" id="studio-applicants-draw-active-badge">
+            <span class="studio-applicants-draw__active-copy">
+              <strong>Award ${escapeHtml(activeLabel)}</strong>
+              <small>Configured in Programs editor (read-only here).</small>
+            </span>
+          </div>
+        </header>
+        <div class="studio-applicants-draw__metrics" role="group" aria-label="Program Award slot metrics">
+          <article class="studio-applicants-draw__metric">
+            <span>Available award slots</span>
+            <strong id="studio-applicants-draw-available">${escapeHtml(String(m.availableSlots))}</strong>
+          </article>
+          <article class="studio-applicants-draw__metric">
+            <span>Total award slots</span>
+            <strong id="studio-applicants-draw-total">${escapeHtml(String(m.totalSlots))}</strong>
+          </article>
+          <article class="studio-applicants-draw__metric">
+            <span>Revenue from paid entries</span>
+            <strong id="studio-applicants-draw-revenue">${escapeHtml(revenueLabel)}</strong>
+            <small>$${escapeHtml(String(Math.round(m.entryFeeCents / 100)))} per paid entry</small>
+          </article>
+        </div>
+        <div class="studio-applicants-draw__progress" aria-label="Distance to award slot goal">
+          <div class="studio-applicants-draw__progress-head">
+            <span class="studio-applicants-draw__progress-label">Distance to slot goal</span>
+            <span class="studio-applicants-draw__progress-value" id="studio-applicants-draw-goal-line">${escapeHtml(goalLine)}</span>
+          </div>
+          <div
+            class="studio-applicants-draw__progress-track"
+            role="progressbar"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="${escapeHtml(String(m.progressPct))}"
+            aria-valuetext="${escapeHtml(goalLine)}"
+          >
+            <div
+              class="studio-applicants-draw__progress-bar"
+              id="studio-applicants-draw-progress-bar"
+              style="width:${escapeHtml(String(m.progressPct))}%"
+            ></div>
+          </div>
+        </div>
+      </section>
+    `;
+}
+
 export function applicantProgramCardsRailHtml(items, selectedProgramId, viewModeByProgramId) {
     /** @type {Record<'active' | 'past' | 'upcoming', ReturnType<typeof buildApplicantProgramCardModel>[]>} */
     const buckets = { active: [], past: [], upcoming: [] };

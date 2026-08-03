@@ -6853,6 +6853,56 @@ a.studio-app-payload-link:hover {
   font-variation-settings: var(--am-fv-text, var(--fv-label));
 }
 
+.studio-art-credits-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+
+.studio-art-credits-card {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  background: #fff;
+}
+
+.studio-art-credits-card h4 {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+}
+
+.studio-art-credits-balance {
+  margin: 0 0 0.35rem;
+  font-size: 1.5rem;
+}
+
+.studio-art-credits-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: end;
+  margin-top: 0.65rem;
+}
+
+.studio-art-credits-actions label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.75rem;
+}
+
+.studio-art-credits-actions input {
+  width: 5rem;
+}
+
+.studio-applicants-draw__active--readonly {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  background: rgba(15, 23, 42, 0.03);
+}
+
 .studio-art-credits-placeholder__list {
   list-style: none;
   margin: 0.85rem 0 0;
@@ -7739,7 +7789,14 @@ a.studio-app-payload-link:hover {
     border-top: 1px solid #e8e4e0;
 }
 
-/* —— Applicants: program overview cards —— */
+/* —— Applicants: program overview cards ——
+   Label contrast follows settings profile: ink `--c2` with modest opacity
+   (not washed slate greys). Status badges use `--fv-label-strong`. */
+.studio-applicants-page {
+    --studio-muted: #475569;
+    --studio-muted-faint: #64748b;
+}
+
 .studio-applicants-page .studio-applicants-program-cards-rail {
     display: flex;
     flex-direction: row;
@@ -7762,12 +7819,19 @@ a.studio-app-payload-link:hover {
 
 .studio-applicants-page .studio-applicants-program-cards-divider {
     flex: 0 0 auto;
-    align-self: center;
-    font-size: 0.68rem;
-    letter-spacing: 0.06em;
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--studio-muted, #64748b);
-    padding: 0 0.15rem;
+    font-variation-settings: var(--fv-label-strong);
+    color: var(--c2, #0f172a);
+    opacity: 0.78;
+    padding: 0.5rem 0.25rem;
 }
 
 .studio-applicants-page .studio-applicants-program-cards__empty {
@@ -7799,7 +7863,7 @@ a.studio-app-payload-link:hover {
         0 0 0 1px color-mix(in srgb, #d4a574 35%, transparent);
 }
 
-.studio-applicants-page .studio-applicants-program-card__select {
+.studio-applicants-page button.studio-applicants-program-card__select {
     display: flex;
     flex-direction: column;
     align-items: stretch;
@@ -7808,10 +7872,12 @@ a.studio-app-payload-link:hover {
     margin: 0;
     padding: 0;
     border: 0;
-    background: transparent;
-    color: inherit;
+    /* Defeat global `button { color: white }` so card copy stays ink on cream */
+    background: transparent !important;
+    color: var(--c2, #0f172a) !important;
     cursor: pointer;
     font: inherit;
+    box-shadow: none !important;
 }
 
 .studio-applicants-page .studio-applicants-program-card__select:focus-visible {
@@ -7839,7 +7905,9 @@ a.studio-app-payload-link:hover {
     align-items: center;
     justify-content: center;
     font-size: 0.78rem;
-    color: var(--studio-muted, #64748b);
+    font-variation-settings: var(--fv-label-strong);
+    color: var(--c2, #0f172a);
+    opacity: 0.72;
     letter-spacing: 0.06em;
     text-transform: uppercase;
 }
@@ -7860,7 +7928,7 @@ a.studio-app-payload-link:hover {
 
 .studio-applicants-page .studio-applicants-program-card__title {
     margin: 0;
-    font-size: 0.88rem;
+    font-size: 0.92rem;
     line-height: 1.25;
     font-variation-settings: var(--fv-label-strong);
     color: var(--c2, #0f172a);
@@ -7868,31 +7936,38 @@ a.studio-app-payload-link:hover {
 
 .studio-applicants-page .studio-applicants-program-card__status {
     flex-shrink: 0;
-    font-size: 0.68rem;
+    font-size: 0.7rem;
     line-height: 1.2;
-    padding: 0.2rem 0.45rem;
+    padding: 0.22rem 0.5rem;
     border-radius: 999px;
     border: 1px solid transparent;
     text-transform: uppercase;
     letter-spacing: 0.04em;
+    font-variation-settings: var(--fv-label-strong);
 }
 
-.studio-applicants-page .studio-applicants-program-card__status--active {
-    color: #166534;
-    background: #ecfdf3;
-    border-color: #bbf7d0;
+.studio-applicants-page
+    button.studio-applicants-program-card__select
+    .studio-applicants-program-card__status--active {
+    color: #14532d !important;
+    background: #dcfce7;
+    border-color: #86efac;
 }
 
-.studio-applicants-page .studio-applicants-program-card__status--completed {
-    color: #475569;
-    background: #f1f5f9;
-    border-color: #e2e8f0;
+.studio-applicants-page
+    button.studio-applicants-program-card__select
+    .studio-applicants-program-card__status--completed {
+    color: #1e293b !important;
+    background: #e2e8f0;
+    border-color: #cbd5e1;
 }
 
-.studio-applicants-page .studio-applicants-program-card__status--upcoming {
-    color: #92400e;
-    background: #fffbeb;
-    border-color: #fde68a;
+.studio-applicants-page
+    button.studio-applicants-program-card__select
+    .studio-applicants-program-card__status--upcoming {
+    color: #78350f !important;
+    background: #fde68a;
+    border-color: #fbbf24;
 }
 
 .studio-applicants-page .studio-applicants-program-card__metrics {
@@ -7908,17 +7983,31 @@ a.studio-app-payload-link:hover {
     gap: 0.08rem;
 }
 
-.studio-applicants-page .studio-applicants-program-card__metric span {
-    font-size: 0.68rem;
-    color: var(--studio-muted, #64748b);
+.studio-applicants-page
+    button.studio-applicants-program-card__select
+    .studio-applicants-program-card__metric
+    span {
+    font-size: 0.72rem;
+    font-variation-settings: var(--fv-label-strong);
+    color: var(--c2, #0f172a) !important;
+    opacity: 0.78;
     text-transform: uppercase;
     letter-spacing: 0.04em;
 }
 
-.studio-applicants-page .studio-applicants-program-card__metric strong {
+.studio-applicants-page
+    button.studio-applicants-program-card__select
+    .studio-applicants-program-card__metric
+    strong {
     font-size: 1.05rem;
     font-variation-settings: var(--fv-emphasis);
-    color: var(--c2, #0f172a);
+    color: var(--c2, #0f172a) !important;
+}
+
+.studio-applicants-page
+    button.studio-applicants-program-card__select
+    .studio-applicants-program-card__title {
+    color: var(--c2, #0f172a) !important;
 }
 
 .studio-applicants-page .studio-applicants-view-toggle {
@@ -7927,28 +8016,33 @@ a.studio-app-payload-link:hover {
     gap: 0.25rem;
     margin: 0 0.75rem 0.75rem;
     padding: 0.25rem;
-    border: 1px solid rgba(15, 23, 42, 0.18);
+    border: 1px solid rgba(15, 23, 42, 0.22);
     border-radius: 999px;
-    background: rgba(15, 23, 42, 0.04);
+    background: rgba(15, 23, 42, 0.05);
 }
 
-.studio-applicants-page .studio-applicants-view-toggle__btn {
+.studio-applicants-page button.studio-applicants-view-toggle__btn {
     min-height: 2.1rem;
     padding: 0.4rem 0.65rem;
     border: 0;
     border-radius: 999px;
-    background: transparent;
-    color: var(--c2, #0f172a);
-    font-variation-settings: var(--fv-label);
-    font-size: 0.76rem;
+    background: transparent !important;
+    color: var(--c2, #0f172a) !important;
+    font-variation-settings: var(--fv-label-strong);
+    font-size: 0.78rem;
     line-height: 1.15;
     cursor: pointer;
     transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
 }
 
-.studio-applicants-page .studio-applicants-view-toggle__btn.is-active {
-    background: var(--c2, #0f172a);
-    color: var(--c3, #fff);
+.studio-applicants-page button.studio-applicants-view-toggle__btn:not(.is-active) {
+    opacity: 0.88;
+}
+
+.studio-applicants-page button.studio-applicants-view-toggle__btn.is-active {
+    background: var(--c2, #0f172a) !important;
+    color: var(--c3, #fff) !important;
+    opacity: 1;
     box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
 }
 
@@ -7958,5 +8052,260 @@ a.studio-app-payload-link:hover {
 }
 
 .studio-applicants-page .studio-applicants-view-toggle__btn:hover:not(.is-active) {
-    background: rgba(15, 23, 42, 0.06);
+    background: rgba(15, 23, 42, 0.08);
+    opacity: 1;
+}
+
+/* Applicants filter chips + search — match settings-profile readable ink */
+.studio-applicants-page .studio-data-tabs__tab {
+    color: var(--c2, #0f172a);
+    border-color: color-mix(in srgb, var(--c2, #0f172a) 28%, transparent);
+    font-variation-settings: var(--fv-label-strong);
+    opacity: 0.92;
+}
+
+.studio-applicants-page .studio-data-tabs__tab:hover {
+    opacity: 1;
+    border-color: color-mix(in srgb, var(--c2, #0f172a) 42%, transparent);
+}
+
+.studio-applicants-page .studio-data-tabs__tab.is-active {
+    opacity: 1;
+    color: var(--c2, #0f172a);
+}
+
+.studio-applicants-page .studio-filter-bar__input {
+    color: var(--c2, #0f172a);
+    border-color: color-mix(in srgb, var(--c2, #0f172a) 28%, transparent);
+}
+
+.studio-applicants-page .studio-filter-bar__input::placeholder {
+    color: var(--c2, #0f172a);
+    opacity: 0.55;
+}
+
+/* —— Applicants: Program Draw detail (Draw mode) —— */
+.studio-applicants-page #studio-applicants-draw-detail-host {
+    margin: 0 0 1rem;
+}
+
+.studio-applicants-page #studio-applicants-draw-detail-host[hidden] {
+    display: none;
+}
+
+.studio-applicants-page .studio-applicants-draw {
+    --studio-muted: #475569;
+    margin: 0;
+    padding: clamp(1rem, 2.2vw, 1.35rem);
+    border: 1px solid color-mix(in srgb, var(--c2, #0f172a) 14%, transparent);
+    border-radius: var(--studio-card-radius, 8px);
+    background:
+        linear-gradient(
+            165deg,
+            color-mix(in srgb, #d4a574 12%, var(--studio-card-bg, #fff) 88%) 0%,
+            var(--studio-card-bg, #fff) 42%,
+            var(--studio-card-bg, #fff) 100%
+        );
+    box-shadow: var(--studio-card-shadow, 0 1px 3px rgba(15, 23, 42, 0.08));
+    color: var(--c2, #0f172a);
+}
+
+.studio-applicants-page .studio-applicants-draw[hidden] {
+    display: none;
+}
+
+.studio-applicants-page .studio-applicants-draw__header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem 1.5rem;
+    margin-bottom: 1rem;
+}
+
+.studio-applicants-page .studio-applicants-draw__eyebrow {
+    margin: 0 0 0.25rem;
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-variation-settings: var(--fv-label-strong);
+    color: var(--c2, #0f172a);
+    opacity: 0.72;
+}
+
+.studio-applicants-page .studio-applicants-draw__heading {
+    margin: 0;
+    font-size: clamp(1.05rem, 2vw, 1.28rem);
+    line-height: 1.2;
+    font-variation-settings: var(--fv-title);
+    color: var(--c2, #0f172a);
+}
+
+.studio-applicants-page .studio-applicants-draw__lede {
+    margin: 0.4rem 0 0;
+    max-width: 38rem;
+    font-size: 0.88rem;
+    line-height: 1.45;
+    font-variation-settings: var(--fv-body);
+    color: var(--c2, #0f172a);
+    opacity: 0.82;
+}
+
+.studio-applicants-page .studio-applicants-draw__active {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.65rem;
+    min-width: min(100%, 16.5rem);
+    margin: 0;
+    padding: 0.75rem 0.9rem;
+    border: 1px solid color-mix(in srgb, var(--c2, #0f172a) 16%, transparent);
+    border-radius: var(--studio-card-radius, 8px);
+    background: color-mix(in srgb, var(--studio-card-bg, #fff) 88%, #d4a574 12%);
+    cursor: pointer;
+    transition:
+        border-color 0.15s ease,
+        background 0.15s ease,
+        box-shadow 0.15s ease;
+}
+
+.studio-applicants-page .studio-applicants-draw__active:hover {
+    border-color: color-mix(in srgb, var(--c2, #0f172a) 32%, transparent);
+    background: color-mix(in srgb, var(--studio-card-bg, #fff) 82%, #d4a574 18%);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.studio-applicants-page .studio-applicants-draw__active:has(input:focus-visible) {
+    outline: 2px solid var(--c2, #0f172a);
+    outline-offset: 2px;
+}
+
+.studio-applicants-page .studio-applicants-draw__active input {
+    width: 1.1rem;
+    height: 1.1rem;
+    margin: 0.15rem 0 0;
+    accent-color: var(--c2, #0f172a);
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.studio-applicants-page .studio-applicants-draw__active-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+
+.studio-applicants-page .studio-applicants-draw__active-copy strong {
+    font-size: 0.92rem;
+    font-variation-settings: var(--fv-label-strong);
+    color: var(--c2, #0f172a);
+}
+
+.studio-applicants-page .studio-applicants-draw__active-copy small {
+    font-size: 0.78rem;
+    line-height: 1.35;
+    font-variation-settings: var(--fv-body);
+    color: var(--c2, #0f172a);
+    opacity: 0.78;
+}
+
+.studio-applicants-page .studio-applicants-draw__metrics {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.65rem;
+    margin-bottom: 1rem;
+}
+
+.studio-applicants-page .studio-applicants-draw__metric {
+    margin: 0;
+    padding: 0.85rem 0.95rem;
+    border: 1px solid color-mix(in srgb, var(--c2, #0f172a) 12%, transparent);
+    border-radius: var(--studio-card-radius, 8px);
+    background: var(--studio-card-bg, #fff);
+    display: flex;
+    flex-direction: column;
+    gap: 0.28rem;
+    min-height: 5.25rem;
+}
+
+.studio-applicants-page .studio-applicants-draw__metric span {
+    font-size: 0.72rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    font-variation-settings: var(--fv-label-strong);
+    color: var(--c2, #0f172a);
+    opacity: 0.78;
+}
+
+.studio-applicants-page .studio-applicants-draw__metric strong {
+    font-size: clamp(1.35rem, 2.4vw, 1.7rem);
+    line-height: 1.1;
+    font-variation-settings: var(--fv-emphasis);
+    color: var(--c2, #0f172a);
+}
+
+.studio-applicants-page .studio-applicants-draw__metric small {
+    font-size: 0.72rem;
+    font-variation-settings: var(--fv-body);
+    color: var(--c2, #0f172a);
+    opacity: 0.68;
+}
+
+.studio-applicants-page .studio-applicants-draw__progress {
+    padding: 0.9rem 1rem;
+    border: 1px solid color-mix(in srgb, var(--c2, #0f172a) 12%, transparent);
+    border-radius: var(--studio-card-radius, 8px);
+    background: var(--studio-card-bg, #fff);
+}
+
+.studio-applicants-page .studio-applicants-draw__progress-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.35rem 1rem;
+    margin-bottom: 0.65rem;
+}
+
+.studio-applicants-page .studio-applicants-draw__progress-label {
+    font-size: 0.72rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    font-variation-settings: var(--fv-label-strong);
+    color: var(--c2, #0f172a);
+    opacity: 0.78;
+}
+
+.studio-applicants-page .studio-applicants-draw__progress-value {
+    font-size: 0.86rem;
+    font-variation-settings: var(--fv-label-strong);
+    color: var(--c2, #0f172a);
+}
+
+.studio-applicants-page .studio-applicants-draw__progress-track {
+    height: 0.7rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--c2, #0f172a) 10%, transparent);
+    overflow: hidden;
+}
+
+.studio-applicants-page .studio-applicants-draw__progress-bar {
+    height: 100%;
+    min-width: 0;
+    border-radius: inherit;
+    background: linear-gradient(
+        90deg,
+        color-mix(in srgb, #d4a574 70%, var(--c2, #0f172a) 30%) 0%,
+        var(--c2, #0f172a) 100%
+    );
+    transition: width 0.35s ease;
+}
+
+@media (max-width: 720px) {
+    .studio-applicants-page .studio-applicants-draw__metrics {
+        grid-template-columns: 1fr;
+    }
+
+    .studio-applicants-page .studio-applicants-draw__active {
+        width: 100%;
+    }
 }

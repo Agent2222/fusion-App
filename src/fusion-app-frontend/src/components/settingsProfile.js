@@ -38,6 +38,8 @@ import {
   getMyAssetReviewNotes,
   getMembershipTierForCaller,
   getQuarterlyAppCreditBalanceForCaller,
+  getApplicationCreditsForCaller,
+  getAwardCreditsForCaller,
 } from "../utils/database.js";
 import { withSeoImageAlt } from "../utils/mediaAltSeo.js";
 import {
@@ -1893,7 +1895,7 @@ function setMpdProgramsTab(tab) {
 }
 
 /**
- * Application + program draw credits on Explore programs (quarterly / annual only).
+ * Application + Program Award entries on Explore programs (member-facing credits home).
  */
 async function hydrateExploreProgramCredits() {
   const strip = document.getElementById("mpd_program_credits");
@@ -1902,6 +1904,17 @@ async function hydrateExploreProgramCredits() {
   const drawEl = document.getElementById("mpd_draw_credits_value");
   const nextEl = document.getElementById("mpd_credits_next_date");
   const hintEl = document.getElementById("mpd_credits_next_hint");
+  const drawLabel = strip.querySelector(
+    ".mpd-program-credits__item:nth-child(2) .mpd-program-credits__label",
+  );
+
+  /** @type {string} */
+  let access = "";
+  try {
+    access = String(await getMembershipAccessForCaller() || "").trim();
+  } catch {
+    access = "";
+  }
 
   let tier = "";
   try {
@@ -1914,17 +1927,33 @@ async function hydrateExploreProgramCredits() {
   }
 
   let appCreditBalance = 0;
-  if (tier === "quarterly") {
-    try {
-      appCreditBalance = await getQuarterlyAppCreditBalanceForCaller();
-    } catch {
-      appCreditBalance = 0;
+  let awardEntryBalance = 0;
+  /** @type {string} */
+  let nextAccrualHint = "";
+  try {
+    const [appInfo, awardInfo] = await Promise.all([
+      getApplicationCreditsForCaller(),
+      getAwardCreditsForCaller(),
+    ]);
+    appCreditBalance = Number(appInfo?.balance) || 0;
+    awardEntryBalance = Number(awardInfo?.balance) || 0;
+    nextAccrualHint = String(appInfo?.nextAccrualHint || awardInfo?.nextGrantHint || "").trim();
+    if (!tier && appInfo?.membershipTier) {
+      tier = normalizeMembershipTier(appInfo.membershipTier);
+    }
+  } catch {
+    if (tier === "quarterly" || tier === "annual") {
+      try {
+        appCreditBalance = await getQuarterlyAppCreditBalanceForCaller();
+      } catch {
+        appCreditBalance = 0;
+      }
     }
   }
 
   /** @type {string} */
   let periodEndIso = "";
-  if (tier === "annual") {
+  if (tier === "annual" && access !== "exempt") {
     try {
       const snap = await getAuthSnapshot();
       if (snap.authenticated) {
@@ -1962,16 +1991,23 @@ async function hydrateExploreProgramCredits() {
 
   const model = buildMembershipCreditsStripModel({
     tier,
+    access,
     appCreditBalance,
+    awardEntryBalance,
     periodEndIso,
+    nextAccrualHint,
+    showForMonthly: tier === "monthly",
   });
   if (!model) {
     strip.hidden = true;
     return;
   }
   strip.hidden = false;
+  if (drawLabel instanceof HTMLElement) {
+    drawLabel.textContent = "Program Award entries";
+  }
   if (appEl) appEl.textContent = model.applicationCreditsLabel;
-  if (drawEl) drawEl.textContent = model.drawCreditsLabel;
+  if (drawEl) drawEl.textContent = model.awardEntriesLabel ?? model.drawCreditsLabel;
   if (nextEl) nextEl.textContent = model.nextCreditsLabel;
   if (hintEl) hintEl.textContent = model.nextCreditsHint;
 }
@@ -3233,15 +3269,23 @@ function mpdMembershipIncludedBullets(tier, creditBalance = 0) {
   const bullets = ["Profile on the public site", "Member benefits and updates"];
   if (t === "monthly") {
     bullets.unshift("Application fee $35 per submission");
+    bullets.push("Program Award entries $50 each when a cycle is active");
   } else if (t === "quarterly") {
     bullets.unshift("One application credit per quarter; unused credits roll over");
+    bullets.push("One Program Award entry per quarter (max one per program)");
     if (creditBalance > 0) {
       bullets.push(
         `${creditBalance} application credit${creditBalance === 1 ? "" : "s"} available now`,
       );
     }
   } else if (t === "annual") {
-    bullets.unshift("Applications included while membership is active");
+    bullets.unshift("4 stackable application credits per year");
+    bullets.push("4 Program Award entries per year");
+    if (creditBalance > 0) {
+      bullets.push(
+        `${creditBalance} application credit${creditBalance === 1 ? "" : "s"} available now`,
+      );
+    }
   } else if (t === "bimonthly") {
     bullets.unshift("Legacy bi-monthly billing");
     bullets.push("New plans are Monthly, Quarterly, or Annual");
@@ -4338,7 +4382,7 @@ export function generateSettingsProfileContent() {
                                             <div class="mpd-program-credits__item">
                                                 <span class="mpd-program-credits__icon mpd-program-credits__icon--draw" aria-hidden="true"></span>
                                                 <div class="mpd-program-credits__copy">
-                                                    <span class="mpd-program-credits__label">Program draw credits</span>
+                                                    <span class="mpd-program-credits__label">Program Award entries</span>
                                                     <strong class="mpd-program-credits__value" id="mpd_draw_credits_value">—</strong>
                                                 </div>
                                             </div>
@@ -5443,11 +5487,16 @@ export default function initSettingsProfile() {
     };
 
     let creditBalance = 0;
-    if (resolvedTier === "quarterly") {
+    if (resolvedTier === "quarterly" || resolvedTier === "annual") {
       try {
-        creditBalance = await getQuarterlyAppCreditBalanceForCaller();
+        const appCredits = await getApplicationCreditsForCaller();
+        creditBalance = Number(appCredits?.balance) || 0;
       } catch {
-        creditBalance = 0;
+        try {
+          creditBalance = await getQuarterlyAppCreditBalanceForCaller();
+        } catch {
+          creditBalance = 0;
+        }
       }
     }
     mpdRenderMembershipIncludedList(includedList, resolvedTier || "monthly", creditBalance);

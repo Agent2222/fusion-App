@@ -696,28 +696,33 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
       <div id="studio-art-panel-credits" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-art-tab-credits" hidden>
         <div class="studio-artist-panel-head">
           <h3>Credits</h3>
-          <p>Manage application credits, program draw credits, view credits, and invitations for this artist. Full controls arrive in a later release.</p>
+          <p>View and adjust application credits and Program Award entries for the linked account principal.</p>
         </div>
-        <div class="studio-art-credits-placeholder" role="status">
-          <p class="studio-banner studio-banner--placeholder">Credits management is coming soon.</p>
-          <ul class="studio-art-credits-placeholder__list">
-            <li>
-              <strong>Application credits</strong>
-              <span class="studio-muted">Balance used when applying to programs (e.g. quarterly membership accrual).</span>
-            </li>
-            <li>
-              <strong>Program draw credits</strong>
-              <span class="studio-muted">Entries into upcoming program draws.</span>
-            </li>
-            <li>
-              <strong>View credits</strong>
-              <span class="studio-muted">Access or visibility credits for restricted content.</span>
-            </li>
-            <li>
-              <strong>Invitations</strong>
-              <span class="studio-muted">Staff-issued invites and remaining invitation capacity.</span>
-            </li>
-          </ul>
+        <div class="studio-art-credits-panel" data-studio-artist-credits>
+          <p class="studio-muted" id="studio-art-credits-principal-hint">Link an account principal on the Identity tab to load balances.</p>
+          <div class="studio-art-credits-grid">
+            <div class="studio-art-credits-card">
+              <h4>Application credits</h4>
+              <p class="studio-art-credits-balance"><strong id="studio-art-app-credit-bal">—</strong></p>
+              <p class="studio-muted" id="studio-art-app-credit-meta"></p>
+              <div class="studio-art-credits-actions">
+                <label>Credit <input type="number" min="0" step="1" id="studio-art-app-credit-add" value="1" class="studio-prog-editor-input" /></label>
+                <label>Debit <input type="number" min="0" step="1" id="studio-art-app-credit-sub" value="0" class="studio-prog-editor-input" /></label>
+                <button type="button" class="studio-btn-ghost" id="studio-art-app-credit-save">Adjust</button>
+              </div>
+            </div>
+            <div class="studio-art-credits-card">
+              <h4>Program Award entries</h4>
+              <p class="studio-art-credits-balance"><strong id="studio-art-award-credit-bal">—</strong></p>
+              <p class="studio-muted" id="studio-art-award-credit-meta"></p>
+              <div class="studio-art-credits-actions">
+                <label>Credit <input type="number" min="0" step="1" id="studio-art-award-credit-add" value="1" class="studio-prog-editor-input" /></label>
+                <label>Debit <input type="number" min="0" step="1" id="studio-art-award-credit-sub" value="0" class="studio-prog-editor-input" /></label>
+                <button type="button" class="studio-btn-ghost" id="studio-art-award-credit-save">Adjust</button>
+              </div>
+            </div>
+          </div>
+          <p id="studio-art-credits-status" class="studio-muted" role="status"></p>
         </div>
       </div>
 
@@ -1070,6 +1075,120 @@ export function collectArtistRecordFromForm(root, baseArtist) {
         })(),
         _featuredFlags,
     };
+}
+
+/**
+ * Wire Manage Artist → Credits tab (application + Program Award balances).
+ * @param {HTMLElement} root
+ * @param {{ id?: string }} artist
+ */
+export function bindArtistCreditsPanel(root, artist) {
+    const panel = root.querySelector('[data-studio-artist-credits]');
+    if (!(panel instanceof HTMLElement)) return;
+    const hint = root.querySelector('#studio-art-credits-principal-hint');
+    const status = root.querySelector('#studio-art-credits-status');
+    const appBal = root.querySelector('#studio-art-app-credit-bal');
+    const appMeta = root.querySelector('#studio-art-app-credit-meta');
+    const awardBal = root.querySelector('#studio-art-award-credit-bal');
+    const awardMeta = root.querySelector('#studio-art-award-credit-meta');
+    /** @type {string} */
+    let principalText = '';
+
+    const setStatus = (msg) => {
+        if (status) status.textContent = msg || '';
+    };
+
+    const refresh = async () => {
+        if (!principalText) {
+            if (appBal) appBal.textContent = '—';
+            if (awardBal) awardBal.textContent = '—';
+            return;
+        }
+        try {
+            const {
+                adminGetApplicationCreditsStudio,
+                adminGetAwardCreditsStudio,
+            } = await import('./database.js');
+            const [app, award] = await Promise.all([
+                adminGetApplicationCreditsStudio(principalText),
+                adminGetAwardCreditsStudio(principalText),
+            ]);
+            if (appBal) appBal.textContent = String(app.balance);
+            if (appMeta) {
+                appMeta.textContent = `Tier: ${app.membershipTier || '—'} · Last: ${app.lastAccruedKey || '—'}`;
+            }
+            if (awardBal) awardBal.textContent = String(award.balance);
+            if (awardMeta) {
+                awardMeta.textContent = `Tier: ${award.membershipTier || '—'} · Last: ${award.lastGrantedKey || '—'}`;
+            }
+            setStatus('');
+        } catch (e) {
+            setStatus(e instanceof Error ? e.message : String(e));
+        }
+    };
+
+    void (async () => {
+        try {
+            const { adminFindPrincipalForArtistStudio } = await import('./database.js');
+            principalText = await adminFindPrincipalForArtistStudio(String(artist?.id || ''));
+            if (hint) {
+                hint.textContent = principalText
+                    ? `Principal: ${principalText}`
+                    : 'No linked account principal found for this artist. Credits cannot be adjusted until an account is linked.';
+            }
+            await refresh();
+        } catch (e) {
+            if (hint) hint.textContent = e instanceof Error ? e.message : String(e);
+        }
+    })();
+
+    root.querySelector('#studio-art-app-credit-save')?.addEventListener('click', async () => {
+        if (!principalText) {
+            setStatus('No linked principal.');
+            return;
+        }
+        const addEl = root.querySelector('#studio-art-app-credit-add');
+        const subEl = root.querySelector('#studio-art-app-credit-sub');
+        const credit = addEl instanceof HTMLInputElement ? Number(addEl.value) : 0;
+        const debit = subEl instanceof HTMLInputElement ? Number(subEl.value) : 0;
+        try {
+            const { adminAdjustApplicationCreditsStudio } = await import('./database.js');
+            const bal = await adminAdjustApplicationCreditsStudio(principalText, {
+                credit,
+                debit,
+                note: 'studio_artist_manage',
+            });
+            if (appBal) appBal.textContent = String(bal);
+            setStatus('Application credits updated.');
+            await refresh();
+        } catch (e) {
+            setStatus(e instanceof Error ? e.message : String(e));
+        }
+    });
+
+    root.querySelector('#studio-art-award-credit-save')?.addEventListener('click', async () => {
+        if (!principalText) {
+            setStatus('No linked principal.');
+            return;
+        }
+        const addEl = root.querySelector('#studio-art-award-credit-add');
+        const subEl = root.querySelector('#studio-art-award-credit-sub');
+        const credit = addEl instanceof HTMLInputElement ? Number(addEl.value) : 0;
+        const debit = subEl instanceof HTMLInputElement ? Number(subEl.value) : 0;
+        try {
+            const { adminAdjustAwardCreditsStudio } = await import('./database.js');
+            const bal = await adminAdjustAwardCreditsStudio(principalText, {
+                credit,
+                debit,
+                note: 'studio_artist_manage',
+            });
+            if (awardBal) awardBal.textContent = String(bal);
+            setStatus('Program Award entries updated.');
+            await refresh();
+        } catch (e) {
+            setStatus(e instanceof Error ? e.message : String(e));
+        }
+    });
 }
 
 /**

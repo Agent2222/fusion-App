@@ -1112,8 +1112,16 @@ app.post('/stripe/create-subscription', requireApiKey, async (req, res) => {
         }
 
         const subMeta = payFirstPending
-            ? { fusion_pending_id: fusionPendingId }
-            : { principal: metadata.principal };
+            ? {
+                  fusion_pending_id: fusionPendingId,
+                  tier,
+                  price_id: priceId,
+              }
+            : {
+                  principal: metadata.principal,
+                  tier,
+                  price_id: priceId,
+              };
         const subscription = await stripe.subscriptions.create({
             customer: customer.id,
             items: [{ price: priceId }],
@@ -1474,9 +1482,13 @@ async function subscriptionWithPrincipalForPush(stripeClient, best, principalTex
         customer: customer.id,
     });
     const cpe = sub.current_period_end;
-    if (typeof cpe !== 'number' || !Number.isFinite(cpe)) {
+    const priceExpanded =
+        sub.items?.data?.[0]?.price && typeof sub.items.data[0].price === 'object';
+    if (typeof cpe !== 'number' || !Number.isFinite(cpe) || !priceExpanded) {
         try {
-            const full = await stripeClient.subscriptions.retrieve(best.id);
+            const full = await stripeClient.subscriptions.retrieve(best.id, {
+                expand: ['items.data.price'],
+            });
             sub = { ...full, metadata: meta };
         } catch {
             /* use list payload */
@@ -1559,14 +1571,29 @@ function planLabelFromSubscription(sub) {
 
 /**
  * @param {import('stripe').Stripe.Price | null | undefined} price
- * @returns {'monthly' | 'bimonthly' | 'annual' | 'other'}
+ * @returns {'monthly' | 'bimonthly' | 'quarterly' | 'annual' | 'other'}
  */
 function cadenceKeyFromPrice(price) {
-    if (!price?.recurring) return 'other';
+    if (!price) return 'other';
+    const priceId = typeof price.id === 'string' ? price.id : '';
+    if (process.env.STRIPE_ANNUAL_PRICE_ID && priceId === process.env.STRIPE_ANNUAL_PRICE_ID) {
+        return 'annual';
+    }
+    if (process.env.STRIPE_MONTHLY_PRICE_ID && priceId === process.env.STRIPE_MONTHLY_PRICE_ID) {
+        return 'monthly';
+    }
+    if (process.env.STRIPE_QUARTERLY_PRICE_ID && priceId === process.env.STRIPE_QUARTERLY_PRICE_ID) {
+        return 'quarterly';
+    }
+    if (process.env.STRIPE_PRICE_ID && priceId === process.env.STRIPE_PRICE_ID) {
+        return 'bimonthly';
+    }
+    if (!price.recurring) return 'other';
     const interval = price.recurring.interval;
     const count = price.recurring.interval_count || 1;
     if (interval === 'month' && count === 1) return 'monthly';
     if (interval === 'month' && count === 2) return 'bimonthly';
+    if (interval === 'month' && count === 3) return 'quarterly';
     if (interval === 'year' && count === 1) return 'annual';
     return 'other';
 }
@@ -1637,11 +1664,14 @@ function aggregateMembershipRevenueFromSubscriptions(subscriptions) {
     let mrrCents = 0;
     let monthlyCents = 0;
     let bimonthlyCents = 0;
+    let quarterlyCents = 0;
     let annualCents = 0;
     let otherCents = 0;
     let active = 0;
     let trialing = 0;
     let included = 0;
+    /** @type {Array<{ subscriptionId: string, principal: string, customerId: string, cadence: string, unitAmount: number, mrrCents: number, status: string }>} */
+    const rows = [];
 
     for (const sub of subscriptions) {
         if (!sub?.id || seen.has(sub.id)) continue;
@@ -1662,18 +1692,38 @@ function aggregateMembershipRevenueFromSubscriptions(subscriptions) {
         const interval = price?.recurring?.interval;
         const count = price?.recurring?.interval_count || 1;
         const cadence = cadenceKeyFromPrice(price);
-        mrrCents += mrrCentsFromPrice(unitAmount, interval, count);
+        const subMrr = mrrCentsFromPrice(unitAmount, interval, count);
+        mrrCents += subMrr;
 
         if (cadence === 'monthly') monthlyCents += unitAmount;
         else if (cadence === 'bimonthly') bimonthlyCents += unitAmount;
+        else if (cadence === 'quarterly') quarterlyCents += unitAmount;
         else if (cadence === 'annual') annualCents += unitAmount;
         else otherCents += unitAmount;
+
+        const principal = safeContactText(sub.metadata?.principal) || '';
+        const customerId =
+            typeof sub.customer === 'string'
+                ? sub.customer
+                : sub.customer && typeof sub.customer === 'object' && 'id' in sub.customer
+                  ? String(sub.customer.id || '')
+                  : '';
+        rows.push({
+            subscriptionId: sub.id,
+            principal,
+            customerId,
+            cadence,
+            unitAmount,
+            mrrCents: subMrr,
+            status: sub.status,
+        });
     }
 
     return {
         mrrCents,
-        cadence: { monthlyCents, bimonthlyCents, annualCents, otherCents },
+        cadence: { monthlyCents, bimonthlyCents, quarterlyCents, annualCents, otherCents },
         counts: { active, trialing, included },
+        subscriptions: rows,
     };
 }
 
@@ -1978,6 +2028,7 @@ app.post('/stripe/membership-revenue-summary', requireApiKey, async (req, res) =
             mrrCents: agg.mrrCents,
             cadence: agg.cadence,
             counts: agg.counts,
+            subscriptions: agg.subscriptions,
         });
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
