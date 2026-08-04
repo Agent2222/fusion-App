@@ -86,6 +86,44 @@ function maybeApplyFusionLogoUrl(html) {
     );
 }
 
+const STUDIO_EMAIL_ALWAYS_CC = 'info@fusionart.world';
+
+/**
+ * Normalize CC list for Resend; always include info@fusionart.world (unless excluded as the To address).
+ * @param {unknown} raw
+ * @param {{ exclude?: string[] }} [opts]
+ * @returns {string[]}
+ */
+function normalizeEmailCcList(raw, opts = {}) {
+    /** @type {string[]} */
+    const out = [];
+    const exclude = new Set(
+        (Array.isArray(opts.exclude) ? opts.exclude : [])
+            .map((v) =>
+                String(v || '')
+                    .trim()
+                    .toLowerCase(),
+            )
+            .filter((e) => e.includes('@')),
+    );
+    const push = (v) => {
+        const e = String(v || '')
+            .trim()
+            .toLowerCase();
+        if (!e.includes('@')) return;
+        if (exclude.has(e)) return;
+        if (out.includes(e)) return;
+        out.push(e);
+    };
+    if (typeof raw === 'string') {
+        for (const part of raw.split(/[,;]/)) push(part);
+    } else if (Array.isArray(raw)) {
+        for (const item of raw) push(item);
+    }
+    push(STUDIO_EMAIL_ALWAYS_CC);
+    return out;
+}
+
 /**
  * @param {string} path
  * @param {{ method?: string, body?: unknown }} [init]
@@ -2110,12 +2148,16 @@ app.post('/email/send', requireApiKey, async (req, res) => {
         if (typeof req.body?.replyTo === 'string' && req.body.replyTo.includes('@')) {
             payload.reply_to = req.body.replyTo.trim();
         }
+        const ccList = normalizeEmailCcList(req.body?.cc, { exclude: [to.trim()] });
+        if (ccList.length) {
+            payload.cc = ccList;
+        }
         const { data, error } = await resend.emails.send(payload);
         if (error) {
             console.error('[email/send] Resend rejected:', error);
             return res.status(502).json({ error: error.message || 'Resend error' });
         }
-        return res.json({ ok: true, id: data?.id });
+        return res.json({ ok: true, id: data?.id, cc: ccList });
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         return res.status(500).json({ error: msg });
@@ -2145,6 +2187,7 @@ app.post('/email/batch', requireApiKey, async (req, res) => {
             typeof req.body?.replyTo === 'string' && req.body.replyTo.includes('@')
                 ? req.body.replyTo.trim()
                 : undefined;
+        const ccList = normalizeEmailCcList(req.body?.cc);
 
         /** @type {Array<{ to: string, subject: string, html?: string, text?: string }>} */
         const normalized = [];
@@ -2189,6 +2232,7 @@ app.post('/email/batch', requireApiKey, async (req, res) => {
                 if (m.html) p.html = m.html;
                 else if (m.text) p.text = m.text;
                 if (replyTo) p.reply_to = replyTo;
+                if (ccList.length) p.cc = ccList;
                 return p;
             });
 
@@ -2235,7 +2279,7 @@ app.post('/email/batch', requireApiKey, async (req, res) => {
             }
         }
 
-        return res.json({ ok: true, okCount, failCount, results });
+        return res.json({ ok: true, okCount, failCount, results, cc: ccList });
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         return res.status(500).json({ error: msg });

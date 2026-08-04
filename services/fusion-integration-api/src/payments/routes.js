@@ -113,7 +113,33 @@ export function registerPaymentRoutes(app, opts) {
             if (order.status !== 'COMPLETED') {
                 return res.status(409).json({ error: `Order not completed: ${order.status}` });
             }
-            const recorded = await recordVerifiedPayPalOrder(order, programPaymentDeps);
+            /** @type {Record<string, string>} */
+            const metaOverride = {};
+            const principal = safePayPalMetaValue(req.body?.principal, 500);
+            const programId = safePayPalMetaValue(req.body?.programId, 120);
+            const applicationId = safePayPalMetaValue(req.body?.applicationId, 240);
+            const paymentType = safePayPalMetaValue(req.body?.paymentType, 80);
+            const payloadJsonRaw =
+                typeof req.body?.payloadJson === 'string'
+                    ? req.body.payloadJson
+                    : req.body?.payload && typeof req.body.payload === 'object'
+                      ? JSON.stringify(req.body.payload)
+                      : '';
+            if (principal) {
+                Principal.fromText(principal);
+                metaOverride.principal = principal;
+            }
+            if (programId) metaOverride.programId = programId;
+            if (applicationId) metaOverride.applicationId = applicationId;
+            if (paymentType) metaOverride.paymentType = paymentType;
+            if (payloadJsonRaw) {
+                metaOverride.payloadJson = safePayPalMetaValue(payloadJsonRaw, 100_000);
+            }
+            const recorded = await recordVerifiedPayPalOrder(
+                order,
+                programPaymentDeps,
+                metaOverride,
+            );
             return res.json({ ok: true, orderId, ...recorded });
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);

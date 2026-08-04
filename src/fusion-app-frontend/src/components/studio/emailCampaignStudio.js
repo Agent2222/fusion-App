@@ -9,12 +9,14 @@ import {
     appendSubscriberResendAudienceForStudio,
     duplicateEmailCampaign,
     deleteEmailCampaign,
+    emailOutboundKindKey,
     getDataSource,
     getEmailCampaign,
     getResendSegmentConfigFromCanister,
     getSubscribersCsv,
     getSubscribersForEmailStudio,
     listEmailCampaigns,
+    listEmailOutboundRecords,
     markEmailCampaignSent,
     studioReinterpretWithPrompt,
     studioTranslateEnToJa,
@@ -79,6 +81,13 @@ import {
 } from '../../utils/socialCardExport.js';
 import { openEmailMediaPickerModal, emailMediaInsertHtml } from './emailMediaPickerModal.js';
 import { openSocialImagePickerModal } from './socialImagePickerModal.js';
+import {
+    buildStudioEmailCcList,
+    populateStudioEmailCcSelect,
+    readStudioEmailCcTeamEmail,
+    recordStudioEmailOutbound,
+    studioEmailCcSelectHtml,
+} from '../../utils/studioEmailCc.js';
 import { Principal } from '@dfinity/principal';
 
 const LLM_MAX = 12000;
@@ -301,8 +310,9 @@ export function renderEmailCampaignStudio() {
 <div class="studio-ec" data-studio-ec-root>
   <div class="studio-ec__layout" role="group" aria-label="Email campaign layout">
     <aside class="studio-ec__col studio-ec__col--assist" aria-label="Campaigns and assistance">
-      <div class="studio-ec__subtabs studio-ec__subtabs--five" role="tablist" aria-label="Left panel">
+      <div class="studio-ec__subtabs studio-ec__subtabs--six" role="tablist" aria-label="Left panel">
         <button type="button" class="studio-ec__subtab" id="studio-ec-ltab-cam" data-ec-ltab="campaigns" role="tab" aria-selected="false">Campaigns</button>
+        <button type="button" class="studio-ec__subtab" id="studio-ec-ltab-records" data-ec-ltab="records" role="tab" aria-selected="false">Records</button>
         <button type="button" class="studio-ec__subtab is-active" id="studio-ec-ltab-a" data-ec-ltab="compose" role="tab" aria-selected="true">Compose</button>
         <button type="button" class="studio-ec__subtab" id="studio-ec-ltab-b" data-ec-ltab="gen" role="tab" aria-selected="false">Generate</button>
         <button type="button" class="studio-ec__subtab" id="studio-ec-ltab-c" data-ec-ltab="tpl" role="tab" aria-selected="false">Templates</button>
@@ -317,6 +327,31 @@ export function renderEmailCampaignStudio() {
           <ul class="studio-ec__campaign-list" id="studio-ec-campaign-list"></ul>
         </div>
         <p class="studio-ec__hint" id="studio-ec-list-hint"></p>
+      </div>
+      <div id="studio-ec-panel-l-records" class="studio-ec__assist-panels studio-ec__panel--records" role="region" aria-label="Sent email records" hidden>
+        <div class="studio-ec__list-head">
+          <h2 class="studio-ec__h">Records</h2>
+          <button type="button" class="studio-btn-ghost" id="studio-ec-records-refresh">Refresh</button>
+        </div>
+        <div class="studio-ec-records-filters" role="group" aria-label="Filter by kind">
+          <button type="button" class="studio-ec-records-pill is-active" data-ec-rec-kind="">All</button>
+          <button type="button" class="studio-ec-records-pill studio-ec-records-pill--single" data-ec-rec-kind="single">Single</button>
+          <button type="button" class="studio-ec-records-pill studio-ec-records-pill--batch" data-ec-rec-kind="batch">Batch</button>
+          <button type="button" class="studio-ec-records-pill studio-ec-records-pill--category" data-ec-rec-kind="category">Category</button>
+          <button type="button" class="studio-ec-records-pill studio-ec-records-pill--all" data-ec-rec-kind="all">Broadcast</button>
+        </div>
+        <label class="studio-field studio-ec__field-tight">
+          <input type="search" class="studio-input" id="studio-ec-records-search" placeholder="Filter subject…" autocomplete="off" />
+        </label>
+        <div class="studio-ec__list-scroll">
+          <table class="studio-ec-records-table" id="studio-ec-records-table">
+            <thead>
+              <tr><th>Sent</th><th>Kind</th><th>Subject</th><th>To</th></tr>
+            </thead>
+            <tbody id="studio-ec-records-tbody"></tbody>
+          </table>
+        </div>
+        <p class="studio-ec__hint" id="studio-ec-records-hint"></p>
       </div>
       <div id="studio-ec-panel-l-compose" class="studio-ec__assist-panels" role="region" aria-label="Assisted compose">
         <p class="studio-ec__assist-title">Compose with assistance</p>
@@ -618,6 +653,10 @@ export function renderEmailCampaignStudio() {
         </div>
         <div id="studio-ec-panel-m-review" class="studio-ec__main-panel studio-ec__main-panel--scroll" role="tabpanel" aria-labelledby="studio-ec-mtab-rev" hidden>
           <div class="studio-ec__settings-section">
+            <h3 class="studio-ec__sh">CC</h3>
+            ${studioEmailCcSelectHtml('studio-ec-cc-team')}
+          </div>
+          <div class="studio-ec__settings-section">
             <h3 class="studio-ec__sh">Test email</h3>
             <label class="studio-field">
               <span>Address</span>
@@ -679,6 +718,7 @@ export async function initEmailCampaignStudio(mainEl) {
     const toneEl = root.querySelector('#studio-ec-tone');
     const lengthEl = root.querySelector('#studio-ec-length');
     const panelCampaigns = root.querySelector('#studio-ec-panel-l-campaigns');
+    const panelRecords = root.querySelector('#studio-ec-panel-l-records');
     const panelComposeL = root.querySelector('#studio-ec-panel-l-compose');
     const panelTplL = root.querySelector('#studio-ec-panel-l-tpl');
     const panelSocialL = root.querySelector('#studio-ec-panel-l-social');
@@ -688,6 +728,132 @@ export async function initEmailCampaignStudio(mainEl) {
     const messageTitleEl = root.querySelector('.studio-ec__col--editor .studio-ec__title');
     const messageEyebrowEl = root.querySelector('.studio-ec__col--editor .studio-ec__eyebrow');
     const messageLedeEl = root.querySelector('#studio-ec-save-state');
+
+    void populateStudioEmailCcSelect(root.querySelector('#studio-ec-cc-team'));
+
+    /** @type {object[]} */
+    let outboundRecordsCache = [];
+    /** @type {string} */
+    let recordsKindFilter = '';
+    const recordsTbody = root.querySelector('#studio-ec-records-tbody');
+    const recordsHint = root.querySelector('#studio-ec-records-hint');
+    const recordsSearch = root.querySelector('#studio-ec-records-search');
+
+    const escapeRecHtml = (s) =>
+        String(s ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+
+    const renderRecordsTable = () => {
+        if (!(recordsTbody instanceof HTMLElement)) return;
+        const q = recordsSearch instanceof HTMLInputElement ? recordsSearch.value.trim().toLowerCase() : '';
+        const rows = outboundRecordsCache.filter((r) => {
+            const kind = emailOutboundKindKey(r?.kind);
+            if (recordsKindFilter && kind !== recordsKindFilter) return false;
+            if (q && !String(r?.subject || '').toLowerCase().includes(q)) return false;
+            return true;
+        });
+        if (!rows.length) {
+            recordsTbody.innerHTML = '';
+            if (recordsHint) {
+                recordsHint.textContent = outboundRecordsCache.length
+                    ? 'No records match this filter.'
+                    : 'No sent emails recorded yet.';
+            }
+            return;
+        }
+        if (recordsHint) recordsHint.textContent = `${rows.length} record${rows.length === 1 ? '' : 's'}`;
+        recordsTbody.innerHTML = rows
+            .map((r) => {
+                const kind = emailOutboundKindKey(r?.kind);
+                const id = escapeRecHtml(r?.id);
+                const subj = escapeRecHtml(r?.subject || '(no subject)');
+                const toSum = escapeRecHtml(r?.toSummary || '—');
+                const sent = escapeRecHtml(formatStudioDate(r?.sentAt));
+                return `<tr class="studio-ec-records-row" data-ec-rec-id="${id}" tabindex="0">
+  <td>${sent}</td>
+  <td><span class="studio-ec-records-pill studio-ec-records-pill--${kind}">${kind}</span></td>
+  <td>${subj}</td>
+  <td>${toSum}</td>
+</tr>`;
+            })
+            .join('');
+    };
+
+    const refreshRecordsList = async () => {
+        if (recordsHint) recordsHint.textContent = 'Loading…';
+        try {
+            outboundRecordsCache = await listEmailOutboundRecords();
+            renderRecordsTable();
+        } catch (e) {
+            outboundRecordsCache = [];
+            if (recordsTbody instanceof HTMLElement) recordsTbody.innerHTML = '';
+            if (recordsHint) {
+                recordsHint.textContent =
+                    e instanceof Error ? e.message : 'Could not load email records.';
+            }
+        }
+    };
+
+    const openRecordPopup = (rec) => {
+        if (!rec) return;
+        const kind = emailOutboundKindKey(rec.kind);
+        const cc = String(rec.ccEmails || '').trim() || '—';
+        const campaignId = unwrapOpt(rec.campaignId) || '';
+        const html = String(rec.htmlBody || '');
+        const inner = `
+<div class="studio-ec-record-detail">
+  <p class="studio-muted" style="margin:0 0 0.75rem">
+    <span class="studio-ec-records-pill studio-ec-records-pill--${escapeRecHtml(kind)}">${escapeRecHtml(kind)}</span>
+    · ${escapeRecHtml(formatStudioDate(rec.sentAt))}
+    · ${escapeRecHtml(String(rec.recipientCount ?? 0))} recipient(s)
+  </p>
+  <p style="margin:0 0 0.35rem"><strong>Subject:</strong> ${escapeRecHtml(rec.subject || '')}</p>
+  <p style="margin:0 0 0.35rem"><strong>To:</strong> ${escapeRecHtml(rec.toSummary || '—')}</p>
+  <p style="margin:0 0 0.35rem"><strong>CC:</strong> ${escapeRecHtml(cc)}</p>
+  ${campaignId ? `<p style="margin:0 0 0.75rem"><strong>Campaign:</strong> ${escapeRecHtml(campaignId)}</p>` : ''}
+  <div class="studio-ec-record-preview-wrap">
+    <iframe class="studio-ec-record-preview" id="studio-ec-record-iframe" title="Email preview" sandbox=""></iframe>
+  </div>
+</div>`;
+        const { root: modalRoot } = openStudioModal(inner, { title: 'Sent email', wide: true });
+        const iframe = modalRoot?.querySelector('#studio-ec-record-iframe');
+        if (iframe instanceof HTMLIFrameElement) {
+            iframe.srcdoc = html || '<p style="font-family:sans-serif;color:#666">No HTML body stored.</p>';
+        }
+    };
+
+    root.querySelector('#studio-ec-records-refresh')?.addEventListener('click', () => {
+        void refreshRecordsList();
+    });
+    recordsSearch?.addEventListener('input', () => renderRecordsTable());
+    root.querySelectorAll('[data-ec-rec-kind]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            recordsKindFilter = btn.getAttribute('data-ec-rec-kind') || '';
+            root.querySelectorAll('[data-ec-rec-kind]').forEach((b) => {
+                b.classList.toggle('is-active', b === btn);
+            });
+            renderRecordsTable();
+        });
+    });
+    recordsTbody?.addEventListener('click', (ev) => {
+        const tr = ev.target instanceof Element ? ev.target.closest('tr[data-ec-rec-id]') : null;
+        if (!tr) return;
+        const id = tr.getAttribute('data-ec-rec-id') || '';
+        const rec = outboundRecordsCache.find((r) => String(r?.id || '') === id);
+        openRecordPopup(rec);
+    });
+    recordsTbody?.addEventListener('keydown', (ev) => {
+        if (ev.key !== 'Enter' && ev.key !== ' ') return;
+        const tr = ev.target instanceof Element ? ev.target.closest('tr[data-ec-rec-id]') : null;
+        if (!tr) return;
+        ev.preventDefault();
+        const id = tr.getAttribute('data-ec-rec-id') || '';
+        const rec = outboundRecordsCache.find((r) => String(r?.id || '') === id);
+        openRecordPopup(rec);
+    });
 
     const titleInp = root.querySelector('#studio-ec-title');
     const subjInp = root.querySelector('#studio-ec-subject');
@@ -1704,11 +1870,15 @@ export async function initEmailCampaignStudio(mainEl) {
         const key = k || 'compose';
         leftSubtabKey = key;
         const isCampaigns = key === 'campaigns';
+        const isRecords = key === 'records';
         const isTpl = key === 'tpl';
         const isSocial = key === 'social';
         root.classList.toggle('studio-ec--social', isSocial);
         if (panelCampaigns) panelCampaigns.toggleAttribute('hidden', !isCampaigns);
-        if (panelComposeL) panelComposeL.toggleAttribute('hidden', isTpl || isCampaigns || isSocial);
+        if (panelRecords) panelRecords.toggleAttribute('hidden', !isRecords);
+        if (panelComposeL) {
+            panelComposeL.toggleAttribute('hidden', isTpl || isCampaigns || isSocial || isRecords);
+        }
         if (panelTplL) panelTplL.toggleAttribute('hidden', !isTpl);
         if (panelSocialL) panelSocialL.toggleAttribute('hidden', !isSocial);
         if (panelMessageM) panelMessageM.toggleAttribute('hidden', isSocial);
@@ -1736,6 +1906,9 @@ export async function initEmailCampaignStudio(mainEl) {
         if (isSocial) {
             // Wait a frame so two-column layout settles before scaling the stage.
             requestAnimationFrame(() => scaleSocialStage());
+        }
+        if (isRecords) {
+            void refreshRecordsList();
         }
         root.querySelectorAll('[data-ec-ltab]').forEach((b) => {
             if (b instanceof HTMLButtonElement) {
@@ -2672,7 +2845,17 @@ export async function initEmailCampaignStudio(mainEl) {
             const bodyHtml = bodyEl instanceof HTMLElement ? bodyEl.innerHTML : String(rec.htmlBody || '');
             const html = fullEmailHtml(bodyHtml);
             const subj = subjInp instanceof HTMLInputElement ? subjInp.value.trim() : '';
-            await sendEmail({ to, subject: subj || 'Fusion — test', html });
+            const cc = buildStudioEmailCcList(readStudioEmailCcTeamEmail(root, 'studio-ec-cc-team'));
+            await sendEmail({ to, subject: subj || 'Fusion — test', html, cc });
+            await recordStudioEmailOutbound({
+                kind: 'single',
+                subject: subj || 'Fusion — test',
+                htmlBody: html,
+                toSummary: `Test → ${to}`,
+                recipientCount: 1,
+                cc,
+                campaignId: currentId || null,
+            });
             setMsg('ok', 'Test email sent.');
         } catch (e) {
             setMsg('error', e instanceof Error ? e.message : String(e));
@@ -2752,6 +2935,8 @@ export async function initEmailCampaignStudio(mainEl) {
                 return;
             }
             await patchStatus(rec, { pendingSend: null });
+            const cc = buildStudioEmailCcList(readStudioEmailCcTeamEmail(root, 'studio-ec-cc-team'));
+            const teamEmail = readStudioEmailCcTeamEmail(root, 'studio-ec-cc-team');
             if (audVal === 'all') {
                 const out = await resendCreateBroadcast({
                     segmentId: seg,
@@ -2763,10 +2948,44 @@ export async function initEmailCampaignStudio(mainEl) {
                 const bid = out && typeof out === 'object' ? (out.id ?? out.data?.id) : null;
                 const btxt = String(bid || '').trim();
                 await markEmailCampaignSent(String(currentId), btxt || 'broadcast', null);
+                // Resend broadcasts cannot CC; send a staff carbon copy.
+                const staffTo = teamEmail || 'info@fusionart.world';
+                try {
+                    await sendEmail({
+                        to: staffTo,
+                        subject: `[Staff copy] ${subj}`,
+                        html,
+                        cc: buildStudioEmailCcList(teamEmail),
+                    });
+                } catch (staffErr) {
+                    console.warn('[email campaign] staff CC copy failed:', staffErr);
+                }
+                await recordStudioEmailOutbound({
+                    kind: 'all',
+                    subject: subj,
+                    htmlBody: html,
+                    toSummary: `Broadcast segment ${seg}`,
+                    recipientCount: 0,
+                    cc,
+                    campaignId: String(currentId),
+                });
             } else {
                 const messages = batchEmails.map((to) => ({ to, subject: subj, html }));
-                await sendEmailBatch(messages, {});
+                await sendEmailBatch(messages, { cc });
                 await markEmailCampaignSent(String(currentId), 'batch', null);
+                const kind = audVal.startsWith('cat:') ? 'category' : 'category';
+                const toSummary = audVal.startsWith('cat:')
+                    ? `Category ${audVal.slice(4)} (${batchEmails.length})`
+                    : `Cohort (${batchEmails.length})`;
+                await recordStudioEmailOutbound({
+                    kind,
+                    subject: subj,
+                    htmlBody: html,
+                    toSummary,
+                    recipientCount: batchEmails.length,
+                    cc,
+                    campaignId: String(currentId),
+                });
             }
             setMsg('ok', 'Send completed.');
             const fresh = await getEmailCampaign(String(currentId));

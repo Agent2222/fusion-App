@@ -30,9 +30,22 @@ export function buildPendingPayPalProgramMetadata(body, amountCents) {
     const principal = safePayPalMetaValue(body?.principal, 500);
     const programId = safePayPalMetaValue(body?.programId, 120);
     const applicationId = safePayPalMetaValue(body?.applicationId, 240);
-    const paymentType = safePayPalMetaValue(body?.paymentType, 80);
-    if (!principal) throw new Error('principal required');
-    Principal.fromText(principal);
+    const purpose = safePayPalMetaValue(body?.purpose, 80);
+    let paymentType = safePayPalMetaValue(body?.paymentType, 80);
+    // Program Draw $50: guests may create the order before Internet Identity / Fusion account.
+    const awardEntry =
+        paymentType === 'program_award_entry' ||
+        purpose === 'program_award_entry' ||
+        applicationId.startsWith('award:');
+    if (awardEntry && !paymentType) {
+        paymentType = 'program_award_entry';
+    }
+    if (!awardEntry) {
+        if (!principal) throw new Error('principal required');
+        Principal.fromText(principal);
+    } else if (principal) {
+        Principal.fromText(principal);
+    }
     if (!programId) throw new Error('programId required');
     if (!applicationId) throw new Error('applicationId required');
     if (!paymentType) throw new Error('paymentType required');
@@ -51,7 +64,7 @@ export function buildPendingPayPalProgramMetadata(body, amountCents) {
         flightCreditCents: String(flightCreditCents),
         applicantEmail: safePayPalMetaValue(body?.email || body?.applicantEmail, 320),
         applicantName: safePayPalMetaValue(body?.applicantName || body?.fullName, 160),
-        purpose: safePayPalMetaValue(body?.purpose, 80),
+        purpose,
         planId: safePayPalMetaValue(body?.planId, 120),
         installmentCount: safePayPalMetaValue(body?.installmentCount, 10),
         installmentAmountCents: safePayPalMetaValue(body?.installmentAmountCents, 20),

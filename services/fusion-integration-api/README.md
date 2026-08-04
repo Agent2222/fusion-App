@@ -89,8 +89,8 @@ stripe listen --forward-to localhost:8787/webhooks/stripe
 - `POST /account/reconnect/complete` — body `{ fromPrincipal, toPrincipal, email?, paypalSubscriptionId? }` — calls canister `integrationReconnectMemberPrincipal`, then Stripe sync-by-email + optional PayPal sync to new principal (API key required)
 - `POST /stripe/create-payment-intent` — body `{ amount, currency?, metadata? }` (Studio tests / legacy)
 - `POST /webhooks/stripe` — **raw** JSON body; Stripe signature via `STRIPE_WEBHOOK_SECRET`
-- `POST /email/send` — body `{ to, subject, html | text, replyTo?, from? }` — optional `from` overrides `RESEND_FROM` when set (must be a verified sender in Resend)
-- `POST /email/batch` — body `{ messages: [{ to, subject, html? | text? }], from?, replyTo? }` — Resend batch send, chunked to ≤100 per call with a short delay between chunks. Returns `{ ok, okCount, failCount, results }`.
+- `POST /email/send` — body `{ to, subject, html | text, replyTo?, from?, cc? }` — optional `from` overrides `RESEND_FROM` when set (must be a verified sender in Resend). `cc` is a string or string[]; server always merges `info@fusionart.world`.
+- `POST /email/batch` — body `{ messages: [{ to, subject, html? | text? }], from?, replyTo?, cc? }` — Resend batch send, chunked to ≤100 per call with a short delay between chunks. Same `cc` rules as `/email/send`. Returns `{ ok, okCount, failCount, results, cc }`.
 - `GET /resend/sender` — `from` (same as `RESEND_FROM`) and optional `segmentId` (from `RESEND_BROADCAST_SEGMENT_ID`) for Studio email campaigns
 - `GET /resend/templates` — list templates (Resend REST, API key on server)
 - `POST /resend/templates` — create template

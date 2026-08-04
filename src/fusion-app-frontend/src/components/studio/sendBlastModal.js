@@ -10,6 +10,13 @@ import {
     getEmailTemplateById,
     interpolateRosterBlastTemplate,
 } from '../../utils/emailCampaignTemplates.js';
+import {
+    buildStudioEmailCcList,
+    populateStudioEmailCcSelect,
+    readStudioEmailCcTeamEmail,
+    recordStudioEmailOutbound,
+    studioEmailCcSelectHtml,
+} from '../../utils/studioEmailCc.js';
 
 const LLM_COMBINED_MAX = 12000;
 
@@ -161,6 +168,7 @@ export function openSendBlastModal(opts) {
     <input type="email" class="studio-input" id="studio-send-blast-test-to" placeholder="you@org.com" autocomplete="email" /></label>
   <button type="button" class="studio-btn-secondary" id="studio-send-blast-test">Send test</button>
 </div>
+${studioEmailCcSelectHtml('studio-send-blast-cc-team')}
 <div class="studio-send-blast-footer">
   <p id="studio-send-blast-status" class="studio-send-blast-foot-status" role="status" aria-live="polite"></p>
   <div class="studio-modal-actions studio-modal-actions--send-blast">
@@ -170,6 +178,8 @@ export function openSendBlastModal(opts) {
 </div>`;
 
     const { close, root } = openStudioModal(inner, { title: 'Send blast', wide: true });
+
+    void populateStudioEmailCcSelect(root.querySelector('#studio-send-blast-cc-team'));
 
     const sigTextarea = root.querySelector('#studio-send-blast-sig');
     const sigPreview = root.querySelector('#studio-send-blast-sig-preview');
@@ -590,7 +600,16 @@ export function openSendBlastModal(opts) {
             const tid = getSelectedTemplateId();
             const sampleRow = firstSelectedArtistRow();
             const html = tid ? htmlForTemplateRow(sampleRow) : fullHtmlCustom();
-            await sendEmail({ to, subject: subj, html });
+            const cc = buildStudioEmailCcList(readStudioEmailCcTeamEmail(root, 'studio-send-blast-cc-team'));
+            await sendEmail({ to, subject: subj, html, cc });
+            await recordStudioEmailOutbound({
+                kind: 'single',
+                subject: subj,
+                htmlBody: html,
+                toSummary: `Test → ${to}`,
+                recipientCount: 1,
+                cc,
+            });
             ok = true;
             const extra =
                 tid && !sampleRow
@@ -687,13 +706,26 @@ export function openSendBlastModal(opts) {
             setStatus(`Sending ${batchPayload.length} message(s)…`);
         }
         try {
-            const result = await sendEmailBatch(batchPayload);
+            const cc = buildStudioEmailCcList(readStudioEmailCcTeamEmail(root, 'studio-send-blast-cc-team'));
+            const result = await sendEmailBatch(batchPayload, { cc });
             const ok = result?.okCount ?? result?.ok ?? 0;
             const fail = result?.failCount ?? result?.failed ?? 0;
             const skipNote =
                 tpl?.requiresRosterPlaceholders && skipped.length
                     ? ` Skipped (no code): ${skipped.length}.`
                     : '';
+            const sampleHtml =
+                batchPayload[0] && typeof batchPayload[0].html === 'string'
+                    ? batchPayload[0].html
+                    : '';
+            await recordStudioEmailOutbound({
+                kind: 'batch',
+                subject: subj,
+                htmlBody: sampleHtml,
+                toSummary: `Artist blast (${batchPayload.length})`,
+                recipientCount: batchPayload.length,
+                cc,
+            });
             setStatus(`Done. Ok: ${ok}, failed: ${fail}.${skipNote}`);
             if (onRefresh) await onRefresh();
         } catch (e) {

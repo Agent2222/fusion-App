@@ -1067,14 +1067,35 @@ export async function createPayPalOneTimePayment(body) {
 
 /**
  * @param {string} orderId
+ * @param {{
+ *   principal?: string,
+ *   programId?: string,
+ *   applicationId?: string,
+ *   paymentType?: string,
+ *   payloadJson?: string,
+ *   payload?: Record<string, unknown>,
+ * }} [opts] Optional meta for guest pay-first (Program Draw) confirm after II login.
  */
-export async function confirmPayPalOneTimePayment(orderId) {
+export async function confirmPayPalOneTimePayment(orderId, opts = {}) {
     const base = getIntegrationBaseUrl();
     if (!base) throw new Error('Integration API URL not configured.');
+    const payloadJson =
+        typeof opts.payloadJson === 'string'
+            ? opts.payloadJson
+            : opts.payload && typeof opts.payload === 'object'
+              ? JSON.stringify(opts.payload)
+              : undefined;
     const res = await fetch(`${base}/payments/one-time/confirm`, {
         method: 'POST',
         headers: integrationHeadersJson(),
-        body: JSON.stringify({ orderId }),
+        body: JSON.stringify({
+            orderId,
+            ...(opts.principal ? { principal: opts.principal } : {}),
+            ...(opts.programId ? { programId: opts.programId } : {}),
+            ...(opts.applicationId ? { applicationId: opts.applicationId } : {}),
+            ...(opts.paymentType ? { paymentType: opts.paymentType } : {}),
+            ...(payloadJson ? { payloadJson } : {}),
+        }),
     });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -1254,7 +1275,7 @@ export async function fetchPayPalPaymentReceipts(orderIds) {
 }
 
 /**
- * @param {{ to: string, subject: string, html?: string, text?: string, replyTo?: string, from?: string }} opts
+ * @param {{ to: string, subject: string, html?: string, text?: string, replyTo?: string, from?: string, cc?: string | string[] }} opts
  */
 export async function sendEmail(opts) {
     const base = getIntegrationBaseUrl();
@@ -1278,8 +1299,8 @@ export async function sendEmail(opts) {
 
 /**
  * @param {Array<{ to: string, subject: string, html?: string, text?: string }>} messages
- * @param {{ from?: string, replyTo?: string }} [opts]
- * @returns {Promise<{ ok?: boolean, okCount?: number, failCount?: number, results?: unknown }>}
+ * @param {{ from?: string, replyTo?: string, cc?: string | string[] }} [opts]
+ * @returns {Promise<{ ok?: boolean, okCount?: number, failCount?: number, results?: unknown, cc?: string[] }>}
  */
 export async function sendEmailBatch(messages, opts = {}) {
     const base = getIntegrationBaseUrl();
@@ -1293,6 +1314,7 @@ export async function sendEmailBatch(messages, opts = {}) {
             messages,
             ...(opts.from ? { from: opts.from } : {}),
             ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
+            ...(opts.cc != null ? { cc: opts.cc } : {}),
         }),
     });
     if (!res.ok) {

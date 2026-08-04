@@ -375,6 +375,149 @@
   border-bottom-width: 2px;
 }
 
+/* Six tabs: two rows of three */
+.studio-ec__subtabs--six {
+  flex-wrap: wrap;
+  min-height: 0;
+}
+
+.studio-ec__subtabs--six .studio-ec__subtab {
+  flex: 1 1 33.33%;
+  max-width: 33.33%;
+  min-width: 0;
+  font-size: 0.72rem;
+  padding: 0.5rem 0.25rem;
+  border-bottom: 1px solid var(--ec-border);
+  margin-bottom: 0;
+}
+
+.studio-ec__subtabs--six .studio-ec__subtab.is-active {
+  border-bottom-color: #111111;
+  border-bottom-width: 2px;
+}
+
+/* Records tab */
+.studio-ec__panel--records {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.studio-ec-records-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.5rem 0.75rem 0;
+}
+
+.studio-ec-records-pill {
+  display: inline-block;
+  border: 1px solid var(--ec-border, #ddd);
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  background: #f5f5f5;
+  color: #444;
+  cursor: pointer;
+}
+
+.studio-ec-records-pill.is-active {
+  border-color: #111;
+  background: #111;
+  color: #fff;
+}
+
+.studio-ec-records-pill--single {
+  background: #e8f1ff;
+  color: #1a4a8a;
+  border-color: #b7d0f5;
+}
+
+.studio-ec-records-pill--batch {
+  background: #eaf7ef;
+  color: #1d6b3a;
+  border-color: #b7e0c4;
+}
+
+.studio-ec-records-pill--category {
+  background: #f7efe6;
+  color: #8a4b12;
+  border-color: #e5c9a8;
+}
+
+.studio-ec-records-pill--all {
+  background: #f3e8f7;
+  color: #6b2d8a;
+  border-color: #d7b8e8;
+}
+
+.studio-ec-records-filters .studio-ec-records-pill.is-active {
+  background: #111;
+  color: #fff;
+  border-color: #111;
+}
+
+.studio-ec-records-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.studio-ec-records-table th,
+.studio-ec-records-table td {
+  text-align: left;
+  padding: 0.45rem 0.5rem;
+  border-bottom: 1px solid var(--ec-border, #eee);
+  vertical-align: top;
+}
+
+.studio-ec-records-table th {
+  font-weight: 600;
+  color: #666;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.studio-ec-records-row {
+  cursor: pointer;
+}
+
+.studio-ec-records-row:hover {
+  background: #f8f6f4;
+}
+
+.studio-ec-record-preview-wrap {
+  margin-top: 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #fff;
+  min-height: 280px;
+}
+
+.studio-ec-record-preview {
+  width: 100%;
+  min-height: 360px;
+  border: 0;
+  background: #fff;
+}
+
+.studio-email-cc-field {
+  margin-top: 0.5rem;
+}
+
+.studio-email-cc-field .studio-hint {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.8rem;
+  color: #666;
+}
+
 .studio-ec__subtab {
   flex: 1;
   padding: 0.5rem 0.4rem;

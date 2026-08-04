@@ -112,7 +112,7 @@ const DRAW_FORM_COPY = {
             'Program Draw entry and review',
             'One entry for this round',
             'No recurring payment',
-            'Account required at checkout',
+            'Pay now — sign in after payment to finish entry',
         ],
         paymentPlanGroupLabel: 'Program Draw payment options',
         exploreMembershipsExpand: 'Explore memberships',
@@ -146,6 +146,11 @@ const DRAW_FORM_COPY = {
         needMembership:
             'Memberships include Program Award entries. Or complete a one-time Program Draw Payment below.',
         needSignIn: 'Sign in with Internet Identity to complete your Program Draw entry.',
+        paidSignInToFinish:
+            'Payment received. Sign in with Internet Identity to finish creating your Fusion account and enter the draw.',
+        paidSignInCancelled:
+            'Payment succeeded, but sign-in was cancelled. Sign in to finish linking your entry, then use Retry enter.',
+        paidFinishing: 'Finishing your Program Draw entry…',
         viewProgramDetails: 'View program details',
         submitNoAccount: 'This sign-in is not linked to a Fusion member account.',
         submitNoLinkedArtist: 'Your account is not linked to an artist profile.',
@@ -212,7 +217,7 @@ const DRAW_FORM_COPY = {
             'プログラム抽選のエントリーと審査',
             'このラウンドへの1回のエントリー',
             '継続課金なし',
-            'チェックアウト時にアカウントが必要',
+            'お支払い後にサインインしてエントリー完了',
         ],
         paymentPlanGroupLabel: 'プログラム抽選の支払いオプション',
         exploreMembershipsExpand: 'メンバーシップを見る',
@@ -246,6 +251,11 @@ const DRAW_FORM_COPY = {
         needMembership:
             'メンバーシップにはプログラムアワードエントリーが含まれます。または下の一回払いで完了できます。',
         needSignIn: 'プログラム抽選のエントリーを完了するには Internet Identity でサインインしてください。',
+        paidSignInToFinish:
+            'お支払いを確認しました。Internet Identity でサインインして Fusion アカウントを作成し、抽選エントリーを完了してください。',
+        paidSignInCancelled:
+            'お支払いは完了していますが、サインインがキャンセルされました。サインインしてエントリーを完了し、必要なら「再エントリー」を押してください。',
+        paidFinishing: 'プログラム抽選のエントリーを完了しています…',
         viewProgramDetails: 'プログラム詳細を見る',
         submitNoAccount: 'このサインインは Fusion メンバーアカウントに紐づいていません。',
         submitNoLinkedArtist: 'アカウントがアーティストプロフィールに紐づいていません。',
@@ -611,10 +621,10 @@ class ProgramDrawFormComponent extends HTMLElement {
             row.innerHTML = `<button type="button" class="app-btn app-btn--primary" id="draw-retry-enter"></button>`;
             status?.parentElement?.insertBefore(row, status);
             row.querySelector('#draw-retry-enter')?.addEventListener('click', () => {
-                void this._enterWithRetry(true, {
-                    skipAccountCheck: true,
-                    retries: 3,
-                    paypalOrderId: this._lastPaidOrderId,
+                void this._finishPaidEntryAfterCheckout({
+                    orderId: this._lastPaidOrderId,
+                    programId: this._programId(),
+                    promptLogin: true,
                 });
             });
         }
@@ -711,15 +721,12 @@ class ProgramDrawFormComponent extends HTMLElement {
                     if (!this._ensureContactOrPrompt()) {
                         throw new Error(L.contactRequiredHint);
                     }
-                    const ready = await this._ensureAccountReadyForPay();
-                    if (!ready) {
-                        throw new Error(D.needSignIn);
-                    }
+                    // Guests may start PayPal without a Fusion account (pay-first).
+                    // Principal is attached on confirm after II login when needed.
                     const snap = await getAuthSnapshot();
                     const principal = snap?.authenticated
                         ? String(snap.principal?.toText?.() || '').trim()
                         : '';
-                    if (!principal) throw new Error(D.needSignIn);
                     const payload = this._collectPayload();
                     const applicantName = [payload.firstName, payload.lastName]
                         .filter(Boolean)
@@ -727,7 +734,7 @@ class ProgramDrawFormComponent extends HTMLElement {
                         .trim();
                     return createPayPalOneTimePayment({
                         amountCents: body.amountCents,
-                        principal,
+                        ...(principal ? { principal } : {}),
                         programId,
                         applicationId: `award:${programId}`,
                         paymentType: 'program_award_entry',
@@ -742,13 +749,12 @@ class ProgramDrawFormComponent extends HTMLElement {
                             purpose: 'program_award_entry',
                             paymentType: 'program_award_entry',
                             applicationId: `award:${programId}`,
-                            principal,
+                            ...(principal ? { principal } : {}),
                         },
                     });
                 },
                 onApproved: async (orderId) => {
                     this._lastPaidOrderId = String(orderId || '');
-                    await confirmPayPalOneTimePayment(orderId);
                     const payPayload = this._collectPayload();
                     void this._syncDrawSubscriber(payPayload);
                     const payVal = DRAW_ENTRY_FEE_CENTS / 100;
@@ -768,10 +774,11 @@ class ProgramDrawFormComponent extends HTMLElement {
                     } catch {
                         /* ignore */
                     }
-                    await this._enterWithRetry(true, {
-                        skipAccountCheck: true,
-                        retries: 3,
-                        paypalOrderId: this._lastPaidOrderId,
+                    await this._finishPaidEntryAfterCheckout({
+                        orderId: this._lastPaidOrderId,
+                        programId,
+                        payload: payPayload,
+                        promptLogin: true,
                     });
                 },
                 onError: (err) => {
@@ -1502,7 +1509,118 @@ class ProgramDrawFormComponent extends HTMLElement {
     }
 
     /**
-     * II + Fusion account ready for paid draw entry (mirrors formal apply).
+     * After $50 PayPal approve: ensure II + Fusion account, confirm order onto ledger, enter draw.
+     * Guests may pay first; sign-in happens here (same idea as membership finish).
+     * @param {{
+     *   orderId: string,
+     *   programId?: string,
+     *   payload?: Record<string, string>,
+     *   promptLogin?: boolean,
+     * }} opts
+     * @returns {Promise<boolean>}
+     */
+    async _finishPaidEntryAfterCheckout(opts) {
+        const D = drawLocaleCopy();
+        const orderId = String(opts?.orderId || this._lastPaidOrderId || '').trim();
+        const programId = String(opts?.programId || this._programId() || '').trim();
+        const payload =
+            opts?.payload && typeof opts.payload === 'object' ? opts.payload : this._collectPayload();
+        if (!orderId || !programId) {
+            this._setMsg(D.paidEnterFailed, 'error');
+            this._showRetryEnterControl();
+            return false;
+        }
+        this._lastPaidOrderId = orderId;
+        this._paidEnterPending = true;
+
+        let snap = await getAuthSnapshot();
+        if (!snap?.authenticated) {
+            if (opts.promptLogin === false) {
+                this._setMsg(D.paidSignInToFinish, 'neutral');
+                this._showRetryEnterControl();
+                return false;
+            }
+            this._setMsg(D.paidSignInToFinish, 'neutral');
+            try {
+                await loginInternetIdentity({ source: 'join-link' });
+            } catch (e) {
+                if (e === ERROR_USER_INTERRUPT) {
+                    this._setMsg(D.paidSignInCancelled, 'error');
+                    this._showRetryEnterControl();
+                    return false;
+                }
+                this._setMsg(e instanceof Error ? e.message : String(e), 'error');
+                this._showRetryEnterControl();
+                return false;
+            }
+            snap = await getAuthSnapshot();
+            if (!snap?.authenticated) {
+                this._setMsg(D.paidSignInCancelled, 'error');
+                this._showRetryEnterControl();
+                return false;
+            }
+        }
+
+        this._setMsg(D.paidFinishing, 'neutral');
+        const principal = String(snap.principal?.toText?.() || '').trim();
+        if (!principal) {
+            this._setMsg(D.needSignIn, 'error');
+            this._showRetryEnterControl();
+            return false;
+        }
+
+        try {
+            const email = String(payload.email || '').trim();
+            if (email.includes('@')) {
+                setStoredBillingEmailForPrincipal(principal, email);
+                try {
+                    await setMyAccountContactForCaller({
+                        email,
+                        firstName: String(payload.firstName || ''),
+                        lastName: String(payload.lastName || ''),
+                    });
+                } catch {
+                    /* contact sidecar optional */
+                }
+            }
+
+            const actor = await getAuthenticatedFusionBackendActor();
+            if (actor && typeof actor.registerOrUpdateAccount === 'function') {
+                await actor.registerOrUpdateAccount(categoryToUserRole('artist'));
+            }
+            try {
+                await ensureMyLinkedArtistProfileForApplication();
+            } catch {
+                /* award enter does not require linked artist */
+            }
+
+            await confirmPayPalOneTimePayment(orderId, {
+                principal,
+                programId,
+                applicationId: `award:${programId}`,
+                paymentType: 'program_award_entry',
+                payload,
+            });
+
+            return await this._enterWithRetry(true, {
+                skipAccountCheck: true,
+                retries: 3,
+                paypalOrderId: orderId,
+            });
+        } catch (e) {
+            if (this._handleAccountGateError(e)) {
+                this._showRetryEnterControl();
+                return false;
+            }
+            this._setMsg(e instanceof Error ? e.message : String(e), 'error');
+            this._showRetryEnterControl();
+            return false;
+        }
+    }
+
+    /**
+     * II + Fusion account ready for paid draw entry (members already signed in).
+     * Not used for guest PayPal createOrder — guests pay first, then `_finishPaidEntryAfterCheckout`.
      * @returns {Promise<boolean>}
      */
     async _ensureAccountReadyForPay() {
@@ -1795,7 +1913,7 @@ class ProgramDrawFormComponent extends HTMLElement {
           <button type="button" class="app-btn app-btn--ghost" id="draw-view-program-details">${escapeHtml(D.viewProgramDetails)}</button>
         </div>
         <form id="draw-form-fields" novalidate ${formDisabled ? 'inert' : ''}>
-          <div class="app-form-card">
+          <div class="app-form-card" id="draw-contact">
             <h3 class="app-step-heading">${escapeHtml(L.contactSectionTitle)}</h3>
             <div class="app-field app-field--card-row">
               <div>
@@ -2008,14 +2126,14 @@ class ProgramDrawFormComponent extends HTMLElement {
         this.shadowRoot.querySelector('#draw-display')?.addEventListener(
             'fusion-draw-display-submit',
             () => {
-                const complete = this.shadowRoot?.querySelector('#draw-complete');
-                if (complete instanceof HTMLElement) {
-                    complete.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    return;
-                }
-                const fields = this.shadowRoot?.querySelector('#draw-form-fields');
-                if (fields instanceof HTMLElement) {
-                    fields.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                const contact =
+                    this.shadowRoot?.querySelector('#draw-contact') ||
+                    this.shadowRoot?.querySelector('#draw-form-fields');
+                if (contact instanceof HTMLElement) {
+                    scrollElementTopToViewportGap(
+                        contact,
+                        PROGRAM_APPLICATION_VIEWPORT_TOP_GAP_PX,
+                    );
                 }
             },
             { signal },

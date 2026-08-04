@@ -4205,6 +4205,8 @@ export async function getSubscribers() {
 
 /** Test overlay: email campaigns (`EmailCampaignRecord`-like plain objects). */
 const LS_EMAIL_CAMPAIGNS = `${LS_STUDIO_PREFIX}email-campaigns`;
+/** Test overlay: Studio Email → Records outbound log. */
+const LS_EMAIL_OUTBOUND = `${LS_STUDIO_PREFIX}email-outbound-records`;
 /** Test overlay: Resend segment name/id slots (max 5) for Services tab. */
 const LS_RESEND_SEGMENTS = `${LS_STUDIO_PREFIX}resend-segments`;
 
@@ -4226,6 +4228,21 @@ function readTestEmailCampaigns() {
  */
 function writeTestEmailCampaigns(rows) {
     writeStudioLs(LS_EMAIL_CAMPAIGNS, rows);
+}
+
+/**
+ * @returns {object[]}
+ */
+function readTestEmailOutboundRecords() {
+    const raw = readStudioLs(LS_EMAIL_OUTBOUND);
+    return Array.isArray(raw) ? raw : [];
+}
+
+/**
+ * @param {object[]} rows
+ */
+function writeTestEmailOutboundRecords(rows) {
+    writeStudioLs(LS_EMAIL_OUTBOUND, rows);
 }
 
 /**
@@ -4507,6 +4524,133 @@ export async function deleteEmailCampaign(id) {
         );
     }
     return actor.deleteEmailCampaign(sid);
+}
+
+/**
+ * @param {'single' | 'batch' | 'category' | 'all'} kind
+ * @returns {{ single: null } | { batch: null } | { category: null } | { all: null }}
+ */
+function emailOutboundKindToCandid(kind) {
+    const k = String(kind || '').trim().toLowerCase();
+    if (k === 'batch') return { batch: null };
+    if (k === 'category') return { category: null };
+    if (k === 'all') return { all: null };
+    return { single: null };
+}
+
+/**
+ * @param {unknown} kind
+ * @returns {'single' | 'batch' | 'category' | 'all'}
+ */
+export function emailOutboundKindKey(kind) {
+    if (kind && typeof kind === 'object') {
+        if ('batch' in kind) return 'batch';
+        if ('category' in kind) return 'category';
+        if ('all' in kind) return 'all';
+        if ('single' in kind) return 'single';
+    }
+    const s = String(kind || '').trim().toLowerCase();
+    if (s === 'batch' || s === 'category' || s === 'all' || s === 'single') return s;
+    return 'single';
+}
+
+/**
+ * @param {{
+ *   kind: 'single' | 'batch' | 'category' | 'all',
+ *   subject: string,
+ *   htmlBody?: string,
+ *   toSummary?: string,
+ *   recipientCount?: number,
+ *   ccEmails?: string,
+ *   campaignId?: string | null,
+ * }} opts
+ * @returns {Promise<string>} record id
+ */
+export async function appendEmailOutboundRecord(opts) {
+    const subject = String(opts?.subject || '').trim();
+    if (!subject) throw new Error('Subject required');
+    const htmlBody = String(opts?.htmlBody || '');
+    const toSummary = String(opts?.toSummary || '').trim();
+    const recipientCount = Math.max(0, Math.round(Number(opts?.recipientCount) || 0));
+    const ccEmails = String(opts?.ccEmails || '').trim();
+    const campaignId = String(opts?.campaignId || '').trim();
+    const kind = emailOutboundKindKey(opts?.kind);
+
+    if (getDataSource() === 'test') {
+        const rows = readTestEmailOutboundRecords();
+        const id = `eo-test-${Date.now()}`;
+        const { Principal } = await import('@dfinity/principal');
+        rows.push({
+            id,
+            kind: emailOutboundKindToCandid(kind),
+            subject,
+            htmlBody,
+            toSummary,
+            recipientCount,
+            ccEmails,
+            campaignId: campaignId ? [campaignId] : [],
+            sentAt: new Date().toISOString(),
+            createdBy: Principal.anonymous(),
+        });
+        writeTestEmailOutboundRecords(rows);
+        return id;
+    }
+
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.appendEmailOutboundRecord !== 'function') {
+        throw new Error(
+            'appendEmailOutboundRecord missing — deploy backend and run dfx generate fusion-app-backend.',
+        );
+    }
+    return actor.appendEmailOutboundRecord(
+        emailOutboundKindToCandid(kind),
+        subject,
+        htmlBody,
+        toSummary,
+        BigInt(recipientCount),
+        ccEmails,
+        campaignId ? [campaignId] : [],
+    );
+}
+
+/**
+ * @returns {Promise<object[]>}
+ */
+export async function listEmailOutboundRecords() {
+    if (getDataSource() === 'test') {
+        const rows = readTestEmailOutboundRecords();
+        return [...rows].sort((a, b) =>
+            String(b.sentAt || '').localeCompare(String(a.sentAt || '')),
+        );
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.listEmailOutboundRecords !== 'function') {
+        throw new Error(
+            'listEmailOutboundRecords missing — deploy backend and run dfx generate fusion-app-backend.',
+        );
+    }
+    const rows = await actor.listEmailOutboundRecords();
+    return Array.isArray(rows) ? rows : [];
+}
+
+/**
+ * @param {string} id
+ * @returns {Promise<object | null>}
+ */
+export async function getEmailOutboundRecord(id) {
+    const sid = String(id || '').trim();
+    if (!sid) return null;
+    if (getDataSource() === 'test') {
+        return readTestEmailOutboundRecords().find((r) => String(r?.id || '') === sid) || null;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.getEmailOutboundRecord !== 'function') {
+        throw new Error(
+            'getEmailOutboundRecord missing — deploy backend and run dfx generate fusion-app-backend.',
+        );
+    }
+    const raw = await actor.getEmailOutboundRecord(sid);
+    return unwrapCandidOptionalRecord(raw);
 }
 
 /**

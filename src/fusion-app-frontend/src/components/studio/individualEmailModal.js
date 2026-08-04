@@ -5,6 +5,13 @@ import { getDataSource, studioReinterpretWithPrompt } from '../../utils/database
 import { openStudioModal } from '../../utils/studioModal.js';
 import { sendEmail } from '../../utils/integrationApi.js';
 import { DEFAULT_SIGNATURE_HTML } from '../../utils/emailHtml.js';
+import {
+    buildStudioEmailCcList,
+    populateStudioEmailCcSelect,
+    readStudioEmailCcTeamEmail,
+    recordStudioEmailOutbound,
+    studioEmailCcSelectHtml,
+} from '../../utils/studioEmailCc.js';
 
 const LLM_COMBINED_MAX = 12000;
 
@@ -120,6 +127,7 @@ export function openIndividualEmailModal(row, opts = {}) {
       <input type="email" class="studio-input" id="studio-ie-test-to" placeholder="you@org.com" autocomplete="email" /></label>
     <button type="button" class="studio-btn-secondary" id="studio-ie-test">Send test</button>
   </div>
+  ${studioEmailCcSelectHtml('studio-ie-cc-team')}
   <div class="studio-send-blast-footer">
     <p id="studio-ie-status" class="studio-send-blast-foot-status" role="status" aria-live="polite"></p>
     <div class="studio-modal-actions studio-modal-actions--send-blast">
@@ -130,6 +138,8 @@ export function openIndividualEmailModal(row, opts = {}) {
 </div>`;
 
     const { root } = openStudioModal(inner, { title, wide: true });
+
+    void populateStudioEmailCcSelect(root.querySelector('#studio-ie-cc-team'));
 
     const subjectEl = root.querySelector('#studio-ie-subject');
     const bodyEl = root.querySelector('#studio-ie-body');
@@ -377,7 +387,17 @@ export function openIndividualEmailModal(row, opts = {}) {
         setStatus('Test email: sending…');
         let ok = false;
         try {
-            await sendEmail({ to, subject: subj, html: fullHtml() });
+            const cc = buildStudioEmailCcList(readStudioEmailCcTeamEmail(root, 'studio-ie-cc-team'));
+            const html = fullHtml();
+            await sendEmail({ to, subject: subj, html, cc });
+            await recordStudioEmailOutbound({
+                kind: 'single',
+                subject: subj,
+                htmlBody: html,
+                toSummary: `Test → ${to}`,
+                recipientCount: 1,
+                cc,
+            });
             ok = true;
             setStatus(`Test email: sent to ${to}.`);
         } catch (e) {
@@ -414,7 +434,17 @@ export function openIndividualEmailModal(row, opts = {}) {
         sendBtn.disabled = true;
         setStatus('Sending…');
         try {
-            await sendEmail({ to: toEmail, subject: subj, html: fullHtml() });
+            const cc = buildStudioEmailCcList(readStudioEmailCcTeamEmail(root, 'studio-ie-cc-team'));
+            const html = fullHtml();
+            await sendEmail({ to: toEmail, subject: subj, html, cc });
+            await recordStudioEmailOutbound({
+                kind: 'single',
+                subject: subj,
+                htmlBody: html,
+                toSummary: toEmail,
+                recipientCount: 1,
+                cc,
+            });
             setStatus(`Sent to ${toEmail}.`);
             if (onSent) await onSent();
         } catch (e) {

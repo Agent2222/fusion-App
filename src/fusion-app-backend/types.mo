@@ -906,6 +906,27 @@ module {
         createdBy : Principal;
     };
 
+    /// Studio Email → Records: one row per outbound send (blast = one row).
+    public type EmailOutboundKindV = {
+        #single;
+        #batch;
+        #category;
+        #all;
+    };
+
+    public type EmailOutboundRecord = {
+        id : Text;
+        kind : EmailOutboundKindV;
+        subject : Text;
+        htmlBody : Text;
+        toSummary : Text;
+        recipientCount : Nat;
+        ccEmails : Text;
+        campaignId : ?Text;
+        sentAt : Text;
+        createdBy : Principal;
+    };
+
     public type StudioPermissionOverrideEntry = (Principal, StudioPermissionMatrix);
 
     /// Admin-only full canister backup / restore (`adminExportFullDatabase` / `adminImportFullDatabase`).

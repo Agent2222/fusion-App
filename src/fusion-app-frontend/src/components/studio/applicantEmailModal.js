@@ -8,6 +8,13 @@ import { getIntegrationBaseUrl, sendEmail } from '../../utils/integrationApi.js'
 import { wrapEmailHtml } from '../../utils/emailCampaignTemplates.js';
 import { buildProgramRunSidebarDateLines } from '../../utils/programSidebarRunDates.js';
 import { formatStudioDateWithTitle } from '../../utils/studioDateFormat.js';
+import {
+    buildStudioEmailCcList,
+    populateStudioEmailCcSelect,
+    readStudioEmailCcTeamEmail,
+    recordStudioEmailOutbound,
+    studioEmailCcSelectHtml,
+} from '../../utils/studioEmailCc.js';
 
 const LLM_COMBINED_MAX = 12000;
 
@@ -439,6 +446,7 @@ export async function openApplicantEmailModal(row, opts = {}) {
           <input type="email" class="studio-input" id="studio-ae-test-to" placeholder="you@org.com" autocomplete="email" />
         </label>
         <button type="button" class="studio-btn-secondary" id="studio-ae-test">Send test</button>
+        ${studioEmailCcSelectHtml('studio-ae-cc-team')}
       </section>
       <section class="studio-applicant-email-composer__card studio-applicant-email-composer__signature-card">
         <div class="studio-applicant-email-composer__card-head">
@@ -473,6 +481,8 @@ export async function openApplicantEmailModal(row, opts = {}) {
 </div>`;
 
     const { root } = openStudioModal(inner, { title, wide: true });
+
+    void populateStudioEmailCcSelect(root.querySelector('#studio-ae-cc-team'));
 
     const subjectEl = root.querySelector('#studio-ae-subject');
     const bodyEl = root.querySelector('#studio-ae-body');
@@ -985,7 +995,17 @@ export async function openApplicantEmailModal(row, opts = {}) {
         setStatus('Test email: sending…');
         let ok = false;
         try {
-            await sendEmail({ to, subject: subj, html: fullHtml() });
+            const cc = buildStudioEmailCcList(readStudioEmailCcTeamEmail(root, 'studio-ae-cc-team'));
+            const html = fullHtml();
+            await sendEmail({ to, subject: subj, html, cc });
+            await recordStudioEmailOutbound({
+                kind: 'single',
+                subject: subj,
+                htmlBody: html,
+                toSummary: `Test → ${to}`,
+                recipientCount: 1,
+                cc,
+            });
             ok = true;
             setStatus(`Test email: sent to ${to}.`);
         } catch (e) {
@@ -1026,7 +1046,17 @@ export async function openApplicantEmailModal(row, opts = {}) {
         sendBtn.disabled = true;
         setStatus('Sending…');
         try {
-            await sendEmail({ to: toEmail, subject: subj, html: fullHtml() });
+            const cc = buildStudioEmailCcList(readStudioEmailCcTeamEmail(root, 'studio-ae-cc-team'));
+            const html = fullHtml();
+            await sendEmail({ to: toEmail, subject: subj, html, cc });
+            await recordStudioEmailOutbound({
+                kind: 'single',
+                subject: subj,
+                htmlBody: html,
+                toSummary: toEmail,
+                recipientCount: 1,
+                cc,
+            });
             const tpl = lastAppliedTemplate || getSelectedTemplate();
             await appendApplicantEmailOutreachStudio(applicantId, {
                 subject: subj,

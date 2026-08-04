@@ -150,6 +150,9 @@ persistent actor {
   stable var emailCampaignsStable : [(Text, Types.EmailCampaignRecord)] = [];
   /// Monotonic id counter for new campaigns (ids are `Nat` as `Text`); reconciled in `postupgrade` when loading from `emailCampaignsStable`.
   stable var nextEmailCampaignId : Nat = 0;
+  /// Studio → Email → Records: outbound send log (one row per blast/campaign/single).
+  stable var emailOutboundRecordsStable : [(Text, Types.EmailOutboundRecord)] = [];
+  stable var nextEmailOutboundId : Nat = 0;
 
   stable var soundEnvironmentConfigStable : Types.SoundEnvironmentConfig = {
     categoryLabel = "Nature";
@@ -438,6 +441,9 @@ persistent actor {
   transient var emailCampaignsById : _HashMap.HashMap<Text, Types.EmailCampaignRecord> =
     _HashMap.HashMap<Text, Types.EmailCampaignRecord>(0, Text.equal, Text.hash);
 
+  transient var emailOutboundRecordsById : _HashMap.HashMap<Text, Types.EmailOutboundRecord> =
+    _HashMap.HashMap<Text, Types.EmailOutboundRecord>(0, Text.equal, Text.hash);
+
   private let maxManualFeaturedStrip : Nat = 8;
 
   private func isEightDigitAccessCode(t : Text) : Bool {
@@ -705,6 +711,9 @@ persistent actor {
   };
   for (entry in emailCampaignsStable.vals()) {
     emailCampaignsById.put(entry.0, entry.1);
+  };
+  for (entry in emailOutboundRecordsStable.vals()) {
+    emailOutboundRecordsById.put(entry.0, entry.1);
   };
 
   /// Keep in sync with `adminPrincipals` defaults above — `postupgrade` appends any of these not already stored.
@@ -1909,6 +1918,7 @@ persistent actor {
     heroProfileImageReviewNotesStable := _Iter.toArray(heroProfileImageReviewNotesById.entries());
     audioEntryReviewNotesStable := _Iter.toArray(audioEntryReviewNotesByKey.entries());
     emailCampaignsStable := _Iter.toArray(emailCampaignsById.entries());
+    emailOutboundRecordsStable := _Iter.toArray(emailOutboundRecordsById.entries());
     applicantEmailOutreachStable := _Iter.toArray(applicantEmailOutreachById.entries());
   };
 
@@ -1935,6 +1945,24 @@ persistent actor {
       };
     };
     nextEmailCampaignId := maxEmailId;
+
+    emailOutboundRecordsById := _HashMap.HashMap<Text, Types.EmailOutboundRecord>(
+      emailOutboundRecordsStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in emailOutboundRecordsStable.vals()) {
+      emailOutboundRecordsById.put(entry.0, entry.1);
+    };
+    emailOutboundRecordsStable := [];
+    var maxOutboundId : Nat = nextEmailOutboundId;
+    for (entry in emailOutboundRecordsById.entries()) {
+      switch (Nat.fromText(entry.0)) {
+        case (?n) { if (n > maxOutboundId) { maxOutboundId := n } };
+        case null {};
+      };
+    };
+    nextEmailOutboundId := maxOutboundId;
 
     accountsByPrincipal := _HashMap.HashMap<Principal, Types.UserAccountCore>(
       accountsStable.size(),
@@ -3860,6 +3888,13 @@ persistent actor {
     nextEmailCampaignId := nextEmailCampaignId + 1;
     Nat.toText(nextEmailCampaignId);
   };
+
+  private func newEmailOutboundId() : Text {
+    nextEmailOutboundId := nextEmailOutboundId + 1;
+    Nat.toText(nextEmailOutboundId);
+  };
+
+  private let maxEmailOutboundHtmlChars : Nat = 200_000;
 
   /// Register with an 8-digit invite or artist roster access code — creates an **active** exempt account.
   public shared (msg) func registerWithJoinAccessCode(
@@ -8891,5 +8926,57 @@ persistent actor {
       case null { false };
       case (?_) { true };
     };
+  };
+
+  /// Append one Studio outbound email record (blast = one row). Returns new id.
+  public shared (msg) func appendEmailOutboundRecord(
+    kind : Types.EmailOutboundKindV,
+    subject : Text,
+    htmlBody : Text,
+    toSummary : Text,
+    recipientCount : Nat,
+    ccEmails : Text,
+    campaignId : ?Text,
+  ) : async Text {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "email");
+    let subj = Text.trim(subject, #char ' ');
+    if (subj.size() == 0) { Debug.trap("Subject required") };
+    if (htmlBody.size() > maxEmailOutboundHtmlChars) {
+      Debug.trap("Email body too large for records snapshot");
+    };
+    let id = newEmailOutboundId();
+    let rec : Types.EmailOutboundRecord = {
+      id = id;
+      kind = kind;
+      subject = Text.trim(subj, #char ' ');
+      htmlBody = htmlBody;
+      toSummary = Text.trim(toSummary, #char ' ');
+      recipientCount = recipientCount;
+      ccEmails = Text.trim(ccEmails, #char ' ');
+      campaignId = campaignId;
+      sentAt = emailNowText();
+      createdBy = msg.caller;
+    };
+    emailOutboundRecordsById.put(id, rec);
+    id
+  };
+
+  public shared query (msg) func listEmailOutboundRecords() : async [Types.EmailOutboundRecord] {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "email");
+    let vals = _Iter.toArray(emailOutboundRecordsById.vals());
+    Array.sort(
+      vals,
+      func(a : Types.EmailOutboundRecord, b : Types.EmailOutboundRecord) : Order.Order {
+        Text.compare(b.sentAt, a.sentAt);
+      },
+    )
+  };
+
+  public shared query (msg) func getEmailOutboundRecord(id : Text) : async ?Types.EmailOutboundRecord {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "email");
+    emailOutboundRecordsById.get(id);
   };
 };
