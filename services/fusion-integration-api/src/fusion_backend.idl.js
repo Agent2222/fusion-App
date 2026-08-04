@@ -100,6 +100,21 @@ export const idlFactory = ({ IDL }) => {
             [],
             [],
         ),
+        integrationEnterProgramAward: IDL.Func(
+            [IDL.Principal, IDL.Text, IDL.Text, IDL.Text, IDL.Text],
+            [
+                IDL.Record({
+                    id: IDL.Text,
+                    programId: IDL.Text,
+                    principalText: IDL.Text,
+                    status: IDL.Text,
+                    enteredAt: IDL.Text,
+                    updatedAt: IDL.Text,
+                    paidEntry: IDL.Bool,
+                }),
+            ],
+            [],
+        ),
         integrationMarkProgramDepositAccepted: IDL.Func(
             [IDL.Principal, IDL.Text, IDL.Text, IDL.Text, IDL.Text],
             [],

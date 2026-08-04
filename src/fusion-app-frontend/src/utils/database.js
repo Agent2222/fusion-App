@@ -102,6 +102,8 @@ const LS_APPLICANTS = 'applicants';
 const LS_APPLICANT_EMAIL_OUTREACH = 'fusion-studio-applicant-email-outreach';
 /** Per-id artist field overrides (imported, accessCode, locales, …). */
 const LS_ARTISTS_OVERLAY = 'artistsOverlay';
+/** Test-mode Program Draw past recipients by artist id. */
+const LS_DRAW_RECIPIENTS = 'artistDrawRecipients';
 const LS_PROGRAMS_BLOCK = 'allProgramsBlock';
 const LS_JOURNALS = 'journals';
 const LS_EDITIONS = 'editions';
@@ -579,6 +581,15 @@ export const CONTENT_PAGE_REGISTRY = [
         editorMode: 'locales',
         primaryStudioSurface: 'join-network',
         studioSurfaces: ['join-network'],
+    },
+    {
+        key: 'programDraw',
+        slug: 'program-draw',
+        testKey: 'programDraw',
+        label: 'Program Draw (display + About)',
+        editorMode: 'locales',
+        primaryStudioSurface: 'content',
+        studioSurfaces: ['content'],
     },
 ];
 
@@ -1360,6 +1371,139 @@ export async function applyFeaturedFlagsFromStudioSaveLive(id, flags) {
 }
 
 /**
+ * @typedef {{ artistId: string, cycle: number, programId: string, awardLabel: string, updatedAt: string }} ArtistDrawRecipientRow
+ */
+
+/**
+ * @returns {Record<string, ArtistDrawRecipientRow>}
+ */
+function readDrawRecipientsLs() {
+    const raw = readStudioLs(LS_DRAW_RECIPIENTS);
+    return raw && typeof raw === 'object' && !Array.isArray(raw) ? /** @type {Record<string, ArtistDrawRecipientRow>} */ (raw) : {};
+}
+
+/**
+ * @param {unknown} row
+ * @returns {ArtistDrawRecipientRow | null}
+ */
+function mapDrawRecipientRow(row) {
+    if (!row || typeof row !== 'object') return null;
+    const r = /** @type {Record<string, unknown>} */ (row);
+    const artistId = String(r.artistId ?? r.artist_id ?? '').trim();
+    if (!artistId) return null;
+    const cycleRaw = Number(r.cycle);
+    return {
+        artistId,
+        cycle: Number.isFinite(cycleRaw) && cycleRaw > 0 ? Math.floor(cycleRaw) : 1,
+        programId: String(r.programId ?? r.program_id ?? '').trim(),
+        awardLabel: String(r.awardLabel ?? r.award_label ?? '').trim(),
+        updatedAt: String(r.updatedAt ?? r.updated_at ?? ''),
+    };
+}
+
+/**
+ * Live/staff: set or clear Program Draw past-recipient flag for a roster artist.
+ * Test: localStorage overlay.
+ * @param {string} id
+ * @param {{ enabled: boolean, cycle?: number, programId?: string, awardLabel?: string }} flags
+ */
+export async function applyDrawRecipientFromStudioSaveLive(id, flags) {
+    const sid = String(id || '').trim();
+    if (!sid) return;
+    const enabled = Boolean(flags?.enabled);
+    const cycle = Math.max(1, Math.floor(Number(flags?.cycle) || 1));
+    const programId = String(flags?.programId ?? '').trim();
+    const awardLabel = String(flags?.awardLabel ?? '').trim();
+
+    if (getDataSource() === 'test') {
+        const map = readDrawRecipientsLs();
+        if (enabled) {
+            map[sid] = {
+                artistId: sid,
+                cycle,
+                programId,
+                awardLabel,
+                updatedAt: new Date().toISOString(),
+            };
+        } else {
+            delete map[sid];
+        }
+        writeStudioLs(LS_DRAW_RECIPIENTS, map);
+        return;
+    }
+
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.staffSetArtistDrawRecipient !== 'function') {
+        const map = readDrawRecipientsLs();
+        if (enabled) {
+            map[sid] = {
+                artistId: sid,
+                cycle,
+                programId,
+                awardLabel,
+                updatedAt: new Date().toISOString(),
+            };
+        } else {
+            delete map[sid];
+        }
+        writeStudioLs(LS_DRAW_RECIPIENTS, map);
+        return;
+    }
+    await actor.staffSetArtistDrawRecipient(sid, enabled, BigInt(cycle), programId, awardLabel);
+}
+
+/**
+ * Studio Manage: load draw-recipient sidecar for one artist.
+ * @param {string} id
+ * @returns {Promise<ArtistDrawRecipientRow | null>}
+ */
+export async function getArtistDrawRecipientStudio(id) {
+    const sid = String(id || '').trim();
+    if (!sid) return null;
+    if (getDataSource() === 'test') {
+        return mapDrawRecipientRow(readDrawRecipientsLs()[sid]);
+    }
+    try {
+        const actor = await getStudioAuthenticatedActor();
+        if (typeof actor.getArtistDrawRecipient !== 'function') {
+            return mapDrawRecipientRow(readDrawRecipientsLs()[sid]);
+        }
+        const row = await actor.getArtistDrawRecipient(sid);
+        if (row == null) return null;
+        const unwrapped = Array.isArray(row) ? row[0] : row;
+        return mapDrawRecipientRow(unwrapped);
+    } catch {
+        return mapDrawRecipientRow(readDrawRecipientsLs()[sid]);
+    }
+}
+
+/**
+ * Public: all Program Draw past recipients (cycle desc from canister).
+ * @returns {Promise<ArtistDrawRecipientRow[]>}
+ */
+export async function listArtistDrawRecipientsPublic() {
+    if (getDataSource() === 'test') {
+        return Object.values(readDrawRecipientsLs())
+            .map(mapDrawRecipientRow)
+            .filter(Boolean)
+            .sort((a, b) => b.cycle - a.cycle || String(b.updatedAt).localeCompare(String(a.updatedAt)));
+    }
+    try {
+        const actor = await getFusionBackendActor();
+        if (typeof actor.listArtistDrawRecipientsPublic !== 'function') {
+            return Object.values(readDrawRecipientsLs())
+                .map(mapDrawRecipientRow)
+                .filter(Boolean);
+        }
+        const rows = await actor.listArtistDrawRecipientsPublic();
+        if (!Array.isArray(rows)) return [];
+        return rows.map(mapDrawRecipientRow).filter(Boolean);
+    } catch {
+        return [];
+    }
+}
+
+/**
  * Live: persist profile-image approval (staff). Test: writes to artists overlay.
  * @param {string} id
  * @param {boolean} approved
@@ -1722,15 +1866,22 @@ export async function loadArtistForStudioEdit(slug, tableRow = null) {
     if (getDataSource() === 'test') {
         const all = await getArtistsForStudio();
         const found = all.find((a) => String(a?.slug || '').toLowerCase() === s.toLowerCase());
-        return found
-            ? mergeArtistFeaturedExtension(normalizeArtistDefaults({ ...found }), readArtistFeaturedMeta())
-            : null;
+        if (!found) return null;
+        const base = mergeArtistFeaturedExtension(normalizeArtistDefaults({ ...found }), readArtistFeaturedMeta());
+        const draw = await getArtistDrawRecipientStudio(String(base.id || ''));
+        return {
+            ...base,
+            drawRecipient: Boolean(draw),
+            drawRecipientCycle: draw?.cycle ?? 1,
+            drawRecipientProgramId: draw?.programId ?? '',
+            drawRecipientAwardLabel: draw?.awardLabel ?? '',
+        };
     }
     const tr = tableRow && typeof tableRow === 'object' ? tableRow : {};
     const fromCanister = await getArtistBySlug(s);
     if (!fromCanister) return null;
     const meta = await fetchFeaturedMergeMetaLive();
-    return mergeArtistFeaturedExtension(
+    const base = mergeArtistFeaturedExtension(
         normalizeArtistDefaults({
             ...fromCanister,
             imported: Boolean(tr.imported ?? fromCanister.imported),
@@ -1744,6 +1895,14 @@ export async function loadArtistForStudioEdit(slug, tableRow = null) {
         }),
         meta
     );
+    const draw = await getArtistDrawRecipientStudio(String(base.id || ''));
+    return {
+        ...base,
+        drawRecipient: Boolean(draw),
+        drawRecipientCycle: draw?.cycle ?? 1,
+        drawRecipientProgramId: draw?.programId ?? '',
+        drawRecipientAwardLabel: draw?.awardLabel ?? '',
+    };
 }
 
 /**
@@ -2566,10 +2725,11 @@ export async function getAwardCreditsForCaller() {
     const { calendarQuarterKey } = await import('./applicationFeePolicy.js');
     const quarterKey = calendarQuarterKey();
     if (getDataSource() === 'test') {
+        // Default 0 — credits are earned via quarterly/annual accrual only (not seeded).
         return {
-            balance: 4,
-            membershipTier: 'annual',
-            lastGrantedKey: `A-${new Date().getUTCFullYear()}`,
+            balance: 0,
+            membershipTier: '',
+            lastGrantedKey: '',
             nextGrantHint: '',
         };
     }
@@ -2608,12 +2768,21 @@ export async function getMyProgramPath(programId) {
 
 /**
  * @param {string} programId
- * @param {{ paidEntryReceipt?: boolean }} [opts]
+ * @param {{ paypalOrderId?: string, paidEntryReceipt?: boolean, payload?: Record<string, unknown> | string }} [opts]
  */
 export async function enterProgramAward(programId, opts = {}) {
     const id = String(programId || '').trim();
     if (!id) throw new Error('programId required');
     const { calendarQuarterKey } = await import('./applicationFeePolicy.js');
+    const payloadJson =
+        typeof opts.payload === 'string'
+            ? opts.payload
+            : JSON.stringify(opts.payload && typeof opts.payload === 'object' ? opts.payload : {});
+    const paypalOrderId = String(opts.paypalOrderId || '').trim();
+    // Legacy: paidEntryReceipt true without order id is no longer accepted on-canister.
+    if (opts.paidEntryReceipt === true && !paypalOrderId) {
+        throw new Error('Paid Program Award entry requires a PayPal order id.');
+    }
     if (getDataSource() === 'test') {
         return {
             id: `test|${id}`,
@@ -2622,7 +2791,8 @@ export async function enterProgramAward(programId, opts = {}) {
             status: 'entered',
             enteredAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
-            paidEntry: Boolean(opts.paidEntryReceipt),
+            paidEntry: Boolean(paypalOrderId),
+            payloadJson,
         };
     }
     const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
@@ -2630,7 +2800,7 @@ export async function enterProgramAward(programId, opts = {}) {
     if (!actor || typeof actor.enterProgramAward !== 'function') {
         throw new Error('enterProgramAward missing — deploy backend and run dfx generate.');
     }
-    return actor.enterProgramAward(id, Boolean(opts.paidEntryReceipt), calendarQuarterKey());
+    return actor.enterProgramAward(id, paypalOrderId, calendarQuarterKey(), payloadJson);
 }
 
 /** @param {string} programId */
@@ -2644,6 +2814,46 @@ export async function exitProgramAward(programId) {
         throw new Error('exitProgramAward missing — deploy backend and run dfx generate.');
     }
     await actor.exitProgramAward(id);
+}
+
+/**
+ * Withdraw a formal application for a program (no application-credit refund).
+ * Clears the application path so the member may enter the Program Draw.
+ * @param {string} programId
+ */
+export async function withdrawMyProgramApplication(programId) {
+    const id = String(programId || '').trim();
+    if (!id) throw new Error('programId required');
+    if (getDataSource() === 'test') {
+        const artistId = getProfileSettingsDevArtistId();
+        if (!artistId) return;
+        const curApps = readStudioLs(LS_APPLICANTS);
+        const list = Array.isArray(curApps) ? [...curApps] : [];
+        const appId = `${artistId}|${id}`;
+        const idx = list.findIndex((x) => String(x?.id || '') === appId);
+        if (idx >= 0) {
+            list[idx] = { ...list[idx], status: 'withdrawn' };
+            writeStudioLs(LS_APPLICANTS, list);
+        }
+        const all = readStudioLs('artistApplications') || {};
+        const next = { ...all };
+        const perArtist = { ...(next[artistId] && typeof next[artistId] === 'object' ? next[artistId] : {}) };
+        if (perArtist[id] && typeof perArtist[id] === 'object') {
+            perArtist[id] = { ...perArtist[id], status: 'withdrawn', applicationStatus: 'withdrawn' };
+            next[artistId] = perArtist;
+            writeStudioLs('artistApplications', next);
+        }
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('fusion-data-source-change', { detail: { source: 'test' } }));
+        }
+        return;
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.withdrawMyProgramApplication !== 'function') {
+        throw new Error('withdrawMyProgramApplication missing — deploy backend and run dfx generate.');
+    }
+    await actor.withdrawMyProgramApplication(id);
 }
 
 /** @param {string} programId */
@@ -2661,6 +2871,124 @@ export async function getMyProgramAwardEntry(programId) {
     }
 }
 
+/**
+ * Authenticated: all Program Award / Draw entries for the caller.
+ * @returns {Promise<object[]>}
+ */
+export async function listMyProgramAwardEntries() {
+    if (getDataSource() === 'test') return [];
+    try {
+        const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+        const actor = await getAuthenticatedFusionBackendActor();
+        if (!actor || typeof actor.listMyProgramAwardEntries !== 'function') return [];
+        const rows = await actor.listMyProgramAwardEntries();
+        return Array.isArray(rows) ? rows : [];
+    } catch {
+        return [];
+    }
+}
+
+/** @type {Map<string, { at: number, row: { active: boolean, totalSlots: number, enteredCount: number, cycle: number } | null }>} */
+const _drawProgressCache = new Map();
+const DRAW_PROGRESS_CACHE_MS = 8000;
+/** Cap hung IC calls so display preload cannot stall on progress. */
+const DRAW_PROGRESS_TIMEOUT_MS = 2500;
+
+/**
+ * Public draw progress (entered count + slot cap). Degrades if bindings lag.
+ * Does not chain a second config fetch — callers already have config when needed.
+ * @param {string} programId
+ * @returns {Promise<{ active: boolean, totalSlots: number, enteredCount: number, cycle: number } | null>}
+ */
+export async function getProgramDrawProgressPublic(programId) {
+    const id = String(programId || '').trim();
+    if (!id) return null;
+    const cached = _drawProgressCache.get(id);
+    if (cached && Date.now() - cached.at < DRAW_PROGRESS_CACHE_MS) {
+        return cached.row;
+    }
+    if (getDataSource() === 'test') {
+        const cfg = await getProgramDrawConfigPublic(id);
+        const row = {
+            active: cfg ? Boolean(cfg.active) : false,
+            totalSlots: Number(cfg?.totalSlots) > 0 ? Math.floor(Number(cfg.totalSlots)) : 100,
+            enteredCount: 0,
+            cycle: 1,
+        };
+        _drawProgressCache.set(id, { at: Date.now(), row });
+        return row;
+    }
+    try {
+        const actor = await getFusionBackendActor();
+        if (!actor || typeof actor.getProgramDrawProgressPublic !== 'function') {
+            // Bindings lag / old canister — skip; display uses config for active/total.
+            _drawProgressCache.set(id, { at: Date.now(), row: null });
+            return null;
+        }
+        const row = await Promise.race([
+            actor.getProgramDrawProgressPublic(id).then((raw) => {
+                if (!raw || typeof raw !== 'object') return null;
+                const totalSlots = Number(raw.totalSlots ?? raw.total_slots ?? 100);
+                const enteredCount = Number(raw.enteredCount ?? raw.entered_count ?? 0);
+                const cycle = Number(raw.cycle ?? 1);
+                return {
+                    active: Boolean(raw.active),
+                    totalSlots:
+                        Number.isFinite(totalSlots) && totalSlots > 0 ? Math.floor(totalSlots) : 100,
+                    enteredCount:
+                        Number.isFinite(enteredCount) && enteredCount >= 0
+                            ? Math.floor(enteredCount)
+                            : 0,
+                    cycle: Number.isFinite(cycle) && cycle > 0 ? Math.floor(cycle) : 1,
+                };
+            }),
+            new Promise((resolve) => {
+                setTimeout(() => resolve(null), DRAW_PROGRESS_TIMEOUT_MS);
+            }),
+        ]);
+        _drawProgressCache.set(id, { at: Date.now(), row });
+        return row;
+    } catch {
+        _drawProgressCache.set(id, { at: Date.now(), row: null });
+        return null;
+    }
+}
+
+/**
+ * @param {string} programId
+ * @returns {Promise<{ entry: object, payloadJson: string } | null>}
+ */
+export async function getMyProgramAwardEntryDetailed(programId) {
+    const id = String(programId || '').trim();
+    if (!id) return null;
+    if (getDataSource() === 'test') return null;
+    try {
+        const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+        const actor = await getAuthenticatedFusionBackendActor();
+        if (!actor) return null;
+        if (typeof actor.getMyProgramAwardEntryDetailed === 'function') {
+            const pair = unwrapOpt(await actor.getMyProgramAwardEntryDetailed(id));
+            if (!pair) return null;
+            if (Array.isArray(pair) && pair.length >= 2) {
+                return { entry: pair[0], payloadJson: String(pair[1] || '') };
+            }
+            if (pair && typeof pair === 'object') {
+                const o = /** @type {Record<string, unknown>} */ (pair);
+                return {
+                    entry: o.entry || o[0],
+                    payloadJson: String(o.payloadJson ?? o[1] ?? ''),
+                };
+            }
+            return null;
+        }
+        const entry = await getMyProgramAwardEntry(id);
+        if (!entry) return null;
+        return { entry, payloadJson: '' };
+    } catch {
+        return null;
+    }
+}
+
 /** @param {string} programId */
 export async function listProgramAwardEntriesStudio(programId) {
     const id = String(programId || '').trim();
@@ -2668,9 +2996,28 @@ export async function listProgramAwardEntriesStudio(programId) {
     if (getDataSource() === 'test') return [];
     try {
         const actor = await getStudioAuthenticatedActor();
-        if (!actor || typeof actor.listProgramAwardEntries !== 'function') return [];
+        if (!actor) return [];
+        if (typeof actor.listProgramAwardEntriesDetailed === 'function') {
+            const rows = await actor.listProgramAwardEntriesDetailed(id);
+            if (!Array.isArray(rows)) return [];
+            return rows.map((row) => {
+                if (Array.isArray(row) && row.length >= 2) {
+                    const entry = row[0] && typeof row[0] === 'object' ? row[0] : {};
+                    return { ...entry, payloadJson: String(row[1] || '') };
+                }
+                if (row && typeof row === 'object') {
+                    const o = /** @type {Record<string, unknown>} */ (row);
+                    return {
+                        ...(o.entry && typeof o.entry === 'object' ? o.entry : o),
+                        payloadJson: String(o.payloadJson ?? ''),
+                    };
+                }
+                return row;
+            });
+        }
+        if (typeof actor.listProgramAwardEntries !== 'function') return [];
         const rows = await actor.listProgramAwardEntries(id);
-        return Array.isArray(rows) ? rows : [];
+        return Array.isArray(rows) ? rows.map((e) => ({ ...e, payloadJson: '' })) : [];
     } catch {
         return [];
     }
@@ -2776,6 +3123,21 @@ export async function adminAdjustAwardCreditsStudio(principalText, adj) {
     }
     const { Principal } = await import('@dfinity/principal');
     return Number(await actor.adminAdjustAwardCredits(Principal.fromText(p), credit, debit, note));
+}
+
+/**
+ * Admin one-shot: zero all Program Award entry balances (keeps last-granted keys).
+ * @returns {Promise<number>} number of principals that had a positive balance
+ */
+export async function adminClearAllAwardEntryBalancesStudio() {
+    if (getDataSource() === 'test') return 0;
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.adminClearAllAwardEntryBalances !== 'function') {
+        throw new Error(
+            'adminClearAllAwardEntryBalances missing — deploy backend and run dfx generate.',
+        );
+    }
+    return Number(await actor.adminClearAllAwardEntryBalances());
 }
 
 /**
@@ -5764,7 +6126,16 @@ export async function getSubscribersCsv() {
  */
 export function applicantStatusToVariant(status) {
     const s = String(status || 'pending');
-    const allowed = ['pending', 'reviewing', 'postInterviewReview', 'needsInfo', 'accepted', 'rejected', 'pulledOut'];
+    const allowed = [
+        'pending',
+        'reviewing',
+        'postInterviewReview',
+        'needsInfo',
+        'accepted',
+        'rejected',
+        'pulledOut',
+        'withdrawn',
+    ];
     const k = allowed.includes(s) ? s : 'pending';
     return { [k]: null };
 }
@@ -5791,7 +6162,8 @@ function emptyLiveContentBundle(entry) {
     if (
         entry.testKey === 'context' ||
         entry.testKey === 'artistsPage' ||
-        entry.testKey === 'joinNetworkPage'
+        entry.testKey === 'joinNetworkPage' ||
+        entry.testKey === 'programDraw'
     ) {
         return { en: {}, ja: {} };
     }
@@ -6444,18 +6816,30 @@ export async function getProgramDrawConfigStudio(programId) {
     }
 }
 
+/** @type {Map<string, { at: number, row: ReturnType<typeof mapProgramDrawConfig> }>} */
+const _drawConfigPublicCache = new Map();
+const DRAW_CONFIG_PUBLIC_CACHE_MS = 10000;
+
 /** Public (anonymous) read of program award/draw config. */
 export async function getProgramDrawConfigPublic(programId) {
     const id = String(programId || '').trim();
     if (!id) return null;
+    const hit = _drawConfigPublicCache.get(id);
+    if (hit && Date.now() - hit.at < DRAW_CONFIG_PUBLIC_CACHE_MS) {
+        return hit.row;
+    }
     if (getDataSource() === 'test') {
-        return getProgramDrawConfigStudio(id);
+        const row = await getProgramDrawConfigStudio(id);
+        _drawConfigPublicCache.set(id, { at: Date.now(), row });
+        return row;
     }
     try {
         const actor = await getFusionBackendActor();
         if (!actor || typeof actor.getProgramDrawConfig !== 'function') return null;
         const opt = await actor.getProgramDrawConfig(id);
-        return mapProgramDrawConfig(unwrapOpt(opt));
+        const row = mapProgramDrawConfig(unwrapOpt(opt));
+        _drawConfigPublicCache.set(id, { at: Date.now(), row });
+        return row;
     } catch {
         return null;
     }

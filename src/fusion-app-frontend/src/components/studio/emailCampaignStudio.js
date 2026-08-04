@@ -22,6 +22,18 @@ import {
     upsertEmailCampaign,
 } from '../../utils/database.js';
 import {
+    COHORT_DRAW,
+    COHORT_DRAW_PREFIX,
+    EMAIL_COHORT_OPTIONS,
+    drawCohortValue,
+    invalidateEmailCohortContextCache,
+    isEmailCohortAudience,
+    listProgramsForDrawCohortPicker,
+    loadEmailCohortContext,
+    parseDrawProgramId,
+    resolveCohortEmails,
+} from '../../utils/emailAudienceCohorts.js';
+import {
     fetchResendMeta,
     getIntegrationBaseUrl,
     resendAddContactToSegment,
@@ -91,8 +103,9 @@ function statusKey(st) {
  */
 function audienceToValue(aud) {
     if (aud && typeof aud === 'object' && 'category' in aud) {
-        const c = /** @type {Record<string, unknown>} */ (aud).category;
-        return `cat:${String(c ?? '')}`;
+        const c = String(/** @type {Record<string, unknown>} */ (aud).category ?? '').trim();
+        if (c.startsWith('cohort:')) return c;
+        return `cat:${c}`;
     }
     return 'all';
 }
@@ -102,8 +115,12 @@ function audienceToValue(aud) {
  * @returns {{ allBroadcast: null } | { category: string }}
  */
 function valueToAudience(v) {
-    if (v.startsWith('cat:')) {
-        return { category: v.slice(4).trim() || 'general' };
+    const s = String(v || '').trim();
+    if (s.startsWith('cohort:')) {
+        return { category: s };
+    }
+    if (s.startsWith('cat:')) {
+        return { category: s.slice(4).trim() || 'general' };
     }
     return { allBroadcast: null };
 }
@@ -579,6 +596,13 @@ export function renderEmailCampaignStudio() {
               <span>Recipients <em class="studio-ec__est" id="studio-ec-recipient-est">—</em></span>
               <select class="studio-select" id="studio-ec-audience"></select>
             </label>
+            <label class="studio-field" id="studio-ec-draw-program-wrap" hidden>
+              <span>Draw program</span>
+              <select class="studio-select" id="studio-ec-draw-program" aria-label="Program for draw applicants">
+                <option value="">— Select program —</option>
+              </select>
+              <p class="studio-muted" style="margin:0.35rem 0 0;font-size:0.85rem">Required for Current draw applicants.</p>
+            </label>
             <label class="studio-field">
               <span>Broadcast segment (Resend)</span>
               <div class="studio-ec-segment-row">
@@ -668,6 +692,10 @@ export async function initEmailCampaignStudio(mainEl) {
     const titleInp = root.querySelector('#studio-ec-title');
     const subjInp = root.querySelector('#studio-ec-subject');
     const prevInp = root.querySelector('#studio-ec-preview');
+    const drawProgramWrap = root.querySelector('#studio-ec-draw-program-wrap');
+    const drawProgramSel = root.querySelector('#studio-ec-draw-program');
+    /** @type {number} */
+    let recipientEstSeq = 0;
     const templateSel = root.querySelector('#studio-ec-template');
     const sourcePanel = root.querySelector('#studio-ec-source-panel');
     const sourceTypeSel = root.querySelector('#studio-ec-source-type');
@@ -787,12 +815,80 @@ export async function initEmailCampaignStudio(mainEl) {
         }
     };
 
+    /**
+     * Audience select value with draw program id composed when needed.
+     * @returns {string}
+     */
+    const getEffectiveAudienceValue = () => {
+        if (!(audSel instanceof HTMLSelectElement)) return 'all';
+        const v = audSel.value;
+        if (v === COHORT_DRAW || v.startsWith(COHORT_DRAW_PREFIX)) {
+            const pid =
+                drawProgramSel instanceof HTMLSelectElement
+                    ? String(drawProgramSel.value || '').trim()
+                    : parseDrawProgramId(v);
+            return drawCohortValue(pid);
+        }
+        return v;
+    };
+
+    const syncDrawProgramVisibility = () => {
+        if (!(audSel instanceof HTMLSelectElement) || !(drawProgramWrap instanceof HTMLElement)) return;
+        const v = audSel.value;
+        const show = v === COHORT_DRAW || v.startsWith(COHORT_DRAW_PREFIX);
+        drawProgramWrap.hidden = !show;
+    };
+
+    const populateDrawProgramSelect = async () => {
+        if (!(drawProgramSel instanceof HTMLSelectElement)) return;
+        const cur = String(drawProgramSel.value || '').trim();
+        let programs = [];
+        try {
+            programs = await listProgramsForDrawCohortPicker();
+        } catch {
+            programs = [];
+        }
+        const opts = ['<option value="">— Select program —</option>'].concat(
+            programs.map(
+                (p) =>
+                    `<option value="${esc(p.id)}">${esc(p.label)}</option>`,
+            ),
+        );
+        drawProgramSel.innerHTML = opts.join('');
+        if (cur && [...drawProgramSel.options].some((o) => o.value === cur)) {
+            drawProgramSel.value = cur;
+        }
+    };
+
     const updateRecipientEst = () => {
         if (!(audSel instanceof HTMLSelectElement) || !recipientEst) return;
-        const v = audSel.value;
+        const v = getEffectiveAudienceValue();
+        syncDrawProgramVisibility();
         if (v === 'all') {
             recipientEst.textContent = '(Resend segment — not counted here)';
-        } else {
+            return;
+        }
+        if (isEmailCohortAudience(v)) {
+            if (v === COHORT_DRAW) {
+                recipientEst.textContent = 'Select a program';
+                return;
+            }
+            const seq = ++recipientEstSeq;
+            recipientEst.textContent = 'Resolving…';
+            void (async () => {
+                try {
+                    const { emails } = await resolveCohortEmails(v, { subscribers });
+                    if (seq !== recipientEstSeq) return;
+                    const n = emails.length;
+                    recipientEst.textContent = n ? `~${n} recipients` : '0 recipients';
+                } catch {
+                    if (seq !== recipientEstSeq) return;
+                    recipientEst.textContent = 'Estimate unavailable';
+                }
+            })();
+            return;
+        }
+        if (v.startsWith('cat:')) {
             const cat = v.slice(4);
             const n = subscribers.filter((s) => {
                 if (String(s?.category || '').trim() !== cat) return false;
@@ -800,7 +896,9 @@ export async function initEmailCampaignStudio(mainEl) {
                 return em.includes('@');
             }).length;
             recipientEst.textContent = n ? `~${n} in category` : '0 in category';
+            return;
         }
+        recipientEst.textContent = '—';
     };
 
     const openMessagePreviewModal = () => {
@@ -1798,6 +1896,7 @@ export async function initEmailCampaignStudio(mainEl) {
     };
 
     const loadSubscribers = async () => {
+        invalidateEmailCohortContextCache();
         try {
             subscribers = await getSubscribersForEmailStudio();
         } catch (e) {
@@ -1806,6 +1905,8 @@ export async function initEmailCampaignStudio(mainEl) {
                 listHint.textContent = e instanceof Error ? e.message : String(e);
             }
         }
+        void loadEmailCohortContext({ subscribers }).catch(() => {});
+        await populateDrawProgramSelect();
         repopulateAudienceSelect();
     };
 
@@ -1814,14 +1915,41 @@ export async function initEmailCampaignStudio(mainEl) {
         const cats = new Set();
         for (const r of subscribers) {
             const c = String(r?.category ?? '').trim();
-            if (c) cats.add(c);
+            if (!c || c.startsWith('cohort:')) continue;
+            cats.add(c);
         }
         const sorted = [...cats].sort((a, b) => a.localeCompare(b));
         const cur = audSel.value;
+        const cohortOpts = EMAIL_COHORT_OPTIONS.map(
+            (o) => `<option value="${esc(o.value)}">${esc(o.label)}</option>`,
+        ).join('');
         audSel.innerHTML =
             `<option value="all">All subscribers (Resend broadcast)</option>` +
-            sorted.map((c) => `<option value="cat:${esc(c)}">Category: ${esc(c)} (batch)</option>`).join('');
-        if (cur && [...audSel.options].some((o) => o.value === cur)) audSel.value = cur;
+            `<optgroup label="Cohort batches">${cohortOpts}</optgroup>` +
+            (sorted.length
+                ? `<optgroup label="Subscriber categories">${sorted
+                      .map((c) => `<option value="cat:${esc(c)}">Category: ${esc(c)} (batch)</option>`)
+                      .join('')}</optgroup>`
+                : '');
+        if (cur && [...audSel.options].some((o) => o.value === cur)) {
+            audSel.value = cur;
+        } else if (cur.startsWith(COHORT_DRAW_PREFIX)) {
+            // Saved draw cohort: select draw option + program
+            if ([...audSel.options].some((o) => o.value === COHORT_DRAW)) {
+                audSel.value = COHORT_DRAW;
+            }
+            const pid = parseDrawProgramId(cur);
+            if (pid && drawProgramSel instanceof HTMLSelectElement) {
+                if (![...drawProgramSel.options].some((o) => o.value === pid)) {
+                    const opt = document.createElement('option');
+                    opt.value = pid;
+                    opt.textContent = pid;
+                    drawProgramSel.appendChild(opt);
+                }
+                drawProgramSel.value = pid;
+            }
+        }
+        syncDrawProgramVisibility();
         updateRecipientEst();
         recomputeSyncButton();
     };
@@ -1928,7 +2056,7 @@ export async function initEmailCampaignStudio(mainEl) {
 
     const readFormToRecord = () => {
         const base = current && typeof current === 'object' ? current : { id: currentId || '' };
-        const aud = audSel instanceof HTMLSelectElement ? valueToAudience(audSel.value) : { allBroadcast: null };
+        const aud = valueToAudience(getEffectiveAudienceValue());
         const htmlBody = bodyEl instanceof HTMLElement ? bodyEl.innerHTML : String(/** @type {any} */(base).htmlBody || '');
         const titleStr = (titleInp instanceof HTMLInputElement ? titleInp.value : '').trim();
         const titleArr = titleStr ? [titleStr] : [];
@@ -1983,8 +2111,34 @@ export async function initEmailCampaignStudio(mainEl) {
                 sourceIdSel.value = campaignMeta.source.id;
             }
             if (audSel instanceof HTMLSelectElement) {
-                audSel.value = audienceToValue(rec.audience);
+                const av = audienceToValue(rec.audience);
+                if (av.startsWith(COHORT_DRAW_PREFIX)) {
+                    if ([...audSel.options].some((o) => o.value === COHORT_DRAW)) {
+                        audSel.value = COHORT_DRAW;
+                    }
+                    const pid = parseDrawProgramId(av);
+                    if (pid && drawProgramSel instanceof HTMLSelectElement) {
+                        if (![...drawProgramSel.options].some((o) => o.value === pid)) {
+                            const opt = document.createElement('option');
+                            opt.value = pid;
+                            opt.textContent = pid;
+                            drawProgramSel.appendChild(opt);
+                        }
+                        drawProgramSel.value = pid;
+                    }
+                } else if ([...audSel.options].some((o) => o.value === av)) {
+                    audSel.value = av;
+                } else if (av.startsWith('cat:')) {
+                    const opt = document.createElement('option');
+                    opt.value = av;
+                    opt.textContent = `Category: ${av.slice(4)} (batch)`;
+                    audSel.appendChild(opt);
+                    audSel.value = av;
+                } else {
+                    audSel.value = 'all';
+                }
             }
+            syncDrawProgramVisibility();
             if (statusVal) {
                 statusVal.textContent = statusKey(rec.status);
             }
@@ -2071,14 +2225,17 @@ export async function initEmailCampaignStudio(mainEl) {
     });
 
     bodyEl?.addEventListener('input', () => markDirty());
-    [titleInp, subjInp, prevInp, notesTa, audSel, templateSel].forEach((el) => {
+    [titleInp, subjInp, prevInp, notesTa, audSel, templateSel, drawProgramSel].forEach((el) => {
         el?.addEventListener('input', () => {
             updateCharCounts();
             markDirty();
         });
         el?.addEventListener('change', () => {
             updateCharCounts();
-            if (el === audSel) updateRecipientEst();
+            if (el === audSel || el === drawProgramSel) {
+                syncDrawProgramVisibility();
+                updateRecipientEst();
+            }
             markDirty();
         });
     });
@@ -2546,12 +2703,12 @@ export async function initEmailCampaignStudio(mainEl) {
             setMsg('error', 'Subject is required.');
             return;
         }
-        const audVal = audSel instanceof HTMLSelectElement ? audSel.value : 'all';
+        const audVal = getEffectiveAudienceValue();
         const html = fullEmailHtml(bodyEl instanceof HTMLElement ? bodyEl.innerHTML : rec.htmlBody);
 
         setMsg('info', 'Sending…');
         try {
-            let catEmails = /** @type {string[]} */ ([]);
+            let batchEmails = /** @type {string[]} */ ([]);
             /** Broadcast segment: must match preset select OR UUID input (see getActiveSegmentId). */
             const seg = audVal === 'all' ? getActiveSegmentId() : '';
             if (audVal === 'all') {
@@ -2562,7 +2719,19 @@ export async function initEmailCampaignStudio(mainEl) {
                     );
                     return;
                 }
-            } else {
+            } else if (isEmailCohortAudience(audVal)) {
+                if (audVal === COHORT_DRAW) {
+                    setMsg('error', 'Select a program for Current draw applicants.');
+                    return;
+                }
+                setMsg('info', 'Resolving recipients…');
+                const resolved = await resolveCohortEmails(audVal, { subscribers });
+                batchEmails = resolved.emails;
+                if (!batchEmails.length) {
+                    setMsg('error', 'No valid emails in this cohort.');
+                    return;
+                }
+            } else if (audVal.startsWith('cat:')) {
                 const cat = audVal.slice(4);
                 const seen = new Set();
                 for (const s of subscribers) {
@@ -2572,12 +2741,15 @@ export async function initEmailCampaignStudio(mainEl) {
                         .toLowerCase();
                     if (!em.includes('@') || seen.has(em)) continue;
                     seen.add(em);
-                    catEmails.push(em);
+                    batchEmails.push(em);
                 }
-                if (!catEmails.length) {
+                if (!batchEmails.length) {
                     setMsg('error', 'No subscribers with a valid email in this category.');
                     return;
                 }
+            } else {
+                setMsg('error', 'Unknown audience selection.');
+                return;
             }
             await patchStatus(rec, { pendingSend: null });
             if (audVal === 'all') {
@@ -2592,7 +2764,7 @@ export async function initEmailCampaignStudio(mainEl) {
                 const btxt = String(bid || '').trim();
                 await markEmailCampaignSent(String(currentId), btxt || 'broadcast', null);
             } else {
-                const messages = catEmails.map((to) => ({ to, subject: subj, html }));
+                const messages = batchEmails.map((to) => ({ to, subject: subj, html }));
                 await sendEmailBatch(messages, {});
                 await markEmailCampaignSent(String(currentId), 'batch', null);
             }

@@ -46,52 +46,140 @@ export function scrollElementTopToViewportGap(element, gapPx, behavior = 'smooth
 }
 
 /**
+ * Signed-in users without a linked roster profile are sent to profile setup first.
+ * @returns {Promise<boolean>} true if the caller should continue revealing a form
+ */
+async function ensureLinkedArtistOrOpenProfileSetup() {
+    const { getAuthSnapshot } = await import('./icAuth.js');
+    const snap = await getAuthSnapshot();
+    if (!snap.authenticated) return true;
+    try {
+        const { getAccountForCaller } = await import('./database.js');
+        const { getProfileSetupDraft } = await import('./profileSetupDraft.js');
+        const acc = await getAccountForCaller();
+        const linkedRaw = acc && typeof acc === 'object' ? acc.linkedArtistId ?? acc.linked_artist_id : null;
+        const linkedId = Array.isArray(linkedRaw)
+            ? linkedRaw.length
+                ? String(linkedRaw[0] ?? '').trim()
+                : ''
+            : linkedRaw != null
+              ? String(linkedRaw).trim()
+              : '';
+        if (!linkedId) {
+            const draft = getProfileSetupDraft();
+            window.dispatchEvent(
+                new CustomEvent('fusion-open-profile-setup', {
+                    detail: { fullName: draft.fullName, email: draft.email },
+                }),
+            );
+            return false;
+        }
+    } catch {
+        /* ignore and continue */
+    }
+    return true;
+}
+
+/**
+ * Show one form and fully hide the other so they replace each other in the wrap.
+ * @param {'apply' | 'draw'} mode
+ */
+function revealProgramFormMode(mode) {
+    const wrap = document.getElementById('programApplicationWrap');
+    const applyForm = document.getElementById('programApplicationSection');
+    const drawForm = document.getElementById('programDrawFormSection');
+    if (wrap) {
+        wrap.removeAttribute('hidden');
+        wrap.removeAttribute('inert');
+    }
+    if (mode === 'draw') {
+        if (applyForm instanceof HTMLElement) {
+            applyForm.setAttribute('active', 'false');
+            applyForm.setAttribute('hidden', '');
+            applyForm.hidden = true;
+        }
+        if (drawForm instanceof HTMLElement) {
+            drawForm.removeAttribute('hidden');
+            drawForm.hidden = false;
+            // Force a re-render even if `active` was already "true" from a prior open.
+            if (drawForm.getAttribute('active') === 'true') {
+                drawForm.setAttribute('active', 'false');
+            }
+            drawForm.setAttribute('active', 'true');
+            if (typeof drawForm.refresh === 'function') {
+                void drawForm.refresh();
+            }
+        }
+        scrollElementTopToViewportGap(drawForm, PROGRAM_APPLICATION_VIEWPORT_TOP_GAP_PX);
+        return;
+    }
+    if (drawForm instanceof HTMLElement) {
+        drawForm.setAttribute('active', 'false');
+        drawForm.setAttribute('hidden', '');
+        drawForm.hidden = true;
+    }
+    if (applyForm instanceof HTMLElement) {
+        applyForm.removeAttribute('hidden');
+        applyForm.hidden = false;
+        applyForm.setAttribute('active', 'true');
+    }
+    scrollElementTopToViewportGap(applyForm, PROGRAM_APPLICATION_VIEWPORT_TOP_GAP_PX);
+    if (applyForm && typeof applyForm.notifyApplicationFunnelRevealed === 'function') {
+        applyForm.notifyApplicationFunnelRevealed();
+    }
+}
+
+/**
  * Program page CTAs: show `#programApplicationWrap`, activate `#programApplicationSection`, scroll into view.
  * Signed-in users without a linked roster profile are still sent to profile setup first; guests go straight to the form.
  *
  * @returns {Promise<void>}
  */
 export async function revealProgramApplicationOrOpenJoin() {
-    const { getAuthSnapshot } = await import('./icAuth.js');
-    const snap = await getAuthSnapshot();
-    if (snap.authenticated) {
-        try {
-            const { getAccountForCaller } = await import('./database.js');
-            const { getProfileSetupDraft } = await import('./profileSetupDraft.js');
-            const acc = await getAccountForCaller();
-            const linkedRaw = acc && typeof acc === 'object' ? acc.linkedArtistId ?? acc.linked_artist_id : null;
-            const linkedId = Array.isArray(linkedRaw)
-                ? linkedRaw.length
-                    ? String(linkedRaw[0] ?? '').trim()
-                    : ''
-                : linkedRaw != null
-                  ? String(linkedRaw).trim()
-                  : '';
-            if (!linkedId) {
-                const draft = getProfileSetupDraft();
-                window.dispatchEvent(
-                    new CustomEvent('fusion-open-profile-setup', {
-                        detail: { fullName: draft.fullName, email: draft.email },
-                    })
-                );
-                return;
-            }
-        } catch {
-            /* ignore and continue */
+    if (!(await ensureLinkedArtistOrOpenProfileSetup())) return;
+    revealProgramFormMode('apply');
+}
+
+/**
+ * Warm Program Draw display cache (CMS + past recipients).
+ * @param {string} [programId]
+ */
+function preloadProgramDrawDisplay(programId = '') {
+    void import('../components/subComponents/program-draw-display.js').then((m) => {
+        if (typeof m.preloadProgramDrawDisplayData === 'function') {
+            void m.preloadProgramDrawDisplayData(programId);
         }
-    }
-    const wrap = document.getElementById('programApplicationWrap');
-    const formEl = document.getElementById('programApplicationSection');
-    if (wrap) {
-        wrap.removeAttribute('hidden');
-        wrap.removeAttribute('inert');
-    }
-    if (formEl) {
-        formEl.setAttribute('active', 'true');
-    }
-    const section = document.getElementById('programApplicationSection');
-    scrollElementTopToViewportGap(section, PROGRAM_APPLICATION_VIEWPORT_TOP_GAP_PX);
-    if (section && typeof section.notifyApplicationFunnelRevealed === 'function') {
-        section.notifyApplicationFunnelRevealed();
-    }
+    });
+}
+
+/**
+ * Program page draw CTAs when the draw is active: auth/profile gate, then show draw form.
+ *
+ * @returns {Promise<void>}
+ */
+export async function revealProgramDrawFormOrOpenJoin() {
+    const drawForm = document.getElementById('programDrawFormSection');
+    const programId =
+        drawForm instanceof HTMLElement
+            ? String(drawForm.getAttribute('data-program-id') || '').trim()
+            : '';
+    preloadProgramDrawDisplay(programId);
+    if (!(await ensureLinkedArtistOrOpenProfileSetup())) return;
+    revealProgramFormMode('draw');
+}
+
+/**
+ * Inactive Program Draw: open the display-only panel without membership/profile gate
+ * so guests can use Get Notified.
+ *
+ * @returns {Promise<void>}
+ */
+export async function revealProgramDrawInactivePanel() {
+    const drawForm = document.getElementById('programDrawFormSection');
+    const programId =
+        drawForm instanceof HTMLElement
+            ? String(drawForm.getAttribute('data-program-id') || '').trim()
+            : '';
+    preloadProgramDrawDisplay(programId);
+    revealProgramFormMode('draw');
 }

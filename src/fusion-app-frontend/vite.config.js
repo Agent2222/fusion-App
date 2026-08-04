@@ -120,6 +120,8 @@ export default defineConfig(({ mode }) => {
                 workbox: {
                     globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2,webmanifest}'],
                     globIgnores: ['**/*.map', '**/*.mp4'],
+                    // Main app chunk can exceed Workbox's 2 MiB default (currently ~2.1 MB).
+                    maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
                     mode: 'development',
                     cleanupOutdatedCaches: true,
                     clientsClaim: true,

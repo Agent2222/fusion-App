@@ -35,6 +35,23 @@ export function isFilterSoundRoute(pathname) {
 }
 
 /**
+ * Program detail URLs: right-aligned like filter routes, without filter-bar top offset.
+ *
+ * @param {string} pathname
+ * @returns {boolean}
+ */
+export function isProgramViewSoundRoute(pathname) {
+    const p = normalizePath(pathname);
+    if (p === '/program-view') return true;
+    const after = p.startsWith('/program/')
+        ? p.slice('/program/'.length)
+        : p.startsWith('/programs/')
+          ? p.slice('/programs/'.length)
+          : '';
+    return Boolean(after.split('/').filter(Boolean)[0]);
+}
+
+/**
  * @returns {number}
  */
 function getHeaderChromeFallbackPx() {
@@ -53,22 +70,31 @@ function isHeaderScrollHidden() {
 }
 
 /**
+ * Layout height of the header chrome (ignores GSAP translateY on `.header-surface`).
+ * Live getBoundingClientRect() is wrong mid scroll-hide/show animation.
+ *
+ * @returns {number}
+ */
+function getHeaderChromeLayoutPx() {
+    const header = document.getElementById('header');
+    const surface = header?.shadowRoot?.querySelector('.header-surface');
+    if (surface instanceof HTMLElement) {
+        const h = surface.offsetHeight;
+        if (Number.isFinite(h) && h > 0) return h;
+    }
+    return getHeaderChromeFallbackPx();
+}
+
+/**
  * Visible header chrome height from the viewport top (0 when scrolled away).
+ * Uses `data-fusion-header-scroll` as source of truth so sound stays aligned
+ * with the feed-filter sticky offset while the bar animates in/out.
  *
  * @returns {number}
  */
 function getHeaderOffsetPx() {
     if (isHeaderScrollHidden()) return 0;
-
-    const header = document.getElementById('header');
-    const surface = header?.shadowRoot?.querySelector('.header-surface');
-    if (surface instanceof HTMLElement) {
-        const rect = surface.getBoundingClientRect();
-        if (rect.bottom <= 0) return 0;
-        return Math.max(0, rect.bottom);
-    }
-
-    return getHeaderChromeFallbackPx();
+    return getHeaderChromeLayoutPx();
 }
 
 /**
@@ -174,8 +200,11 @@ function computeFilterPlacementTopPx() {
     return getHeaderOffsetPx() + getFilterSystemHeightPx();
 }
 
+/** Gap below the header chrome on default (non-filter) placement. */
+const DEFAULT_SOUND_GAP_PX = 15;
+
 /**
- * @param {'filter' | 'default'} placement
+ * @param {'filter' | 'right' | 'default'} placement
  * @returns {number}
  */
 function computeTopPx(placement) {
@@ -183,20 +212,23 @@ function computeTopPx(placement) {
         return computeFilterPlacementTopPx();
     }
 
-    const header = document.getElementById('header');
-    const nav = header?.shadowRoot?.querySelector('header');
-    if (nav instanceof HTMLElement) {
-        const rect = nav.getBoundingClientRect();
-        if (rect.height > 0) {
-            return rect.bottom + 15;
-        }
-    }
-
+    // Match filter-route behavior: pin under chrome when header is shown
+    // (`top` / `visible`), including scroll-up mid-page — not live transformed rect.
     if (isHeaderScrollHidden()) {
-        return 0;
+        return DEFAULT_SOUND_GAP_PX;
     }
 
-    return getHeaderChromeFallbackPx() - 80;
+    return getHeaderOffsetPx() + DEFAULT_SOUND_GAP_PX;
+}
+
+/**
+ * @param {string} pathname
+ * @returns {'filter' | 'right' | 'default'}
+ */
+function getSoundPlacement(pathname) {
+    if (isFilterSoundRoute(pathname)) return 'filter';
+    if (isProgramViewSoundRoute(pathname)) return 'right';
+    return 'default';
 }
 
 /**
@@ -209,7 +241,7 @@ export function syncSoundEnvironmentPosition(pathname) {
     syncSoundEnvironmentMobileHost(host);
 
     const path = normalizePath(pathname ?? window.location?.pathname ?? '/');
-    const placement = isFilterSoundRoute(path) ? 'filter' : 'default';
+    const placement = getSoundPlacement(path);
 
     delete document.documentElement.dataset.fusionSoundMount;
     document.documentElement.dataset.fusionSoundPlacement = placement;

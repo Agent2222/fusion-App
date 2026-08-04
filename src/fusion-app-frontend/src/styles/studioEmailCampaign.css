@@ -1785,6 +1785,15 @@
   filter: none !important;
 }
 
+/* Draw cohort: program picker under Audience */
+#studio-ec-draw-program-wrap[hidden] {
+  display: none !important;
+}
+
+#studio-ec-draw-program-wrap {
+  margin-top: 0.15rem;
+}
+
 /* Broadcast segment row: preset + UUID + SYNC / READY (see studio-resend-sync--*) */
 .studio-ec-segment-row {
   display: flex;

@@ -40,6 +40,8 @@ import {
   getQuarterlyAppCreditBalanceForCaller,
   getApplicationCreditsForCaller,
   getAwardCreditsForCaller,
+  withdrawMyProgramApplication,
+  listMyProgramAwardEntries,
 } from "../utils/database.js";
 import { withSeoImageAlt } from "../utils/mediaAltSeo.js";
 import {
@@ -1895,18 +1897,55 @@ function setMpdProgramsTab(tab) {
 }
 
 /**
- * Application + Program Award entries on Explore programs (member-facing credits home).
+ * Paint one credits strip from a resolved membership credits model.
+ * @param {HTMLElement} strip
+ * @param {ReturnType<typeof buildMembershipCreditsStripModel>} model
+ */
+function paintMembershipCreditsStrip(strip, model) {
+  if (!(strip instanceof HTMLElement)) return;
+  if (!model) {
+    strip.hidden = true;
+    return;
+  }
+  strip.hidden = false;
+  const appEl =
+    strip.querySelector("[data-mpd-credits-app]") ||
+    (strip.id === "mpd_program_credits"
+      ? document.getElementById("mpd_app_credits_value")
+      : null);
+  const drawEl =
+    strip.querySelector("[data-mpd-credits-draw]") ||
+    (strip.id === "mpd_program_credits"
+      ? document.getElementById("mpd_draw_credits_value")
+      : null);
+  const nextEl =
+    strip.querySelector("[data-mpd-credits-next]") ||
+    (strip.id === "mpd_program_credits"
+      ? document.getElementById("mpd_credits_next_date")
+      : null);
+  const hintEl =
+    strip.querySelector("[data-mpd-credits-next-hint]") ||
+    (strip.id === "mpd_program_credits"
+      ? document.getElementById("mpd_credits_next_hint")
+      : null);
+  const drawLabel = strip.querySelector("[data-mpd-credits-draw-label]");
+  if (drawLabel instanceof HTMLElement) {
+    drawLabel.textContent = "Program Award entries";
+  }
+  if (appEl) appEl.textContent = model.applicationCreditsLabel;
+  if (drawEl) drawEl.textContent = model.awardEntriesLabel ?? model.drawCreditsLabel;
+  if (nextEl) nextEl.textContent = model.nextCreditsLabel;
+  if (hintEl) hintEl.textContent = model.nextCreditsHint;
+}
+
+/**
+ * Application + Program Award credits (Studio Overview + Explore programs).
  */
 async function hydrateExploreProgramCredits() {
-  const strip = document.getElementById("mpd_program_credits");
-  if (!(strip instanceof HTMLElement)) return;
-  const appEl = document.getElementById("mpd_app_credits_value");
-  const drawEl = document.getElementById("mpd_draw_credits_value");
-  const nextEl = document.getElementById("mpd_credits_next_date");
-  const hintEl = document.getElementById("mpd_credits_next_hint");
-  const drawLabel = strip.querySelector(
-    ".mpd-program-credits__item:nth-child(2) .mpd-program-credits__label",
-  );
+  const strips = Array.from(
+    document.querySelectorAll("[data-mpd-credits-strip], #mpd_program_credits, #mpd_overview_credits"),
+  ).filter((el, i, arr) => el instanceof HTMLElement && arr.indexOf(el) === i);
+  if (!strips.length) return;
 
   /** @type {string} */
   let access = "";
@@ -1998,18 +2037,9 @@ async function hydrateExploreProgramCredits() {
     nextAccrualHint,
     showForMonthly: tier === "monthly",
   });
-  if (!model) {
-    strip.hidden = true;
-    return;
+  for (const strip of strips) {
+    paintMembershipCreditsStrip(/** @type {HTMLElement} */ (strip), model);
   }
-  strip.hidden = false;
-  if (drawLabel instanceof HTMLElement) {
-    drawLabel.textContent = "Program Award entries";
-  }
-  if (appEl) appEl.textContent = model.applicationCreditsLabel;
-  if (drawEl) drawEl.textContent = model.awardEntriesLabel ?? model.drawCreditsLabel;
-  if (nextEl) nextEl.textContent = model.nextCreditsLabel;
-  if (hintEl) hintEl.textContent = model.nextCreditsHint;
 }
 
 function applyMpdPublicProgramFilters() {
@@ -2053,16 +2083,34 @@ function applyMpdMyProgramsFilters() {
       "data-mpd-my-program-filter",
     ) || "all";
   const cards = Array.from(root.querySelectorAll(".mpd-my-program-card"));
+  /** @type {Map<string, boolean>} */
+  const formalVisibleByPid = new Map();
   let visibleCount = 0;
   for (const card of cards) {
     const status = String(card.getAttribute("data-status-key") || "submitted");
     const visible = active === "all" || status === active;
     card.toggleAttribute("hidden", !visible);
     if (visible) visibleCount += 1;
+    const pid = String(card.getAttribute("data-program-id") || "");
+    if (pid) formalVisibleByPid.set(pid, visible);
   }
+  root.querySelectorAll(".mpd-draw-status-wrap").forEach((wrap) => {
+    if (!(wrap instanceof HTMLElement)) return;
+    const forPid = String(wrap.getAttribute("data-mpd-draw-for") || "");
+    if (forPid && formalVisibleByPid.has(forPid)) {
+      wrap.toggleAttribute("hidden", !formalVisibleByPid.get(forPid));
+      return;
+    }
+    // Orphan / fixture draw cards: show only on "all"
+    const show = active === "all";
+    wrap.toggleAttribute("hidden", !show);
+    if (show) visibleCount += 1;
+  });
   const noResults = document.getElementById("mpd_my_programs_no_results");
   if (noResults) {
-    noResults.hidden = cards.length === 0 || visibleCount > 0;
+    const emptyList =
+      cards.length === 0 && root.querySelectorAll(".mpd-draw-status-wrap").length === 0;
+    noResults.hidden = emptyList || visibleCount > 0;
   }
 }
 
@@ -2415,7 +2463,11 @@ function renderMpdMyProgramCard(item) {
           <div class="mpd-my-program-actions">
             <button type="button" class="mpd-my-program-action" data-mpd-application-action="view" data-program-id="${escapeHtmlMpd(item.programId)}">View application</button>
             <button type="button" class="mpd-my-program-action" data-mpd-application-action="update" data-program-id="${escapeHtmlMpd(item.programId)}">Update materials</button>
-            <button type="button" class="mpd-my-program-action mpd-my-program-action--danger" data-mpd-application-action="withdraw" data-program-id="${escapeHtmlMpd(item.programId)}">Withdraw application</button>
+            ${
+              item.status?.key === "withdrawn"
+                ? ""
+                : `<button type="button" class="mpd-my-program-action mpd-my-program-action--danger" data-mpd-application-action="withdraw" data-program-id="${escapeHtmlMpd(item.programId)}">Withdraw application</button>`
+            }
           </div>
         </section>
       </div>
@@ -3544,16 +3596,22 @@ async function hydrateProgramsPanel(rec, locales, active) {
     countBadge.toggleAttribute("hidden", applicationIds.length === 0);
     countBadge.setAttribute("aria-label", `${applicationIds.length} applications`);
   }
-  if (applicationIds.length === 0) {
-    container.innerHTML = `
-      <div class="mpd-programs-empty-state mpd-my-program-empty">
-        <h4>No applications yet.</h4>
-        <p class="studio-muted">When you apply to a Fusion program, your status and next steps will appear here.</p>
-      </div>
-    `;
-    await hydrateProgramPaymentsPanel(programs);
-          return;
-        }
+
+  /** @type {object[]} */
+  let enteredDraws = [];
+  try {
+    const rows = await listMyProgramAwardEntries();
+    enteredDraws = (Array.isArray(rows) ? rows : []).filter(
+      (e) => String(/** @type {Record<string, unknown>} */ (e)?.status || "") === "entered",
+    );
+  } catch {
+    enteredDraws = [];
+  }
+
+  const showTesterFixture =
+    applicationsIncludeTester(rec.applied_json ?? rec.appliedJson) ||
+    readApplicationOnlyDisplayPref();
+
   let paymentState = { approvedPrograms: [], summaries: [], ledger: [], plans: [] };
   try {
     paymentState = await getMyProgramPayments();
@@ -3573,9 +3631,63 @@ async function hydrateProgramsPanel(rec, locales, active) {
       );
     })
     .sort((a, b) => String(b.submittedAt || "").localeCompare(String(a.submittedAt || "")));
+
+  /** @type {{ type: 'formal'|'draw', html: string, programId?: string }[]} */
+  const blocks = [];
+  /** @type {Set<string>} */
+  const drawIdsPlaced = new Set();
+
+  for (const card of cards) {
+    const pid = String(card.programId || "");
+    blocks.push({ type: "formal", html: renderMpdMyProgramCard(card), programId: pid });
+    const draw = enteredDraws.find((e) => String(e?.programId || "") === pid);
+    if (draw) {
+      drawIdsPlaced.add(pid);
+      blocks.push({
+        type: "draw",
+        programId: pid,
+        html: `<div class="mpd-draw-status-wrap" data-mpd-draw-for="${escapeHtmlMpd(pid)}">
+          <app-program-draw-status data-program-id="${escapeHtmlMpd(pid)}" data-fixture="false"></app-program-draw-status>
+        </div>`,
+      });
+    }
+  }
+  for (const entry of enteredDraws) {
+    const pid = String(entry?.programId || "").trim();
+    if (!pid || drawIdsPlaced.has(pid)) continue;
+    drawIdsPlaced.add(pid);
+    blocks.push({
+      type: "draw",
+      programId: pid,
+      html: `<div class="mpd-draw-status-wrap" data-mpd-draw-for="${escapeHtmlMpd(pid)}">
+        <app-program-draw-status data-program-id="${escapeHtmlMpd(pid)}" data-fixture="false"></app-program-draw-status>
+      </div>`,
+    });
+  }
+  if (showTesterFixture && !blocks.some((b) => b.type === "draw")) {
+    blocks.push({
+      type: "draw",
+      programId: "fixture",
+      html: `<div class="mpd-draw-status-wrap mpd-draw-status-wrap--fixture" data-mpd-draw-fixture="true">
+        <app-program-draw-status data-fixture="true" data-program-id="fixture"></app-program-draw-status>
+      </div>`,
+    });
+  }
+
+  if (blocks.length === 0) {
+    container.innerHTML = `
+      <div class="mpd-programs-empty-state mpd-my-program-empty">
+        <h4>No applications yet.</h4>
+        <p class="studio-muted">When you apply to a Fusion program, your status and next steps will appear here.</p>
+      </div>
+    `;
+    await hydrateProgramPaymentsPanel(programs);
+    return;
+  }
+
   container.innerHTML = `
     <div class="mpd-my-program-cards">
-      ${cards.map(renderMpdMyProgramCard).join("")}
+      ${blocks.map((b) => b.html).join("")}
     </div>
     <div id="mpd_my_programs_no_results" class="mpd-programs-empty-state mpd-my-program-empty" hidden>
       <h4>No applications match this filter.</h4>
@@ -3590,6 +3702,13 @@ async function hydrateProgramsPanel(rec, locales, active) {
     if (countEl) countEl.textContent = String(count);
   }
   applyMpdMyProgramsFilters();
+
+  container.querySelectorAll("app-program-draw-status").forEach((el) => {
+    el.addEventListener("fusion-draw-status-exited", () => {
+      void hydrateProgramsPanel(rec, locales, active);
+    });
+  });
+
   await hydrateProgramPaymentsPanel(programs);
 }
 
@@ -4081,7 +4200,38 @@ export function generateSettingsProfileContent() {
                                             <span class="mpd-completion-step__status">Not started</span>
                                         </div>
                                     </div>
-                    </div>
+                                </div>
+
+                                <div
+                                  class="mpd-program-credits mpd-program-credits--overview"
+                                  id="mpd_overview_credits"
+                                  data-mpd-credits-strip
+                                  hidden
+                                  aria-live="polite"
+                                >
+                                    <div class="mpd-program-credits__item">
+                                        <span class="mpd-program-credits__icon mpd-program-credits__icon--app" aria-hidden="true"></span>
+                                        <div class="mpd-program-credits__copy">
+                                            <span class="mpd-program-credits__label">Application credits</span>
+                                            <strong class="mpd-program-credits__value" data-mpd-credits-app>—</strong>
+                                        </div>
+                                    </div>
+                                    <div class="mpd-program-credits__item">
+                                        <span class="mpd-program-credits__icon mpd-program-credits__icon--draw" aria-hidden="true"></span>
+                                        <div class="mpd-program-credits__copy">
+                                            <span class="mpd-program-credits__label" data-mpd-credits-draw-label>Program Award entries</span>
+                                            <strong class="mpd-program-credits__value" data-mpd-credits-draw>—</strong>
+                                        </div>
+                                    </div>
+                                    <div class="mpd-program-credits__item mpd-program-credits__item--next">
+                                        <span class="mpd-program-credits__icon mpd-program-credits__icon--next" aria-hidden="true"></span>
+                                        <div class="mpd-program-credits__copy">
+                                            <span class="mpd-program-credits__label">Next credits</span>
+                                            <strong class="mpd-program-credits__value" data-mpd-credits-next>—</strong>
+                                            <span class="mpd-program-credits__hint" data-mpd-credits-next-hint></span>
+                                        </div>
+                                    </div>
+                                </div>
 
                                 <div class="mpd-blindspots" id="mpd_blindspots">
                                     <span class="mpd-section-label">BLINDSPOTS</span>
@@ -4371,27 +4521,27 @@ export function generateSettingsProfileContent() {
 
                                 <div class="mpd-program-tab-panel" id="mpd-program-panel-explore" role="tabpanel" aria-labelledby="mpd-program-tab-explore" data-mpd-program-panel="explore">
                                 <div class="mpd-public-programs-discovery" id="mpd_public_programs_discovery">
-                                        <div class="mpd-program-credits" id="mpd_program_credits" hidden aria-live="polite">
+                                        <div class="mpd-program-credits" id="mpd_program_credits" data-mpd-credits-strip hidden aria-live="polite">
                                             <div class="mpd-program-credits__item">
                                                 <span class="mpd-program-credits__icon mpd-program-credits__icon--app" aria-hidden="true"></span>
                                                 <div class="mpd-program-credits__copy">
                                                     <span class="mpd-program-credits__label">Application credits</span>
-                                                    <strong class="mpd-program-credits__value" id="mpd_app_credits_value">—</strong>
+                                                    <strong class="mpd-program-credits__value" id="mpd_app_credits_value" data-mpd-credits-app>—</strong>
                                                 </div>
                                             </div>
                                             <div class="mpd-program-credits__item">
                                                 <span class="mpd-program-credits__icon mpd-program-credits__icon--draw" aria-hidden="true"></span>
                                                 <div class="mpd-program-credits__copy">
-                                                    <span class="mpd-program-credits__label">Program Award entries</span>
-                                                    <strong class="mpd-program-credits__value" id="mpd_draw_credits_value">—</strong>
+                                                    <span class="mpd-program-credits__label" data-mpd-credits-draw-label>Program Award entries</span>
+                                                    <strong class="mpd-program-credits__value" id="mpd_draw_credits_value" data-mpd-credits-draw>—</strong>
                                                 </div>
                                             </div>
                                             <div class="mpd-program-credits__item mpd-program-credits__item--next">
                                                 <span class="mpd-program-credits__icon mpd-program-credits__icon--next" aria-hidden="true"></span>
                                                 <div class="mpd-program-credits__copy">
                                                     <span class="mpd-program-credits__label">Next credits</span>
-                                                    <strong class="mpd-program-credits__value" id="mpd_credits_next_date">—</strong>
-                                                    <span class="mpd-program-credits__hint" id="mpd_credits_next_hint"></span>
+                                                    <strong class="mpd-program-credits__value" id="mpd_credits_next_date" data-mpd-credits-next>—</strong>
+                                                    <span class="mpd-program-credits__hint" id="mpd_credits_next_hint" data-mpd-credits-next-hint></span>
                                                 </div>
                                             </div>
                                         </div>
@@ -6394,6 +6544,7 @@ export default function initSettingsProfile() {
     syncCompletionTrack();
     syncBlindspots();
     rotateQuote();
+    void hydrateExploreProgramCredits();
   };
 
   const rootEl = document.getElementById("mpd_root");
@@ -6568,7 +6719,29 @@ export default function initSettingsProfile() {
         } else if (action === "update") {
           window.alert("Material updates are coming soon. For now, contact the Fusion team if your application needs changes.");
         } else if (action === "withdraw") {
-          window.alert("Application withdrawal is coming soon. Contact the Fusion team if you need to withdraw before this action is available.");
+          const ok = window.confirm(
+            "Withdraw this application? Application credits are not refunded. You can then enter the Program Draw for this program if it is open.",
+          );
+          if (!ok || !programId) return;
+          void (async () => {
+            try {
+              await withdrawMyProgramApplication(programId);
+              const fresh = await getMyArtistRecord();
+              if (fresh) {
+                const locales = mpdObject(fresh.locales ?? fresh.localesJson);
+                const active =
+                  typeof window.getLocale === "function" && window.getLocale() === "ja"
+                    ? "ja"
+                    : "en";
+                await hydrateProgramsPanel(fresh, locales, active);
+              }
+              window.alert("Application withdrawn. Application credits were not refunded.");
+            } catch (err) {
+              window.alert(
+                err instanceof Error ? err.message : "Could not withdraw this application.",
+              );
+            }
+          })();
         }
         return;
       }
@@ -7481,8 +7654,8 @@ export default function initSettingsProfile() {
       setMpdProgramsTab("my-programs");
     } else {
       setMpdProgramsTab("explore");
-      void hydratePublicProgramDiscoveryCards();
-      void syncResidencyApplyCta();
+    void hydratePublicProgramDiscoveryCards();
+    void syncResidencyApplyCta();
     }
 
     if (applicantLightGateActive) {
@@ -7491,7 +7664,7 @@ export default function initSettingsProfile() {
       const hashKey = panelKeyFromHash();
       showMpdPanel(hashKey === "join-unlock" ? "join-unlock" : "programs");
     } else {
-      showMpdPanel(panelKeyFromHash());
+    showMpdPanel(panelKeyFromHash());
     }
     if (!applicantStudioActive && !applicantLightGateActive) {
       syncStudioOverview();

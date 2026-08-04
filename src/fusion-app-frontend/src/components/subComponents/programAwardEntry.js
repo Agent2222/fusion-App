@@ -1,5 +1,6 @@
 /**
  * Public Program Award entry panel on program pages.
+ * Prefer `<app-program-draw-form>` for full intake; this panel keeps a thin credit / pay path.
  */
 
 import {
@@ -48,6 +49,8 @@ export async function mountProgramAwardEntryPanel(programId, host) {
 
     host.hidden = false;
     const totalSlots = Math.max(1, Number(cfg.totalSlots) || 100);
+    /** @type {string} */
+    let lastPaidOrderId = '';
 
     const render = async () => {
         const snap = await getAuthSnapshot();
@@ -117,7 +120,7 @@ export async function mountProgramAwardEntryPanel(programId, host) {
         host.querySelector('[data-award-enter-credit]')?.addEventListener('click', async () => {
             setMsg('Entering…');
             try {
-                await enterProgramAward(id, { paidEntryReceipt: false });
+                await enterProgramAward(id, { paypalOrderId: '' });
                 setMsg('Entered.');
                 await render();
             } catch (e) {
@@ -145,6 +148,9 @@ export async function mountProgramAwardEntryPanel(programId, host) {
                     setMsg('PayPal is not configured for award entry checkout.');
                     return;
                 }
+                const principal = snap?.authenticated
+                    ? String(snap.principal?.toText?.() || '').trim()
+                    : '';
                 await mountPayPalAdvancedOneTimeCheckout(payHost, {
                     clientId,
                     mode: payConfig.mode === 'live' ? 'live' : 'sandbox',
@@ -152,16 +158,35 @@ export async function mountProgramAwardEntryPanel(programId, host) {
                     metadata: {
                         programId: id,
                         purpose: 'program_award_entry',
+                        paymentType: 'program_award_entry',
+                        applicationId: `award:${id}`,
                     },
                     showPayNowButton: true,
-                    createOrder: async (body) =>
-                        createPayPalOneTimePayment({
+                    createOrder: async (body) => {
+                        if (!principal) throw new Error('Sign in required for paid entry.');
+                        return createPayPalOneTimePayment({
                             amountCents: body.amountCents,
-                            metadata: body.metadata,
-                        }),
+                            principal,
+                            programId: id,
+                            applicationId: `award:${id}`,
+                            paymentType: 'program_award_entry',
+                            purpose: 'program_award_entry',
+                            metadata: {
+                                ...(body.metadata || {}),
+                                programId: id,
+                                purpose: 'program_award_entry',
+                                paymentType: 'program_award_entry',
+                                applicationId: `award:${id}`,
+                                principal,
+                            },
+                        });
+                    },
                     onApproved: async (orderId) => {
+                        lastPaidOrderId = String(orderId || '');
                         await confirmPayPalOneTimePayment(orderId);
-                        await enterProgramAward(id, { paidEntryReceipt: true });
+                        // Prefer <app-program-draw-form> for contact payload; this panel is a thin pay shell.
+                        await enterProgramAward(id, { paypalOrderId: lastPaidOrderId });
+                        lastPaidOrderId = '';
                         setMsg('Payment complete — you are entered.');
                         await render();
                     },

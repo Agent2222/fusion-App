@@ -58,6 +58,16 @@ export function buildPendingPayPalProgramMetadata(body, amountCents) {
         planStartAt: safePayPalMetaValue(body?.planStartAt, 40),
         planEndAt: safePayPalMetaValue(body?.planEndAt, 40),
         paypalSubscriptionId: safePayPalMetaValue(body?.paypalSubscriptionId, 120),
+        /** Draw-form contact payload for webhook/repair enter after capture. */
+        payloadJson: (() => {
+            const raw =
+                typeof body?.payloadJson === 'string'
+                    ? body.payloadJson
+                    : body?.payload && typeof body.payload === 'object'
+                      ? JSON.stringify(body.payload)
+                      : '';
+            return safePayPalMetaValue(raw, 100_000);
+        })(),
         source: 'program_payments_tab',
     };
 }

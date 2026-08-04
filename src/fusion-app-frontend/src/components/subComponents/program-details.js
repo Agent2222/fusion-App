@@ -1,10 +1,20 @@
-import { programApplicationCtaLabelForAuth, programApplicationReviewLabel } from '../../utils/programApplicationCta.js';
+import {
+    programApplicationCtaLabelForAuth,
+    programApplicationCtaSubLabel,
+    programApplicationReviewLabel,
+    programDrawCtaLabel,
+    programDrawCtaSubLabel,
+} from '../../utils/programApplicationCta.js';
 import {
     PH_LOADER_BASE_STYLES,
     PROGRAM_DETAILS_PENDING_WRAPPER_STYLES,
     programHeroLoaderHtml,
 } from '../../utils/programHeroLoader.js';
-import { revealProgramApplicationOrOpenJoin } from '../../utils/scrollAnchorToViewportGap.js';
+import {
+    revealProgramApplicationOrOpenJoin,
+    revealProgramDrawFormOrOpenJoin,
+    revealProgramDrawInactivePanel,
+} from '../../utils/scrollAnchorToViewportGap.js';
 import { formatMonthlyFromRemainingAndMonths, splitTextLinesForBullets } from '../../utils/programDeadlineParse.js';
 
 /**
@@ -466,6 +476,10 @@ class ProgramDetailsComponent extends HTMLElement {
         const timelineBlocksEl = root.querySelector('.timeline-blocks');
         const sidebarEl = root.querySelector('.sidebar');
         const beginBtn = root.querySelector('.begin-application');
+        const drawCell = root.querySelector('.program-details-draw-cell');
+        const drawBtn = root.querySelector('.enter-program-draw');
+        const applySubEl = root.querySelector('.program-details-apply-sub');
+        const drawSubEl = root.querySelector('.program-details-draw-sub');
         const additionalSection = root.querySelector('.additional-info');
         const additionalHeading = root.querySelector('.additional-info-heading');
         const triggerAppfee = root.querySelector('#ai-trigger-appfee');
@@ -892,6 +906,11 @@ class ProgramDetailsComponent extends HTMLElement {
         }
 
         const applicationsOpen = this._data.applicationsOpen !== false;
+        const applyCell = root.querySelector('.program-details-cta-cell:not(.program-details-draw-cell)');
+        if (applySubEl) {
+            applySubEl.textContent = programApplicationCtaSubLabel();
+            applySubEl.hidden = !hasMain || !applicationsOpen;
+        }
         if (beginBtn) {
             beginBtn.hidden = !hasMain || !applicationsOpen;
             if (applicationsOpen) {
@@ -901,6 +920,56 @@ class ProgramDetailsComponent extends HTMLElement {
                 beginBtn.onclick = null;
                 beginBtn.textContent = '';
                 beginBtn.classList.remove('program-application-cta--review');
+            }
+        }
+        if (applyCell instanceof HTMLElement) {
+            applyCell.hidden = !hasMain || !applicationsOpen;
+        }
+        if (drawCell instanceof HTMLElement) {
+            drawCell.hidden = !hasMain;
+        }
+        const pid = String(this._data.programId || '').trim();
+        if (hasMain && drawCell instanceof HTMLElement && drawBtn instanceof HTMLButtonElement) {
+            // Inactive defaults immediately; config updates label/handler in the background.
+            drawCell.hidden = false;
+            drawBtn.textContent = programDrawCtaLabel(false);
+            if (drawSubEl) {
+                drawSubEl.dataset.drawSlots = '100';
+                drawSubEl.dataset.drawActive = '0';
+                drawSubEl.textContent = programDrawCtaSubLabel(100, false);
+            }
+            drawBtn.onclick = () => {
+                void revealProgramDrawInactivePanel();
+            };
+            if (pid) {
+                void import('../../utils/database.js')
+                    .then(({ getProgramDrawConfigPublic }) => getProgramDrawConfigPublic(pid))
+                    .then((cfg) => {
+                        const active = Boolean(cfg?.active);
+                        drawCell.hidden = false;
+                        const slots = Math.max(1, Number(cfg?.totalSlots) || 100);
+                        drawBtn.textContent = programDrawCtaLabel(active);
+                        if (drawSubEl) {
+                            drawSubEl.dataset.drawSlots = String(slots);
+                            drawSubEl.dataset.drawActive = active ? '1' : '0';
+                            drawSubEl.textContent = programDrawCtaSubLabel(slots, active);
+                        }
+                        drawBtn.onclick = () => {
+                            if (active) void revealProgramDrawFormOrOpenJoin();
+                            else void revealProgramDrawInactivePanel();
+                        };
+                    })
+                    .catch(() => {
+                        drawCell.hidden = false;
+                        drawBtn.textContent = programDrawCtaLabel(false);
+                        if (drawSubEl) {
+                            drawSubEl.dataset.drawActive = '0';
+                            drawSubEl.textContent = programDrawCtaSubLabel(100, false);
+                        }
+                        drawBtn.onclick = () => {
+                            void revealProgramDrawInactivePanel();
+                        };
+                    });
             }
         }
 
@@ -1053,8 +1122,22 @@ class ProgramDetailsComponent extends HTMLElement {
         if (!root || !this._data) return;
         if (this._data.applicationsOpen === false) return;
         const beginBtn = root.querySelector('.begin-application');
-        if (!beginBtn || beginBtn.hidden) return;
-        void this._syncBeginApplicationButtonLabel(beginBtn);
+        const applySubEl = root.querySelector('.program-details-apply-sub');
+        const drawBtn = root.querySelector('.enter-program-draw');
+        const drawSubEl = root.querySelector('.program-details-draw-sub');
+        const drawCell = root.querySelector('.program-details-draw-cell');
+        if (applySubEl) applySubEl.textContent = programApplicationCtaSubLabel();
+        if (beginBtn && !beginBtn.hidden) {
+            void this._syncBeginApplicationButtonLabel(beginBtn);
+        }
+        if (drawCell instanceof HTMLElement && !drawCell.hidden && drawBtn instanceof HTMLButtonElement) {
+            const active = drawSubEl?.dataset.drawActive !== '0';
+            drawBtn.textContent = programDrawCtaLabel(active);
+            if (drawSubEl) {
+                const slots = Number(drawSubEl.dataset.drawSlots) || 100;
+                drawSubEl.textContent = programDrawCtaSubLabel(slots, active);
+            }
+        }
     }
 
     connectedCallback() {
@@ -1249,27 +1332,78 @@ class ProgramDetailsComponent extends HTMLElement {
                     margin: 0.2rem 0;
                 }
 
-                .begin-application {
+                .program-details-cta-pair {
+                    display: flex;
+                    flex-wrap: wrap;
+                    align-items: flex-start;
+                    justify-content: center;
+                    gap: 0.85rem 1.25rem;
+                    width: 100%;
+                    margin-top: 0.5rem;
+                }
+
+                .program-details-cta-cell {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    gap: 0.4rem;
+                    width: 100%;
+                    max-width: 300px;
+                }
+
+                .program-details-cta-cell[hidden] {
+                    display: none !important;
+                }
+
+                .program-details-cta-sub {
+                    margin: 0;
+                    width: 100%;
+                    text-align: center;
+                    font-size: 0.75rem;
+                    line-height: 1.35;
+                    letter-spacing: 0.02em;
+                    color: var(--c2);
+                    opacity: 0.82;
+                    font-variation-settings: var(--fv-body);
+                }
+
+                .begin-application,
+                .enter-program-draw {
                     width: 100%;
                     max-width: 300px;
                     min-height: 48px;
                     padding: 0.65rem 1.25rem;
                     border: 1px solid rgba(0, 0, 0, 0.12);
                     cursor: pointer;
-                    background: var(--c2);
-                    color: var(--c3);
                     font-size: clamp(0.95rem, 1.1vw, 1.1rem);
                     font-variation-settings: var(--fv-cta);
                     letter-spacing: 0.04em;
-                    transition: opacity 0.25s ease, transform 0.2s ease;
+                    transition: opacity 0.25s ease, transform 0.2s ease, background 0.25s ease, color 0.25s ease;
                     justify-self: center;
                     align-self: center;
+                }
+
+                .begin-application {
+                    background: var(--c2);
+                    color: var(--c3);
+                    border-color: var(--c2);
                 }
 
                 .begin-application:hover {
                     background: var(--c3);
                     color: var(--c2);
-                    transition: all 0.3s ease;
+                    transform: translateY(-1px);
+                }
+
+                .enter-program-draw {
+                    background: var(--c3, #fff);
+                    color: var(--c2);
+                    border-color: var(--c2);
+                }
+
+                .enter-program-draw:hover {
+                    background: var(--c2);
+                    color: var(--c3);
                     transform: translateY(-1px);
                 }
 
@@ -1700,7 +1834,16 @@ class ProgramDetailsComponent extends HTMLElement {
                 <div class="columns">
                     <div class="timeline-col">
                         <div class="timeline-blocks"></div>
-                        <button type="button" class="begin-application"></button>
+                        <div class="program-details-cta-pair" role="group" aria-label="Program actions">
+                            <div class="program-details-cta-cell">
+                                <button type="button" class="begin-application"></button>
+                                <p class="program-details-cta-sub program-details-apply-sub"></p>
+                            </div>
+                            <div class="program-details-cta-cell program-details-draw-cell">
+                                <button type="button" class="enter-program-draw">Program Draw</button>
+                                <p class="program-details-cta-sub program-details-draw-sub">Get notified when it opens</p>
+                            </div>
+                        </div>
                     </div>
                     <aside class="sidebar" aria-label="Program information"></aside>
                 </div>

@@ -67,6 +67,7 @@ import {
     setCurrentProgramSeason,
     setArtistMostRecentProgram,
     applyFeaturedFlagsFromStudioSaveLive,
+    applyDrawRecipientFromStudioSaveLive,
     applyHeroProfileImageApprovedFromStudioSaveLive,
     applyArtistAudioApprovedFromStudioSaveLive,
     fetchArtistAudioCollectionsMap,
@@ -556,6 +557,7 @@ function renderApplicants() {
                 countLabel: 'in view',
             })}
             <div class="studio-applicants-program-cards-rail" id="studio-applicants-program-cards" role="list" aria-label="Programs"></div>
+            <div id="studio-applicants-status-tabs-host">
             ${studioDataTabsHtml({
                 ariaLabel: 'Applicant status',
                 tabs: [
@@ -570,6 +572,7 @@ function renderApplicants() {
                     { id: 'studio-app-tab-tester', label: 'Tester', value: 'tester' },
                 ],
             })}
+            </div>
             ${studioFilterBarHtml({
                 searchId: 'studio-applicants-search',
                 searchPlaceholder: 'Search email, name, program…',
@@ -577,36 +580,36 @@ function renderApplicants() {
             <details class="studio-section-accordion studio-section-accordion--applicants-admin">
                 <summary class="studio-section-accordion__summary">Add applicant &amp; admin tools</summary>
                 <div class="studio-section-accordion__body">
-                    <div id="studio-applicants-banner" class="studio-banner studio-banner--info"></div>
-                    <div class="studio-modal-actions" style="margin:0.25rem 0 0.5rem">
-                        <button type="button" class="studio-btn-secondary" id="studio-applicants-generate-access-code">Generate access code</button>
-                    </div>
-                    <div class="studio-applicant-add">
-                        <h3 class="studio-subheading">Add applicant</h3>
-                        <div class="studio-form-grid">
+            <div id="studio-applicants-banner" class="studio-banner studio-banner--info"></div>
+            <div class="studio-modal-actions" style="margin:0.25rem 0 0.5rem">
+                <button type="button" class="studio-btn-secondary" id="studio-applicants-generate-access-code">Generate access code</button>
+            </div>
+            <div class="studio-applicant-add">
+                <h3 class="studio-subheading">Add applicant</h3>
+                <div class="studio-form-grid">
                             <label class="studio-field studio-field--full"><span>Pick veteran artist</span>
                                 <select id="studio-app-new-artist" class="studio-select">
                                     <option value="">Manual applicant</option>
                                 </select>
                             </label>
-                            <label class="studio-field"><span>Applicant reference</span><input type="text" id="studio-app-new-id" class="studio-input" placeholder="Unique reference for this record" /></label>
-                            <label class="studio-field"><span>Program ID</span><input type="text" id="studio-app-new-program" class="studio-input" /></label>
-                            <label class="studio-field"><span>Email</span><input type="email" id="studio-app-new-email" class="studio-input" /></label>
-                            <label class="studio-field"><span>Name</span><input type="text" id="studio-app-new-name" class="studio-input" /></label>
-                            <label class="studio-field"><span>Status</span>
-                                <select id="studio-app-new-status" class="studio-select">
-                                    <option value="pending">Pending</option>
+                    <label class="studio-field"><span>Applicant reference</span><input type="text" id="studio-app-new-id" class="studio-input" placeholder="Unique reference for this record" /></label>
+                    <label class="studio-field"><span>Program ID</span><input type="text" id="studio-app-new-program" class="studio-input" /></label>
+                    <label class="studio-field"><span>Email</span><input type="email" id="studio-app-new-email" class="studio-input" /></label>
+                    <label class="studio-field"><span>Name</span><input type="text" id="studio-app-new-name" class="studio-input" /></label>
+                    <label class="studio-field"><span>Status</span>
+                        <select id="studio-app-new-status" class="studio-select">
+                            <option value="pending">Pending</option>
                                     <option value="reviewing">Initial review</option>
                                     <option value="postInterviewReview">Post interview review</option>
-                                    <option value="needsInfo">Needs info</option>
-                                    <option value="accepted">Approved</option>
-                                    <option value="rejected">Denied</option>
-                                </select>
-                            </label>
-                            <label class="studio-field studio-field--full"><span>Notes</span><textarea id="studio-app-new-payload" class="studio-textarea" rows="4" placeholder="Internal notes (plain text)"></textarea></label>
-                        </div>
-                        <button type="button" class="studio-btn-primary" id="studio-app-new-save">SAVE APPLICANT</button>
-                    </div>
+                            <option value="needsInfo">Needs info</option>
+                            <option value="accepted">Approved</option>
+                            <option value="rejected">Denied</option>
+                        </select>
+                    </label>
+                    <label class="studio-field studio-field--full"><span>Notes</span><textarea id="studio-app-new-payload" class="studio-textarea" rows="4" placeholder="Internal notes (plain text)"></textarea></label>
+                </div>
+                <button type="button" class="studio-btn-primary" id="studio-app-new-save">SAVE APPLICANT</button>
+            </div>
                 </div>
             </details>
             <div id="studio-applicants-draw-detail-host"></div>
@@ -990,11 +993,11 @@ function renderJournal() {
                         { id: 'studio-journal-tab-published', label: 'Published', value: 'published' },
                         { id: 'studio-journal-tab-archived', label: 'Archived', value: 'archived' },
                     ],
-                })}
-                ${studioFilterBarHtml({
+            })}
+            ${studioFilterBarHtml({
                     searchId: 'studio-journal-entries-search',
-                    searchPlaceholder: 'Search title, id, link…',
-                })}
+                searchPlaceholder: 'Search title, id, link…',
+            })}
                 <div class="studio-subscribers-toolbar studio-journal-toolbar">
                     <button type="button" class="studio-btn-primary" id="studio-journal-new-entry">+ New journal entry</button>
                 </div>
@@ -1012,7 +1015,7 @@ function renderJournal() {
                         </thead>
                         <tbody id="studio-journal-entries-tbody"><tr><td colspan="6">Loading…</td></tr></tbody>
                     </table>
-                </div>
+                    </div>
             </section>
 
             <section class="studio-journal-section" aria-labelledby="studio-journal-home-carousel-heading">
@@ -1020,7 +1023,7 @@ function renderJournal() {
                     <div>
                         <h3 id="studio-journal-home-carousel-heading" class="studio-subheading">Home carousel</h3>
                         <p class="studio-muted studio-journal-lede">Choose up to <strong>3 published</strong> entries for the homepage journal hero. Slide 1 is the first pagination dot (left). Leave all slots empty to use automatic newest-first order.</p>
-                    </div>
+                </div>
                 </div>
                 <div class="studio-journal-home-carousel">
                     <label class="studio-field">
@@ -1058,26 +1061,26 @@ function renderJournal() {
                 })}
                 <div class="studio-subscribers-toolbar studio-journal-toolbar" style="flex-wrap:wrap;gap:0.5rem;align-items:center">
                     <button type="button" class="studio-btn-primary" id="studio-journal-add">+ Add layout row</button>
-                    <button type="button" class="studio-btn-primary" id="studio-journal-save-layout">Save layout</button>
+                <button type="button" class="studio-btn-primary" id="studio-journal-save-layout">Save layout</button>
                     <a href="/journal" target="_blank" rel="noopener noreferrer" class="studio-btn-ghost">Preview /journal</a>
-                    <button type="button" class="studio-btn-ghost" id="studio-journal-refresh">Refresh</button>
-                </div>
-                <div id="studio-journal-banner" class="studio-banner studio-banner--info" style="display:none"></div>
-                <div class="studio-table-wrap studio-table-wrap--sticky-head">
-                    <table class="studio-table studio-table--dense">
-                        <thead>
-                            <tr>
-                                <th>Order</th>
-                                <th>Feature</th>
-                                <th>Type</th>
+                <button type="button" class="studio-btn-ghost" id="studio-journal-refresh">Refresh</button>
+            </div>
+            <div id="studio-journal-banner" class="studio-banner studio-banner--info" style="display:none"></div>
+            <div class="studio-table-wrap studio-table-wrap--sticky-head">
+                <table class="studio-table studio-table--dense">
+                    <thead>
+                        <tr>
+                            <th>Order</th>
+                            <th>Feature</th>
+                            <th>Type</th>
                                 <th>Visibility</th>
-                                <th>Ref / details</th>
-                                <th class="studio-td-actions">Actions</th>
-                            </tr>
-                        </thead>
+                            <th>Ref / details</th>
+                            <th class="studio-td-actions">Actions</th>
+                        </tr>
+                    </thead>
                         <tbody id="studio-journal-tbody"><tr><td colspan="6">Loading…</td></tr></tbody>
-                    </table>
-                </div>
+                </table>
+            </div>
             </section>
 
             <details class="studio-embed-block studio-journal-settings">
@@ -1511,15 +1514,15 @@ function renderServices() {
                                     <label class="studio-field">
                                         <span>Client ID — Sandbox</span>
                                         <input type="text" id="studio-svc-paypal-test" class="studio-input" placeholder="AY… (sandbox)" autocomplete="off" />
-                                    </label>
+                                </label>
                                     <label class="studio-field">
                                         <span>Client ID — Live</span>
                                         <input type="text" id="studio-svc-paypal-live" class="studio-input" placeholder="AY… (live)" autocomplete="off" />
-                                    </label>
+                                </label>
                                     <p class="studio-pay-resolved">Resolved for <span data-studio-pay-env-label>Test / Sandbox</span>: <code id="studio-svc-paypal-resolved">—</code></p>
                                     <div class="studio-pay-card__actions">
                                         <button type="button" class="studio-btn-ghost" id="studio-svc-help-paypal">How to set up PayPal</button>
-                                    </div>
+                            </div>
                                 </section>
 
                                 <section class="studio-pay-card studio-pay-card--legacy" id="studio-svc-stripe-card" data-studio-pay-card="stripe">
@@ -1533,30 +1536,30 @@ function renderServices() {
                                     <p class="studio-muted studio-pay-card__desc">When selected as the active provider, new checkouts use embedded Stripe Elements. Existing Stripe subscriptions still sync, cancel, and appear in Finance.</p>
                                     <label class="studio-field">
                                         <span>Publishable key — Test <code>pk_test_…</code></span>
-                                        <input type="text" id="studio-svc-pk-test" class="studio-input" placeholder="pk_test_…" autocomplete="off" />
-                                    </label>
+                                <input type="text" id="studio-svc-pk-test" class="studio-input" placeholder="pk_test_…" autocomplete="off" />
+                            </label>
                                     <label class="studio-field">
                                         <span>Secret key — Test <code>sk_test_…</code> <em>(server only, never saved)</em></span>
                                         <input type="password" id="studio-svc-sk-test" class="studio-input" placeholder="Paste to build .env; cleared on reload" autocomplete="off" />
-                                    </label>
+                            </label>
                                     <details class="studio-pay-details" id="studio-svc-live-details">
-                                        <summary>Live keys (production)</summary>
+                                <summary>Live keys (production)</summary>
                                         <div class="studio-pay-details__body">
                                             <label class="studio-field">
                                                 <span>Publishable key — Live <code>pk_live_…</code></span>
-                                                <input type="text" id="studio-svc-pk-live" class="studio-input" placeholder="pk_live_…" autocomplete="off" />
-                                            </label>
+                                    <input type="text" id="studio-svc-pk-live" class="studio-input" placeholder="pk_live_…" autocomplete="off" />
+                                </label>
                                             <label class="studio-field">
                                                 <span>Secret key — Live <code>sk_live_…</code> <em>(server only, never saved)</em></span>
-                                                <input type="password" id="studio-svc-sk-live" class="studio-input" placeholder="Never commit" autocomplete="off" />
-                                            </label>
+                                    <input type="password" id="studio-svc-sk-live" class="studio-input" placeholder="Never commit" autocomplete="off" />
+                                </label>
                                         </div>
-                                    </details>
+                            </details>
                                     <p class="studio-pay-resolved">Resolved for <span data-studio-pay-env-label>Test / Sandbox</span>: <code id="studio-svc-pk-resolved">—</code></p>
                                     <div class="studio-pay-card__actions">
-                                        <button type="button" class="studio-btn-ghost" id="studio-svc-help-stripe">How to set up Stripe</button>
-                                        <button type="button" class="studio-btn-ghost" id="studio-svc-copy-env">Copy .env snippet</button>
-                                    </div>
+                                <button type="button" class="studio-btn-ghost" id="studio-svc-help-stripe">How to set up Stripe</button>
+                                <button type="button" class="studio-btn-ghost" id="studio-svc-copy-env">Copy .env snippet</button>
+                            </div>
                                 </section>
                             </div>
 
@@ -1565,28 +1568,28 @@ function renderServices() {
                                 <div class="studio-pay-details__body">
                                     <p class="studio-muted">Creates a one-off PaymentIntent via <code>POST /stripe/create-payment-intent</code> (min 50 in smallest units). Test card <code>4242 4242 4242 4242</code>.</p>
                                     <div class="studio-pay-devtools__row">
-                                        <label class="studio-field">
-                                            <span>Amount</span>
-                                            <input type="number" id="studio-svc-pi-amount" class="studio-input" min="0.5" step="0.01" value="1.00" />
-                                        </label>
-                                        <label class="studio-field">
-                                            <span>Currency</span>
-                                            <select id="studio-svc-pi-currency" class="studio-input">
-                                                <option value="usd" selected>usd</option>
-                                                <option value="eur">eur</option>
-                                                <option value="gbp">gbp</option>
-                                                <option value="jpy">jpy</option>
-                                            </select>
-                                        </label>
+                            <label class="studio-field">
+                                <span>Amount</span>
+                                <input type="number" id="studio-svc-pi-amount" class="studio-input" min="0.5" step="0.01" value="1.00" />
+                            </label>
+                            <label class="studio-field">
+                                <span>Currency</span>
+                                <select id="studio-svc-pi-currency" class="studio-input">
+                                    <option value="usd" selected>usd</option>
+                                    <option value="eur">eur</option>
+                                    <option value="gbp">gbp</option>
+                                    <option value="jpy">jpy</option>
+                                </select>
+                            </label>
                                     </div>
                                     <div class="studio-pay-card__actions">
-                                        <button type="button" class="studio-btn-primary" id="studio-svc-pi-create">Create test PaymentIntent</button>
-                                        <button type="button" class="studio-btn-ghost" id="studio-svc-pi-copy" disabled>Copy client secret</button>
-                                    </div>
-                                    <label class="studio-field studio-field--full">
-                                        <span>Client secret</span>
-                                        <textarea id="studio-svc-pi-secret" class="studio-input studio-textarea-mono" rows="3" readonly placeholder="Create a PaymentIntent to see the secret"></textarea>
-                                    </label>
+                                <button type="button" class="studio-btn-primary" id="studio-svc-pi-create">Create test PaymentIntent</button>
+                                <button type="button" class="studio-btn-ghost" id="studio-svc-pi-copy" disabled>Copy client secret</button>
+                            </div>
+                            <label class="studio-field studio-field--full">
+                                <span>Client secret</span>
+                                <textarea id="studio-svc-pi-secret" class="studio-input studio-textarea-mono" rows="3" readonly placeholder="Create a PaymentIntent to see the secret"></textarea>
+                            </label>
                                 </div>
                             </details>
 
@@ -2226,10 +2229,18 @@ function openStudioArtistManageFromRow(tableRow, afterSave, hostEl, listSurface 
                 const raw = collectArtistRecordFromForm(root, full);
                 const flags = raw._featuredFlags;
                 delete raw._featuredFlags;
+                const drawFlags = raw._drawRecipientFlags;
+                delete raw._drawRecipientFlags;
                 try {
                     raw.featuredOrder = await applyFeaturedFlagsFromStudioSaveLive(String(full.id), {
                         featured: Boolean(flags?.featured),
                         featurable: Boolean(flags?.featurable),
+                    });
+                    await applyDrawRecipientFromStudioSaveLive(String(full.id), {
+                        enabled: Boolean(drawFlags?.enabled),
+                        cycle: Number(drawFlags?.cycle) || 1,
+                        programId: String(drawFlags?.programId ?? ''),
+                        awardLabel: String(drawFlags?.awardLabel ?? ''),
                     });
                     await applyHeroProfileImageApprovedFromStudioSaveLive(
                         String(full.id),
@@ -2705,20 +2716,99 @@ function applicantStatusPillHtml(status) {
                   ? 'Denied'
                   : s === 'pulledOut'
                     ? 'Pulled out'
-                  : s === 'reviewing'
-                    ? 'Initial review'
-                    : s === 'pending'
-                      ? 'Pending'
-                      : s;
+                    : s === 'withdrawn'
+                      ? 'Withdrawn'
+                      : s === 'reviewing'
+                        ? 'Initial review'
+                        : s === 'pending'
+                          ? 'Pending'
+                          : s === 'entered'
+                            ? 'Entered'
+                            : s === 'exited'
+                              ? 'Exited'
+                              : s === 'selected'
+                                ? 'Selected'
+                                : s === 'not_selected'
+                                  ? 'Not selected'
+                                  : s;
     let cls = 'studio-status-pill--neutral';
     if (s === 'pending') cls = 'studio-status-pill--pending';
     else if (s === 'reviewing') cls = 'studio-status-pill--reviewing';
     else if (s === 'postInterviewReview') cls = 'studio-status-pill--reviewing';
     else if (s === 'needsInfo') cls = 'studio-status-pill--needs';
-    else if (s === 'accepted') cls = 'studio-status-pill--accepted';
-    else if (s === 'rejected') cls = 'studio-status-pill--rejected';
-    else if (s === 'pulledOut') cls = 'studio-status-pill--rescinded';
+    else if (s === 'accepted' || s === 'entered' || s === 'selected') cls = 'studio-status-pill--accepted';
+    else if (s === 'rejected' || s === 'not_selected') cls = 'studio-status-pill--rejected';
+    else if (s === 'pulledOut' || s === 'withdrawn' || s === 'exited') cls = 'studio-status-pill--rescinded';
     return `<span class="studio-status-pill ${cls}">${escapeHtml(label)}</span>`;
+}
+
+const APPLICANT_STATUS_TABS = Object.freeze([
+    { id: 'studio-app-tab-all', label: 'All', value: 'all' },
+    { id: 'studio-app-tab-pending', label: 'Pending', value: 'pending' },
+    { id: 'studio-app-tab-reviewing', label: 'Initial review', value: 'reviewing' },
+    { id: 'studio-app-tab-post-interview', label: 'Post interview review', value: 'postInterviewReview' },
+    { id: 'studio-app-tab-needs', label: 'Needs info', value: 'needsInfo' },
+    { id: 'studio-app-tab-accepted', label: 'Approved', value: 'accepted' },
+    { id: 'studio-app-tab-rejected', label: 'Denied', value: 'rejected' },
+    { id: 'studio-app-tab-pulled-out', label: 'Pulled out', value: 'pulledOut' },
+    { id: 'studio-app-tab-tester', label: 'Tester', value: 'tester' },
+]);
+
+const AWARD_ENTRY_STATUS_TABS = Object.freeze([
+    { id: 'studio-app-tab-all', label: 'All', value: 'all' },
+    { id: 'studio-app-tab-entered', label: 'Entered', value: 'entered' },
+    { id: 'studio-app-tab-exited', label: 'Exited', value: 'exited' },
+    { id: 'studio-app-tab-selected', label: 'Selected', value: 'selected' },
+    { id: 'studio-app-tab-not-selected', label: 'Not selected', value: 'not_selected' },
+]);
+
+/**
+ * Normalize a Program Award entry (+ payloadJson) into a table row for Award mode.
+ * @param {object} entry
+ * @returns {object}
+ */
+function awardEntryToStudioRow(entry) {
+    const e = entry && typeof entry === 'object' ? entry : {};
+    let payload = {};
+    const raw = e.payloadJson;
+    if (typeof raw === 'string' && raw.trim()) {
+        try {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object') payload = parsed;
+        } catch {
+            /* ignore */
+        }
+    } else if (raw && typeof raw === 'object') {
+        payload = raw;
+    }
+    const firstName = String(payload.firstName || '').trim();
+    const lastName = String(payload.lastName || '').trim();
+    const fullName =
+        `${firstName} ${lastName}`.trim() ||
+        String(e.principalText || '').trim() ||
+        '—';
+    const email = String(payload.email || '').trim() || String(e.principalText || '').trim();
+    const paidEntry = Boolean(
+        e.paidEntry === true ||
+            e.paid_entry === true ||
+            e.paidEntryReceipt === true ||
+            String(e.paidEntry || e.paid_entry || '').toLowerCase() === 'true',
+    );
+    return {
+        id: String(e.id || ''),
+        programId: String(e.programId || ''),
+        email,
+        fullName,
+        status: String(e.status || 'entered'),
+        createdAt: String(e.enteredAt || e.updatedAt || e.entered_at || ''),
+        payloadJson: typeof raw === 'string' ? raw : JSON.stringify(payload),
+        slotSecured: false,
+        isAwardEntry: true,
+        paidEntry,
+        principalText: String(e.principalText || e.principal_text || ''),
+        website: String(payload.website || '').trim(),
+        bioStatement: String(payload.bioStatement || '').trim(),
+    };
 }
 
 function applicantCategoryPillHtmlLocal(category) {
@@ -3456,7 +3546,12 @@ async function initApplicants(mainEl) {
     let drawConfigByProgramId = new Map();
     /** @type {Map<string, number>} entered award counts by program id */
     let awardEnteredCountByProgramId = new Map();
+    /** @type {Map<string, number>} paid ($50) award entry counts by program id */
+    let awardPaidCountByProgramId = new Map();
+    /** @type {Map<string, object[]>} Program Award / draw entries (with payload) by program id */
+    let awardDetailRowsByProgramId = new Map();
     const drawDetailHost = mainEl.querySelector('#studio-applicants-draw-detail-host');
+    const statusTabsHost = mainEl.querySelector('#studio-applicants-status-tabs-host');
     /** @type {Map<string, string>} */
     let applicantEmailToSlug = new Map();
     /** @type {{ id: string, name: string, email: string }[]} */
@@ -3513,6 +3608,39 @@ async function initApplicants(mainEl) {
         return viewModeByProgramId.get(selectedProgramId) || 'standard';
     };
 
+    /**
+     * Persist award entry list + slot/revenue counts for a program (same store as public intake).
+     * @param {string} programId
+     * @param {object[]} entries
+     */
+    const storeAwardEntriesForProgram = (programId, entries) => {
+        const pid = String(programId || '').trim();
+        if (!pid) return;
+        const list = Array.isArray(entries) ? entries : [];
+        const rows = list.map(awardEntryToStudioRow);
+        awardDetailRowsByProgramId.set(pid, rows);
+        const entered = rows.filter((e) => String(e?.status || '') === 'entered').length;
+        // Revenue: any paid entry that completed checkout (includes exited — no refund).
+        const paid = rows.filter((e) => Boolean(e?.paidEntry)).length;
+        awardEnteredCountByProgramId.set(pid, entered);
+        awardPaidCountByProgramId.set(pid, paid);
+    };
+
+    /**
+     * @param {string} programId
+     * @returns {Promise<void>}
+     */
+    const loadAwardEntriesForProgram = async (programId) => {
+        const pid = String(programId || '').trim();
+        if (!pid) return;
+        try {
+            const entries = await listProgramAwardEntriesStudio(pid);
+            storeAwardEntriesForProgram(pid, entries);
+        } catch {
+            storeAwardEntriesForProgram(pid, []);
+        }
+    };
+
     const syncDrawDetailPanel = () => {
         if (!(drawDetailHost instanceof HTMLElement)) return;
         const show =
@@ -3529,16 +3657,8 @@ async function initApplicants(mainEl) {
         const programTitle = programRow
             ? getProgramDisplayNameFromRow(programRow)
             : programId;
-        const fromPayload = allRows.filter(
-            (r) =>
-                String(r.programId || '') === programId &&
-                getApplicantIsProgramDraw(r.payloadJson) &&
-                !getApplicantIsTester(r.payloadJson),
-        ).length;
-        const claimedSlots = Math.max(
-            fromPayload,
-            Number(awardEnteredCountByProgramId.get(programId)) || 0,
-        );
+        const claimedSlots = Number(awardEnteredCountByProgramId.get(programId)) || 0;
+        const paidEntryCount = Number(awardPaidCountByProgramId.get(programId)) || 0;
         const cfg = drawConfigByProgramId.get(programId);
         const drawActive =
             cfg != null ? Boolean(cfg.active) : Boolean(drawActiveByProgramId[programId]);
@@ -3550,6 +3670,7 @@ async function initApplicants(mainEl) {
             programId,
             programTitle,
             claimedSlots,
+            paidEntryCount,
             totalSlots,
             drawActive,
         });
@@ -3561,10 +3682,23 @@ async function initApplicants(mainEl) {
     };
 
     const syncStatusTabs = () => {
-        mainEl.querySelectorAll('.studio-data-tabs__tab').forEach((btn) => {
-            const v = btn.getAttribute('data-tab-value') || '';
-            btn.classList.toggle('is-active', v === statusTab);
-        });
+        const drawMode = selectedViewMode() === 'draw';
+        const tabs = drawMode ? AWARD_ENTRY_STATUS_TABS : APPLICANT_STATUS_TABS;
+        const allowed = new Set(tabs.map((t) => t.value));
+        if (!allowed.has(statusTab)) statusTab = 'all';
+        if (statusTabsHost instanceof HTMLElement) {
+            statusTabsHost.innerHTML = studioDataTabsHtml({
+                ariaLabel: drawMode ? 'Program Award entry status' : 'Applicant status',
+                tabs: tabs.map((t) => ({ ...t, active: t.value === statusTab })),
+            });
+        } else {
+            mainEl.querySelectorAll('.studio-data-tabs__tab').forEach((btn) => {
+                const v = btn.getAttribute('data-tab-value') || '';
+                const on = v === statusTab;
+                btn.classList.toggle('is-active', on);
+                btn.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
+        }
     };
 
     const paintProgramCards = () => {
@@ -3592,25 +3726,29 @@ async function initApplicants(mainEl) {
     };
 
     const filteredRows = () => {
-        let rows = allRows;
-        if (selectedProgramId) {
+        const drawMode = Boolean(selectedProgramId) && selectedViewMode() === 'draw';
+        let rows = drawMode
+            ? [...(awardDetailRowsByProgramId.get(String(selectedProgramId)) || [])]
+            : allRows;
+        if (!drawMode && selectedProgramId) {
             rows = rows.filter((r) => String(r.programId || '') === selectedProgramId);
-            if (selectedViewMode() === 'draw') {
-                rows = rows.filter((r) => getApplicantIsProgramDraw(r.payloadJson));
-            }
         }
-        if (statusTab === 'tester') {
-            rows = rows.filter((r) => getApplicantIsTester(r.payloadJson));
-        } else {
-            rows = rows.filter((r) => !getApplicantIsTester(r.payloadJson));
-            if (statusTab !== 'all') {
-                rows = rows.filter((r) => String(r.status) === statusTab);
+        if (!drawMode) {
+            if (statusTab === 'tester') {
+                rows = rows.filter((r) => getApplicantIsTester(r.payloadJson));
+            } else {
+                rows = rows.filter((r) => !getApplicantIsTester(r.payloadJson));
+                if (statusTab !== 'all') {
+                    rows = rows.filter((r) => String(r.status) === statusTab);
+                }
             }
+        } else if (statusTab !== 'all') {
+            rows = rows.filter((r) => String(r.status) === statusTab);
         }
         const q = (searchInput instanceof HTMLInputElement ? searchInput.value : '').trim().toLowerCase();
         if (q) {
             rows = rows.filter((r) => {
-                const hay = `${r.email} ${r.fullName || ''} ${r.programId || ''} ${r.status}`.toLowerCase();
+                const hay = `${r.email} ${r.fullName || ''} ${r.programId || ''} ${r.status} ${r.website || ''}`.toLowerCase();
                 return hay.includes(q);
             });
         }
@@ -3651,33 +3789,37 @@ async function initApplicants(mainEl) {
         if (!slice.length) {
             let emptyMsg = allRows.length ? 'No applicants match filters.' : 'No applicants.';
             if (selectedProgramId && selectedViewMode() === 'draw') {
-                const anyDraw = allRows.some(
-                    (r) =>
-                        String(r.programId || '') === selectedProgramId &&
-                        getApplicantIsProgramDraw(r.payloadJson),
-                );
-                if (!anyDraw) emptyMsg = 'No draw applicants yet.';
+                emptyMsg = 'No draw entries yet.';
             }
             tbody.innerHTML = `<tr><td colspan="10">${emptyMsg}</td></tr>`;
         } else {
+            const drawMode = selectedViewMode() === 'draw';
             const delBtn = (id) =>
-                canEditApplicants && canDeleteApplicants
+                !drawMode && canEditApplicants && canDeleteApplicants
                     ? `<td class="studio-td-actions"><button type="button" class="studio-btn-danger studio-app-delete" data-id="${escapeHtml(id)}">Delete</button></td>`
                     : '<td class="studio-td-actions">—</td>';
             const emailBtn = (id) =>
-                canEditApplicants
+                !drawMode && canEditApplicants
                     ? `<td class="studio-td-actions"><button type="button" class="studio-btn-ghost studio-app-email" data-id="${escapeHtml(id)}">Send email</button></td>`
                     : '<td class="studio-td-actions">—</td>';
             tbody.innerHTML = slice
                 .map((r) => {
+                    const categoryOrPaid = drawMode
+                        ? r.paidEntry
+                            ? '<span class="studio-muted">Paid $50</span>'
+                            : '<span class="studio-muted">Award credit</span>'
+                        : applicantCategoryCellHtmlLocal(r.payloadJson);
+                    const slotOrDash = drawMode
+                        ? '<span class="studio-muted">—</span>'
+                        : applicantSlotSecuredPillHtml(Boolean(r.slotSecured));
                     return `
-        <tr class="studio-app-row" data-id="${escapeHtml(r.id)}" tabindex="0" role="button">
+        <tr class="studio-app-row" data-id="${escapeHtml(r.id)}" data-award-entry="${r.isAwardEntry ? '1' : '0'}" tabindex="0" role="button">
             <td>${escapeHtml(r.email)}</td>
             <td>${escapeHtml(r.fullName || '')}</td>
             <td>${escapeHtml(r.programId)}</td>
             <td>${applicantStatusPillHtml(r.status)}</td>
-            <td>${applicantCategoryCellHtmlLocal(r.payloadJson)}</td>
-            <td>${applicantSlotSecuredPillHtml(Boolean(r.slotSecured))}</td>
+            <td>${categoryOrPaid}</td>
+            <td>${slotOrDash}</td>
             <td><span class="studio-muted" title="${escapeHtml(r.createdAt || '')}">${escapeHtml(formatStudioDate(r.createdAt))}</span></td>
             <td class="studio-td-actions"><button type="button" class="studio-btn-ghost studio-app-view" data-id="${escapeHtml(r.id)}">View</button></td>
             ${emailBtn(r.id)}
@@ -3689,6 +3831,10 @@ async function initApplicants(mainEl) {
                 const openRow = () => {
                     const id = tr.getAttribute('data-id');
                     if (!id) return;
+                    if (tr.getAttribute('data-award-entry') === '1') {
+                        openAwardEntryViewModal(id);
+                        return;
+                    }
                     if (canEditApplicants) openApplicantModal(id);
                     else openApplicantViewModal(id);
                 };
@@ -3708,21 +3854,25 @@ async function initApplicants(mainEl) {
             });
             if (canEditApplicants) {
                 tbody.querySelectorAll('.studio-app-email').forEach((btn) => {
-                    btn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        const id = btn.getAttribute('data-id');
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const id = btn.getAttribute('data-id');
                         if (id) openApplicantEmailModal(id);
-                    });
                 });
+            });
             }
             tbody.querySelectorAll('.studio-app-view').forEach((btn) => {
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     const id = btn.getAttribute('data-id');
-                    if (id) openApplicantViewModal(id);
+                    if (!id) return;
+                    const tr = btn.closest('.studio-app-row');
+                    if (tr?.getAttribute('data-award-entry') === '1') openAwardEntryViewModal(id);
+                    else openApplicantViewModal(id);
                 });
             });
         }
+        syncStatusTabs();
         syncStatusTabs();
         syncDrawDetailPanel();
         paintPageNumbers(pages);
@@ -3747,6 +3897,8 @@ async function initApplicants(mainEl) {
         allPrograms = Array.isArray(programs) ? programs : [];
         drawConfigByProgramId = new Map();
         awardEnteredCountByProgramId = new Map();
+        awardPaidCountByProgramId = new Map();
+        awardDetailRowsByProgramId = new Map();
         if (drawConfigs instanceof Map) {
             for (const [id, row] of drawConfigs) {
                 drawConfigByProgramId.set(String(id), {
@@ -3763,18 +3915,12 @@ async function initApplicants(mainEl) {
             }
             saveDrawActiveByProgramId(drawActiveByProgramId);
             await Promise.all(
-                [...drawConfigByProgramId.keys()].map(async (pid) => {
-                    try {
-                        const entries = await listProgramAwardEntriesStudio(pid);
-                        const entered = (Array.isArray(entries) ? entries : []).filter(
-                            (e) => String(e?.status || '') === 'entered',
-                        ).length;
-                        awardEnteredCountByProgramId.set(pid, entered);
-                    } catch {
-                        awardEnteredCountByProgramId.set(pid, 0);
-                    }
-                }),
+                [...drawConfigByProgramId.keys()].map((pid) => loadAwardEntriesForProgram(pid)),
             );
+        }
+        // Also hydrate the selected Award-mode program if config list missed it.
+        if (selectedProgramId && selectedViewMode() === 'draw') {
+            await loadAwardEntriesForProgram(selectedProgramId);
         }
         allRows = await Promise.all(
             (Array.isArray(applicants) ? applicants : []).map(async (row) => ({
@@ -3831,6 +3977,39 @@ async function initApplicants(mainEl) {
         if (emailInput instanceof HTMLInputElement) emailInput.value = artist.email;
         if (nameInput instanceof HTMLInputElement) nameInput.value = artist.name;
         if (statusInput instanceof HTMLSelectElement) statusInput.value = 'accepted';
+    };
+
+    const findAwardEntryRow = (id) => {
+        const needle = String(id || '');
+        for (const rows of awardDetailRowsByProgramId.values()) {
+            const hit = rows.find((x) => String(x.id) === needle);
+            if (hit) return hit;
+        }
+        return null;
+    };
+
+    const openAwardEntryViewModal = (id) => {
+        const r = findAwardEntryRow(id);
+        if (!r) return;
+        const body = `
+          <div class="studio-modal-form">
+            <p><strong>Email:</strong> ${escapeHtml(r.email)}</p>
+            <p><strong>Name:</strong> ${escapeHtml(r.fullName || '—')}</p>
+            <p><strong>Program:</strong> ${escapeHtml(r.programId)}</p>
+            <p><strong>Status:</strong> ${applicantStatusPillHtml(r.status)}</p>
+            <p><strong>Entered:</strong> ${escapeHtml(formatStudioDate(r.createdAt))}</p>
+            <p><strong>Payment:</strong> ${r.paidEntry ? 'Paid $50' : 'Award credit'}</p>
+            <p><strong>Principal:</strong> <code class="studio-code-inline">${escapeHtml(r.principalText || '—')}</code></p>
+            <h3 class="studio-subheading">Draw entry</h3>
+            <p><strong>Website / world:</strong> ${
+                r.website
+                    ? `<a href="${escapeHtml(r.website)}" target="_blank" rel="noopener noreferrer">${escapeHtml(r.website)}</a>`
+                    : '—'
+            }</p>
+            <p><strong>About:</strong></p>
+            <p class="studio-muted" style="white-space:pre-wrap">${escapeHtml(r.bioStatement || '—')}</p>
+          </div>`;
+        openStudioModal(body, { title: 'View draw entry', wide: true });
     };
 
     const openApplicantViewModal = (id) => {
@@ -4262,15 +4441,31 @@ async function initApplicants(mainEl) {
         renderPage();
     });
 
-    mainEl.querySelectorAll('.studio-data-tabs__tab').forEach((btn) => {
-        btn.addEventListener('click', () => {
-            const v = btn.getAttribute('data-tab-value');
-            if (!v) return;
-            statusTab = /** @type {typeof statusTab} */ (v);
-            page = 0;
-            renderPage();
+    const onApplicantsStatusTabClick = (e) => {
+        const btn =
+            e.target instanceof Element ? e.target.closest('.studio-data-tabs__tab') : null;
+        if (!(btn instanceof HTMLElement)) return;
+        const host = statusTabsHost instanceof HTMLElement ? statusTabsHost : mainEl;
+        if (!host.contains(btn)) return;
+        const v = btn.getAttribute('data-tab-value');
+        if (!v) return;
+        statusTab = /** @type {typeof statusTab} */ (v);
+        page = 0;
+        renderPage();
+    };
+    if (statusTabsHost instanceof HTMLElement) {
+        statusTabsHost.addEventListener('click', onApplicantsStatusTabClick);
+    } else {
+        mainEl.querySelectorAll('.studio-data-tabs__tab').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const v = btn.getAttribute('data-tab-value');
+                if (!v) return;
+                statusTab = /** @type {typeof statusTab} */ (v);
+                page = 0;
+                renderPage();
+            });
         });
-    });
+    }
     searchInput?.addEventListener('input', () => {
         page = 0;
         renderPage();
@@ -4292,7 +4487,12 @@ async function initApplicants(mainEl) {
                 saveSelectedProgramId(programId);
             }
             page = 0;
+            statusTab = 'all';
             paintProgramCards();
+            if (mode === 'draw') {
+                void loadAwardEntriesForProgram(programId).then(() => renderPage());
+                return;
+            }
             renderPage();
             return;
         }
@@ -4310,6 +4510,10 @@ async function initApplicants(mainEl) {
             }
             page = 0;
             paintProgramCards();
+            if (selectedProgramId && selectedViewMode() === 'draw') {
+                void loadAwardEntriesForProgram(selectedProgramId).then(() => renderPage());
+                return;
+            }
             renderPage();
         }
     });
@@ -4691,7 +4895,7 @@ async function initArtists(mainEl) {
                     ? `${label}: no artists in roster.`
                     : isFirebaseGallery
                       ? `${label}: no artists had Firebase intro gallery URLs.`
-                      : `${label}: no artists needed updates (already have URLs or gallery).`;
+                    : `${label}: no artists needed updates (already have URLs or gallery).`;
             }
             await load();
         } catch (e) {
@@ -5889,8 +6093,8 @@ async function initPrograms(mainEl) {
             )
             .join('');
         const studioStatusOptions = ['open', 'full', 'active', 'completed', 'comingUp']
-            .map(
-                (s) =>
+                    .map(
+                        (s) =>
                     `<option value="${s}" ${String(p.studioStatus) === s ? 'selected' : ''}>${escapeHtml(s)}</option>`,
             )
             .join('');

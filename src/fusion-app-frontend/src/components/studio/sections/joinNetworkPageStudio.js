@@ -72,6 +72,10 @@ function emptyLocale() {
         planAnnual: emptyPlanCard(),
         includesTitle: '',
         includes: [''],
+        /** Features shown on Program Draw one-time payment product card (`.app-fee-product-card__list`). */
+        programDrawFeatures: {
+            includedBullets: [''],
+        },
         ctaLabel: '',
         paymentFooter: '',
         proof: [
@@ -143,6 +147,13 @@ function normalizeBundle(raw) {
         // Keep legacy `includes` in sync with monthly for older readers; edit per-plan bullets in Studio.
         out.includes = normalizePlanBullets(out.planMonthly?.includedBullets).filter(Boolean);
         if (!out.includes.length) out.includes = [''];
+        const drawFeatSrc =
+            src.programDrawFeatures && typeof src.programDrawFeatures === 'object'
+                ? src.programDrawFeatures
+                : {};
+        out.programDrawFeatures = {
+            includedBullets: normalizePlanBullets(drawFeatSrc.includedBullets),
+        };
         delete out.planBimonthly;
         return out;
     };
@@ -227,6 +238,25 @@ function planCardFieldsHtml(loc, planKey, subhead) {
 
 /**
  * @param {Record<string, any>} loc
+ */
+function programDrawFeaturesFieldsHtml(loc) {
+    const bullets = normalizePlanBullets(loc.programDrawFeatures?.includedBullets);
+    const rows = bullets
+        .map(
+            (line, i) => `
+        <div class="studio-jnp__include-row">
+            <input class="studio-input" data-jnp="programDrawFeatures.includedBullets.${i}" value="${esc(line)}" placeholder="Feature ${i + 1}" />
+            <button type="button" class="studio-btn-ghost" data-jnp-remove-draw-feature="${i}" title="Remove">×</button>
+        </div>`,
+        )
+        .join('');
+    return `
+        <div class="studio-jnp__includes" data-jnp-draw-features>${rows}</div>
+        <button type="button" class="studio-btn-ghost" data-jnp-add-draw-feature style="margin-top:0.45rem">+ Add feature</button>`;
+}
+
+/**
+ * @param {Record<string, any>} loc
  * @param {'en'|'ja'} locale
  */
 function fieldsHtml(loc, locale) {
@@ -294,6 +324,11 @@ function fieldsHtml(loc, locale) {
             ${planCardFieldsHtml(loc, 'planMonthly', '1. Monthly')}
             ${planCardFieldsHtml(loc, 'planQuarterly', '2. Quarterly')}
             ${planCardFieldsHtml(loc, 'planAnnual', '3. Annual')}
+        </section>
+        <section class="studio-jnp__card">
+            <h3>Program Draw features</h3>
+            <p class="studio-muted">Bullets for the Program Draw one-time payment card (<code>.app-fee-product-card__list</code>) on public program pages. Leave empty to use built-in defaults.</p>
+            ${programDrawFeaturesFieldsHtml(loc)}
         </section>
         <section class="studio-jnp__card">
             <h3>Proof strip</h3>
@@ -423,6 +458,21 @@ function setPath(obj, path, value) {
             if (!obj.includes.length) obj.includes = [''];
         }
         delete obj.planBimonthly;
+        return;
+    }
+    if (
+        parentParts.length === 3 &&
+        parentParts[0] === 'programDrawFeatures' &&
+        parentParts[1] === 'includedBullets'
+    ) {
+        const idx = Number(parentParts[2]);
+        if (!obj.programDrawFeatures || typeof obj.programDrawFeatures !== 'object') {
+            obj.programDrawFeatures = { includedBullets: [] };
+        }
+        if (!Array.isArray(obj.programDrawFeatures.includedBullets)) {
+            obj.programDrawFeatures.includedBullets = [];
+        }
+        obj.programDrawFeatures.includedBullets[idx] = value;
         return;
     }
     if (
@@ -575,6 +625,36 @@ export async function initJoinNetworkPageStudio(mainEl) {
                 if (planKey === 'planMonthly') {
                     data[locale].includes = [...plan.includedBullets];
                 }
+                setDirty(true);
+                renderFields();
+            });
+        });
+
+        fieldsEl?.querySelectorAll('[data-jnp-add-draw-feature]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                if (
+                    !data[locale].programDrawFeatures ||
+                    typeof data[locale].programDrawFeatures !== 'object'
+                ) {
+                    data[locale].programDrawFeatures = { includedBullets: [''] };
+                }
+                if (!Array.isArray(data[locale].programDrawFeatures.includedBullets)) {
+                    data[locale].programDrawFeatures.includedBullets = [''];
+                }
+                data[locale].programDrawFeatures.includedBullets.push('');
+                setDirty(true);
+                renderFields();
+            });
+        });
+
+        fieldsEl?.querySelectorAll('[data-jnp-remove-draw-feature]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const i = Number(btn.getAttribute('data-jnp-remove-draw-feature'));
+                if (!Number.isFinite(i)) return;
+                const feat = data[locale].programDrawFeatures;
+                if (!feat || !Array.isArray(feat.includedBullets)) return;
+                feat.includedBullets.splice(i, 1);
+                if (!feat.includedBullets.length) feat.includedBullets = [''];
                 setDirty(true);
                 renderFields();
             });

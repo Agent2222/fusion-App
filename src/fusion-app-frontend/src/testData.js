@@ -16,7 +16,8 @@ import object4 from './assets/dev/oh-4.webp';
 
 import journal1 from './assets/dev/je-1.jpg';
 import journal2 from './assets/dev/je-2.jpg';
-import journal3 from './assets/dev/je-3.jpg'; 
+import journal3 from './assets/dev/je-3.jpg';
+import { defaultProgramDrawBundle } from './utils/programDrawContent.js';
 
 /**
  * Feed item shape: { imageSrc, imageAlt, location, month, date, year, label, ctaExhibit, ctaAttend }
@@ -24,6 +25,8 @@ import journal3 from './assets/dev/je-3.jpg';
  */
 
 export const testData = {
+    /** Studio Content → Program Draw (display panel + About). */
+    programDraw: defaultProgramDrawBundle(),
     /** Site setting `applicationPaymentGlobal` — global EN/JA bullets for the program application form (test mode). */
     applicationPaymentGlobal: {
         en: {

@@ -26,6 +26,10 @@ import {
     fillJoinNetworkFlowEditor,
     mergeJoinNetworkFlowFromContainer,
 } from './joinNetworkFlowStudio.js';
+import {
+    fillProgramDrawContentEditor,
+    mergeProgramDrawContentFromContainer,
+} from './programDrawContentStudio.js';
 
 function escapeHtml(s) {
     return String(s)
@@ -254,6 +258,11 @@ export async function loadStudioContentEditorPayload(fieldsEl, slug, hooks, opti
         await fillJoinNetworkFlowEditor(fieldsEl, bundle, hooks);
         return { isLivePlaceholder };
     }
+    if (slug === 'program-draw') {
+        fieldsEl.className = 'studio-content-fields studio-content-fields--scroll';
+        await fillProgramDrawContentEditor(fieldsEl, bundle, hooks);
+        return { isLivePlaceholder };
+    }
     fieldsEl.className = 'studio-content-fields studio-content-fields--scroll';
     fillStudioContentPlainFields(fieldsEl, bundle, slug || '', hooks, { chapterId: options.chapterId });
     return { isLivePlaceholder };
@@ -269,6 +278,12 @@ export async function persistStudioContentPage(slug, fieldsEl) {
     if (slug === 'join-network-flow') {
         const bundle = await getContentBundleForStudio(slug, { forStudio: true });
         const next = mergeJoinNetworkFlowFromContainer(fieldsEl, bundle);
+        await upsertContentPageStudio(slug, next);
+        return;
+    }
+    if (slug === 'program-draw') {
+        const bundle = await getContentBundleForStudio(slug, { forStudio: true });
+        const next = mergeProgramDrawContentFromContainer(fieldsEl, bundle);
         await upsertContentPageStudio(slug, next);
         return;
     }
@@ -425,7 +440,9 @@ async function initContentPanel(mainEl, cfg) {
             hintEl.innerHTML =
                 slug === 'join-network-flow'
                     ? joinNetworkFlowHint
-                    : defaultHint;
+                    : slug === 'program-draw'
+                      ? 'Edit global Program Draw display labels and the About Program Draw section (EN/JA). Saved to the canister content page <code>program-draw</code>.'
+                      : defaultHint;
         }
         const { isLivePlaceholder } = fieldsEl
             ? await loadStudioContentEditorPayload(fieldsEl, slug, { markDirty: () => setDirty(true) }, {})

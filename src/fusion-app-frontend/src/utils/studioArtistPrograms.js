@@ -3,7 +3,15 @@
  */
 
 import { artistDisplayName, artistEnglishBlock } from './artistSlug.js';
-import { getDataSource, getPrograms, getProgramRecordForStudio, unwrapOpt, upsertProgramStudio } from './database.js';
+import {
+    adminFindPrincipalForArtistStudio,
+    getDataSource,
+    getPrograms,
+    getProgramRecordForStudio,
+    listProgramAwardEntriesStudio,
+    unwrapOpt,
+    upsertProgramStudio,
+} from './database.js';
 import { getStudioAuthenticatedActor } from './studioAuth.js';
 
 /**
@@ -271,6 +279,120 @@ export function programRowReservedState(programRow, englishName) {
 }
 
 /**
+ * @param {object | null | undefined} programRow
+ * @returns {string}
+ */
+function programRowDisplayTitle(programRow) {
+    if (!programRow || typeof programRow !== 'object') return '';
+    const pid = String(/** @type {Record<string, unknown>} */ (programRow).id ?? '');
+    try {
+        const parsed = JSON.parse(
+            String(/** @type {Record<string, unknown>} */ (programRow).localesJson || '{}'),
+        );
+        const en = parsed.en && typeof parsed.en === 'object' ? parsed.en : {};
+        const pp = en.programPage && typeof en.programPage === 'object' ? en.programPage : {};
+        return (
+            String(pp.headline || en.headline || en.location || en.focus || pid).trim() || pid
+        );
+    } catch {
+        return pid;
+    }
+}
+
+/**
+ * Resolve linked account principal for Manage Artist (Identity / credits link).
+ * @param {HTMLElement} root
+ * @param {string} artistId
+ * @returns {Promise<string>}
+ */
+async function resolveArtistLinkedPrincipal(root, artistId) {
+    const fromInput = root.querySelector(
+        '#studio-art-linked-principal, [data-art-field="linkedPrincipal"], [name="linkedPrincipal"]',
+    );
+    if (fromInput instanceof HTMLInputElement || fromInput instanceof HTMLTextAreaElement) {
+        const v = String(fromInput.value || '').trim();
+        if (v) return v;
+    }
+    try {
+        return String((await adminFindPrincipalForArtistStudio(artistId)) || '').trim();
+    } catch {
+        return '';
+    }
+}
+
+/**
+ * Fill Program Draw read-only table for the linked principal.
+ * @param {HTMLElement} root
+ * @param {object[]} programs
+ * @param {string} principalText
+ * @param {(s: unknown) => string} esc
+ */
+async function fillArtistProgramDrawTable(root, programs, principalText, esc) {
+    const drawTbody = root.querySelector('#studio-art-draw-tbody');
+    const drawStatus = root.querySelector('#studio-art-draw-status');
+    if (!drawTbody) return;
+
+    const setDrawStatus = (msg) => {
+        if (drawStatus) drawStatus.textContent = msg || '';
+    };
+
+    drawTbody.replaceChildren();
+    if (!principalText) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td colspan="3" class="studio-muted">No linked account principal — Program Draw rows unavailable.</td>`;
+        drawTbody.appendChild(tr);
+        setDrawStatus('Link an account principal on the Identity tab to see draw entries.');
+        return;
+    }
+    setDrawStatus('');
+
+    /** @type {{ title: string, entered: boolean, won: boolean }[]} */
+    const rows = [];
+    for (const p of programs) {
+        if (!p || typeof p !== 'object') continue;
+        const pid = String(/** @type {Record<string, unknown>} */ (p).id ?? '');
+        if (!pid) continue;
+        let entries = [];
+        try {
+            entries = await listProgramAwardEntriesStudio(pid);
+        } catch {
+            entries = [];
+        }
+        const match = (Array.isArray(entries) ? entries : []).find((e) => {
+            if (!e || typeof e !== 'object') return false;
+            const o = /** @type {Record<string, unknown>} */ (e);
+            return String(o.principalText || o.principal_text || '').trim() === principalText;
+        });
+        if (!match) continue;
+        const status = String(
+            /** @type {Record<string, unknown>} */ (match).status || '',
+        ).trim();
+        rows.push({
+            title: programRowDisplayTitle(p) || pid,
+            entered: status === 'entered' || status === 'selected',
+            won: status === 'selected',
+        });
+    }
+
+    if (!rows.length) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td colspan="3" class="studio-muted">No Program Draw records for this principal.</td>`;
+        drawTbody.appendChild(tr);
+        return;
+    }
+
+    for (const row of rows) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+        <td class="studio-td-title">${esc(row.title)}</td>
+        <td class="studio-td-cb"><input type="checkbox" disabled ${row.entered ? 'checked' : ''} title="Entered (or selected)" /></td>
+        <td class="studio-td-cb"><input type="checkbox" disabled ${row.won ? 'checked' : ''} title="Won (status selected)" /></td>
+      `;
+        drawTbody.appendChild(tr);
+    }
+}
+
+/**
  * Fill Programs tab table and wire Reserved toggles.
  * @param {HTMLElement} root — modal root
  * @param {object} full — loaded artist row
@@ -289,10 +411,17 @@ export async function initArtistProgramsTab(root, full) {
         statusEl.className = `studio-muted studio-art-programs-status${isErr ? ' studio-banner studio-banner--error' : ''}`;
     };
 
+    const esc = (s) =>
+        String(s ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/"/g, '&quot;');
+
     try {
-        const [programs, appliedIds] = await Promise.all([
+        const [programs, appliedIds, principalText] = await Promise.all([
             getPrograms(),
             getStaffArtistApplicationsProgramIds(artistId),
+            resolveArtistLinkedPrincipal(root, artistId),
         ]);
         if (!englishName) {
             setStatus('Add an English name under Identity to manage program reservation.', false);
@@ -300,17 +429,12 @@ export async function initArtistProgramsTab(root, full) {
             setStatus('', false);
         }
 
-        const esc = (s) =>
-            String(s ?? '')
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/"/g, '&quot;');
-
         tbody.replaceChildren();
         if (!programs.length) {
             const tr = document.createElement('tr');
             tr.innerHTML = `<td colspan="5" class="studio-muted">No programs in the roster.</td>`;
             tbody.appendChild(tr);
+            await fillArtistProgramDrawTable(root, [], principalText, esc);
             return;
         }
         for (const p of programs) {
@@ -320,19 +444,7 @@ export async function initArtistProgramsTab(root, full) {
 
             const { reserved, totalSlots, remaining } = programRowReservedState(p, englishName);
             const applied = appliedIds.has(pid);
-
-            let title = pid;
-            try {
-                const parsed = JSON.parse(String(/** @type {Record<string, unknown>} */ (p).localesJson || '{}'));
-                const en = parsed.en && typeof parsed.en === 'object' ? parsed.en : {};
-                const pp =
-                    en.programPage && typeof en.programPage === 'object' ? en.programPage : {};
-                title = String(
-                    pp.headline || en.headline || en.location || en.focus || pid
-                ).trim() || pid;
-            } catch {
-                /* use pid */
-            }
+            const title = programRowDisplayTitle(p) || pid;
 
             const tr = document.createElement('tr');
             tr.dataset.programId = pid;
@@ -377,7 +489,13 @@ export async function initArtistProgramsTab(root, full) {
                 });
             }
         }
+
+        await fillArtistProgramDrawTable(root, programs, principalText, esc);
     } catch (e) {
         setStatus(e instanceof Error ? e.message : String(e), true);
+        const drawTbody = root.querySelector('#studio-art-draw-tbody');
+        if (drawTbody) {
+            drawTbody.innerHTML = `<tr><td colspan="3" class="studio-muted">Could not load Program Draw entries.</td></tr>`;
+        }
     }
 }

@@ -10,6 +10,50 @@ import {
 import { parsePayPalCustomId, safePayPalMetaValue } from './providers/paypalProvider.js';
 
 /**
+ * @param {Date} [date]
+ * @returns {string} `YYYY-Qn`
+ */
+function calendarQuarterKey(date = new Date()) {
+    const y = date.getUTCFullYear();
+    const q = Math.floor(date.getUTCMonth() / 3) + 1;
+    return `${y}-Q${q}`;
+}
+
+/**
+ * After award fee is on the ledger: enter Program Award when payload is available (webhook/confirm safety net).
+ * @param {object} actor
+ * @param {{ principalText: string, programId: string, orderId: string, payloadJson: string, currentQuarterKey?: string }} opts
+ */
+async function maybeIntegrationEnterProgramAward(actor, opts) {
+    const principalText = String(opts.principalText || '').trim();
+    const programId = String(opts.programId || '').trim();
+    const orderId = String(opts.orderId || '').trim();
+    const payloadJson = String(opts.payloadJson || '').trim();
+    if (!principalText || !programId || !orderId || !payloadJson) {
+        return { entered: false, skipped: true };
+    }
+    if (typeof actor.integrationEnterProgramAward !== 'function') {
+        console.warn('[paypal] integrationEnterProgramAward missing — redeploy backend + update IDL');
+        return { entered: false, skipped: true };
+    }
+    try {
+        const entry = await actor.integrationEnterProgramAward(
+            Principal.fromText(principalText),
+            programId,
+            orderId,
+            payloadJson,
+            String(opts.currentQuarterKey || '').trim() || calendarQuarterKey(),
+        );
+        return { entered: true, entry };
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        // Soft-fail: payment is already on the ledger; FE Retry / repair can enter later.
+        console.warn('[paypal] integrationEnterProgramAward failed:', msg);
+        return { entered: false, error: msg };
+    }
+}
+
+/**
  * @param {object} order PayPal order after capture (COMPLETED)
  * @param {{ sendProgramPaymentConfirmationEmails?: (d: object) => Promise<void>; markProgramPaymentEmailsSent?: (id: string) => Promise<void>; cancelPlatformSubscriptionImmediately?: (principal: string) => Promise<void>; addConfirmedArtistToProgram?: (actor: unknown, principal: string, programId: string, createdAt: string) => Promise<{ ok: boolean; reason?: string }> }} deps
  * @param {Record<string, string>} [metaOverride]
@@ -74,6 +118,65 @@ export async function recordVerifiedPayPalOrder(order, deps = {}, metaOverride =
         0,
         Math.round(Number.parseFloat(String(capture.amount?.value || pu.amount?.value || '0')) * 100),
     );
+
+    // Program Draw $50 entry: ledger row (no deposit side effects) + optional enter from pending payload.
+    if (paymentType === 'program_award_entry') {
+        let alreadyRecorded = false;
+        if (orderId && typeof actor.integrationHasProgramPayment === 'function') {
+            try {
+                alreadyRecorded = Boolean(await actor.integrationHasProgramPayment(orderId));
+            } catch (e) {
+                console.warn('[paypal] integrationHasProgramPayment failed:', e);
+            }
+        }
+        if (!alreadyRecorded) {
+            const row = {
+                id: orderId,
+                principal: Principal.fromText(principalText),
+                programId,
+                applicationId: applicationId || `award:${programId}`,
+                paymentType: 'program_award_entry',
+                amountCents: BigInt(amountCents),
+                currency: 'usd',
+                stripePaymentIntentId: '',
+                stripeChargeId: '',
+                stripeReceiptUrl: '',
+                status: 'succeeded',
+                createdAt,
+                dueAt: [],
+                feeCents: 0n,
+                staffNote: '',
+                paymentProvider: 'paypal',
+                externalPaymentId: orderId,
+                externalChargeId: captureId,
+                externalReceiptUrl: receiptUrl,
+            };
+            await actor.integrationRecordProgramPayment(row, 0n, 0n, 0n, false, 0n);
+        }
+        const payloadJson = safePayPalMetaValue(meta.payloadJson, 100_000);
+        const enterResult = await maybeIntegrationEnterProgramAward(actor, {
+            principalText,
+            programId,
+            orderId,
+            payloadJson,
+            currentQuarterKey: safePayPalMetaValue(meta.currentQuarterKey, 20),
+        });
+        if (metaRef) {
+            await deletePendingPayPalMetadata(metaRef);
+        }
+        return {
+            receiptUrl,
+            chargeId: captureId,
+            amountCents,
+            paymentType,
+            programId,
+            awardEntry: true,
+            alreadyRecorded,
+            entered: Boolean(enterResult.entered),
+            enterSkipped: Boolean(enterResult.skipped),
+            enterError: enterResult.error || '',
+        };
+    }
     const totalDueCents = Math.max(0, Math.round(Number(meta.totalDueCents || 0)));
     const depositAmountCents = Math.max(0, Math.round(Number(meta.depositAmountCents || 0)));
     const ownFlight = String(meta.ownFlight || '').toLowerCase() === 'true';

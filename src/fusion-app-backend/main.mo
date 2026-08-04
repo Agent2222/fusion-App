@@ -105,8 +105,12 @@ persistent actor {
   stable var programPathStable : [(Text, Text)] = [];
   /// Program Award entries keyed by `principalText|programId`.
   stable var programAwardEntriesStable : [(Text, Types.ProgramAwardEntry)] = [];
+  /// Award entry id → draw-form payload JSON (sidecar — do not reshape ProgramAwardEntry).
+  stable var programAwardPayloadStable : [(Text, Text)] = [];
   /// Principal → award win period key (`YYYY`) — one win per membership year.
   stable var awardWinPeriodStable : [(Principal, Text)] = [];
+  /// PayPal order id → award entry id (`principalText|programId`) after paid enter (attestation consume).
+  stable var awardPaidOrderConsumedStable : [(Text, Text)] = [];
   /// Recent credit ledger (app + award); capped on append.
   stable var creditLedgerStable : [Types.CreditLedgerEntry] = [];
 
@@ -129,6 +133,9 @@ persistent actor {
   stable var artistFeaturedManualIdsStable : [Text] = [];
   /// When true, public clients pick up to 8 from the featurable pool (shuffled client-side).
   stable var artistFeaturedRandomModeStable : Bool = false;
+
+  /// Program Draw past recipients (Studio Manage checkbox) — keyed by artist id.
+  stable var artistDrawRecipientsStable : [(Text, Types.ArtistDrawRecipient)] = [];
 
   /// Studio → Permissions: role-tab defaults (`staff`, …), per-principal overrides, super-staff principals.
   stable var studioPermissionDefaultsStable : [(Text, Types.StudioPermissionMatrix)] = [];
@@ -368,8 +375,15 @@ persistent actor {
   transient var programAwardEntriesById : _HashMap.HashMap<Text, Types.ProgramAwardEntry> =
     _HashMap.HashMap<Text, Types.ProgramAwardEntry>(0, Text.equal, Text.hash);
 
+  transient var programAwardPayloadById : _HashMap.HashMap<Text, Text> =
+    _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
+
   transient var awardWinPeriodByPrincipal : _HashMap.HashMap<Principal, Text> =
     _HashMap.HashMap<Principal, Text>(0, Principal.equal, Principal.hash);
+
+  /// PayPal order id → award entry id after successful paid enter.
+  transient var awardPaidOrderConsumedByOrderId : _HashMap.HashMap<Text, Text> =
+    _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
 
   transient var creditLedgerBuf : Buffer.Buffer<Types.CreditLedgerEntry> = Buffer.Buffer<Types.CreditLedgerEntry>(0);
 
@@ -386,6 +400,9 @@ persistent actor {
     _HashMap.HashMap<Text, Bool>(0, Text.equal, Text.hash);
 
   transient var manualFeaturedArtistIds : Buffer.Buffer<Text> = Buffer.Buffer<Text>(0);
+
+  transient var artistDrawRecipientById : _HashMap.HashMap<Text, Types.ArtistDrawRecipient> =
+    _HashMap.HashMap<Text, Types.ArtistDrawRecipient>(0, Text.equal, Text.hash);
 
   transient var joinInvitesByCode : _HashMap.HashMap<Text, Types.JoinInviteRecord> =
     _HashMap.HashMap<Text, Types.JoinInviteRecord>(0, Text.equal, Text.hash);
@@ -588,8 +605,14 @@ persistent actor {
   for (entry in programAwardEntriesStable.vals()) {
     programAwardEntriesById.put(entry.0, entry.1);
   };
+  for (entry in programAwardPayloadStable.vals()) {
+    programAwardPayloadById.put(entry.0, entry.1);
+  };
   for (entry in awardWinPeriodStable.vals()) {
     awardWinPeriodByPrincipal.put(entry.0, entry.1);
+  };
+  for (entry in awardPaidOrderConsumedStable.vals()) {
+    awardPaidOrderConsumedByOrderId.put(entry.0, entry.1);
   };
   for (e in creditLedgerStable.vals()) {
     creditLedgerBuf.add(e);
@@ -660,6 +683,9 @@ persistent actor {
   };
   for (id in artistFeaturedManualIdsStable.vals()) {
     manualFeaturedArtistIds.add(id);
+  };
+  for (entry in artistDrawRecipientsStable.vals()) {
+    artistDrawRecipientById.put(entry.0, entry.1);
   };
 
   for (entry in joinInvitesStable.vals()) {
@@ -1218,6 +1244,21 @@ persistent actor {
   private func cleanupFeaturedForDeletedArtist(artistId : Text) {
     ignore artistFeaturedFeaturableById.remove(artistId);
     removeManualFeaturedId(artistId);
+    ignore artistDrawRecipientById.remove(artistId);
+  };
+
+  private func compareDrawRecipientsDesc(a : Types.ArtistDrawRecipient, b : Types.ArtistDrawRecipient) : Order.Order {
+    if (a.cycle > b.cycle) { #less } else if (a.cycle < b.cycle) { #greater } else {
+      Text.compare(b.updatedAt, a.updatedAt)
+    };
+  };
+
+  private func listDrawRecipientsSorted() : [Types.ArtistDrawRecipient] {
+    let buf = Buffer.Buffer<Types.ArtistDrawRecipient>(artistDrawRecipientById.size());
+    for ((_, row) in artistDrawRecipientById.entries()) {
+      buf.add(row);
+    };
+    Array.sort(Buffer.toArray(buf), compareDrawRecipientsDesc);
   };
 
   private func defaultMembership() : Types.MembershipFields {
@@ -1835,7 +1876,9 @@ persistent actor {
     awardEntryLastGrantedStable := _Iter.toArray(awardEntryLastGrantedByPrincipal.entries());
     programPathStable := _Iter.toArray(programPathByKey.entries());
     programAwardEntriesStable := _Iter.toArray(programAwardEntriesById.entries());
+    programAwardPayloadStable := _Iter.toArray(programAwardPayloadById.entries());
     awardWinPeriodStable := _Iter.toArray(awardWinPeriodByPrincipal.entries());
+    awardPaidOrderConsumedStable := _Iter.toArray(awardPaidOrderConsumedByOrderId.entries());
     creditLedgerStable := Buffer.toArray(creditLedgerBuf);
     programPaymentLedgerStable := [];
     programPaymentPlansStableV2 := _Iter.toArray(programPaymentPlansById.entries());
@@ -1847,6 +1890,7 @@ persistent actor {
     artistFilterCohortYearsStable := _Iter.toArray(artistFilterCohortYearsById.entries());
     artistFeaturedFeaturableIdsStable := featurableIdsSorted();
     artistFeaturedManualIdsStable := Buffer.toArray(manualFeaturedArtistIds);
+    artistDrawRecipientsStable := _Iter.toArray(artistDrawRecipientById.entries());
     joinInvitesStable := _Iter.toArray(joinInvitesByCode.entries());
     joinInviteTrialMonthsStable := _Iter.toArray(joinInviteTrialMonthsByCode.entries());
     accountRecoveryCodesStable := _Iter.toArray(accountRecoveryCodesByCode.entries());
@@ -2266,6 +2310,12 @@ persistent actor {
     };
     programAwardEntriesStable := [];
 
+    programAwardPayloadById := _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
+    for (entry in programAwardPayloadStable.vals()) {
+      programAwardPayloadById.put(entry.0, entry.1);
+    };
+    programAwardPayloadStable := [];
+
     awardWinPeriodByPrincipal := _HashMap.HashMap<Principal, Text>(
       awardWinPeriodStable.size(),
       Principal.equal,
@@ -2275,6 +2325,16 @@ persistent actor {
       awardWinPeriodByPrincipal.put(entry.0, entry.1);
     };
     awardWinPeriodStable := [];
+
+    awardPaidOrderConsumedByOrderId := _HashMap.HashMap<Text, Text>(
+      awardPaidOrderConsumedStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in awardPaidOrderConsumedStable.vals()) {
+      awardPaidOrderConsumedByOrderId.put(entry.0, entry.1);
+    };
+    awardPaidOrderConsumedStable := [];
 
     creditLedgerBuf := Buffer.Buffer<Types.CreditLedgerEntry>(creditLedgerStable.size());
     for (e in creditLedgerStable.vals()) {
@@ -2325,6 +2385,16 @@ persistent actor {
       manualFeaturedArtistIds.add(id);
     };
     artistFeaturedManualIdsStable := [];
+
+    artistDrawRecipientById := _HashMap.HashMap<Text, Types.ArtistDrawRecipient>(
+      artistDrawRecipientsStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in artistDrawRecipientsStable.vals()) {
+      artistDrawRecipientById.put(entry.0, entry.1);
+    };
+    artistDrawRecipientsStable := [];
 
     reloadStudioPermissionTransientFromStable();
     ensureStudioFeatureKeysMergedWithDefaults();
@@ -2564,6 +2634,15 @@ persistent actor {
       manualFeaturedArtistIds.add(id);
     };
 
+    artistDrawRecipientById := _HashMap.HashMap<Text, Types.ArtistDrawRecipient>(
+      artistDrawRecipientsStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in artistDrawRecipientsStable.vals()) {
+      artistDrawRecipientById.put(entry.0, entry.1);
+    };
+
     joinInvitesByCode := _HashMap.HashMap<Text, Types.JoinInviteRecord>(
       joinInvitesStable.size(),
       Text.equal,
@@ -2627,6 +2706,7 @@ persistent actor {
       artistMostRecentProgramStable = _Iter.toArray(mostRecentProgramByArtistId.entries());
       artistFeaturedFeaturableIdsStable = featurableIdsSorted();
       artistFeaturedManualIdsStable = Buffer.toArray(manualFeaturedArtistIds);
+      artistDrawRecipientsStable = ?(_Iter.toArray(artistDrawRecipientById.entries()));
       joinInvitesStable = _Iter.toArray(joinInvitesByCode.entries());
       joinInviteTrialMonthsStable = ?(_Iter.toArray(joinInviteTrialMonthsByCode.entries()));
       accountRecoveryCodesStable = ?(_Iter.toArray(accountRecoveryCodesByCode.entries()));
@@ -2751,6 +2831,10 @@ persistent actor {
       case (?rows) { rows };
     };
     audioEntryReviewNotesStable := switch (snapshot.audioEntryReviewNotesStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    artistDrawRecipientsStable := switch (snapshot.artistDrawRecipientsStable) {
       case null { [] };
       case (?rows) { rows };
     };
@@ -3218,6 +3302,28 @@ persistent actor {
     };
     awardEntryBalanceByPrincipal.put(p, bal);
     bal
+  };
+
+  /// Admin one-shot: zero every Program Award entry balance.
+  /// Keeps `awardEntryLastGrantedByPrincipal` so the current quarter/year does not immediately re-grant.
+  /// Eligible members re-earn only on the next quarterly/annual accrual.
+  public shared (msg) func adminClearAllAwardEntryBalances() : async Nat {
+    assertAdmin(msg.caller);
+    var cleared : Nat = 0;
+    for ((p, bal) in awardEntryBalanceByPrincipal.entries()) {
+      if (bal > 0) {
+        appendCreditLedger(
+          Principal.toText(p),
+          "award_admin",
+          bal,
+          "debit",
+          "admin_clear_all_award_balances",
+        );
+        cleared += 1;
+      };
+    };
+    awardEntryBalanceByPrincipal := _HashMap.HashMap<Principal, Nat>(0, Principal.equal, Principal.hash);
+    cleared
   };
 
   public shared query (msg) func adminListCreditLedgerForPrincipal(principalText : Text, limit : Nat) : async [Types.CreditLedgerEntry] {
@@ -4175,6 +4281,50 @@ persistent actor {
     };
   };
 
+  /// Staff: mark/unmark roster artist as a Program Draw past recipient (public Past recipients list).
+  public shared (msg) func staffSetArtistDrawRecipient(
+    artistId : Text,
+    enabled : Bool,
+    cycle : Nat,
+    programId : Text,
+    awardLabel : Text,
+  ) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "artists");
+    switch (artistsById.get(artistId)) {
+      case null { Debug.trap("Unknown artist id") };
+      case (?_) {
+        if (enabled) {
+          let c = if (cycle == 0) { 1 } else { cycle };
+          artistDrawRecipientById.put(
+            artistId,
+            {
+              artistId = artistId;
+              cycle = c;
+              programId = Text.trim(programId, #char ' ');
+              awardLabel = Text.trim(awardLabel, #char ' ');
+              updatedAt = nowText();
+            },
+          );
+        } else {
+          ignore artistDrawRecipientById.remove(artistId);
+        };
+      };
+    };
+  };
+
+  /// Staff: load draw-recipient sidecar for Studio Manage.
+  public shared query (msg) func getArtistDrawRecipient(artistId : Text) : async ?Types.ArtistDrawRecipient {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "artists");
+    artistDrawRecipientById.get(artistId);
+  };
+
+  /// Public: all Program Draw past recipients (cycle desc).
+  public query func listArtistDrawRecipientsPublic() : async [Types.ArtistDrawRecipient] {
+    listDrawRecipientsSorted();
+  };
+
   /// Staff/admin: add/remove artist from the manual featured list (max 8). Returns 1-based slot or 0 if not featured.
   public shared (msg) func staffSetManualFeaturedForArtist(artistId : Text, featured : Bool) : async Nat {
     assertStaffOrAdmin(msg.caller);
@@ -4298,6 +4448,7 @@ persistent actor {
       case (#accepted) { "accepted" };
       case (#rejected) { "rejected" };
       case (#pulledOut) { "pulledOut" };
+      case (#withdrawn) { "withdrawn" };
     };
   };
 
@@ -5962,6 +6113,10 @@ persistent actor {
       case null {};
     };
     programPaymentLedgerById.put(row.id, row);
+    // Program Draw $50 fee: ledger only — do not treat as residency deposit.
+    if (row.paymentType == "program_award_entry") {
+      return;
+    };
     putProgramPaymentFlightPreference(row.principal, row.programId, row.applicationId, ownFlight, flightCreditCents, totalDueCents, row.createdAt, true);
     putProgramPaymentSummaryFromLedger(row, totalDueCents, depositAmountCents, refundedCents);
   };
@@ -6154,7 +6309,6 @@ persistent actor {
       status = #pending;
       createdAt = submittedAt;
       payloadJson = payloadJson;
-      emailOutreachJson = "[]";
     };
     applicantsById.put(key, applicant);
     let pk = pathKey(msg.caller, programId);
@@ -7059,16 +7213,39 @@ persistent actor {
     n
   };
 
-  /// Enter Program Award for a program (consumes 1 award entry unless paidEntryReceipt).
-  public shared (msg) func enterProgramAward(
+  private func validateAwardPayloadJson(payloadJson : Text) : Text {
+    let trimmed = Text.trim(payloadJson, #char ' ');
+    if (trimmed.size() == 0) { Debug.trap("Draw entry payload required") };
+    if (trimmed.size() > maxApplicationEntryChars) {
+      Debug.trap("Draw entry payload too large");
+    };
+    let firstName = Text.trim(extractJsonStringField(trimmed, "firstName"), #char ' ');
+    let lastName = Text.trim(extractJsonStringField(trimmed, "lastName"), #char ' ');
+    let email = Text.trim(extractJsonStringField(trimmed, "email"), #char ' ');
+    if (firstName.size() == 0 or lastName.size() == 0 or email.size() == 0) {
+      Debug.trap("First name, last name, and email are required");
+    };
+    trimmed
+  };
+
+  private let PROGRAM_AWARD_PAID_ENTRY_FEE_CENTS : Nat = 5000;
+
+  /// Shared enter logic for caller and integration (webhook/repair) paths.
+  /// Empty `paypalOrderId` → credit path; non-empty → paid attestation via ledger row.
+  private func enterProgramAwardForPrincipal(
+    memberPrincipal : Principal,
     programId : Text,
-    paidEntryReceipt : Bool,
+    paypalOrderId : Text,
     currentQuarterKey : Text,
-  ) : async Types.ProgramAwardEntry {
-    if (Principal.equal(msg.caller, anonPrincipal)) {
+    payloadJson : Text,
+  ) : Types.ProgramAwardEntry {
+    if (Principal.equal(memberPrincipal, anonPrincipal)) {
       Debug.trap("Anonymous caller");
     };
     if (programId.size() == 0) { Debug.trap("programId required") };
+    let payload = validateAwardPayloadJson(payloadJson);
+    let orderId = Text.trim(paypalOrderId, #char ' ');
+    let paidPath = orderId.size() > 0;
     switch (programsById.get(programId)) {
       case null { Debug.trap("Unknown program") };
       case (?_) {};
@@ -7079,7 +7256,7 @@ persistent actor {
     };
     if (not cfg.active) { Debug.trap("Program Award is not active") };
     let yearKey = yearKeyFromQuarterKey(currentQuarterKey);
-    switch (awardWinPeriodByPrincipal.get(msg.caller)) {
+    switch (awardWinPeriodByPrincipal.get(memberPrincipal)) {
       case (?w) {
         if (w == yearKey) {
           Debug.trap("Already won a Program Award this year");
@@ -7087,16 +7264,66 @@ persistent actor {
       };
       case null {};
     };
-    let pk = pathKey(msg.caller, programId);
+    let pk = pathKey(memberPrincipal, programId);
+
+    if (paidPath) {
+      switch (awardPaidOrderConsumedByOrderId.get(orderId)) {
+        case (?consumedEntryId) {
+          if (consumedEntryId == pk) {
+            switch (programAwardEntriesById.get(pk)) {
+              case (?existing) {
+                if (existing.status == "entered") {
+                  programAwardPayloadById.put(pk, payload);
+                  return existing;
+                };
+              };
+              case null {};
+            };
+          } else {
+            Debug.trap("PayPal order already used for another Program Award entry");
+          };
+        };
+        case null {};
+      };
+      switch (programPaymentLedgerById.get(orderId)) {
+        case null {
+          Debug.trap("Paid Program Award entry requires a verified payment");
+        };
+        case (?row) {
+          if (row.paymentType != "program_award_entry") {
+            Debug.trap("Payment is not a Program Award entry fee");
+          };
+          if (not Principal.equal(row.principal, memberPrincipal)) {
+            Debug.trap("Payment principal does not match");
+          };
+          if (row.programId != programId) {
+            Debug.trap("Payment program does not match");
+          };
+          if (row.status != "succeeded" and row.status != "paid") {
+            Debug.trap("Payment is not succeeded");
+          };
+          if (row.amountCents < PROGRAM_AWARD_PAID_ENTRY_FEE_CENTS) {
+            Debug.trap("Payment amount too low for Program Award entry");
+          };
+        };
+      };
+    };
+
     switch (programPathByKey.get(pk)) {
       case (?path) {
         if (path == "application") {
-          Debug.trap("Already applying to this program — leave the application path before entering Program Award");
+          Debug.trap("Already applying to this program — withdraw the application in Settings before entering the Program Draw");
         };
         if (path == "award") {
           switch (programAwardEntriesById.get(pk)) {
             case (?existing) {
-              if (existing.status == "entered") { return existing };
+              if (existing.status == "entered") {
+                programAwardPayloadById.put(pk, payload);
+                if (paidPath) {
+                  awardPaidOrderConsumedByOrderId.put(orderId, pk);
+                };
+                return existing;
+              };
             };
             case null {};
           };
@@ -7107,26 +7334,57 @@ persistent actor {
     if (countActiveAwardEntries(programId) >= cfg.totalSlots) {
       Debug.trap("Program Award slots are full");
     };
-    accrueAllCredits(msg.caller, currentQuarterKey);
-    if (not paidEntryReceipt) {
-      let bal = awardEntryBalanceOf(msg.caller);
+    accrueAllCredits(memberPrincipal, currentQuarterKey);
+    if (not paidPath) {
+      let bal = awardEntryBalanceOf(memberPrincipal);
       if (bal < 1) { Debug.trap("No Program Award entries available") };
-      awardEntryBalanceByPrincipal.put(msg.caller, bal - 1);
-      appendCreditLedger(Principal.toText(msg.caller), "award_consume", 1, "debit", "enter_award");
+      awardEntryBalanceByPrincipal.put(memberPrincipal, bal - 1);
+      appendCreditLedger(Principal.toText(memberPrincipal), "award_consume", 1, "debit", "enter_award");
     };
     let now = nowText();
     let entry : Types.ProgramAwardEntry = {
       id = pk;
       programId = programId;
-      principalText = Principal.toText(msg.caller);
+      principalText = Principal.toText(memberPrincipal);
       status = "entered";
       enteredAt = now;
       updatedAt = now;
-      paidEntry = paidEntryReceipt;
+      paidEntry = paidPath;
     };
     programAwardEntriesById.put(pk, entry);
+    programAwardPayloadById.put(pk, payload);
     programPathByKey.put(pk, "award");
+    if (paidPath) {
+      awardPaidOrderConsumedByOrderId.put(orderId, pk);
+    };
     entry
+  };
+
+  /// Enter Program Award for a program.
+  /// Empty `paypalOrderId` consumes 1 award credit; non-empty requires a verified ledger row for that order.
+  /// `payloadJson` is the draw-form contact/world/about payload (sidecar).
+  public shared (msg) func enterProgramAward(
+    programId : Text,
+    paypalOrderId : Text,
+    currentQuarterKey : Text,
+    payloadJson : Text,
+  ) : async Types.ProgramAwardEntry {
+    enterProgramAwardForPrincipal(msg.caller, programId, paypalOrderId, currentQuarterKey, payloadJson)
+  };
+
+  /// Integration API / webhook / repair: enter Program Award for a principal after payment attestation.
+  public shared (msg) func integrationEnterProgramAward(
+    memberPrincipal : Principal,
+    programId : Text,
+    paypalOrderId : Text,
+    payloadJson : Text,
+    currentQuarterKey : Text,
+  ) : async Types.ProgramAwardEntry {
+    assertIntegrationCaller(msg.caller);
+    if (Text.trim(paypalOrderId, #char ' ').size() == 0) {
+      Debug.trap("paypalOrderId required for integration enter");
+    };
+    enterProgramAwardForPrincipal(memberPrincipal, programId, paypalOrderId, currentQuarterKey, payloadJson)
   };
 
   /// Exit Program Award (does not refund consumed entry). Clears path for formal apply.
@@ -7152,6 +7410,51 @@ persistent actor {
     ignore programPathByKey.remove(pk);
   };
 
+  /// Member: withdraw a formal application for this program (no application-credit refund).
+  /// Clears the application path so the member may enter the Program Draw.
+  public shared (msg) func withdrawMyProgramApplication(programId : Text) : async () {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      Debug.trap("Anonymous caller");
+    };
+    if (programId.size() == 0) { Debug.trap("programId required") };
+    let pk = pathKey(msg.caller, programId);
+    switch (programPathByKey.get(pk)) {
+      case (?path) {
+        if (path != "application") {
+          Debug.trap("Not on the formal application path for this program");
+        };
+      };
+      case null {
+        Debug.trap("No formal application path for this program");
+      };
+    };
+    ignore programPathByKey.remove(pk);
+    let aid = switch (accountsByPrincipal.get(msg.caller)) {
+      case null { "" };
+      case (?acc) {
+        switch (acc.linkedArtistId) {
+          case null { "" };
+          case (?id) { id };
+        };
+      };
+    };
+    if (aid.size() > 0) {
+      let appKey = aid # "|" # programId;
+      switch (applicantsById.get(appKey)) {
+        case null {};
+        case (?a) {
+          applicantsById.put(
+            appKey,
+            {
+              a with
+              status = #withdrawn;
+            },
+          );
+        };
+      };
+    };
+  };
+
   public shared query (msg) func listProgramAwardEntries(programId : Text) : async [Types.ProgramAwardEntry] {
     assertStaffOrAdmin(msg.caller);
     let buf = Buffer.Buffer<Types.ProgramAwardEntry>(0);
@@ -7163,9 +7466,78 @@ persistent actor {
     Buffer.toArray(buf)
   };
 
+  /// Staff: award entries with draw-form payload JSON (empty string when none).
+  public shared query (msg) func listProgramAwardEntriesDetailed(programId : Text) : async [(Types.ProgramAwardEntry, Text)] {
+    assertStaffOrAdmin(msg.caller);
+    let buf = Buffer.Buffer<(Types.ProgramAwardEntry, Text)>(0);
+    for ((id, e) in programAwardEntriesById.entries()) {
+      if (e.programId == programId) {
+        let payload = switch (programAwardPayloadById.get(id)) {
+          case (?p) { p };
+          case null { "" };
+        };
+        buf.add((e, payload));
+      };
+    };
+    Buffer.toArray(buf)
+  };
+
   public shared query (msg) func getMyProgramAwardEntry(programId : Text) : async ?Types.ProgramAwardEntry {
     if (Principal.equal(msg.caller, anonPrincipal)) { return null };
     programAwardEntriesById.get(pathKey(msg.caller, programId))
+  };
+
+  /// Authenticated: own award entry + payload for the draw form.
+  public shared query (msg) func getMyProgramAwardEntryDetailed(programId : Text) : async ?(Types.ProgramAwardEntry, Text) {
+    if (Principal.equal(msg.caller, anonPrincipal)) { return null };
+    let pk = pathKey(msg.caller, programId);
+    switch (programAwardEntriesById.get(pk)) {
+      case null { null };
+      case (?e) {
+        let payload = switch (programAwardPayloadById.get(pk)) {
+          case (?p) { p };
+          case null { "" };
+        };
+        ?(e, payload)
+      };
+    }
+  };
+
+  /// Authenticated: all Program Award / Draw entries for the caller (any status).
+  public shared query (msg) func listMyProgramAwardEntries() : async [Types.ProgramAwardEntry] {
+    if (Principal.equal(msg.caller, anonPrincipal)) { return [] };
+    let callerText = Principal.toText(msg.caller);
+    let buf = Buffer.Buffer<Types.ProgramAwardEntry>(0);
+    for ((_, e) in programAwardEntriesById.entries()) {
+      if (e.principalText == callerText) {
+        buf.add(e);
+      };
+    };
+    Buffer.toArray(buf)
+  };
+
+  /// Public progress for Settings / draw status UI (entered count + slot cap).
+  public query func getProgramDrawProgressPublic(programId : Text) : async Types.ProgramDrawProgress {
+    let pid = Text.trim(programId, #char ' ');
+    let enteredCount = if (pid.size() == 0) { 0 } else { countActiveAwardEntries(pid) };
+    switch (programDrawConfigById.get(pid)) {
+      case (?cfg) {
+        {
+          active = cfg.active;
+          totalSlots = cfg.totalSlots;
+          enteredCount = enteredCount;
+          cycle = 1;
+        }
+      };
+      case null {
+        {
+          active = false;
+          totalSlots = 100;
+          enteredCount = enteredCount;
+          cycle = 1;
+        }
+      };
+    }
   };
 
   /// Mark winner for a program; enforces one win per calendar year. Optional gift to another principal.

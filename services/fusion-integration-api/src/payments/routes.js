@@ -72,7 +72,7 @@ export function registerPaymentRoutes(app, opts) {
             const metadata = {};
             for (const [k, v] of Object.entries({ ...rawMeta, ...req.body })) {
                 if (typeof k !== 'string' || !k.length) continue;
-                if (['amountCents', 'amount', 'metadata'].includes(k)) continue;
+                if (['amountCents', 'amount', 'metadata', 'payloadJson', 'payload'].includes(k)) continue;
                 metadata[k.slice(0, 40)] =
                     typeof v === 'string' ? v.slice(0, 500) : String(v ?? '').slice(0, 500);
             }
@@ -146,6 +146,12 @@ export function registerPaymentRoutes(app, opts) {
             const ownFlight =
                 req.body?.ownFlight === true ||
                 String(req.body?.ownFlight || '').toLowerCase() === 'true';
+            const payloadJsonRaw =
+                typeof req.body?.payloadJson === 'string'
+                    ? req.body.payloadJson
+                    : req.body?.payload && typeof req.body.payload === 'object'
+                      ? JSON.stringify(req.body.payload)
+                      : '';
             const metaOverride = {
                 principal,
                 programId,
@@ -161,6 +167,8 @@ export function registerPaymentRoutes(app, opts) {
                 ),
                 applicantEmail: safePayPalMetaValue(req.body?.applicantEmail || req.body?.email, 320),
                 applicantName: safePayPalMetaValue(req.body?.applicantName || req.body?.fullName, 160),
+                payloadJson: safePayPalMetaValue(payloadJsonRaw, 100_000),
+                currentQuarterKey: safePayPalMetaValue(req.body?.currentQuarterKey, 20),
             };
             const resolved = await resolvePayPalOrderForRepair({
                 orderId,

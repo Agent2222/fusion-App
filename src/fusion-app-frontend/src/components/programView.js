@@ -8,18 +8,24 @@ import {
   getContentBundleForStudio,
   getCurrentProgramSeason,
   getMyArtistRecord,
+  getProgramDrawConfigPublic,
 } from "../utils/database.js";
 import { buildResidencyAlumniEntries } from "../utils/residencyAlumniEntries.js";
 import { getAuthSnapshot } from "../utils/icAuth.js";
 import posthog from "posthog-js";
 import {
   programApplicationCtaLabelForAuth,
+  programApplicationCtaSubLabel,
   programApplicationReviewLabel,
+  programDrawCtaLabel,
+  programDrawCtaSubLabel,
   programKeyDetailsLabel,
 } from "../utils/programApplicationCta.js";
 import {
   PROGRAM_APPLICATION_VIEWPORT_TOP_GAP_PX,
   revealProgramApplicationOrOpenJoin,
+  revealProgramDrawFormOrOpenJoin,
+  revealProgramDrawInactivePanel,
   scrollElementTopToViewportGap,
 } from "../utils/scrollAnchorToViewportGap.js";
 import { mergeLocaleDeep } from "../utils/localeFallback.js";
@@ -361,8 +367,12 @@ function hasAppliedForProgram(record, programId) {
 function wireProgramApplicationSection(programId, applicationsOpen = true) {
   const wrap = document.getElementById("programApplicationWrap");
   const formEl = document.getElementById("programApplicationSection");
+  const drawFormEl = document.getElementById("programDrawFormSection");
   if (formEl && programId) {
     formEl.setAttribute("data-program-id", programId);
+  }
+  if (drawFormEl && programId) {
+    drawFormEl.setAttribute("data-program-id", programId);
   }
 
   if (programCtaWireAbort) {
@@ -379,6 +389,17 @@ function wireProgramApplicationSection(programId, applicationsOpen = true) {
     /** @returns {el is HTMLElement} */
     (el) => el instanceof HTMLElement,
   );
+  const drawCtAs = [
+    document.getElementById("programIntroCTADraw1"),
+    document.getElementById("programIntroCTADraw3"),
+  ].filter(/** @returns {el is HTMLElement} */ (el) => el instanceof HTMLElement);
+  const drawCells = [
+    document.getElementById("programIntroDrawCell1"),
+    document.getElementById("programIntroDrawCell3"),
+  ].filter(/** @returns {el is HTMLElement} */ (el) => el instanceof HTMLElement);
+  const applySubEls = document.querySelectorAll("[data-program-apply-sub]");
+  const drawSubEls = document.querySelectorAll("[data-program-draw-sub]");
+  const ctaPairs = document.querySelectorAll(".program-intro-cta-pair");
 
   const scrollToProgramDetailsSection = () => {
     const el = document.getElementById("programDetailsSection");
@@ -399,6 +420,63 @@ function wireProgramApplicationSection(programId, applicationsOpen = true) {
     );
   };
 
+  const setApplySubCopy = () => {
+    const sub = programApplicationCtaSubLabel();
+    applySubEls.forEach((el) => {
+      el.textContent = sub;
+    });
+  };
+
+  /** @type {boolean} */
+  let drawConfigActive = false;
+
+  /**
+   * Always show the draw CTA; label/sub flip with ProgramDrawConfig.active.
+   * @param {boolean} awardActive
+   * @param {number} [totalSlots]
+   */
+  const setDrawCtaVisibility = (awardActive, totalSlots = 100) => {
+    drawConfigActive = Boolean(awardActive);
+    for (const cell of drawCells) {
+      cell.hidden = false;
+      cell.removeAttribute("hidden");
+      cell.setAttribute("aria-hidden", "false");
+    }
+    for (const pair of ctaPairs) {
+      pair.classList.add("program-intro-cta-pair--with-draw");
+    }
+    const label = programDrawCtaLabel(drawConfigActive);
+    const sub = programDrawCtaSubLabel(totalSlots, drawConfigActive);
+    for (const el of drawCtAs) {
+      el.textContent = label;
+    }
+    drawSubEls.forEach((el) => {
+      el.textContent = sub;
+    });
+  };
+
+  // Show inactive defaults immediately; flip label when config resolves.
+  setDrawCtaVisibility(false);
+  void getProgramDrawConfigPublic(programId)
+    .then((cfg) => {
+      const active = Boolean(cfg?.active);
+      const slots = Math.max(1, Number(cfg?.totalSlots) || 100);
+      setDrawCtaVisibility(active, slots);
+    })
+    .catch(() => {
+      setDrawCtaVisibility(false);
+    });
+
+  setApplySubCopy();
+
+  const onDrawCta = () => {
+    if (drawConfigActive) {
+      void revealProgramDrawFormOrOpenJoin();
+    } else {
+      void revealProgramDrawInactivePanel();
+    }
+  };
+
   if (!applicationsOpen) {
     for (const el of primaryApplyCtAs) {
       el.removeAttribute("hidden");
@@ -412,16 +490,38 @@ function wireProgramApplicationSection(programId, applicationsOpen = true) {
     }
     const introCtAs = document.getElementById("programIntroCTAs");
     introCtAs?.classList.add("program-intro-ctas--apply-closed");
-    if (wrap) {
-      wrap.setAttribute("hidden", "");
-      wrap.setAttribute("inert", "");
-    }
     if (formEl) formEl.setAttribute("active", "false");
+    // Keep wrap available for Program Draw even when formal applications are closed.
+    if (wrap) {
+      wrap.removeAttribute("inert");
+    }
+    if (drawFormEl) {
+      drawFormEl.setAttribute("active", "false");
+      drawFormEl.hidden = true;
+    }
+    for (const el of drawCtAs) {
+      el.setAttribute("role", "button");
+      el.setAttribute("tabindex", "0");
+      el.addEventListener("click", onDrawCta, { signal });
+      bindKeyboardButton(el, onDrawCta);
+    }
     appBtn1?.addEventListener("click", scrollToProgramDetailsSection, {
       signal,
     });
     if (appBtn1) appBtn1.textContent = programKeyDetailsLabel();
     bindKeyboardButton(appBtn1, scrollToProgramDetailsSection);
+    window.addEventListener(
+      "fusion-localechange",
+      () => {
+        setApplySubCopy();
+        void getProgramDrawConfigPublic(programId)
+          .then((cfg) => {
+            setDrawCtaVisibility(Boolean(cfg?.active), Number(cfg?.totalSlots) || 100);
+          })
+          .catch(() => setDrawCtaVisibility(false));
+      },
+      { signal },
+    );
     return;
   }
 
@@ -453,6 +553,12 @@ function wireProgramApplicationSection(programId, applicationsOpen = true) {
     el.addEventListener("click", onPrimaryCta, { signal });
     bindKeyboardButton(el, onPrimaryCta);
   }
+  for (const el of drawCtAs) {
+    el.setAttribute("role", "button");
+    el.setAttribute("tabindex", "0");
+    el.addEventListener("click", onDrawCta, { signal });
+    bindKeyboardButton(el, onDrawCta);
+  }
   appBtn1?.addEventListener("click", scrollToProgramDetailsSection, { signal });
   bindKeyboardButton(appBtn1, scrollToProgramDetailsSection);
 
@@ -473,6 +579,7 @@ function wireProgramApplicationSection(programId, applicationsOpen = true) {
         : programApplicationCtaLabelForAuth(true);
       el.classList.toggle("program-application-cta--review", alreadyApplied);
     }
+    setApplySubCopy();
     if (appBtn1) appBtn1.textContent = programKeyDetailsLabel();
   };
 
@@ -480,9 +587,18 @@ function wireProgramApplicationSection(programId, applicationsOpen = true) {
   window.addEventListener("fusion-auth-change", () => void refreshAuthUi(), {
     signal,
   });
-  window.addEventListener("fusion-localechange", () => void refreshAuthUi(), {
-    signal,
-  });
+  window.addEventListener(
+    "fusion-localechange",
+    () => {
+      void refreshAuthUi();
+      void getProgramDrawConfigPublic(programId)
+        .then((cfg) => {
+          setDrawCtaVisibility(Boolean(cfg?.active), Number(cfg?.totalSlots) || 100);
+        })
+        .catch(() => setDrawCtaVisibility(false));
+    },
+    { signal },
+  );
   window.addEventListener(
     "fusion-program-application-submitted",
     () => void refreshAuthUi(),
@@ -508,7 +624,16 @@ export function generateProgramViewContent() {
                                 <p id="programIntroSubLine2"></p>
                             </div>
                             <div id="programIntroCTAs">
-                                <div id="programIntroCTA1" class="program-intro-cta" role="button" tabindex="0">Sign up & apply</div>
+                                <div class="program-intro-cta-pair program-intro-cta-pair--with-draw" role="group" aria-label="Program actions">
+                                    <div class="program-intro-cta-cell">
+                                        <div id="programIntroCTA1" class="program-intro-cta" role="button" tabindex="0">Sign up & apply</div>
+                                        <p class="program-intro-cta-sub" data-program-apply-sub>Apply for the residency program</p>
+                                    </div>
+                                    <div id="programIntroDrawCell1" class="program-intro-cta-cell program-intro-cta-cell--draw" aria-hidden="false">
+                                        <div id="programIntroCTADraw1" class="program-intro-cta program-intro-cta--draw" role="button" tabindex="0">Program Draw</div>
+                                        <p class="program-intro-cta-sub" data-program-draw-sub>Get notified when it opens</p>
+                                    </div>
+                                </div>
                                 <div id="programIntroCTA2">
                                     <div class="horizontal-line"><hr></div>
                                     <div id="applicationButton1" class="program-intro-cta" role="button" tabindex="0">Key Details</div>
@@ -522,9 +647,9 @@ export function generateProgramViewContent() {
                         </div>
                         <app-program-fade-gallery id="programFadeGallery"></app-program-fade-gallery>
                         <app-program-details id="programDetailsSection" active="true"></app-program-details>
-                        <div id="programAwardEntryHost" class="program-award-entry-host" hidden></div>
                         <div id="programApplicationWrap" class="program-application-wrap" hidden inert>
                             <app-application-form id="programApplicationSection" active="false" data-program-id=""></app-application-form>
+                            <app-program-draw-form id="programDrawFormSection" active="false" data-program-id="" hidden></app-program-draw-form>
                         </div>
                         <app-confirmed-artists-feed id="confirmedArtistsFeed" active="true"></app-confirmed-artists-feed>
                         <app-program-strip-gallery id="programStripGallery"></app-program-strip-gallery>
@@ -532,7 +657,16 @@ export function generateProgramViewContent() {
                             This is not for every artist.<br><br>It is for those willing to work<br>within unfamiliar environments,<br>alongside others,<br> in close proximity to place and process.
                         </div>
                         <app-residency-alumni-table id="programAlumniTable" hidden></app-residency-alumni-table>
-                        <div id="programIntroCTA3" class="program-intro-cta program-close-cta" role="button" tabindex="0" style="justify-self: center; margin-bottom: 15rem;">Sign up & apply</div>
+                        <div class="program-intro-cta-pair program-intro-cta-pair--close program-intro-cta-pair--with-draw" role="group" aria-label="Program actions" style="justify-self: center; margin-bottom: 15rem;">
+                            <div class="program-intro-cta-cell">
+                                <div id="programIntroCTA3" class="program-intro-cta program-close-cta" role="button" tabindex="0">Sign up & apply</div>
+                                <p class="program-intro-cta-sub" data-program-apply-sub>Apply for the residency program</p>
+                            </div>
+                            <div id="programIntroDrawCell3" class="program-intro-cta-cell program-intro-cta-cell--draw" aria-hidden="false">
+                                <div id="programIntroCTADraw3" class="program-intro-cta program-intro-cta--draw" role="button" tabindex="0">Program Draw</div>
+                                <p class="program-intro-cta-sub" data-program-draw-sub>Get notified when it opens</p>
+                            </div>
+                        </div>
                         <div id="programDetailNotFound" class="program-detail-not-found" hidden>
                             <p>We could not find that program.</p>
                             <p><a href="/programs">Browse programs</a></p>
@@ -646,36 +780,58 @@ async function applyProgramToDom(programPair) {
   );
 
   const formEl = document.getElementById("programApplicationSection");
+  const drawFormEl = document.getElementById("programDrawFormSection");
   if (formEl && programId) {
     formEl.setAttribute("data-program-id", programId);
   }
-  if (
-    formEl &&
-    "setProgramFormContext" in formEl &&
-    typeof /** @type {{ setProgramFormContext?: (c: object) => void }} */ (formEl)
-      .setProgramFormContext === "function"
-  ) {
+  if (drawFormEl && programId) {
+    drawFormEl.setAttribute("data-program-id", programId);
+  }
+  // Wire draw/apply CTAs immediately — do not wait for join CMS, artists, or alumni fetches.
+  if (programId) {
+    wireProgramApplicationSection(programId, applicationsOpen);
+  }
+  {
     const locale =
       typeof window.getLocale === "function" && window.getLocale() === "ja"
         ? "ja"
         : "en";
-    let joinNetworkFlowBundle = null;
-    try {
-      joinNetworkFlowBundle = await getContentBundleForStudio("join-network-flow", {
-        forStudio: false,
-      });
-    } catch {
-      joinNetworkFlowBundle = null;
+    const [joinNetworkFlowBundle, joinNetworkPageBundle] = await Promise.all([
+      getContentBundleForStudio("join-network-flow", { forStudio: false }).catch(
+        () => null,
+      ),
+      getContentBundleForStudio("join-network-page", { forStudio: false }).catch(
+        () => null,
+      ),
+    ]);
+    const formCtx = buildProgramApplicationFormContext(programPageForForm, {
+      programYear: current?.year != null ? String(current.year) : "",
+      availableSlots,
+      totalSlots,
+      joinNetworkFlowBundle,
+      joinNetworkPageBundle,
+      locale,
+    });
+    if (
+      formEl &&
+      "setProgramFormContext" in formEl &&
+      typeof /** @type {{ setProgramFormContext?: (c: object) => void }} */ (formEl)
+        .setProgramFormContext === "function"
+    ) {
+      /** @type {{ setProgramFormContext: (c: object) => void }} */ (formEl).setProgramFormContext(
+        formCtx,
+      );
     }
-    /** @type {{ setProgramFormContext: (c: object) => void }} */ (formEl).setProgramFormContext(
-      buildProgramApplicationFormContext(programPageForForm, {
-        programYear: current?.year != null ? String(current.year) : "",
-        availableSlots,
-        totalSlots,
-        joinNetworkFlowBundle,
-        locale,
-      }),
-    );
+    if (
+      drawFormEl &&
+      "setProgramFormContext" in drawFormEl &&
+      typeof /** @type {{ setProgramFormContext?: (c: object) => void }} */ (drawFormEl)
+        .setProgramFormContext === "function"
+    ) {
+      /** @type {{ setProgramFormContext: (c: object) => void }} */ (
+        drawFormEl
+      ).setProgramFormContext(formCtx);
+    }
   }
 
   if (keyOfferingsTitle) {
@@ -923,20 +1079,6 @@ async function applyProgramToDom(programPair) {
     ],
   });
 
-  if (programId) {
-    wireProgramApplicationSection(programId, applicationsOpen);
-    const awardHost = document.getElementById('programAwardEntryHost');
-    if (awardHost instanceof HTMLElement) {
-      void import('./subComponents/programAwardEntry.js')
-        .then(({ mountProgramAwardEntryPanel }) =>
-          mountProgramAwardEntryPanel(programId, awardHost),
-        )
-        .catch(() => {
-          awardHost.hidden = true;
-          awardHost.innerHTML = '';
-        });
-    }
-  }
 }
 
 export default function initProgramView() {

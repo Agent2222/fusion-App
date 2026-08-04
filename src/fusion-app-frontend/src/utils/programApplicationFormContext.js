@@ -64,12 +64,34 @@ function parseApplicationFeeAmountCents(raw) {
 }
 
 /**
+ * Program Draw product-card bullets from Studio → Join Network (`join-network-page`).
+ * @param {unknown} bundle
+ * @param {'en'|'ja'} locale
+ * @returns {{ includedBullets: string[] }}
+ */
+export function programDrawFeaturesFromJoinNetworkPage(bundle, locale) {
+    const root = bundle && typeof bundle === 'object' ? /** @type {Record<string, unknown>} */ (bundle) : {};
+    const locKey = locale === 'ja' ? 'ja' : 'en';
+    const locRaw = root[locKey] && typeof root[locKey] === 'object' ? root[locKey] : root.en;
+    const loc = locRaw && typeof locRaw === 'object' ? /** @type {Record<string, unknown>} */ (locRaw) : {};
+    const feat =
+        loc.programDrawFeatures && typeof loc.programDrawFeatures === 'object'
+            ? /** @type {Record<string, unknown>} */ (loc.programDrawFeatures)
+            : {};
+    const bullets = Array.isArray(feat.includedBullets)
+        ? feat.includedBullets.map((x) => String(x ?? '').trim()).filter(Boolean)
+        : [];
+    return { includedBullets: bullets };
+}
+
+/**
  * @param {Record<string, unknown> | null | undefined} programPage
  * @param {{
  *   programYear?: string,
  *   availableSlots?: number | null,
  *   totalSlots?: number | null,
  *   joinNetworkFlowBundle?: unknown,
+ *   joinNetworkPageBundle?: unknown,
  *   locale?: 'en'|'ja',
  * }} [opts]
  * @returns {{
@@ -82,6 +104,7 @@ function parseApplicationFeeAmountCents(raw) {
  *   detailsSectionId: string,
  *   applicationFeeAmountCents: number | null,
  *   applicationPaymentOptions: Record<'one_time' | 'monthly' | 'quarterly' | 'annual' | 'bimonthly', ApplicationPaymentOptionSlice>,
+ *   programDrawFeatures: { includedBullets: string[] },
  *   useGlobalPaymentOptionDetails: boolean,
  *   availableSlots: number | null,
  *   totalSlots: number | null,
@@ -151,6 +174,11 @@ export function buildProgramApplicationFormContext(programPage, opts = {}) {
             ? opts.totalSlots
             : null;
 
+    const programDrawFeatures = programDrawFeaturesFromJoinNetworkPage(
+        opts.joinNetworkPageBundle,
+        locale,
+    );
+
     return {
         applicationFeeLine: String(costs.applicationFee ?? '').trim(),
         depositAmountDisplay: deposit,
@@ -167,6 +195,7 @@ export function buildProgramApplicationFormContext(programPage, opts = {}) {
             quarterly: resolved.quarterly,
             annual: resolved.annual,
         },
+        programDrawFeatures,
         useGlobalPaymentOptionDetails,
         availableSlots: as,
         totalSlots: ts,

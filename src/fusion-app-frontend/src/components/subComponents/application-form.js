@@ -48,6 +48,7 @@ import {
     getActiveProvider,
     paymentModeMismatch,
 } from '../../utils/paymentProvider.js';
+import { isLooseEmail } from '../../utils/programFormContact.js';
 import {
     clearProgramApplicationDraft,
     getProgramApplicationDraft,
@@ -120,15 +121,6 @@ function normalizeWebsiteForPayload(raw) {
     if (/^https?:\/\//i.test(s)) return s;
     if (s.startsWith('//')) return `https:${s}`;
     return `https://${s}`;
-}
-
-/**
- * @param {string} email
- * @returns {boolean}
- */
-function isLooseEmail(email) {
-    const t = String(email ?? '').trim();
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t);
 }
 
 /**
@@ -665,24 +657,45 @@ class ApplicationFormComponent extends HTMLElement {
 
         const memberCreditEl = root.querySelector('#app-member-credit-note');
         if (memberCreditEl instanceof HTMLElement) {
-            const bal = this._memberApplicationFee?.appCreditBalance;
-            const tier = String(this._memberApplicationFee?.membershipTier || '').toLowerCase();
-            const reason = String(this._memberApplicationFee?.reason || '');
-            if (
-                this._membershipFeeWaived &&
-                reason === 'credit' &&
-                (tier === 'quarterly' || tier === 'annual') &&
-                typeof bal === 'number' &&
-                bal >= 1
-            ) {
-                memberCreditEl.removeAttribute('hidden');
-                memberCreditEl.textContent = L.memberQuarterlyCreditNote.replace('{{count}}', String(bal));
-            } else if (this._awardPathBlocked) {
+            // Credit-first path uses #app-credit-callout; keep this note for award-path block only.
+            if (this._awardPathBlocked) {
                 memberCreditEl.removeAttribute('hidden');
                 memberCreditEl.textContent = L.awardPathBlocked || '';
             } else {
                 memberCreditEl.setAttribute('hidden', '');
             }
+        }
+
+        this._syncCreditCalloutUi(L);
+    }
+
+    /**
+     * Primary credit callout next to free submit (reason === 'credit' only).
+     * @param {Record<string, string>} [labels]
+     */
+    _syncCreditCalloutUi(labels) {
+        const root = this.shadowRoot;
+        if (!root) return;
+        const L = labels || this._labels();
+        const callout = root.querySelector('#app-credit-callout');
+        const bodyEl = root.querySelector('#app-credit-callout-body');
+        const reason = String(this._memberApplicationFee?.reason || '');
+        const bal = Number(this._memberApplicationFee?.appCreditBalance);
+        const show =
+            this._membershipFeeWaived &&
+            !this._alreadyApplied &&
+            !this._awardPathBlocked &&
+            reason === 'credit' &&
+            Number.isFinite(bal) &&
+            bal >= 1;
+        if (callout instanceof HTMLElement) {
+            callout.toggleAttribute('hidden', !show);
+        }
+        if (show && bodyEl instanceof HTMLElement) {
+            bodyEl.textContent = String(L.creditCalloutBody || L.memberQuarterlyCreditNote || '').replace(
+                '{{count}}',
+                String(bal),
+            );
         }
     }
 
@@ -803,8 +816,14 @@ class ApplicationFormComponent extends HTMLElement {
                     '正解よりも、あなたの視点や文脈を知りたいと考えています。率直にご記入のうえ、下の応募料でお支払い・送信を完了してください。',
                 lead2MemberFeeWaived:
                     'Fusion メンバーのため、応募料は含まれています。内容を入力して、下のボタンから応募を送信してください。',
+                lead2UsingCredit:
+                    '応募クレジットで送信します。内容を確認して、下のボタンから応募してください。',
                 memberFeeWaivedBanner:
                     'Fusion メンバーシップに応募料が含まれます。カードでのお支払いは不要です。',
+                creditCalloutEyebrow: '応募クレジット',
+                creditCalloutTitle: '応募クレジットを1回使用します',
+                creditCalloutBody:
+                    'この送信で応募クレジットを1回使います（送信前の残高: {{count}}）。お支払いは不要です。',
                 submitApplicationOnly: '応募を送信',
                 lead2AlreadyApplied:
                     '応募内容を更新して保存できます。追加の応募料はかかりません。',
@@ -990,8 +1009,14 @@ class ApplicationFormComponent extends HTMLElement {
                 'We’re less interested in perfect answers, more in perspective. Share what feels true to you, then pay the application fee and submit below.',
             lead2MemberFeeWaived:
                 'As a Fusion member, your application fee is included. Complete your answers and submit below.',
+            lead2UsingCredit:
+                'You’re submitting with an application credit. Finish your answers and submit below — no payment required.',
             memberFeeWaivedBanner:
                 'Your Fusion membership includes the program application fee—no card payment required.',
+            creditCalloutEyebrow: 'Application credit',
+            creditCalloutTitle: 'You’re using 1 application credit',
+            creditCalloutBody:
+                'This submit uses 1 application credit ({{count}} available before submit). No payment is required.',
             submitApplicationOnly: 'Submit application',
             lead2AlreadyApplied:
                 'You can update your answers below and save. No additional application fee.',
@@ -2448,12 +2473,22 @@ class ApplicationFormComponent extends HTMLElement {
             return;
         }
         if (this._membershipFeeWaived) {
+            const reason = String(this._memberApplicationFee?.reason || '');
+            const usingCredit = reason === 'credit';
             if (pay instanceof HTMLElement) pay.setAttribute('hidden', '');
             if (updatesWrap instanceof HTMLElement) updatesWrap.setAttribute('hidden', '');
             if (freeWrap instanceof HTMLElement) freeWrap.removeAttribute('hidden');
-            if (banner instanceof HTMLElement) banner.removeAttribute('hidden');
-            if (lead) lead.textContent = L.lead2MemberFeeWaived;
+            if (banner instanceof HTMLElement) {
+                // Soft membership banner only for exempt / temp waive — not credit path.
+                banner.toggleAttribute('hidden', usingCredit);
+            }
+            if (lead) {
+                lead.textContent = usingCredit
+                    ? L.lead2UsingCredit || L.lead2MemberFeeWaived
+                    : L.lead2MemberFeeWaived;
+            }
             this._hydratePaymentPlanCards();
+            this._syncCreditCalloutUi(L);
             this._teardownStripePayment();
             return;
         }
@@ -3047,6 +3082,10 @@ class ApplicationFormComponent extends HTMLElement {
                     padding: clamp(2rem, 5vw, 3.5rem) 0 clamp(3rem, 8vw, 5rem);
                 }
 
+                :host([hidden]) {
+                    display: none !important;
+                }
+
                 .application-form-root {
                     width: 100%;
                     max-width: 1200px;
@@ -3526,6 +3565,45 @@ class ApplicationFormComponent extends HTMLElement {
                 .app-member-fee-only-banner[hidden],
                 .app-member-credit-note[hidden] {
                     display: none !important;
+                }
+
+                .app-credit-callout {
+                    margin: 0 0 1.15rem;
+                    padding: 1rem 1.1rem;
+                    border: 1px solid color-mix(in srgb, #3f7e5a 35%, transparent);
+                    border-radius: 8px;
+                    background: color-mix(in srgb, #3f7e5a 10%, #fff);
+                }
+
+                .app-credit-callout[hidden] {
+                    display: none !important;
+                }
+
+                .app-credit-callout__eyebrow {
+                    margin: 0 0 0.35rem;
+                    font-size: 0.72rem;
+                    letter-spacing: 0.06em;
+                    text-transform: uppercase;
+                    color: #3f7e5a;
+                    font-weight: 650;
+                    font-variation-settings: var(--fv-label);
+                }
+
+                .app-credit-callout__title {
+                    margin: 0 0 0.4rem;
+                    font-size: 1.15rem;
+                    line-height: 1.3;
+                    font-weight: 700;
+                    color: var(--c2);
+                    font-variation-settings: var(--fv-emphasis);
+                }
+
+                .app-credit-callout__body {
+                    margin: 0;
+                    font-size: 0.92rem;
+                    line-height: 1.45;
+                    color: color-mix(in srgb, var(--c2) 78%, transparent);
+                    font-variation-settings: var(--fv-body-wide);
                 }
 
                 .app-membership-plans-panel {
@@ -4675,6 +4753,11 @@ class ApplicationFormComponent extends HTMLElement {
                             <p id="app-member-credit-note" class="app-member-credit-note" hidden></p>
                         </div>
                         <div id="app-submit-free-wrap" class="app-form-card app-form-card--spaced" hidden>
+                            <div id="app-credit-callout" class="app-credit-callout" hidden role="status">
+                                <p class="app-credit-callout__eyebrow">${escHtml(L.creditCalloutEyebrow || 'Application credit')}</p>
+                                <p class="app-credit-callout__title">${escHtml(L.creditCalloutTitle || "You're using 1 application credit")}</p>
+                                <p class="app-credit-callout__body" id="app-credit-callout-body"></p>
+                            </div>
                             <div class="app-form-actions">
                                 <button type="button" class="app-btn app-btn--primary" id="app-submit-free">${L.submitApplicationOnly}</button>
                             </div>

@@ -14,8 +14,26 @@ function escapeHtmlAttr(s) {
         .replace(/</g, '&lt;');
 }
 
+/**
+ * @param {string} s
+ * @returns {string}
+ */
+function escapeHtmlText(s) {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
 /** Core: circle SVG + `.ph-loader` + `phLoaderSpin` + reduced motion. */
 export const PH_LOADER_BASE_STYLES = `
+                .ph-loader-stack {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 0.85rem;
+                }
                 .ph-loader {
                     width: 72px;
                     height: 72px;
@@ -32,6 +50,15 @@ export const PH_LOADER_BASE_STYLES = `
                     fill: none;
                     stroke: #000000;
                     stroke-width: 1;
+                }
+                .ph-loader-label {
+                    margin: 0;
+                    font-size: 0.82rem;
+                    line-height: 1.35;
+                    letter-spacing: 0.04em;
+                    text-align: center;
+                    color: var(--c2, #111);
+                    font-variation-settings: var(--fv-body);
                 }
                 @keyframes phLoaderSpin {
                     to {
@@ -69,22 +96,52 @@ export const PROGRAM_HERO_HOME_WRAPPER_STYLES = `
 `;
 
 /**
- * @param {{ wrapperClass?: string, ariaLabel?: string }} [opts]
+ * @param {{ wrapperClass?: string, ariaLabel?: string, label?: string }} [opts]
  * @returns {string}
  */
 export function programHeroLoaderHtml(opts = {}) {
     const wrapperClass = opts.wrapperClass || 'program-hero-loader';
-    const ariaLabel = escapeHtmlAttr(opts.ariaLabel != null ? opts.ariaLabel : 'Loading');
+    const label = opts.label != null ? String(opts.label).trim() : '';
+    const ariaLabel = escapeHtmlAttr(
+        opts.ariaLabel != null ? opts.ariaLabel : label || 'Loading',
+    );
+    const labelHtml = label
+        ? `<p class="ph-loader-label">${escapeHtmlText(label)}</p>`
+        : '';
     return `
             <div class="${wrapperClass}" role="status" aria-live="polite" aria-label="${ariaLabel}">
-                <div class="ph-loader">
-                    <svg width="72" height="72" viewBox="0 0 24 24" aria-hidden="true">
-                        <circle cx="12" cy="12" r="10.5" stroke-linecap="round" stroke-dasharray="18 48" />
-                    </svg>
+                <div class="ph-loader-stack">
+                    <div class="ph-loader">
+                        <svg width="72" height="72" viewBox="0 0 24 24" aria-hidden="true">
+                            <circle cx="12" cy="12" r="10.5" stroke-linecap="round" stroke-dasharray="18 48" />
+                        </svg>
+                    </div>
+                    ${labelHtml}
                 </div>
             </div>
         `;
 }
+
+/** `app-program-draw-display` while CMS / config is loading. */
+export const PROGRAM_DRAW_PENDING_WRAPPER_STYLES = `
+                .pdd-pending-loader {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 100%;
+                    min-height: 220px;
+                    box-sizing: border-box;
+                    padding: 2rem 1.25rem;
+                    border: 1px solid var(--c2, #111);
+                    border-radius: 5px;
+                    background: var(--bg, #f8f4f0);
+                }
+                :host {
+                    display: block;
+                    width: 100%;
+                    box-sizing: border-box;
+                }
+`;
 
 /** Program view `app-program-fade-gallery` — approx. 5:4 frame while data pending. */
 export const PROGRAM_FADE_PENDING_WRAPPER_STYLES = `

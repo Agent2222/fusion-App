@@ -1,9 +1,9 @@
-/** Stub Program Draw metrics until canister fields ship. */
+/** Studio Applicants → Program Award metrics (slots + paid revenue). */
 
 export const APPLICANTS_DRAW_ACTIVE_STORAGE_KEY = 'studio-applicants-draw-active-v1';
 
 export const DRAW_SLOT_GOAL_DEFAULT = 100;
-/** Stub entry fee per claimed draw slot ($50). */
+/** One-time Program Draw entry fee ($50). */
 export const DRAW_ENTRY_FEE_CENTS = 5000;
 
 /**
@@ -42,6 +42,7 @@ export function saveDrawActiveByProgramId(map) {
  *   programId: string,
  *   programTitle: string,
  *   claimedSlots?: number,
+ *   paidEntryCount?: number,
  *   totalSlots?: number,
  *   entryFeeCents?: number,
  *   drawActive?: boolean,
@@ -66,7 +67,13 @@ export function buildApplicantDrawDetailModel(args) {
         Number.isFinite(Number(args?.entryFeeCents)) && Number(args.entryFeeCents) >= 0
             ? Math.floor(Number(args.entryFeeCents))
             : DRAW_ENTRY_FEE_CENTS;
-    const revenueCents = claimedSlots * entryFeeCents;
+    const paidRaw = Number(args?.paidEntryCount);
+    const paidEntryCount = Math.max(
+        0,
+        Number.isFinite(paidRaw) ? Math.floor(paidRaw) : 0,
+    );
+    // Revenue is paid $50 entries only — award-credit occupies a slot but is not revenue.
+    const revenueCents = paidEntryCount * entryFeeCents;
     const progressPct = Math.min(100, Math.round((claimedSlots / totalSlots) * 100));
     return {
         programId,
@@ -75,6 +82,7 @@ export function buildApplicantDrawDetailModel(args) {
         availableSlots,
         totalSlots,
         claimedSlots,
+        paidEntryCount,
         entryFeeCents,
         revenueCents,
         progressPct,

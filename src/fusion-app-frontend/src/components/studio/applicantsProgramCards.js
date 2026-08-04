@@ -176,8 +176,14 @@ export function applicantProgramCardHtml(item, opts = {}) {
 export function applicantDrawDetailSectionHtml(model) {
     const m = model && typeof model === 'object' ? model : buildApplicantDrawDetailModel({});
     const revenueLabel = formatUsdFromCents(m.revenueCents);
+    const paidCount = Number(m.paidEntryCount) || 0;
+    const feeDollars = Math.round(m.entryFeeCents / 100);
     const goalLine = `${m.claimedSlots} / ${m.totalSlots} slots claimed · ${m.progressPct}% to goal`;
     const activeLabel = m.drawActive ? 'Active' : 'Inactive';
+    const revenueSub =
+        paidCount === 1
+            ? `1 paid entry × $${feeDollars}`
+            : `${paidCount} paid entries × $${feeDollars}`;
     return `
       <section
         class="studio-applicants-draw"
@@ -191,7 +197,7 @@ export function applicantDrawDetailSectionHtml(model) {
             <p class="studio-applicants-draw__eyebrow">Program Award</p>
             <h3 class="studio-applicants-draw__heading" id="studio-applicants-draw-heading">${escapeHtml(m.programTitle)}</h3>
             <p class="studio-applicants-draw__lede">
-              Ops view for this cycle. Edit active status and slot totals in Programs → Edit → Program Award.
+              Live intake from Program Draw entries (paid $50 or award credit). Edit active status and slot totals in Programs → Edit → Program Award.
               Formal applications and award entries are mutually exclusive for the same program.
             </p>
           </div>
@@ -214,7 +220,7 @@ export function applicantDrawDetailSectionHtml(model) {
           <article class="studio-applicants-draw__metric">
             <span>Revenue from paid entries</span>
             <strong id="studio-applicants-draw-revenue">${escapeHtml(revenueLabel)}</strong>
-            <small>$${escapeHtml(String(Math.round(m.entryFeeCents / 100)))} per paid entry</small>
+            <small>${escapeHtml(revenueSub)}</small>
           </article>
         </div>
         <div class="studio-applicants-draw__progress" aria-label="Distance to award slot goal">

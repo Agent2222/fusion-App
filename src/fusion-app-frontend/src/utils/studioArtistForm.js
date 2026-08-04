@@ -537,8 +537,21 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
             <input type="checkbox" name="art-featurable" ${a.featurable === true ? 'checked' : ''} />
             <span>Featurable (random featured pool)</span>
           </label>
+          <label class="studio-field studio-field--checkbox">
+            <input type="checkbox" name="art-draw-recipient" id="studio-art-draw-recipient" ${a.drawRecipient === true ? 'checked' : ''} />
+            <span>Draw recipient (Program Draw past recipients)</span>
+          </label>
           <label class="studio-field"><span>imported</span><input name="art-imported" class="studio-input" readonly value="${esc(escapeHtml, a.imported ? 'yes' : 'no')}" /></label>
           <label class="studio-field studio-field--grow"><span>Contact email (Studio / email blast)</span><input name="art-contact-email" type="email" class="studio-input" placeholder="artist@example.com" autocomplete="off" value="${esc(escapeHtml, String(a.contactEmail ?? ''))}" title="Roster contact — not shown on the public site" /></label>
+        </div>
+        <div class="studio-modal-fields-row studio-art-draw-recipient-meta" id="studio-art-draw-recipient-meta" ${a.drawRecipient === true ? '' : 'hidden'}>
+          <label class="studio-field"><span>Draw cycle #</span>
+            <input name="art-draw-recipient-cycle" id="studio-art-draw-recipient-cycle" class="studio-input" type="number" min="1" step="1" value="${esc(escapeHtml, String(a.drawRecipientCycle ?? 1))}" />
+          </label>
+          <label class="studio-field studio-field--grow"><span>Award label (residency / date line)</span>
+            <input name="art-draw-recipient-award-label" id="studio-art-draw-recipient-award-label" class="studio-input" placeholder="Kaga, Japan · June 2026" value="${esc(escapeHtml, String(a.drawRecipientAwardLabel ?? ''))}" />
+          </label>
+          <input type="hidden" name="art-draw-recipient-program-id" id="studio-art-draw-recipient-program-id" value="${esc(escapeHtml, String(a.drawRecipientProgramId ?? ''))}" />
         </div>
         <div class="studio-modal-fields-row" style="align-items:flex-end;flex-wrap:wrap;gap:0.5rem">
           <label class="studio-field studio-field--grow"><span>accessCode (8 digits)</span><input name="art-accessCode" id="studio-art-access-code" class="studio-input" inputmode="numeric" autocomplete="off" maxlength="8" value="${esc(escapeHtml, String(a.accessCode ?? ''))}" title="Roster claim code — cleared on the canister after a successful artist link. Generate a new code if empty." /></label>
@@ -691,6 +704,23 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
             </tbody>
           </table>
         </div>
+        <h4 class="studio-prog-subhead" style="margin-top:1.25rem">Program Draw</h4>
+        <p class="studio-modal-hint">Read-only. Won is set when a winner is selected (status selected).</p>
+        <p id="studio-art-draw-status" class="studio-muted studio-art-programs-status" role="status"></p>
+        <div class="studio-table-wrap studio-table-wrap--modal-programs">
+          <table class="studio-table studio-table--dense studio-table--programs">
+            <thead>
+              <tr>
+                <th>Program name</th>
+                <th>Entered</th>
+                <th>Won</th>
+              </tr>
+            </thead>
+            <tbody id="studio-art-draw-tbody">
+              <tr><td colspan="3" class="studio-muted">Loading draw entries…</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div id="studio-art-panel-credits" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-art-tab-credits" hidden>
@@ -721,6 +751,13 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
                 <button type="button" class="studio-btn-ghost" id="studio-art-award-credit-save">Adjust</button>
               </div>
             </div>
+          </div>
+          <div class="studio-art-credits-danger" style="margin-top:1.25rem;padding-top:1rem;border-top:1px solid rgba(15,23,42,0.12)">
+            <h4>Network-wide award reset</h4>
+            <p class="studio-muted">
+              Admin only: set every Program Award entry balance to 0. Last-grant keys are kept so members do not immediately re-accrue this period.
+            </p>
+            <button type="button" class="studio-btn-danger" id="studio-art-award-clear-all">Zero all Program Award balances</button>
           </div>
           <p id="studio-art-credits-status" class="studio-muted" role="status"></p>
         </div>
@@ -1032,6 +1069,13 @@ export function collectArtistRecordFromForm(root, baseArtist) {
         featured: featuredCb instanceof HTMLInputElement && featuredCb.checked,
         featurable: featurableCb instanceof HTMLInputElement && featurableCb.checked,
     };
+    const drawRecipientCb = form.querySelector('#studio-art-draw-recipient');
+    const _drawRecipientFlags = {
+        enabled: drawRecipientCb instanceof HTMLInputElement && drawRecipientCb.checked,
+        cycle: Math.max(1, Math.floor(Number(fd.get('art-draw-recipient-cycle') || 1))),
+        programId: String(fd.get('art-draw-recipient-program-id') ?? '').trim(),
+        awardLabel: String(fd.get('art-draw-recipient-award-label') ?? '').trim(),
+    };
     const audioApprovedCb = form.querySelector('#studio-art-audio-approved');
     const audioApproved = audioApprovedCb instanceof HTMLInputElement && audioApprovedCb.checked;
     const featuredOrder = 0;
@@ -1074,6 +1118,7 @@ export function collectArtistRecordFromForm(root, baseArtist) {
             return String(base.accessCode ?? '');
         })(),
         _featuredFlags,
+        _drawRecipientFlags,
     };
 }
 
@@ -1189,6 +1234,30 @@ export function bindArtistCreditsPanel(root, artist) {
             setStatus(e instanceof Error ? e.message : String(e));
         }
     });
+
+    root.querySelector('#studio-art-award-clear-all')?.addEventListener('click', async () => {
+        const ok = window.confirm(
+            'Zero ALL Program Award entry balances on this canister?\n\n' +
+                'This cannot be undone. Last-grant keys are kept so members will not immediately re-earn this period.\n\n' +
+                'Admin only.',
+        );
+        if (!ok) return;
+        const btn = root.querySelector('#studio-art-award-clear-all');
+        if (btn instanceof HTMLButtonElement) btn.disabled = true;
+        try {
+            const { adminClearAllAwardEntryBalancesStudio } = await import('./database.js');
+            const cleared = await adminClearAllAwardEntryBalancesStudio();
+            if (awardBal) awardBal.textContent = '0';
+            setStatus(
+                `Cleared Program Award balances for ${cleared} principal${cleared === 1 ? '' : 's'}.`,
+            );
+            await refresh();
+        } catch (e) {
+            setStatus(e instanceof Error ? e.message : String(e));
+        } finally {
+            if (btn instanceof HTMLButtonElement) btn.disabled = false;
+        }
+    });
 }
 
 /**
@@ -1216,6 +1285,16 @@ export function initArtistManageTabs(root) {
     tabs.forEach((tab) => {
         tab.addEventListener('click', () => activate(tab));
     });
+
+    const drawCb = root.querySelector('#studio-art-draw-recipient');
+    const drawMeta = root.querySelector('#studio-art-draw-recipient-meta');
+    if (drawCb instanceof HTMLInputElement && drawMeta instanceof HTMLElement) {
+        const syncDrawMeta = () => {
+            drawMeta.hidden = !drawCb.checked;
+        };
+        drawCb.addEventListener('change', syncDrawMeta);
+        syncDrawMeta();
+    }
 }
 
 /**

@@ -1505,6 +1505,18 @@
   gap: 0.9rem;
 }
 
+.settings-profile-page .mpd-draw-status-wrap {
+  margin-top: -0.15rem;
+}
+
+.settings-profile-page .mpd-draw-status-wrap[hidden] {
+  display: none;
+}
+
+.settings-profile-page .mpd-my-program-card + .mpd-draw-status-wrap {
+  margin-top: 0.15rem;
+}
+
 .settings-profile-page .mpd-my-program-card {
   overflow: hidden;
   border: 1px solid rgba(15, 23, 42, 0.12);
@@ -2341,7 +2353,11 @@
   font-size: 0.82rem;
 }
 
-/* Explore programs — membership application / draw credits */
+/* Membership application / draw credits (Studio Overview + Explore programs) */
+.settings-profile-page .mpd-program-credits--overview {
+  margin: 0 0 1.25rem;
+}
+
 .settings-profile-page .mpd-program-credits {
   --mpd-credits-accent: #3f7e5a;
   --mpd-credits-accent-soft: rgba(63, 126, 90, 0.13);

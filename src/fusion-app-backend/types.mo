@@ -333,6 +333,15 @@ module {
         featurableIds : [Text];
     };
 
+    /// Program Draw past recipient — sidecar keyed by artist id (Studio Manage + public Past recipients).
+    public type ArtistDrawRecipient = {
+        artistId : Text;
+        cycle : Nat;
+        programId : Text;
+        awardLabel : Text;
+        updatedAt : Text;
+    };
+
     /// Program card + detail page JSON (versioned) — mirrors `testData.allPrograms.programs`.
     /// Locale JSON may include `programPage.applicationPaymentOptions` (one_time | monthly | quarterly | annual — application form cards),
 
@@ -407,6 +416,14 @@ module {
         /// Cap for draw / award entries this cycle (default 100 in the Studio UI).
         totalSlots : Nat;
         updatedAt : Text;
+    };
+
+    /// Public progress snapshot for Program Draw status UI.
+    public type ProgramDrawProgress = {
+        active : Bool;
+        totalSlots : Nat;
+        enteredCount : Nat;
+        cycle : Nat;
     };
 
     public type JournalRecord = {
@@ -536,6 +553,8 @@ module {
         #accepted;
         #rejected;
         #pulledOut;
+        /// Member-initiated withdraw (Settings); no application-credit refund.
+        #withdrawn;
     };
 
     public type ApplicantRecord = {
@@ -950,5 +969,7 @@ module {
         heroProfileImageReviewNotesStable : ?[(Text, AssetReviewNote)];
         /// Staff review notes for audio entries (keyed by "artistId|audioUrl").
         audioEntryReviewNotesStable : ?[(Text, AssetReviewNote)];
+        /// Program Draw past recipients by artist id; optional for backups before this field existed.
+        artistDrawRecipientsStable : ?[(Text, ArtistDrawRecipient)];
     };
 };
