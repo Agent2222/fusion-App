@@ -97,7 +97,14 @@ After Motoko changes, run `dfx generate` and redeploy `fusion-app-backend`. New 
 
 **Application fees:** guest one-time **$50**. Active members: monthly / legacy bi-monthly **$35** per formal application; quarterly **+1** stackable application credit per calendar quarter; annual **4** stackable application credits per membership year. When balance ≥ 1, submit is free (`credit`) and consumes one credit; when balance is 0, member fee is **$35**. Program Award entries are separate (not application credits) and mutually exclusive with a formal application for the same program. See [`FIXES_APPLICATION_CREDITS_AND_PROGRAM_AWARD.md`](./FIXES_APPLICATION_CREDITS_AND_PROGRAM_AWARD.md). If `TEMP_WAIVE_MEMBER_APPLICATION_FEES` is still `true` in Motoko + `applicationFeePolicy.js`, all active members submit free (`membership_temp`) — flip both to `false` when credits are live.
 
-**Program Draw paid entry:** one-time **$50** via PayPal with `paymentType` / `purpose` `program_award_entry` (synthetic `applicationId` `award:{programId}`). Confirm verifies capture, records a ledger row (no deposit/confirmed-artist side effects), and may call `integrationEnterProgramAward` from pending `payloadJson`. FE then calls `enterProgramAward` with the PayPal **order id** (Motoko attests against the ledger; empty order id = award credit). Webhook + `POST /payments/paypal/repair` use the same record+enter path. Webhook signature verification remains optional — see [`PROGRAM_DRAW_SELECTION_AND_DISPLAY.md`](./PROGRAM_DRAW_SELECTION_AND_DISPLAY.md) §8.
+**Program Draw paid entry:** one-time **$50** via PayPal with `paymentType` / `purpose` `program_award_entry` (synthetic `applicationId` `award:{programId}`).
+
+- **Guest pay-first:** `POST /payments/one-time` allows empty principal. After PayPal approve, FE calls `POST /payments/one-time/confirm` **without** principal → **capture only** (`captured: true`, `awaitingPrincipal: true`; pending S3 meta patched). UI shows `app-program-draw-paid-modal` (“Payment received”) — II is **not** opened until Continue. Second confirm **with** principal writes the ledger (no deposit/confirmed-artist side effects) and may `integrationEnterProgramAward`; FE then `enterProgramAward` with the order id.
+- **Signed-in:** confirm with principal captures + ledger in one step, then enter.
+- **Webhook:** if award entry capture arrives with empty principal, soft-skip ledger (keep pending). Repair still requires principal.
+- Empty order id on enter = award credit path.
+
+Webhook signature verification remains optional — see [`PROGRAM_DRAW_SELECTION_AND_DISPLAY.md`](./PROGRAM_DRAW_SELECTION_AND_DISPLAY.md) §8. **Redeploy the integration API** after the capture-without-principal confirm change.
 
 **Studio Users / Manage account (PayPal):** membership status reads PayPal `ACTIVE`/`APPROVED` (not Stripe-only). Staff can **Check PayPal** / **Push** with subscription id `I-…` via `POST /payments/subscription/status` + `/sync` (tier inferred from plan env ids for monthly / quarterly / annual). Deploy backend for `adminListMembershipTiers` after Motoko update.
 

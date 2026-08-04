@@ -1,7 +1,16 @@
 /**
  * PayPal webhook event handler.
  */
-import { getPayPalOrder, parsePayPalCustomId, resolvePayPalOrderForRepair } from '../payments/providers/paypalProvider.js';
+import {
+    getPayPalOrder,
+    parsePayPalCustomId,
+    resolvePayPalOrderForRepair,
+    safePayPalMetaValue,
+} from '../payments/providers/paypalProvider.js';
+import {
+    getPendingPayPalMetadata,
+    patchPendingPayPalMetadata,
+} from '../payments/pendingPaymentStore.js';
 import { recordVerifiedPayPalOrder } from '../payments/recordPayment.js';
 import { pushPayPalSubscriptionToCanister } from '../canisterActor.js';
 
@@ -35,7 +44,36 @@ export async function handlePayPalWebhookEvent(event, programPaymentDeps = {}) {
             try {
                 const order = await getPayPalOrder(orderId);
                 if (order.status === 'COMPLETED') {
-                    await recordVerifiedPayPalOrder(order, programPaymentDeps);
+                    const pu = (order.purchase_units || [])[0] || {};
+                    const metaRef = safePayPalMetaValue(pu.custom_id, 127);
+                    const pending = metaRef ? await getPendingPayPalMetadata(metaRef) : {};
+                    const principalText = safePayPalMetaValue(pending.principal, 500);
+                    const paymentType = safePayPalMetaValue(pending.paymentType, 80);
+                    const applicationId = safePayPalMetaValue(pending.applicationId, 240);
+                    const purpose = safePayPalMetaValue(pending.purpose, 80);
+                    const awardEntry =
+                        paymentType === 'program_award_entry' ||
+                        purpose === 'program_award_entry' ||
+                        applicationId.startsWith('award:');
+                    // Guest draw: capture may land before II — keep pending for FE confirm+principal.
+                    if (awardEntry && !principalText) {
+                        if (metaRef) {
+                            const capture = (pu.payments?.captures || [])[0] || {};
+                            await patchPendingPayPalMetadata(metaRef, {
+                                ...pending,
+                                paymentType: paymentType || 'program_award_entry',
+                                captured: 'true',
+                                captureId: safePayPalMetaValue(capture.id || resource.id, 120),
+                                capturedAt: new Date().toISOString(),
+                            });
+                        }
+                        console.warn(
+                            '[paypal webhook] award entry capture awaiting principal — skip ledger',
+                            orderId,
+                        );
+                    } else {
+                        await recordVerifiedPayPalOrder(order, programPaymentDeps);
+                    }
                 } else {
                     console.warn(
                         '[paypal webhook] CAPTURE.COMPLETED order not COMPLETED yet',

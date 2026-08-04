@@ -140,6 +140,7 @@ Entry-path selection (`adminSelectProgramAwardWinner`, `awardWinPeriodByPrincipa
 | Empty Past recipients / cycle #1 empty-state | Done |
 | Past recipients list joined to `getArtists()` | Done |
 | Inactive → Get notified waitlist | Done (`program-draw-notify-modal.js`) |
+| Guest paid → completion modal | Done (`program-draw-paid-modal.js`) |
 | “View all recipients” | Thin: navigates to `/artists` (not a dedicated recipients page) |
 
 ### Entry form UX (shipped)
@@ -152,7 +153,9 @@ Entry-path selection (`adminSelectProgramAwardWinner`, `awardWinPeriodByPrincipa
 | Already entered | Applied panel + exit (no refund) |
 | Formal application path | Blocked until Settings withdraw |
 
-Paid path: create PayPal order (pending meta includes `payloadJson`) → confirm → `enterProgramAward` with that **order id** (Retry reuses `_lastPaidOrderId`). Credit path: empty order id.
+**Guest paid path:** create PayPal order (empty principal OK) → approve → **capture** via confirm without principal (`awaitingPrincipal`) → payment-received modal → Continue / II → confirm **with** principal (ledger + enter) → `enterProgramAward` with order id. Retry / session storage reuse captured order id. Credit path: empty order id.
+
+**Signed-in paid path:** approve → confirm with principal (capture + ledger) → enter (no guest modal).
 
 ---
 
@@ -191,24 +194,25 @@ Paid path: create PayPal order (pending meta includes `payloadJson`) → confirm
 Closes the old hole where Motoko trusted a client `paidEntryReceipt` boolean.
 
 ```
-PayPal capture → confirm / webhook
-  → integrationRecordProgramPayment (program_award_entry; ledger id = order id)
-  → integrationEnterProgramAward when payloadJson is available
-FE happy path → enterProgramAward(programId, paypalOrderId, …)
-  → require unused succeeded ledger row (principal + program, amount ≥ $50)
-  → mark order consumed; paidEntry = true
+Guest: PayPal approve → POST /payments/one-time/confirm (no principal)
+  → capture only; pending meta marked captured; awaitingPrincipal
+  → FE modal “Payment received” → II → confirm with principal
+  → integrationRecordProgramPayment + optional integrationEnterProgramAward
+  → FE enterProgramAward(programId, paypalOrderId, …)
+Signed-in: confirm with principal does capture + ledger in one step
 ```
 
 | Path | Behavior |
 |------|----------|
 | Credit | Empty `paypalOrderId` → consume 1 award credit; `paidEntry = false` |
-| Paid (FE) | After confirm, enter with order id; Retry uses same id (idempotent) |
-| Paid (safety net) | Confirm / webhook / repair enter via `integrationEnterProgramAward` if browser dies after capture |
+| Paid guest | Capture before II; ledger/enter after II; Retry uses captured order id |
+| Paid signed-in | Confirm with principal → enter |
+| Webhook (no principal) | Soft-skip ledger for award entry; keep pending for FE finish |
 | Ledger | Award rows skip deposit summary / confirmed-artist / payment-confirmation email side effects |
 
 Still optional: PayPal webhook **signature** verification (`PAYPAL_WEBHOOK_ID`). Details also in [`PAYMENTS.md`](./PAYMENTS.md).
 
-**Deploy note:** after Motoko changes, run `dfx generate` (or frontend `prebuild`) so client bindings match `enterProgramAward(…, paypalOrderId, …)`. Redeploy the integration API for the hand IDL + record/enter path.
+**Deploy note:** Redeploy the **integration API** for capture-without-principal confirm + webhook soft-skip. After Motoko changes, run `dfx generate` (or frontend `prebuild`) so client bindings match.
 
 ---
 
@@ -221,4 +225,4 @@ Still optional: PayPal webhook **signature** verification (`PAYPAL_WEBHOOK_ID`).
 
 ---
 
-*Last updated: Paid-entry attestation shipped (ledger + order-id enter + webhook/repair). Remaining: Studio selection UI, sidecar auto-sync, real cycle counter.*
+*Last updated: Guest pay-first captures before II + payment-received modal. Remaining: Studio selection UI, sidecar auto-sync, real cycle counter.*

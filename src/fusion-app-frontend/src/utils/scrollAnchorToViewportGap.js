@@ -3,19 +3,37 @@ export const PROGRAM_APPLICATION_VIEWPORT_TOP_GAP_PX = 190;
 
 /**
  * Find the nearest ancestor that scrolls vertically (same idea as app-application-form).
+ * Pierces open shadow roots so targets inside custom elements still find `#mainContent` / `.main-cont`.
  * @param {Element} el
  * @returns {HTMLElement}
  */
 function getScrollParent(el) {
-    if (!el || !el.parentElement) return document.documentElement;
-    let p = el.parentElement;
+    if (!el) return document.documentElement;
+
+    /**
+     * @param {Element | null} node
+     * @returns {Element | null}
+     */
+    const parentCrossingShadow = (node) => {
+        if (!node) return null;
+        if (node.parentElement) return node.parentElement;
+        const root = typeof node.getRootNode === 'function' ? node.getRootNode() : null;
+        if (root instanceof ShadowRoot && root.host instanceof Element) {
+            return root.host;
+        }
+        return null;
+    };
+
+    let p = parentCrossingShadow(el);
     while (p) {
         const st = getComputedStyle(p);
         const oy = st.overflowY;
         if (oy === 'auto' || oy === 'scroll' || oy === 'overlay') {
-            if (p.scrollHeight > p.clientHeight + 2) return p;
+            if (p.scrollHeight > p.clientHeight + 2) {
+                return /** @type {HTMLElement} */ (p);
+            }
         }
-        p = p.parentElement;
+        p = parentCrossingShadow(p);
     }
     return document.documentElement;
 }

@@ -38,6 +38,11 @@ import {
     mountPayPalAdvancedOneTimeCheckout,
     mountPayPalSubscriptionButtons,
 } from '../../utils/paymentCheckout.js';
+import {
+    clearProgramApplicationDraft,
+    getProgramApplicationDraft,
+    saveProgramApplicationDraft,
+} from '../../utils/programApplicationDraft.js';
 import { DRAW_ENTRY_FEE_CENTS } from '../../utils/applicantsDrawModel.js';
 import { emptyApplicationPaymentOptions } from '../../utils/programApplicationFormContext.js';
 import { MEMBERSHIP_TIER_META, planIdForTier } from '../../utils/membershipPlanChange.js';
@@ -54,6 +59,7 @@ import { navigate } from '../../router.js';
 import posthog from 'posthog-js';
 import './program-draw-display.js';
 import './program-draw-notify-modal.js';
+import './program-draw-paid-modal.js';
 import paymentCardIcon from '../../assets/icons/fusion_svg_icons_b2/payment-card.svg';
 import benefitCheckIcon from '../../assets/icons/fusion_svg_icons_b2/benefit-check.svg';
 import popularCrownIcon from '../../assets/icons/fusion_svg_icons_b2/popular-crown.svg';
@@ -147,9 +153,12 @@ const DRAW_FORM_COPY = {
             'Memberships include Program Award entries. Or complete a one-time Program Draw Payment below.',
         needSignIn: 'Sign in with Internet Identity to complete your Program Draw entry.',
         paidSignInToFinish:
-            'Payment received. Sign in with Internet Identity to finish creating your Fusion account and enter the draw.',
+            'Payment received. Continue to sign up with Internet Identity to finish your Program Draw entry.',
         paidSignInCancelled:
-            'Payment succeeded, but sign-in was cancelled. Sign in to finish linking your entry, then use Retry enter.',
+            'Payment received. Sign-in was cancelled — use Continue to sign up or Retry enter to finish your entry.',
+        paidCheckoutNotCompleted:
+            'Checkout was not completed. You were not charged. Try payment again when you are ready.',
+        paidCapturing: 'Confirming your payment…',
         paidFinishing: 'Finishing your Program Draw entry…',
         viewProgramDetails: 'View program details',
         submitNoAccount: 'This sign-in is not linked to a Fusion member account.',
@@ -198,7 +207,7 @@ const DRAW_FORM_COPY = {
         membershipFinishing: 'Linking membership and completing entry…',
         retryEnter: 'Retry enter',
         paidEnterFailed:
-            'Payment succeeded, but we could not complete your draw entry. Tap Retry enter — you will not be charged again.',
+            'Payment received, but we could not complete your draw entry. Tap Retry enter — you will not be charged again.',
         selectMembershipPlan: 'Approve your membership with PayPal below.',
     },
     ja: {
@@ -252,9 +261,12 @@ const DRAW_FORM_COPY = {
             'メンバーシップにはプログラムアワードエントリーが含まれます。または下の一回払いで完了できます。',
         needSignIn: 'プログラム抽選のエントリーを完了するには Internet Identity でサインインしてください。',
         paidSignInToFinish:
-            'お支払いを確認しました。Internet Identity でサインインして Fusion アカウントを作成し、抽選エントリーを完了してください。',
+            'お支払いを確認しました。Internet Identity でサインアップを続けて抽選エントリーを完了してください。',
         paidSignInCancelled:
-            'お支払いは完了していますが、サインインがキャンセルされました。サインインしてエントリーを完了し、必要なら「再エントリー」を押してください。',
+            'お支払いを確認済みです。サインインがキャンセルされました。「サインアップへ進む」または「エントリーを再試行」で完了してください。',
+        paidCheckoutNotCompleted:
+            'チェックアウトは完了していません。この試行では課金されていません。準備ができたらもう一度お支払いください。',
+        paidCapturing: 'お支払いを確認しています…',
         paidFinishing: 'プログラム抽選のエントリーを完了しています…',
         viewProgramDetails: 'プログラム詳細を見る',
         submitNoAccount: 'このサインインは Fusion メンバーアカウントに紐づいていません。',
@@ -303,10 +315,62 @@ const DRAW_FORM_COPY = {
         membershipFinishing: 'メンバーシップを連携し、エントリーを完了しています…',
         retryEnter: 'エントリーを再試行',
         paidEnterFailed:
-            '支払いは完了しましたが、抽選エントリーを完了できませんでした。「エントリーを再試行」を押してください（再課金されません）。',
+            'お支払いを確認済みですが、抽選エントリーを完了できませんでした。「エントリーを再試行」を押してください（再課金されません）。',
         selectMembershipPlan: '下の PayPal でメンバーシップを承認してください。',
     },
 };
+
+const DRAW_PAID_ORDER_SESSION_PREFIX = 'fusion-draw-paid-order:';
+
+/**
+ * @param {string} programId
+ * @returns {string}
+ */
+function drawPaidOrderSessionKey(programId) {
+    return `${DRAW_PAID_ORDER_SESSION_PREFIX}${String(programId || '').trim()}`;
+}
+
+/**
+ * @param {string} programId
+ * @param {string} orderId
+ */
+function persistCapturedDrawOrder(programId, orderId) {
+    const id = String(programId || '').trim();
+    const oid = String(orderId || '').trim();
+    if (!id || !oid || typeof sessionStorage === 'undefined') return;
+    try {
+        sessionStorage.setItem(drawPaidOrderSessionKey(id), oid);
+    } catch {
+        /* ignore */
+    }
+}
+
+/**
+ * @param {string} programId
+ * @returns {string}
+ */
+function readCapturedDrawOrder(programId) {
+    const id = String(programId || '').trim();
+    if (!id || typeof sessionStorage === 'undefined') return '';
+    try {
+        return String(sessionStorage.getItem(drawPaidOrderSessionKey(id)) || '').trim();
+    } catch {
+        return '';
+    }
+}
+
+/**
+ * @param {string} programId
+ */
+function clearCapturedDrawOrder(programId) {
+    const id = String(programId || '').trim();
+    if (!id || typeof sessionStorage === 'undefined') return;
+    try {
+        sessionStorage.removeItem(drawPaidOrderSessionKey(id));
+    } catch {
+        /* ignore */
+    }
+}
 
 function drawLocaleCopy() {
     const loc =
@@ -754,31 +818,21 @@ class ProgramDrawFormComponent extends HTMLElement {
                     });
                 },
                 onApproved: async (orderId) => {
+                    // Return quickly so the PayPal popup can close, then capture + modal.
+                    // Do not open II inside onApprove (stuck popup) and do not claim paid
+                    // until capture succeeds.
                     this._lastPaidOrderId = String(orderId || '');
                     const payPayload = this._collectPayload();
                     void this._syncDrawSubscriber(payPayload);
-                    const payVal = DRAW_ENTRY_FEE_CENTS / 100;
-                    this._captureDrawEvent('program_draw_payment_completed', {
-                        payment_plan: 'one_time',
-                        value: payVal,
-                        currency: 'USD',
-                        ads_conversion: 'Purchase',
-                    });
-                    try {
-                        metaTrack('Purchase', {
-                            value: payVal,
-                            currency: 'USD',
-                            content_name: 'program_draw_entry',
-                            content_ids: [programId].filter(Boolean),
+                    this._setMsg(D.paidCapturing, 'neutral');
+                    const finishOrderId = this._lastPaidOrderId;
+                    const finishProgramId = programId;
+                    queueMicrotask(() => {
+                        void this._handlePayPalApprovedAfterPopup({
+                            orderId: finishOrderId,
+                            programId: finishProgramId,
+                            payload: payPayload,
                         });
-                    } catch {
-                        /* ignore */
-                    }
-                    await this._finishPaidEntryAfterCheckout({
-                        orderId: this._lastPaidOrderId,
-                        programId,
-                        payload: payPayload,
-                        promptLogin: true,
                     });
                 },
                 onError: (err) => {
@@ -1169,23 +1223,28 @@ class ProgramDrawFormComponent extends HTMLElement {
                             : tier === 'quarterly'
                               ? 'subscription_quarterly'
                               : 'subscription_monthly';
-                    this._captureDrawEvent('program_draw_payment_completed', {
-                        payment_plan: paymentPlan,
-                        entry_path: 'membership',
-                        ads_conversion: 'Purchase',
-                    });
-                    try {
-                        metaTrack('Purchase', {
-                            currency: 'USD',
-                            content_name: 'program_draw_membership',
-                            content_ids: [programId].filter(Boolean),
-                        });
-                    } catch {
-                        /* ignore */
-                    }
                     this._setMsg(D.membershipApproved, 'neutral');
-                    // Authenticated: finish immediately. Guest: prompt II (no account-gate overlay).
-                    await this._finishMembershipEntry({ promptLogin: true });
+                    // Resolve PayPal onApprove immediately so the popup can close; finish II/link after.
+                    queueMicrotask(() => {
+                        void (async () => {
+                            const ok = await this._finishMembershipEntry({ promptLogin: true });
+                            if (!ok) return;
+                            this._captureDrawEvent('program_draw_payment_completed', {
+                                payment_plan: paymentPlan,
+                                entry_path: 'membership',
+                                ads_conversion: 'Purchase',
+                            });
+                            try {
+                                metaTrack('Purchase', {
+                                    currency: 'USD',
+                                    content_name: 'program_draw_membership',
+                                    content_ids: [programId].filter(Boolean),
+                                });
+                            } catch {
+                                /* ignore */
+                            }
+                        })();
+                    });
                 },
                 onError: (err) => {
                     this._captureDrawEvent('program_draw_payment_failed', {
@@ -1276,6 +1335,76 @@ class ProgramDrawFormComponent extends HTMLElement {
             website: get('draw-website'),
             bioStatement: get('draw-bio'),
         };
+    }
+
+    /**
+     * Persist contact/about fields (same localStorage key as the formal application form).
+     */
+    _saveDrawDraftFromForm() {
+        const programId = this._programId();
+        if (!programId) return;
+        const payload = this._collectPayload();
+        const existing = getProgramApplicationDraft(programId) || {};
+        saveProgramApplicationDraft(programId, {
+            ...existing,
+            firstName: payload.firstName,
+            lastName: payload.lastName,
+            email: payload.email,
+            country: payload.country,
+            stateProvince: payload.stateProvince,
+            city: payload.city,
+            website: payload.website,
+            bioStatement: payload.bioStatement,
+        });
+    }
+
+    /**
+     * Fill empty payload keys from the local draft (server / entered payload wins).
+     * @param {string} programId
+     * @param {Record<string, string>} payload
+     * @returns {Record<string, string>}
+     */
+    _mergeLocalDraftIntoPayload(programId, payload) {
+        const draft = getProgramApplicationDraft(programId);
+        if (!draft) return payload;
+        /** @type {Record<string, string>} */
+        const out = { ...payload };
+        const keys = [
+            'firstName',
+            'lastName',
+            'email',
+            'country',
+            'stateProvince',
+            'city',
+            'website',
+            'bioStatement',
+        ];
+        for (const key of keys) {
+            if (String(out[key] || '').trim()) continue;
+            const v = draft[/** @type {keyof typeof draft} */ (key)];
+            if (v != null && String(v).trim()) out[key] = String(v).trim();
+        }
+        return out;
+    }
+
+    _bindDrawDraftPersistence(signal) {
+        const form = this.shadowRoot?.querySelector('#draw-form-fields');
+        if (!(form instanceof HTMLFormElement)) return;
+        form.addEventListener(
+            'focusout',
+            (e) => {
+                const t = e.target;
+                if (
+                    !(t instanceof HTMLInputElement) &&
+                    !(t instanceof HTMLTextAreaElement) &&
+                    !(t instanceof HTMLSelectElement)
+                ) {
+                    return;
+                }
+                this._saveDrawDraftFromForm();
+            },
+            { signal },
+        );
     }
 
     _analyticsLocale() {
@@ -1382,6 +1511,7 @@ class ProgramDrawFormComponent extends HTMLElement {
         });
         if (!result.missing.length && !result.invalidEmail) {
             this._setMsg('', 'neutral');
+            this._saveDrawDraftFromForm();
             return true;
         }
         const lines = result.missing.map((f) => f.label);
@@ -1509,13 +1639,126 @@ class ProgramDrawFormComponent extends HTMLElement {
     }
 
     /**
-     * After $50 PayPal approve: ensure II + Fusion account, confirm order onto ledger, enter draw.
-     * Guests may pay first; sign-in happens here (same idea as membership finish).
+     * @param {{ orderId: string, programId: string, captured: boolean }} opts
+     */
+    _openPaidCompletionModal(opts) {
+        const modal = this.shadowRoot?.querySelector('#draw-paid-modal');
+        if (!modal || typeof modal.open !== 'function') return;
+        modal.open({
+            orderId: opts.orderId,
+            programId: opts.programId,
+            captured: opts.captured,
+            onContinue: (detail) => {
+                void this._finishPaidEntryAfterCheckout({
+                    orderId: detail.orderId || opts.orderId,
+                    programId: detail.programId || opts.programId,
+                    promptLogin: true,
+                });
+            },
+        });
+    }
+
+    /**
+     * After PayPal popup approve: capture first, then modal (guest) or finish enter (signed-in).
+     * @param {{
+     *   orderId: string,
+     *   programId: string,
+     *   payload?: Record<string, string>,
+     * }} opts
+     */
+    async _handlePayPalApprovedAfterPopup(opts) {
+        const D = drawLocaleCopy();
+        const orderId = String(opts?.orderId || this._lastPaidOrderId || '').trim();
+        const programId = String(opts?.programId || this._programId() || '').trim();
+        const payload =
+            opts?.payload && typeof opts.payload === 'object' ? opts.payload : this._collectPayload();
+        if (!orderId || !programId) {
+            this._paidEnterPending = false;
+            this._setMsg(D.paidCheckoutNotCompleted, 'error');
+            this._openPaidCompletionModal({ orderId, programId, captured: false });
+            return;
+        }
+        this._lastPaidOrderId = orderId;
+        this._setMsg(D.paidCapturing, 'neutral');
+
+        const snap = await getAuthSnapshot();
+        const principal = snap?.authenticated
+            ? String(snap.principal?.toText?.() || '').trim()
+            : '';
+
+        try {
+            const confirmResult = await confirmPayPalOneTimePayment(orderId, {
+                ...(principal ? { principal } : {}),
+                programId,
+                applicationId: `award:${programId}`,
+                paymentType: 'program_award_entry',
+                payload,
+            });
+            const awaitingPrincipal = Boolean(
+                confirmResult &&
+                    typeof confirmResult === 'object' &&
+                    /** @type {{ awaitingPrincipal?: boolean }} */ (confirmResult).awaitingPrincipal,
+            );
+
+            // Capture succeeded (ledger may still await principal for guests).
+            this._paidEnterPending = true;
+            persistCapturedDrawOrder(programId, orderId);
+
+            const payVal = DRAW_ENTRY_FEE_CENTS / 100;
+            this._captureDrawEvent('program_draw_payment_completed', {
+                payment_plan: 'one_time',
+                value: payVal,
+                currency: 'USD',
+                ads_conversion: 'Purchase',
+            });
+            try {
+                metaTrack('Purchase', {
+                    value: payVal,
+                    currency: 'USD',
+                    content_name: 'program_draw_entry',
+                    content_ids: [programId].filter(Boolean),
+                });
+            } catch {
+                /* ignore */
+            }
+
+            if (principal && !awaitingPrincipal) {
+                this._setMsg(D.paidFinishing, 'neutral');
+                await this._finishPaidEntryAfterCheckout({
+                    orderId,
+                    programId,
+                    payload,
+                    promptLogin: false,
+                    skipCaptureConfirm: true,
+                });
+                return;
+            }
+
+            this._setMsg(D.paidSignInToFinish, 'neutral');
+            this._showRetryEnterControl();
+            this._openPaidCompletionModal({ orderId, programId, captured: true });
+        } catch (e) {
+            this._paidEnterPending = false;
+            this._captureDrawEvent('program_draw_payment_failed', {
+                payment_plan: 'one_time',
+            });
+            this._setMsg(
+                e instanceof Error ? e.message : D.paidCheckoutNotCompleted,
+                'error',
+            );
+            this._openPaidCompletionModal({ orderId, programId, captured: false });
+        }
+    }
+
+    /**
+     * After $50 PayPal capture: ensure II + Fusion account, confirm order onto ledger, enter draw.
+     * Guests pay first (capture); sign-in + ledger happen here.
      * @param {{
      *   orderId: string,
      *   programId?: string,
      *   payload?: Record<string, string>,
      *   promptLogin?: boolean,
+     *   skipCaptureConfirm?: boolean,
      * }} opts
      * @returns {Promise<boolean>}
      */
@@ -1526,18 +1769,20 @@ class ProgramDrawFormComponent extends HTMLElement {
         const payload =
             opts?.payload && typeof opts.payload === 'object' ? opts.payload : this._collectPayload();
         if (!orderId || !programId) {
-            this._setMsg(D.paidEnterFailed, 'error');
-            this._showRetryEnterControl();
+            this._setMsg(D.paidCheckoutNotCompleted, 'error');
             return false;
         }
         this._lastPaidOrderId = orderId;
+        // Entry unfinished after a confirmed capture (session / Retry).
         this._paidEnterPending = true;
+        persistCapturedDrawOrder(programId, orderId);
 
         let snap = await getAuthSnapshot();
         if (!snap?.authenticated) {
             if (opts.promptLogin === false) {
                 this._setMsg(D.paidSignInToFinish, 'neutral');
                 this._showRetryEnterControl();
+                this._openPaidCompletionModal({ orderId, programId, captured: true });
                 return false;
             }
             this._setMsg(D.paidSignInToFinish, 'neutral');
@@ -1547,6 +1792,7 @@ class ProgramDrawFormComponent extends HTMLElement {
                 if (e === ERROR_USER_INTERRUPT) {
                     this._setMsg(D.paidSignInCancelled, 'error');
                     this._showRetryEnterControl();
+                    this._openPaidCompletionModal({ orderId, programId, captured: true });
                     return false;
                 }
                 this._setMsg(e instanceof Error ? e.message : String(e), 'error');
@@ -1557,6 +1803,7 @@ class ProgramDrawFormComponent extends HTMLElement {
             if (!snap?.authenticated) {
                 this._setMsg(D.paidSignInCancelled, 'error');
                 this._showRetryEnterControl();
+                this._openPaidCompletionModal({ orderId, programId, captured: true });
                 return false;
             }
         }
@@ -1594,19 +1841,26 @@ class ProgramDrawFormComponent extends HTMLElement {
                 /* award enter does not require linked artist */
             }
 
-            await confirmPayPalOneTimePayment(orderId, {
-                principal,
-                programId,
-                applicationId: `award:${programId}`,
-                paymentType: 'program_award_entry',
-                payload,
-            });
+            if (!opts.skipCaptureConfirm) {
+                await confirmPayPalOneTimePayment(orderId, {
+                    principal,
+                    programId,
+                    applicationId: `award:${programId}`,
+                    paymentType: 'program_award_entry',
+                    payload,
+                });
+            }
 
-            return await this._enterWithRetry(true, {
+            const entered = await this._enterWithRetry(true, {
                 skipAccountCheck: true,
                 retries: 3,
                 paypalOrderId: orderId,
             });
+            if (entered) {
+                this._paidEnterPending = false;
+                clearCapturedDrawOrder(programId);
+            }
+            return entered;
         } catch (e) {
             if (this._handleAccountGateError(e)) {
                 this._showRetryEnterControl();
@@ -1677,6 +1931,7 @@ class ProgramDrawFormComponent extends HTMLElement {
             });
             this._paidEnterPending = false;
             this._lastPaidOrderId = '';
+            clearProgramApplicationDraft(id);
             this._captureDrawEvent('program_draw_entered', {
                 entry_path: paidEntryReceipt ? 'paid' : 'award_credit',
                 ads_conversion: 'SubmitApplication',
@@ -1798,6 +2053,9 @@ class ProgramDrawFormComponent extends HTMLElement {
             } catch {
                 /* ignore */
             }
+        }
+        if (id) {
+            payload = this._mergeLocalDraftIntoPayload(id, payload);
         }
         if (token !== this._renderToken) return;
 
@@ -2107,6 +2365,7 @@ class ProgramDrawFormComponent extends HTMLElement {
                 : ''
         }
 
+        <app-program-draw-paid-modal id="draw-paid-modal"></app-program-draw-paid-modal>
         <p id="draw-form-status" class="app-form-status" role="status" aria-live="polite"></p>
       </div>
     `;
@@ -2126,12 +2385,14 @@ class ProgramDrawFormComponent extends HTMLElement {
         this.shadowRoot.querySelector('#draw-display')?.addEventListener(
             'fusion-draw-display-submit',
             () => {
-                const contact =
+                // Scroll-only: bring the draw form into view (details row near top). No navigate.
+                const anchor =
+                    this.shadowRoot?.querySelector('.app-view-details-row') ||
                     this.shadowRoot?.querySelector('#draw-contact') ||
                     this.shadowRoot?.querySelector('#draw-form-fields');
-                if (contact instanceof HTMLElement) {
+                if (anchor instanceof HTMLElement) {
                     scrollElementTopToViewportGap(
-                        contact,
+                        anchor,
                         PROGRAM_APPLICATION_VIEWPORT_TOP_GAP_PX,
                     );
                 }
@@ -2215,11 +2476,17 @@ class ProgramDrawFormComponent extends HTMLElement {
                 { signal },
             );
         });
-        if (this._paidEnterPending) {
+        const storedOrder = id ? readCapturedDrawOrder(id) : '';
+        if (storedOrder) {
+            this._lastPaidOrderId = storedOrder;
+            this._paidEnterPending = true;
+        }
+        if (this._paidEnterPending && this._lastPaidOrderId) {
             this._showRetryEnterControl();
-            this._setMsg(D.paidEnterFailed, 'error');
+            this._setMsg(D.paidSignInToFinish, 'neutral');
         }
 
+        this._bindDrawDraftPersistence(signal);
     }
 
     _styles() {

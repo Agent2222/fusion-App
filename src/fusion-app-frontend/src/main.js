@@ -62,6 +62,7 @@ import "./components/subComponents/program-strip-gallery.js";
 import "./components/subComponents/application-form.js";
 import "./components/subComponents/program-draw-form.js";
 import "./components/subComponents/program-draw-notify-modal.js";
+import "./components/subComponents/program-draw-paid-modal.js";
 import "./components/subComponents/program-draw-display.js";
 import "./components/subComponents/program-draw-status.js";
 import "./components/subComponents/journalRow.js";

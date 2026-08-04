@@ -154,6 +154,24 @@ export async function getPendingPayPalMetadata(ref) {
 }
 
 /**
+ * Merge fields into existing pending PayPal metadata (S3/R2).
+ * @param {string} ref
+ * @param {Record<string, string>} patch
+ * @returns {Promise<Record<string, string>>}
+ */
+export async function patchPendingPayPalMetadata(ref, patch) {
+    const safeRef = String(ref || '').trim();
+    if (!safeRef) throw new Error('Invalid pending payment reference');
+    const prev = await getPendingPayPalMetadata(safeRef);
+    const next = {
+        ...(prev && typeof prev === 'object' ? prev : {}),
+        ...(patch && typeof patch === 'object' ? patch : {}),
+    };
+    await putPendingPayPalMetadata(safeRef, next);
+    return next;
+}
+
+/**
  * @param {string} ref
  */
 export async function deletePendingPayPalMetadata(ref) {

@@ -26,6 +26,8 @@ import {
 } from './providers/paypalProvider.js';
 import {
     buildPendingPayPalProgramMetadata,
+    getPendingPayPalMetadata,
+    patchPendingPayPalMetadata,
     putPendingPayPalMetadata,
 } from './pendingPaymentStore.js';
 import { recordVerifiedPayPalOrder, pushPayPalSubscriptionToCanister } from './recordPayment.js';
@@ -135,12 +137,51 @@ export function registerPaymentRoutes(app, opts) {
             if (payloadJsonRaw) {
                 metaOverride.payloadJson = safePayPalMetaValue(payloadJsonRaw, 100_000);
             }
+
+            const pu = (order.purchase_units || [])[0] || {};
+            const metaRef = safePayPalMetaValue(pu.custom_id, 127);
+            const pending = metaRef ? await getPendingPayPalMetadata(metaRef) : {};
+            const merged = { ...pending, ...metaOverride };
+            const principalText = safePayPalMetaValue(merged.principal, 500);
+            let paymentTypeFinal = safePayPalMetaValue(merged.paymentType, 80);
+            const applicationIdFinal = safePayPalMetaValue(merged.applicationId, 240);
+            const purposeFinal = safePayPalMetaValue(merged.purpose, 80);
+            const awardEntry =
+                paymentTypeFinal === 'program_award_entry' ||
+                purposeFinal === 'program_award_entry' ||
+                applicationIdFinal.startsWith('award:');
+            if (awardEntry && !paymentTypeFinal) {
+                paymentTypeFinal = 'program_award_entry';
+                metaOverride.paymentType = paymentTypeFinal;
+            }
+
+            // Guest Program Draw: capture now; attach principal + ledger on a later confirm.
+            if (awardEntry && !principalText) {
+                const capture = (pu.payments?.captures || [])[0] || {};
+                if (metaRef) {
+                    await patchPendingPayPalMetadata(metaRef, {
+                        ...merged,
+                        paymentType: paymentTypeFinal,
+                        captured: 'true',
+                        captureId: safePayPalMetaValue(capture.id, 120),
+                        capturedAt: new Date().toISOString(),
+                    });
+                }
+                return res.json({
+                    ok: true,
+                    orderId,
+                    captured: true,
+                    awaitingPrincipal: true,
+                    chargeId: safePayPalMetaValue(capture.id, 120),
+                });
+            }
+
             const recorded = await recordVerifiedPayPalOrder(
                 order,
                 programPaymentDeps,
                 metaOverride,
             );
-            return res.json({ ok: true, orderId, ...recorded });
+            return res.json({ ok: true, orderId, captured: true, awaitingPrincipal: false, ...recorded });
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             return res.status(500).json({ error: msg });
