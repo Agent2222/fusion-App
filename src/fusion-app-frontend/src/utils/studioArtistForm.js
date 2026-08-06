@@ -665,11 +665,15 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
           </label>
         </div>
         <div class="studio-modal-fields-row">
-          <label class="studio-field studio-field--grow"><span>Audio title</span><input type="text" class="studio-input" name="art-audio-title" value="${esc(escapeHtml, String(a.audioTitle ?? ''))}" /></label>
+          <label class="studio-field studio-field--grow"><span>Audio title</span><input type="text" class="studio-input" name="art-audio-title" id="studio-art-audio-title" value="${esc(escapeHtml, String(a.audioTitle ?? ''))}" /></label>
         </div>
+        <label class="studio-field studio-field--checkbox studio-field--full" style="margin-bottom:0.35rem">
+          <input type="checkbox" name="art-audio-approved" id="studio-art-audio-approved" ${a.audioApproved || a.audioApprovedFullSite ? 'checked' : ''} />
+          <span>Approved for public profile</span>
+        </label>
         <label class="studio-field studio-field--checkbox studio-field--full" style="margin-bottom:0.75rem">
-          <input type="checkbox" name="art-audio-approved" id="studio-art-audio-approved" ${a.audioApproved ? 'checked' : ''} />
-          <span>Approved for public playback (sound environment, profile, journal audio rows)</span>
+          <input type="checkbox" name="art-audio-approved-full-site" id="studio-art-audio-approved-full-site" ${a.audioApprovedFullSite ? 'checked' : ''} />
+          <span>Approved for full site (sound environment + site audio)</span>
         </label>
         <h4 class="studio-prog-subhead">English</h4>
         ${renderIntroSlot(escapeHtml, 'en', enW, 0)}
@@ -1077,7 +1081,12 @@ export function collectArtistRecordFromForm(root, baseArtist) {
         awardLabel: String(fd.get('art-draw-recipient-award-label') ?? '').trim(),
     };
     const audioApprovedCb = form.querySelector('#studio-art-audio-approved');
-    const audioApproved = audioApprovedCb instanceof HTMLInputElement && audioApprovedCb.checked;
+    const audioFullSiteCb = form.querySelector('#studio-art-audio-approved-full-site');
+    let audioApproved = audioApprovedCb instanceof HTMLInputElement && audioApprovedCb.checked;
+    let audioApprovedFullSite =
+        audioFullSiteCb instanceof HTMLInputElement && audioFullSiteCb.checked;
+    if (audioApprovedFullSite) audioApproved = true;
+    if (!audioApproved) audioApprovedFullSite = false;
     const featuredOrder = 0;
     const updatedAt = new Date().toISOString();
 
@@ -1094,6 +1103,12 @@ export function collectArtistRecordFromForm(root, baseArtist) {
         view: String(fd.get('art-gf-view') ?? ''),
     };
 
+    const audioUrl = String(fd.get('art-audio-url') ?? '').trim();
+    const audioTitle = String(fd.get('art-audio-title') ?? '').trim();
+    if (audioUrl && !audioTitle) {
+        throw new Error('Audio title is required when an audio URL is set.');
+    }
+
     return {
         id,
         slug,
@@ -1101,9 +1116,10 @@ export function collectArtistRecordFromForm(root, baseArtist) {
         heroProfileImage,
         heroProfileImageApproved,
         quote: String(fd.get('art-profile-quote') ?? '').trim(),
-        audioUrl: String(fd.get('art-audio-url') ?? '').trim(),
-        audioTitle: String(fd.get('art-audio-title') ?? '').trim(),
+        audioUrl,
+        audioTitle,
         audioApproved,
+        audioApprovedFullSite,
         featuredOrder,
         visibility,
         updatedAt,
@@ -1120,6 +1136,22 @@ export function collectArtistRecordFromForm(root, baseArtist) {
         _featuredFlags,
         _drawRecipientFlags,
     };
+}
+
+/**
+ * Keep profile / full-site audio approval checkboxes consistent in Manage Artist.
+ * @param {ParentNode} root
+ */
+export function wireArtistAudioApprovalTierCheckboxes(root) {
+    const profileCb = root.querySelector('#studio-art-audio-approved');
+    const fullSiteCb = root.querySelector('#studio-art-audio-approved-full-site');
+    if (!(profileCb instanceof HTMLInputElement) || !(fullSiteCb instanceof HTMLInputElement)) return;
+    fullSiteCb.addEventListener('change', () => {
+        if (fullSiteCb.checked) profileCb.checked = true;
+    });
+    profileCb.addEventListener('change', () => {
+        if (!profileCb.checked) fullSiteCb.checked = false;
+    });
 }
 
 /**

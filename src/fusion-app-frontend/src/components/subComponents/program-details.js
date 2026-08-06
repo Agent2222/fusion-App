@@ -24,6 +24,9 @@ class ProgramDetailsComponent extends HTMLElement {
     constructor() {
         super();
         this._costPlanDisclosureUid = 0;
+        this._costDrawDisclosureUid = 0;
+        /** @type {'apply' | 'draw'} */
+        this._formMode = 'apply';
         this.shadow = this.attachShadow({ mode: 'open' });
         /** @type {null | { programId?: string, applicationsOpen?: boolean, headline: string, keyDates: Array<{ date?: string, description?: string, sectionTitle?: string }>, locations?: string[], facilities?: string[], costText: string, totalProgramFeeLine?: string, applicationFeeLine?: string, useStructuredCost?: boolean, depositLine?: string, remainingBalanceLine?: string, maxPlanMonths?: number, japanResidencyNotice?: string, availableSlots?: number | null, totalSlots?: number | null, residences?: Array<{ name?: string, href?: string }>, included?: string[], notIncluded?: string[], platform?: string, additionalInfo?: object | null, sidebarRunDates?: { start?: string, end?: string } | null }} */
         this._data = null;
@@ -33,8 +36,18 @@ class ProgramDetailsComponent extends HTMLElement {
      * @param {{ programId?: string, applicationsOpen?: boolean, headline: string, keyDates: Array<{ date?: string, description?: string, sectionTitle?: string }>, locations?: string[], facilities?: string[], costText: string, totalProgramFeeLine?: string, applicationFeeLine?: string, useStructuredCost?: boolean, depositLine?: string, remainingBalanceLine?: string, maxPlanMonths?: number, japanResidencyNotice?: string, availableSlots?: number | null, totalSlots?: number | null, residences?: Array<{ name?: string, href?: string }>, included?: string[], notIncluded?: string[], platform?: string, additionalInfo?: { applicationFee?: string, aboutProgram?: string, faq?: object[], programNotes?: object[], refundPolicy?: object[] } | null, sidebarRunDates?: { start?: string, end?: string } | null }} payload
      */
     setProgramDetails(payload) {
+        this._formMode = 'apply';
         this._data = payload;
         this.render();
+        this._populate();
+    }
+
+    /**
+     * Toggle sidebar COST presentation for residency apply vs Program Draw form.
+     * @param {'apply' | 'draw'} mode
+     */
+    setFormMode(mode) {
+        this._formMode = mode === 'draw' ? 'draw' : 'apply';
         this._populate();
     }
 
@@ -80,6 +93,9 @@ class ProgramDetailsComponent extends HTMLElement {
                 costMonthlyPayment: '月額支払い',
                 costPaymentPlanHelper: '支払いプランは、一部の候補者向けに利用できます。',
                 costJapanNotice: '日本居住者向け',
+                costDrawEntryFee: '抽選への応募には一度きり $50 の手数料が必要です。',
+                costDrawFunded: 'プログラム抽選の当選者には、本プログラム費用は全額助成されます。',
+                costProgramDrawDetails: 'プログラム抽選について',
                 residence: 'レジデンス',
                 included: '含まれるもの',
                 notIncluded: '含まれないもの',
@@ -112,6 +128,9 @@ class ProgramDetailsComponent extends HTMLElement {
             costMonthlyPayment: 'Monthly payment',
             costPaymentPlanHelper: 'Payment plans are available to select applicants.',
             costJapanNotice: 'Notice (Japan)',
+            costDrawEntryFee: 'One-time fee of $50 to enter the draw.',
+            costDrawFunded: 'This program is fully funded for the Program Draw winner.',
+            costProgramDrawDetails: 'Program Draw Details',
             cohortCapacity: 'COHORT',
             slotsRemainingValue: '<strong>{{a}}</strong> of <strong>{{b}}</strong> Slots Remaining',
             residence: 'RESIDENCE',
@@ -466,6 +485,55 @@ class ProgramDetailsComponent extends HTMLElement {
         container.appendChild(article);
     }
 
+    /**
+     * Collapsed “Program Draw Details” disclosure (apply-mode COST only).
+     * @param {HTMLElement} block
+     * @param {ReturnType<ProgramDetailsComponent['_labels']>} L
+     */
+    _appendProgramDrawDetailsDisclosure(block, L) {
+        this._costDrawDisclosureUid += 1;
+        const panelId = `sidebar-cost-draw-${this._costDrawDisclosureUid}`;
+        const section = document.createElement('div');
+        section.className = 'sidebar-cost-plan-extras sidebar-cost-draw-details';
+        const trig = document.createElement('button');
+        trig.type = 'button';
+        trig.className = 'sidebar-cost-plan-trigger';
+        trig.setAttribute('aria-expanded', 'false');
+        trig.setAttribute('aria-controls', panelId);
+        const arr = document.createElement('span');
+        arr.className = 'sidebar-cost-plan-arrow';
+        arr.setAttribute('aria-hidden', 'true');
+        arr.textContent = '→';
+        const tlab = document.createElement('span');
+        tlab.className = 'sidebar-cost-plan-trigger-label';
+        tlab.textContent = L.costProgramDrawDetails;
+        trig.appendChild(arr);
+        trig.appendChild(tlab);
+        const panel = document.createElement('div');
+        panel.id = panelId;
+        panel.className = 'sidebar-cost-plan-panel';
+        panel.setAttribute('role', 'group');
+        panel.setAttribute('aria-label', L.costProgramDrawDetails);
+        panel.hidden = true;
+        const entry = document.createElement('p');
+        entry.className = 'sidebar-value sidebar-cost-draw-funded-msg';
+        entry.textContent = L.costDrawEntryFee;
+        const body = document.createElement('p');
+        body.className = 'sidebar-value sidebar-cost-draw-funded-msg';
+        body.textContent = L.costDrawFunded;
+        panel.appendChild(entry);
+        panel.appendChild(body);
+        section.appendChild(trig);
+        section.appendChild(panel);
+        block.appendChild(section);
+        trig.addEventListener('click', () => {
+            const willOpen = panel.hidden;
+            panel.hidden = !willOpen;
+            trig.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+            trig.classList.toggle('is-open', willOpen);
+        });
+    }
+
     _populate() {
         const root = this.shadowRoot;
         if (!root || !this._data) return;
@@ -577,7 +645,8 @@ class ProgramDetailsComponent extends HTMLElement {
             const runDateEnd = String(runDt?.end || '').trim();
 
             sidebarEl.innerHTML = '';
-            /** @type {Array<[string, 'list' | 'text' | 'residences' | 'cost_pair' | 'cost_details' | 'slots' | 'date_range', unknown]>} */
+            const isDrawMode = this._formMode === 'draw';
+            /** @type {Array<[string, 'list' | 'text' | 'residences' | 'cost_pair' | 'cost_details' | 'cost_draw_funded' | 'slots' | 'date_range', unknown]>} */
             const costPayload = useStruct
                 ? {
                       totalProgram: totalProgramLine,
@@ -588,11 +657,16 @@ class ProgramDetailsComponent extends HTMLElement {
                       japanNotice: locale === 'ja' ? jnLine : '',
                   }
                 : { main: cost, extra: appFeeSidebar };
+            const costBlock = /** @type {[string, 'cost_draw_funded' | 'cost_details' | 'cost_pair', unknown]} */ (
+                isDrawMode
+                    ? [L.cost, 'cost_draw_funded', true]
+                    : [L.cost, useStruct ? 'cost_details' : 'cost_pair', costPayload]
+            );
             const blocks = [
                 [L.dates, 'date_range', { start: runDateStart, end: runDateEnd }],
                 [L.locations, 'list', loc],
                 [L.facilities, 'list', fac],
-                [L.cost, useStruct ? 'cost_details' : 'cost_pair', costPayload],
+                costBlock,
                 [L.cohortCapacity, 'slots', { available: slotA, total: slotB, show: showCohortSlots }],
                 [L.residence, 'residences', residenceRows],
                 [L.included, 'list', incList],
@@ -712,6 +786,24 @@ class ProgramDetailsComponent extends HTMLElement {
                     }
                     block.appendChild(lab);
                     block.appendChild(ul);
+                    sidebarEl.appendChild(block);
+                    return;
+                }
+                if (kind === 'cost_draw_funded') {
+                    const block = document.createElement('div');
+                    block.className = 'sidebar-block sidebar-cost-draw-funded';
+                    const mainLab = document.createElement('div');
+                    mainLab.className = 'sidebar-label';
+                    mainLab.textContent = label;
+                    const entry = document.createElement('p');
+                    entry.className = 'sidebar-value sidebar-cost-draw-funded-msg';
+                    entry.textContent = L.costDrawEntryFee;
+                    const p = document.createElement('p');
+                    p.className = 'sidebar-value sidebar-cost-draw-funded-msg';
+                    p.textContent = L.costDrawFunded;
+                    block.appendChild(mainLab);
+                    block.appendChild(entry);
+                    block.appendChild(p);
                     sidebarEl.appendChild(block);
                     return;
                 }
@@ -859,6 +951,9 @@ class ProgramDetailsComponent extends HTMLElement {
                         row.appendChild(p);
                         block.appendChild(row);
                     }
+                    if (!isDrawMode) {
+                        this._appendProgramDrawDetailsDisclosure(block, L);
+                    }
                     sidebarEl.appendChild(block);
                     return;
                 }
@@ -884,6 +979,9 @@ class ProgramDetailsComponent extends HTMLElement {
                         p2.className = 'sidebar-value sidebar-value--addon';
                         p2.textContent = extra;
                         block.appendChild(p2);
+                    }
+                    if (!isDrawMode) {
+                        this._appendProgramDrawDetailsDisclosure(block, L);
                     }
                     sidebarEl.appendChild(block);
                     return;
@@ -930,28 +1028,45 @@ class ProgramDetailsComponent extends HTMLElement {
         }
         const pid = String(this._data.programId || '').trim();
         if (hasMain && drawCell instanceof HTMLElement && drawBtn instanceof HTMLButtonElement) {
-            // Inactive defaults immediately; config updates label/handler in the background.
+            // Inactive defaults immediately; config + entry update label/handler in the background.
             drawCell.hidden = false;
             drawBtn.textContent = programDrawCtaLabel(false);
             if (drawSubEl) {
                 drawSubEl.dataset.drawSlots = '100';
                 drawSubEl.dataset.drawActive = '0';
+                drawSubEl.dataset.drawEntered = '0';
                 drawSubEl.textContent = programDrawCtaSubLabel(100, false);
             }
             drawBtn.onclick = () => {
                 void revealProgramDrawInactivePanel();
             };
             if (pid) {
-                void import('../../utils/database.js')
-                    .then(({ getProgramDrawConfigPublic }) => getProgramDrawConfigPublic(pid))
-                    .then((cfg) => {
+                void Promise.all([
+                    import('../../utils/database.js').then(({ getProgramDrawConfigPublic }) =>
+                        getProgramDrawConfigPublic(pid),
+                    ),
+                    import('../../utils/database.js').then(async ({ getMyProgramAwardEntryDetailed }) => {
+                        try {
+                            const { getAuthSnapshot } = await import('../../utils/icAuth.js');
+                            const snap = await getAuthSnapshot();
+                            if (!snap?.authenticated) return false;
+                            const detailed = await getMyProgramAwardEntryDetailed(pid);
+                            return String(detailed?.entry?.status || '') === 'entered';
+                        } catch {
+                            return false;
+                        }
+                    }),
+                ])
+                    .then(([cfg, entered]) => {
                         const active = Boolean(cfg?.active);
                         drawCell.hidden = false;
                         const slots = Math.max(1, Number(cfg?.totalSlots) || 100);
-                        drawBtn.textContent = programDrawCtaLabel(active);
+                        const userEntered = Boolean(entered);
+                        drawBtn.textContent = programDrawCtaLabel(active, userEntered);
                         if (drawSubEl) {
                             drawSubEl.dataset.drawSlots = String(slots);
                             drawSubEl.dataset.drawActive = active ? '1' : '0';
+                            drawSubEl.dataset.drawEntered = userEntered ? '1' : '0';
                             drawSubEl.textContent = programDrawCtaSubLabel(slots, active);
                         }
                         drawBtn.onclick = () => {
@@ -964,6 +1079,7 @@ class ProgramDetailsComponent extends HTMLElement {
                         drawBtn.textContent = programDrawCtaLabel(false);
                         if (drawSubEl) {
                             drawSubEl.dataset.drawActive = '0';
+                            drawSubEl.dataset.drawEntered = '0';
                             drawSubEl.textContent = programDrawCtaSubLabel(100, false);
                         }
                         drawBtn.onclick = () => {
@@ -1131,13 +1247,37 @@ class ProgramDetailsComponent extends HTMLElement {
             void this._syncBeginApplicationButtonLabel(beginBtn);
         }
         if (drawCell instanceof HTMLElement && !drawCell.hidden && drawBtn instanceof HTMLButtonElement) {
-            const active = drawSubEl?.dataset.drawActive !== '0';
-            drawBtn.textContent = programDrawCtaLabel(active);
-            if (drawSubEl) {
-                const slots = Number(drawSubEl.dataset.drawSlots) || 100;
-                drawSubEl.textContent = programDrawCtaSubLabel(slots, active);
+            void this._syncDrawCtaLabel(drawBtn, drawSubEl);
+        }
+    }
+
+    /**
+     * @param {HTMLButtonElement} drawBtn
+     * @param {HTMLElement | null} drawSubEl
+     */
+    async _syncDrawCtaLabel(drawBtn, drawSubEl) {
+        const pid = String(this._data?.programId || '').trim();
+        const active = drawSubEl?.dataset.drawActive !== '0';
+        const slots = Number(drawSubEl?.dataset.drawSlots) || 100;
+        let entered = drawSubEl?.dataset.drawEntered === '1';
+        if (pid) {
+            try {
+                const { getAuthSnapshot } = await import('../../utils/icAuth.js');
+                const snap = await getAuthSnapshot();
+                if (snap?.authenticated) {
+                    const { getMyProgramAwardEntryDetailed } = await import('../../utils/database.js');
+                    const detailed = await getMyProgramAwardEntryDetailed(pid);
+                    entered = String(detailed?.entry?.status || '') === 'entered';
+                } else {
+                    entered = false;
+                }
+            } catch {
+                /* keep prior */
             }
         }
+        if (drawSubEl) drawSubEl.dataset.drawEntered = entered ? '1' : '0';
+        drawBtn.textContent = programDrawCtaLabel(active, entered);
+        if (drawSubEl) drawSubEl.textContent = programDrawCtaSubLabel(slots, active);
     }
 
     connectedCallback() {
@@ -1147,6 +1287,7 @@ class ProgramDetailsComponent extends HTMLElement {
             window.addEventListener('fusion-auth-change', this._onProgramCtaRefresh);
             window.addEventListener('fusion-localechange', this._onProgramCtaRefresh);
             window.addEventListener('fusion-program-application-submitted', this._onProgramCtaRefresh);
+            window.addEventListener('fusion-program-draw-entry-change', this._onProgramCtaRefresh);
         }
         if (!this._navBound) {
             this._navBound = true;
@@ -1173,6 +1314,7 @@ class ProgramDetailsComponent extends HTMLElement {
             window.removeEventListener('fusion-auth-change', this._onProgramCtaRefresh);
             window.removeEventListener('fusion-localechange', this._onProgramCtaRefresh);
             window.removeEventListener('fusion-program-application-submitted', this._onProgramCtaRefresh);
+            window.removeEventListener('fusion-program-draw-entry-change', this._onProgramCtaRefresh);
             this._programCtaRefreshBound = false;
             this._onProgramCtaRefresh = null;
         }
@@ -1648,6 +1790,22 @@ class ProgramDetailsComponent extends HTMLElement {
                 .sidebar-cost-plan-panel {
                     margin-top: 0.4rem;
                     padding-left: 0.1rem;
+                }
+
+                .sidebar-cost-draw-funded-msg {
+                    margin: 0.35rem 0 0;
+                    font-size: clamp(0.88rem, 1.05vw, 0.98rem);
+                    font-variation-settings: var(--fv-body-wide);
+                    color: var(--c2);
+                    line-height: 1.45;
+                    letter-spacing: 0.02em;
+                }
+                .sidebar-cost-draw-funded-msg + .sidebar-cost-draw-funded-msg {
+                    margin-top: 0.55rem;
+                }
+
+                .sidebar-cost-draw-details {
+                    margin-top: 0.85rem;
                 }
 
                 .sidebar-cost-plan-panel[hidden] {

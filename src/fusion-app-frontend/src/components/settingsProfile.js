@@ -68,7 +68,10 @@ import { getAuthSnapshot } from "../utils/icAuth.js";
 import { DEV_MODE } from "../config.js";
 import { uploadBlobToS3 } from "../utils/studioS3Upload.js";
 import { openMpdAudioCaptureModal } from "./subComponents/audioCaptureModal.js";
-import { isArtistAudioApproved } from "../utils/artistCardImageMode.js";
+import {
+  isArtistAudioApproved,
+  isArtistAudioFullSiteApproved,
+} from "../utils/artistCardImageMode.js";
 import {
   prepareImageFileForUpload,
 } from "../utils/imageUploadPrep.js";
@@ -1476,6 +1479,7 @@ function renderMpdAudioCollection(collection) {
   const entries = collection?.entries ?? [];
   const highlightUrl = collection?.highlightUrl ?? "";
   const approvedSet = new Set(collection?.approvedUrls ?? []);
+  const fullSiteSet = new Set(collection?.fullSiteApprovedUrls ?? []);
 
   if (countEl) {
     countEl.hidden = entries.length === 0;
@@ -1487,8 +1491,8 @@ function renderMpdAudioCollection(collection) {
 
   if (entries.length === 0) {
     container.innerHTML = "";
-      return;
-    }
+    return;
+  }
   const escHtml = (s) =>
     String(s ?? "")
       .replace(/&/g, "&amp;")
@@ -1498,10 +1502,18 @@ function renderMpdAudioCollection(collection) {
   container.innerHTML = entries
     .map((e) => {
       const isHighlight = e.url === highlightUrl;
-      const isApproved = approvedSet.has(e.url);
+      const isFullSite = fullSiteSet.has(e.url);
+      const isProfile = approvedSet.has(e.url) || isFullSite;
       const hlClass = isHighlight ? " is-highlight" : "";
-      const statusText = isApproved ? "approved" : "pending";
-      const statusClass = isApproved ? "is-approved" : "is-pending";
+      let statusText = "pending";
+      let statusClass = "is-pending";
+      if (isFullSite) {
+        statusText = "full site";
+        statusClass = "is-approved";
+      } else if (isProfile) {
+        statusText = "profile";
+        statusClass = "is-approved";
+      }
       const audioNote = mpdAssetReviewNotes.audioEntries.find(([k]) => k.endsWith('|' + e.url));
       const audioBanner = audioNote ? mpdReviewBannerHtml(audioNote[1]) : '';
       return `<div class="mpd-audio-entry${hlClass}" data-audio-url="${escHtml(e.url)}">
@@ -2944,9 +2956,57 @@ async function openMpdStripePaymentModal(item, paymentType, amountCents) {
       }
     };
     const finishPayment = async (orderId) => {
-      await svc.confirmPayPalOneTimePayment(orderId);
+      const oid = String(orderId || "").trim();
+      if (!oid) throw new Error("Missing PayPal order id.");
+      const paidBefore = item.totalPaidCents;
+      const depositBefore = item.depositPaid;
+      try {
+        await svc.confirmPayPalOneTimePayment(oid, {
+          principal,
+          programId: item.programId,
+          applicationId: item.applicationId,
+          paymentType,
+        });
+      } catch (e) {
+        showError(e);
+        return;
+      }
       closeMpdPaymentModal();
       await hydrateProgramPaymentsPanel(mpdLastProgramsForPayments);
+      // Re-check after hydrate: surface a clear failure if canister never recorded the payment.
+      try {
+        const payments = await getMyProgramPayments();
+        const summary = mpdPaymentSummaryFor(item.programId, payments);
+        const ledger = (payments.ledger || []).filter(
+          (x) => String(x.programId || "") === item.programId,
+        );
+        const paidAfter = mpdCents(summary?.totalPaidCents);
+        const depositAfter = isMemberProgramDepositPaid(
+          { applicationId: item.applicationId, manualDepositSubmitted: false },
+          summary,
+          ledger,
+          item.depositCents,
+        );
+        const orderOnLedger = ledger.some(
+          (row) =>
+            String(row.id || row.externalPaymentId || "") === oid &&
+            (String(row.status || "") === "succeeded" || String(row.status || "") === "paid"),
+        );
+        if (
+          !orderOnLedger &&
+          paidAfter <= paidBefore &&
+          (paymentType === "deposit" || paymentType === "full_payment"
+            ? !depositAfter && !depositBefore
+            : true)
+        ) {
+          window.alert(
+            "Payment may have completed in PayPal but is not yet reflected here. Refresh this page, or contact Fusion with your PayPal order id: " +
+              oid,
+          );
+        }
+      } catch {
+        /* hydrate already ran; avoid blocking UX on secondary check */
+      }
     };
     if (mount) {
       mount.textContent = "";
@@ -3590,12 +3650,6 @@ async function hydrateProgramsPanel(rec, locales, active) {
   }
   container.replaceChildren();
   const applicationIds = Object.keys(applied).filter(Boolean);
-  const countBadge = document.getElementById("mpd_my_programs_count");
-  if (countBadge) {
-    countBadge.textContent = String(applicationIds.length);
-    countBadge.toggleAttribute("hidden", applicationIds.length === 0);
-    countBadge.setAttribute("aria-label", `${applicationIds.length} applications`);
-  }
 
   /** @type {object[]} */
   let enteredDraws = [];
@@ -3606,6 +3660,20 @@ async function hydrateProgramsPanel(rec, locales, active) {
     );
   } catch {
     enteredDraws = [];
+  }
+
+  const drawProgramIds = new Set(
+    enteredDraws.map((e) => String(e?.programId || "").trim()).filter(Boolean),
+  );
+  const myProgramsTotal = new Set([...applicationIds.map(String), ...drawProgramIds]).size;
+  const countBadge = document.getElementById("mpd_my_programs_count");
+  if (countBadge) {
+    countBadge.textContent = String(myProgramsTotal);
+    countBadge.toggleAttribute("hidden", myProgramsTotal === 0);
+    countBadge.setAttribute(
+      "aria-label",
+      `${myProgramsTotal} program${myProgramsTotal === 1 ? "" : "s"}`,
+    );
   }
 
   const showTesterFixture =
@@ -4672,7 +4740,8 @@ export function generateSettingsProfileContent() {
                                 <div id="mpd_audio_section" class="mpd-audio-section">
                                 <h3 class="studio-subheading mpd-media-subhead">Audio bite</h3>
                                 <blockquote class="mpd-audio-inspiration" id="mpd_audio_inspiration">\u201CWords mean more than what is set down on paper. It takes the human voice to infuse them with deeper meaning.\u201D \u2014 Maya Angelou</blockquote>
-                                <p class="studio-muted mpd-media-helper">Upload a file or record up to 3 minutes with your microphone. New recordings require staff approval before they appear in the sound environment, your public profile, or journal audio rows.</p>
+                                <p class="studio-muted mpd-media-helper">Upload a file or record up to 3 minutes with your microphone. A title is required. Staff may approve clips for your public profile and/or for full-site play (sound environment and other site audio rows).</p>
+                                <p class="studio-muted mpd-media-helper mpd-audio-eligibility-notice">Audio without background noise or music may be eligible to play throughout the site after staff approval. Other audio stays on your public profile page only.</p>
                                 <input type="hidden" id="mpd_audio_url" value="" />
                                 <div class="mpd-audio-actions" id="mpd_audio_actions">
                                     <input type="file" id="mpd_audio_file" class="mpd-file-input-hidden" accept="audio/*" />
@@ -4680,8 +4749,8 @@ export function generateSettingsProfileContent() {
                                     <button type="button" class="mpd-upload-btn mpd-audio-record-btn" id="mpd_audio_record_open">Record audio</button>
                                 </div>
                                 <p id="mpd_audio_approval_status" class="mpd-audio-approval-status" hidden></p>
-                                <label class="studio-field studio-field--full"><span>Audio title</span>
-                                    <input type="text" id="mpd_audio_title" class="studio-input" />
+                                <label class="studio-field studio-field--full"><span>Audio title <span class="mpd-required-mark" aria-hidden="true">*</span></span>
+                                    <input type="text" id="mpd_audio_title" class="studio-input" maxlength="120" placeholder="Required before upload or record" />
                                 </label>
                                 <div id="mpd_audio_collection" class="mpd-audio-collection"></div>
                                 <p class="studio-muted mpd-audio-count" id="mpd_audio_count" hidden></p>
@@ -5040,7 +5109,7 @@ export default function initSettingsProfile() {
   let baselineMediaUploadRevision = 0;
   /** Restricted Applicant Studio chrome (locked nav + My programs + Join unlock). */
   let applicantStudioActive = false;
-  /** needsSubscription with zero applications — Join unlock primary. */
+  /** needsSubscription with zero applications and zero entered draws — Join unlock primary. */
   let applicantLightGateActive = false;
   let applicationOnlyDisplayPref = readApplicationOnlyDisplayPref();
   /** @type {(() => void) | null} */
@@ -6637,14 +6706,29 @@ export default function initSettingsProfile() {
         e.target && /** @type {Element} */ (e.target).closest?.("#mpd_audio_record_open");
       if (recordOpen && rootEl.contains(recordOpen)) {
         e.preventDefault();
+        if (!getVal("mpd_audio_title").trim()) {
+          setStatus("Add an audio title before recording.");
+          document.getElementById("mpd_audio_title")?.focus();
+          return;
+        }
         openMpdAudioCaptureModal({
           artistId: currentArtistId,
           slug: profileSlug,
-          onCaptured: ({ url }) => {
+          onCaptured: ({ url, title }) => {
+            const audioTitle =
+              String(title || "").trim() || getVal("mpd_audio_title").trim();
+            if (!audioTitle) {
+              setStatus("Add an audio title before recording.");
+              document.getElementById("mpd_audio_title")?.focus();
+              return;
+            }
             profileAudioUrl = url;
             mediaUploadRevision += 1;
-            addMyArtistAudioEntry(url, "Audio bite")
-              .then(() => loadMpdAudioCollection())
+            addMyArtistAudioEntry(url, audioTitle)
+              .then(() => {
+                setVal("mpd_audio_title", "");
+                return loadMpdAudioCollection();
+              })
               .catch((err) => console.error("Failed to add audio entry", err));
             setStatus("Recording uploaded and added to your collection.");
           },
@@ -6991,6 +7075,13 @@ export default function initSettingsProfile() {
       }
       if (t.id === "mpd_audio_file" && t.files?.[0]) {
         const f = t.files[0];
+        const audioTitle = getVal("mpd_audio_title").trim();
+        if (!audioTitle) {
+          mpdNotifyStatus("Add an audio title before uploading.");
+          document.getElementById("mpd_audio_title")?.focus();
+          t.value = "";
+          return;
+        }
         const MPD_MAX_AUDIO_BYTES = 10 * 1024 * 1024;
         if (f.size > MPD_MAX_AUDIO_BYTES) {
           mpdNotifyStatus(
@@ -7022,8 +7113,11 @@ export default function initSettingsProfile() {
           setVal("mpd_audio_url", url);
           profileAudioUrl = url;
           mediaUploadRevision += 1;
-          addMyArtistAudioEntry(url, "Audio bite")
-            .then(() => loadMpdAudioCollection())
+          addMyArtistAudioEntry(url, audioTitle)
+            .then(() => {
+              setVal("mpd_audio_title", "");
+              return loadMpdAudioCollection();
+            })
             .catch((err) => console.error("Failed to add audio entry", err));
           const badge = document.getElementById("mpd_audio_approval_status");
           if (badge) {
@@ -7425,6 +7519,15 @@ export default function initSettingsProfile() {
     const applicationCount = rec
       ? countApplicationsFromRecord(rec.applied_json ?? rec.appliedJson)
       : 0;
+    let awardEntryCount = 0;
+    try {
+      const awardRows = await listMyProgramAwardEntries();
+      awardEntryCount = (Array.isArray(awardRows) ? awardRows : []).filter(
+        (e) => String(/** @type {Record<string, unknown>} */ (e)?.status || "") === "entered",
+      ).length;
+    } catch {
+      awardEntryCount = 0;
+    }
     const hasTesterApp = rec
       ? applicationsIncludeTester(rec.applied_json ?? rec.appliedJson)
       : false;
@@ -7441,12 +7544,14 @@ export default function initSettingsProfile() {
     const applicantMode = shouldUseApplicantStudioMode({
       membershipGate: mpdMembershipGate,
       applicationCount,
+      awardEntryCount,
       applicationOnlyDisplay: applicationOnlyDisplayPref,
       applicationOnlyToggleVisible: showTesterToggle,
     });
     const lightGate = shouldUseApplicantLightGate({
       membershipGate: mpdMembershipGate,
       applicationCount,
+      awardEntryCount,
       applicationOnlyDisplay: applicationOnlyDisplayPref,
       applicationOnlyToggleVisible: showTesterToggle,
     });
@@ -7477,6 +7582,27 @@ export default function initSettingsProfile() {
         }
         if (formWrap) formWrap.setAttribute("hidden", "");
         setInitialProfileLoading(false);
+        applySettingsProfileDocumentSeo(dashTitle);
+        return;
+      }
+      // Draw-only guests (no linked artist yet): Programs → My programs with draw status.
+      if (applicantMode && awardEntryCount >= 1) {
+        applyApplicantStudioChrome({
+          applicantMode: true,
+          lightGate: false,
+          showTesterToggle,
+        });
+        setInitialProfileLoading(false);
+        if (formWrap) formWrap.removeAttribute("hidden");
+        if (hint) {
+          hint.textContent =
+            "Track your Program Draw under My programs. Become a FUSION member to unlock your full studio.";
+        }
+        localesState = { en: {}, ja: {} };
+        void hydrateProgramsPanel(/** @type {Record<string, unknown>} */ ({}), localesState, "en");
+        setMpdProgramsTab("my-programs");
+        const hashKey = panelKeyFromHash();
+        showMpdPanel(hashKey === "join-unlock" ? "join-unlock" : "programs");
         applySettingsProfileDocumentSeo(dashTitle);
         return;
       }
@@ -7589,12 +7715,15 @@ export default function initSettingsProfile() {
       if (badge) {
         if (profileAudioUrl) {
           badge.hidden = false;
-          const approved = isArtistAudioApproved(p);
-          badge.textContent = approved
-            ? "Approved for public playback"
-            : "Pending staff approval";
-          badge.classList.toggle("is-approved", approved);
-          badge.classList.toggle("is-pending", !approved);
+          const fullSite = isArtistAudioFullSiteApproved(p);
+          const profileOk = isArtistAudioApproved(p) || fullSite;
+          badge.textContent = fullSite
+            ? "Approved for full site"
+            : profileOk
+              ? "Approved for public profile"
+              : "Pending staff approval";
+          badge.classList.toggle("is-approved", profileOk);
+          badge.classList.toggle("is-pending", !profileOk);
         } else {
           badge.hidden = true;
           badge.textContent = "";

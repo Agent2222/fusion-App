@@ -22,10 +22,13 @@ import {
 import posthog from "posthog-js";
 import { introSlotsFromWorld } from "../utils/memberProfileForm.js";
 import { probeImageSrc } from "../utils/imageProbe.js";
-import { artistHasPublicPlayableAudio, getApprovedAudioEntries } from "../utils/artistCardImageMode.js";
+import {
+  artistHasProfilePlayableAudio,
+  getProfileAudioEntries,
+} from "../utils/artistCardImageMode.js";
 
 /**
- * Mount `app-audio-row` when the artist has an approved audio URL.
+ * Mount `app-audio-row` when the artist has profile-approved audio.
  * @param {HTMLElement | null} container
  * @param {unknown} artist
  * @param {string} [fallbackTitle]
@@ -34,11 +37,14 @@ function populateProfileAudio(container, artist, fallbackTitle = "") {
   if (!(container instanceof HTMLElement)) return;
   container.replaceChildren();
   const a = /** @type {Record<string, unknown> | null} */ (artist);
-  if (!artistHasPublicPlayableAudio(a)) {
+  if (!artistHasProfilePlayableAudio(a)) {
     container.setAttribute("hidden", "");
     return;
   }
-  const entries = getApprovedAudioEntries(a);
+  const entries = getProfileAudioEntries(a).map((e) => ({
+    url: e.url,
+    title: String(e.title || "").trim() || String(fallbackTitle || "").trim() || "Audio",
+  }));
   const row = document.createElement("app-audio-row");
   row.setAttribute("active", "true");
   row.setAttribute("data-layout", "profile");
@@ -46,10 +52,11 @@ function populateProfileAudio(container, artist, fallbackTitle = "") {
     row.setAttribute("data-audio-sources", JSON.stringify(entries));
   } else if (entries.length === 1) {
     row.setAttribute("data-audio-src", entries[0].url);
-    row.setAttribute("data-audio-title", entries[0].title || fallbackTitle || "Artist audio");
+    row.setAttribute("data-audio-title", entries[0].title);
   } else {
     const url = String(a?.audioUrl ?? "").trim();
-    const title = String(a?.audioTitle ?? "").trim() || fallbackTitle || "Artist audio";
+    const title =
+      String(a?.audioTitle ?? "").trim() || String(fallbackTitle || "").trim() || "Audio";
     row.setAttribute("data-audio-src", url);
     row.setAttribute("data-audio-title", title);
   }
@@ -283,6 +290,7 @@ export function generateProfileContent() {
                                     <div class="galleryAccessButton">Gallery Access</div>
                                 </div>
                             </div>
+                            <div id="profileAudioContainer" class="profile-audio-container" hidden></div>
                         </article>
                         <div id="profile-sight-words">
                             <p id="profileSightWordsHeading" class="artist-profile-heading">What they see</p>
@@ -297,7 +305,6 @@ export function generateProfileContent() {
                             <p><a href="/artists">Browse artists</a></p>
                         </div>
                         <div id="profileImagesContainer" class="profile-images-container"></div>
-                        <div id="profileAudioContainer" class="profile-audio-container" hidden></div>
                         <div id="profileGalleryAccessButtonContainer" class="profile-gallery-access-button-container">
                             <div class="galleryAccessButton">Gallery Access</div>
                         </div>

@@ -83,6 +83,16 @@ function artistMatchesNameQuery(artist, query) {
 }
 
 /**
+ * @param {unknown} artist
+ * @returns {boolean}
+ */
+export function artistIsDrawRecipient(artist) {
+    if (!artist || typeof artist !== 'object') return false;
+    const o = /** @type {Record<string, unknown>} */ (artist);
+    return Boolean(o.drawRecipient ?? o.draw_recipient);
+}
+
+/**
  * @param {object[]} artists
  * @returns {{ locationKeys: string[], disciplineKeys: string[], connectionIds: string[], cohortYears: number[] }}
  */
@@ -95,6 +105,7 @@ export function buildArtistFilterAvailability(artists) {
     const connectionIds = new Set();
     /** @type {Set<number>} */
     const cohortYears = new Set();
+    let hasDrawRecipients = false;
 
     for (const a of artists || []) {
         const m = deriveArtistFilterRow(a);
@@ -102,7 +113,9 @@ export function buildArtistFilterAvailability(artists) {
         if (m.disciplineKey) disciplineKeys.add(m.disciplineKey);
         connectionIds.add(m.connection === 'alumni' ? 'alumniConnection' : 'userConnection');
         for (const y of m.cohortYears) cohortYears.add(y);
+        if (artistIsDrawRecipient(a)) hasDrawRecipients = true;
     }
+    if (hasDrawRecipients) connectionIds.add('drawRecipientsConnection');
 
     return {
         locationKeys: [...locationKeys].sort(),
@@ -339,6 +352,9 @@ export function applyArtistFilters(artists, c) {
         }
 
         if (connectionId !== 'allConnection') {
+            if (connectionId === 'drawRecipientsConnection') {
+                return artistIsDrawRecipient(a);
+            }
             if (connectionId === 'alumniConnection' && m.connection !== 'alumni') return false;
             if (connectionId === 'userConnection' && m.connection !== 'artist') return false;
             const cm = /^(\d{4})CohortConnection$/.exec(connectionId);

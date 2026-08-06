@@ -33,6 +33,10 @@ describe('studioArtistForm', () => {
         expect(html).toContain('Credits management is coming soon');
         expect(html).toContain('id="studio-art-panel-new-world"');
         expect(html).toContain('id="studio-art-audio-display-for-artist"');
+        expect(html).toContain('id="studio-art-audio-approved"');
+        expect(html).toContain('id="studio-art-audio-approved-full-site"');
+        expect(html).toContain('Approved for public profile');
+        expect(html).toContain('Approved for full site');
         expect(html).toContain('Translate to New World');
         expect(html).toContain('id="studio-art-new-world-from-base"');
         expect(html).toContain('New World from base');

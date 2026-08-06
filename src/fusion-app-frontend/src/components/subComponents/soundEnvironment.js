@@ -3,7 +3,10 @@ import { artistLocaleBlock, artistDisplayName } from '../../utils/artistSlug.js'
 import { escapeHtml } from '../../utils/textPreview.js';
 import { navigate } from '../../router.js';
 import { assetUrlCandidates } from '../../utils/assetDistribution.js';
-import { artistHasPublicPlayableAudio } from '../../utils/artistCardImageMode.js';
+import {
+    artistHasFullSitePlayableAudio,
+    getFullSiteAudioEntries,
+} from '../../utils/artistCardImageMode.js';
 
 const LS = 'fusion-sound-env-v1';
 const DUCK = 0.45;
@@ -493,7 +496,7 @@ class SoundEnvironment extends HTMLElement {
             return;
         }
         const poolRaw = (await this._artistsWithAudioForRandom()).filter((a) =>
-            artistHasPublicPlayableAudio(a),
+            artistHasFullSitePlayableAudio(a),
         );
         const pool = this._dedupeVoicePoolByAudioUrl(poolRaw);
         const mode = String(c.voiceSelectionMode || 'random').toLowerCase();
@@ -514,7 +517,10 @@ class SoundEnvironment extends HTMLElement {
         }
         const name = formatVoiceArtistDisplayName(pick, String(pick?.locales?.en?.name || '').trim());
         const href = String(pick?.slug ? `/profile/${pick.slug}` : '/artists');
-        await this._playVoiceUrl(String(pick?.audioUrl || ''), null, name, href, pick);
+        const fullSiteEntries = getFullSiteAudioEntries(pick);
+        const voiceUrl =
+            String(fullSiteEntries[0]?.url || '').trim() || String(pick?.audioUrl || '').trim();
+        await this._playVoiceUrl(voiceUrl, null, name, href, pick);
         this._queueNextVoice();
     }
 
@@ -527,7 +533,8 @@ class SoundEnvironment extends HTMLElement {
         const seen = new Set();
         const out = [];
         for (const a of artists) {
-            const url = String(a?.audioUrl || '')
+            const entries = getFullSiteAudioEntries(a);
+            const url = String(entries[0]?.url || a?.audioUrl || '')
                 .trim()
                 .toLowerCase();
             if (!url || seen.has(url)) continue;
@@ -594,7 +601,7 @@ class SoundEnvironment extends HTMLElement {
     async _artistsWithAudioForRandom() {
         const { getArtists } = await import('../../utils/database.js');
         const a = await getArtists().catch(() => []);
-        return (Array.isArray(a) ? a : []).filter((row) => artistHasPublicPlayableAudio(row));
+        return (Array.isArray(a) ? a : []).filter((row) => artistHasFullSitePlayableAudio(row));
     }
 
     /**

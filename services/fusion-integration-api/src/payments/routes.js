@@ -40,7 +40,11 @@ const PROGRAM_PAYMENT_PLAN_START_ENABLED = false;
  * @param {{ requireApiKey: import('express').RequestHandler; programPaymentDeps?: object }} opts
  */
 export function registerPaymentRoutes(app, opts) {
-    const { requireApiKey, programPaymentDeps = {} } = opts;
+    const {
+        requireApiKey,
+        programPaymentDeps = {},
+        cancelPlatformSubscriptionImmediately,
+    } = opts;
 
     app.get('/payments/config', (_req, res) => {
         res.json({
@@ -463,6 +467,28 @@ export function registerPaymentRoutes(app, opts) {
             const sub = await getPayPalSubscription(subscriptionId);
             await pushPayPalSubscriptionToCanister(sub);
             return res.json({ ok: true, subscriptionId, status: sub.status });
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            return res.status(500).json({ error: msg });
+        }
+    });
+
+    /**
+     * Studio / ops: cancel Stripe + PayPal platform membership for a program-confirmed member.
+     * Body: { principal }
+     */
+    app.post('/payments/subscription/cancel-for-program', requireApiKey, async (req, res) => {
+        try {
+            const principalText = safePayPalMetaValue(req.body?.principal, 500);
+            if (!principalText) {
+                return res.status(400).json({ error: 'principal required' });
+            }
+            Principal.fromText(principalText);
+            if (typeof cancelPlatformSubscriptionImmediately !== 'function') {
+                return res.status(503).json({ error: 'Cancel helper not configured' });
+            }
+            const result = await cancelPlatformSubscriptionImmediately(principalText);
+            return res.json({ ok: Boolean(result?.ok), principal: principalText, ...result });
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             return res.status(500).json({ error: msg });

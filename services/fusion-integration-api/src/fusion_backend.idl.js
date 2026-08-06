@@ -61,6 +61,11 @@ export const idlFactory = ({ IDL }) => {
             [MembershipAccessResult],
             ['query'],
         ),
+        integrationGetMembershipSnapshotJson: IDL.Func(
+            [IDL.Principal],
+            [IDL.Text],
+            ['query'],
+        ),
         integrationRecordStripeSubscription: IDL.Func(
             [
                 IDL.Principal,

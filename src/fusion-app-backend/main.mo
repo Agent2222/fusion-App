@@ -193,15 +193,21 @@ persistent actor {
   stable var artistHeroProfileImageStable : [(Text, Text)] = [];
   /// Artist ids with staff-approved headshots for public cards (parallel map; default not approved).
   stable var artistHeroProfileImageApprovedIdsStable : [Text] = [];
-  /// Artist ids whose audio bite is approved for public play (sound env / profile / journal).
+  /// Artist ids whose audio bite is approved for public profile playback.
   stable var artistAudioApprovedIdsStable : [Text] = [];
+  /// Artist ids whose audio is approved for full-site play (sound env / site audio rows).
+  stable var artistAudioFullSiteApprovedIdsStable : [Text] = [];
+  /// One-time: copy existing profile approvals into full-site maps after upgrade.
+  stable var audioFullSiteMigratedV1 : Bool = false;
 
   /// Multi-bite audio collection per artist (max 5 entries each).
   stable var artistAudioCollectionStable : [(Text, [Types.ArtistAudioEntry])] = [];
   /// Artist id → highlight audio URL (synced to ArtistMedia.audioUrl for backward compat).
   stable var artistAudioHighlightStable : [(Text, Text)] = [];
-  /// Artist id → list of staff-approved audio URLs (per-bite approval).
+  /// Artist id → list of staff-approved audio URLs (per-bite profile approval).
   stable var artistAudioApprovedUrlsStable : [(Text, [Text])] = [];
+  /// Artist id → list of full-site-approved audio URLs.
+  stable var artistAudioFullSiteApprovedUrlsStable : [(Text, [Text])] = [];
 
   /// Staff review notes for hero profile images (keyed by artist id).
   stable var heroProfileImageReviewNotesStable : [(Text, Types.AssetReviewNote)] = [];
@@ -278,6 +284,13 @@ persistent actor {
       Text.hash
     );
 
+  transient var artistAudioFullSiteApprovedById : _HashMap.HashMap<Text, Bool> =
+    _HashMap.HashMap<Text, Bool>(
+      artistAudioFullSiteApprovedIdsStable.size(),
+      Text.equal,
+      Text.hash
+    );
+
   transient var artistAudioCollectionById : _HashMap.HashMap<Text, [Types.ArtistAudioEntry]> =
     _HashMap.HashMap<Text, [Types.ArtistAudioEntry]>(0, Text.equal, Text.hash);
 
@@ -285,6 +298,9 @@ persistent actor {
     _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
 
   transient var artistAudioApprovedUrlsById : _HashMap.HashMap<Text, [Text]> =
+    _HashMap.HashMap<Text, [Text]>(0, Text.equal, Text.hash);
+
+  transient var artistAudioFullSiteApprovedUrlsById : _HashMap.HashMap<Text, [Text]> =
     _HashMap.HashMap<Text, [Text]>(0, Text.equal, Text.hash);
 
   transient var heroProfileImageReviewNotesById : _HashMap.HashMap<Text, Types.AssetReviewNote> =
@@ -646,6 +662,17 @@ persistent actor {
   for (id in artistAudioApprovedIdsStable.vals()) {
     artistAudioApprovedById.put(id, true);
   };
+
+  for (id in artistAudioFullSiteApprovedIdsStable.vals()) {
+    artistAudioFullSiteApprovedById.put(id, true);
+  };
+
+  for (entry in artistAudioFullSiteApprovedUrlsStable.vals()) {
+    artistAudioFullSiteApprovedUrlsById.put(entry.0, entry.1);
+  };
+
+  // After loading profile approval maps into memory (URLs load in postupgrade for older installs).
+  // Migration also runs at end of postupgrade / import rebuild.
 
   for (entry in programsStable.vals()) {
     programsById.put(entry.0, entry.1);
@@ -1115,6 +1142,12 @@ persistent actor {
     Array.sort(keys, Text.compare);
   };
 
+  private func approvedFullSiteAudioIdsSorted() : [Text] {
+    let pairs = _Iter.toArray(artistAudioFullSiteApprovedById.entries());
+    let keys = Array.map<(Text, Bool), Text>(pairs, func((k, _) : (Text, Bool)) : Text { k });
+    Array.sort(keys, Text.compare);
+  };
+
   private func heroProfileImageApprovedForArtist(artistId : Text) : Bool {
     switch (artistHeroProfileImageApprovedById.get(artistId)) {
       case (?true) { true };
@@ -1129,11 +1162,30 @@ persistent actor {
     };
   };
 
+  private func audioFullSiteApprovedForArtist(artistId : Text) : Bool {
+    switch (artistAudioFullSiteApprovedById.get(artistId)) {
+      case (?true) { true };
+      case _ { false };
+    };
+  };
+
   private func setAudioApprovedForArtist(artistId : Text, approved : Bool) {
     if (approved) {
       artistAudioApprovedById.put(artistId, true);
     } else {
       ignore artistAudioApprovedById.remove(artistId);
+      // Profile revoke also clears full-site artist-level approval.
+      ignore artistAudioFullSiteApprovedById.remove(artistId);
+    };
+  };
+
+  private func setAudioFullSiteApprovedForArtist(artistId : Text, approved : Bool) {
+    if (approved) {
+      artistAudioFullSiteApprovedById.put(artistId, true);
+      // Full-site implies profile visibility.
+      artistAudioApprovedById.put(artistId, true);
+    } else {
+      ignore artistAudioFullSiteApprovedById.remove(artistId);
     };
   };
 
@@ -1160,6 +1212,13 @@ persistent actor {
     };
   };
 
+  private func getFullSiteApprovedAudioUrls(artistId : Text) : [Text] {
+    switch (artistAudioFullSiteApprovedUrlsById.get(artistId)) {
+      case (?urls) { urls };
+      case null { [] };
+    };
+  };
+
   private func isAudioUrlApproved(artistId : Text, url : Text) : Bool {
     let urls = getApprovedAudioUrls(artistId);
     for (u in urls.vals()) {
@@ -1168,13 +1227,35 @@ persistent actor {
     false;
   };
 
+  private func isAudioUrlFullSiteApproved(artistId : Text, url : Text) : Bool {
+    let urls = getFullSiteApprovedAudioUrls(artistId);
+    for (u in urls.vals()) {
+      if (u == url) return true;
+    };
+    false;
+  };
+
+  private func removeFullSiteApprovedUrl(artistId : Text, url : Text) {
+    let current = getFullSiteApprovedAudioUrls(artistId);
+    let filtered = Array.filter<Text>(current, func(u : Text) : Bool { u != url });
+    if (filtered.size() == current.size()) { return };
+    if (filtered.size() == 0) {
+      ignore artistAudioFullSiteApprovedUrlsById.remove(artistId);
+    } else {
+      artistAudioFullSiteApprovedUrlsById.put(artistId, filtered);
+    };
+  };
+
   private func setAudioUrlApproved(artistId : Text, url : Text, approved : Bool) {
     let current = getApprovedAudioUrls(artistId);
     if (approved) {
+      var already = false;
       for (u in current.vals()) {
-        if (u == url) return;
+        if (u == url) already := true;
       };
-      artistAudioApprovedUrlsById.put(artistId, Array.append(current, [url]));
+      if (not already) {
+        artistAudioApprovedUrlsById.put(artistId, Array.append(current, [url]));
+      };
     } else {
       let filtered = Array.filter<Text>(current, func(u : Text) : Bool { u != url });
       if (filtered.size() == 0) {
@@ -1182,17 +1263,68 @@ persistent actor {
       } else {
         artistAudioApprovedUrlsById.put(artistId, filtered);
       };
+      // Profile revoke clears full-site for that URL.
+      removeFullSiteApprovedUrl(artistId, url);
     };
     syncArtistLevelAudioApproval(artistId);
+  };
+
+  private func setAudioUrlFullSiteApproved(artistId : Text, url : Text, approved : Bool) {
+    if (approved) {
+      // Ensure profile URL approval first (does not clear full-site lists).
+      let profileUrls = getApprovedAudioUrls(artistId);
+      var profileHas = false;
+      for (u in profileUrls.vals()) {
+        if (u == url) profileHas := true;
+      };
+      if (not profileHas) {
+        artistAudioApprovedUrlsById.put(artistId, Array.append(profileUrls, [url]));
+      };
+      let current = getFullSiteApprovedAudioUrls(artistId);
+      var already = false;
+      for (u in current.vals()) {
+        if (u == url) already := true;
+      };
+      if (not already) {
+        artistAudioFullSiteApprovedUrlsById.put(artistId, Array.append(current, [url]));
+      };
+    } else {
+      removeFullSiteApprovedUrl(artistId, url);
+    };
+    syncArtistLevelAudioApproval(artistId);
+  };
+
+  private func syncArtistLevelFullSiteApproval(artistId : Text) {
+    let hl = getAudioHighlight(artistId);
+    if (hl.size() == 0) { return };
+    if (isAudioUrlFullSiteApproved(artistId, hl)) {
+      artistAudioFullSiteApprovedById.put(artistId, true);
+      artistAudioApprovedById.put(artistId, true);
+    } else {
+      ignore artistAudioFullSiteApprovedById.remove(artistId);
+    };
   };
 
   private func syncArtistLevelAudioApproval(artistId : Text) {
     let hl = getAudioHighlight(artistId);
     if (hl.size() > 0 and isAudioUrlApproved(artistId, hl)) {
-      setAudioApprovedForArtist(artistId, true);
-    } else {
-      setAudioApprovedForArtist(artistId, false);
+      artistAudioApprovedById.put(artistId, true);
+    } else if (hl.size() > 0) {
+      ignore artistAudioApprovedById.remove(artistId);
     };
+    syncArtistLevelFullSiteApproval(artistId);
+  };
+
+  /// One-time: existing profile approvals also count as full-site so sound env stays populated.
+  private func migrateAudioFullSiteFromProfileIfNeeded() {
+    if (audioFullSiteMigratedV1) { return };
+    for ((id, _) in artistAudioApprovedById.entries()) {
+      artistAudioFullSiteApprovedById.put(id, true);
+    };
+    for ((id, urls) in artistAudioApprovedUrlsById.entries()) {
+      artistAudioFullSiteApprovedUrlsById.put(id, urls);
+    };
+    audioFullSiteMigratedV1 := true;
   };
 
   private func syncHighlightToArtistMedia(artistId : Text) {
@@ -1912,9 +2044,11 @@ persistent actor {
     artistHeroProfileImageStable := _Iter.toArray(artistHeroProfileImageById.entries());
     artistHeroProfileImageApprovedIdsStable := approvedHeroProfileImageIdsSorted();
     artistAudioApprovedIdsStable := approvedAudioIdsSorted();
+    artistAudioFullSiteApprovedIdsStable := approvedFullSiteAudioIdsSorted();
     artistAudioCollectionStable := _Iter.toArray(artistAudioCollectionById.entries());
     artistAudioHighlightStable := _Iter.toArray(artistAudioHighlightById.entries());
     artistAudioApprovedUrlsStable := _Iter.toArray(artistAudioApprovedUrlsById.entries());
+    artistAudioFullSiteApprovedUrlsStable := _Iter.toArray(artistAudioFullSiteApprovedUrlsById.entries());
     heroProfileImageReviewNotesStable := _Iter.toArray(heroProfileImageReviewNotesById.entries());
     audioEntryReviewNotesStable := _Iter.toArray(audioEntryReviewNotesByKey.entries());
     emailCampaignsStable := _Iter.toArray(emailCampaignsById.entries());
@@ -2092,6 +2226,12 @@ persistent actor {
     };
     artistAudioApprovedIdsStable := [];
 
+    artistAudioFullSiteApprovedById := _HashMap.HashMap<Text, Bool>(0, Text.equal, Text.hash);
+    for (id in artistAudioFullSiteApprovedIdsStable.vals()) {
+      artistAudioFullSiteApprovedById.put(id, true);
+    };
+    artistAudioFullSiteApprovedIdsStable := [];
+
     artistAudioCollectionById := _HashMap.HashMap<Text, [Types.ArtistAudioEntry]>(
       artistAudioCollectionStable.size(), Text.equal, Text.hash
     );
@@ -2115,6 +2255,16 @@ persistent actor {
       artistAudioApprovedUrlsById.put(entry.0, entry.1);
     };
     artistAudioApprovedUrlsStable := [];
+
+    artistAudioFullSiteApprovedUrlsById := _HashMap.HashMap<Text, [Text]>(
+      artistAudioFullSiteApprovedUrlsStable.size(), Text.equal, Text.hash
+    );
+    for (entry in artistAudioFullSiteApprovedUrlsStable.vals()) {
+      artistAudioFullSiteApprovedUrlsById.put(entry.0, entry.1);
+    };
+    artistAudioFullSiteApprovedUrlsStable := [];
+
+    migrateAudioFullSiteFromProfileIfNeeded();
 
     heroProfileImageReviewNotesById := _HashMap.HashMap<Text, Types.AssetReviewNote>(
       heroProfileImageReviewNotesStable.size(), Text.equal, Text.hash
@@ -2538,6 +2688,15 @@ persistent actor {
       artistAudioApprovedById.put(id, true);
     };
 
+    artistAudioFullSiteApprovedById := _HashMap.HashMap<Text, Bool>(
+      artistAudioFullSiteApprovedIdsStable.size(),
+      Text.equal,
+      Text.hash
+    );
+    for (id in artistAudioFullSiteApprovedIdsStable.vals()) {
+      artistAudioFullSiteApprovedById.put(id, true);
+    };
+
     artistAudioCollectionById := _HashMap.HashMap<Text, [Types.ArtistAudioEntry]>(
       artistAudioCollectionStable.size(), Text.equal, Text.hash
     );
@@ -2558,6 +2717,15 @@ persistent actor {
     for (entry in artistAudioApprovedUrlsStable.vals()) {
       artistAudioApprovedUrlsById.put(entry.0, entry.1);
     };
+
+    artistAudioFullSiteApprovedUrlsById := _HashMap.HashMap<Text, [Text]>(
+      artistAudioFullSiteApprovedUrlsStable.size(), Text.equal, Text.hash
+    );
+    for (entry in artistAudioFullSiteApprovedUrlsStable.vals()) {
+      artistAudioFullSiteApprovedUrlsById.put(entry.0, entry.1);
+    };
+
+    migrateAudioFullSiteFromProfileIfNeeded();
 
     heroProfileImageReviewNotesById := _HashMap.HashMap<Text, Types.AssetReviewNote>(
       heroProfileImageReviewNotesStable.size(), Text.equal, Text.hash
@@ -2717,6 +2885,7 @@ persistent actor {
       artistHeroProfileImageStable = ?(_Iter.toArray(artistHeroProfileImageById.entries()));
       artistHeroProfileImageApprovedIdsStable = ?approvedHeroProfileImageIdsSorted();
       artistAudioApprovedIdsStable = ?approvedAudioIdsSorted();
+      artistAudioFullSiteApprovedIdsStable = ?approvedFullSiteAudioIdsSorted();
       artistsStable = _Iter.toArray(artistsById.entries());
       programsStable = _Iter.toArray(programsById.entries());
       programDrawConfigStable = ?(_Iter.toArray(programDrawConfigById.entries()));
@@ -2746,6 +2915,7 @@ persistent actor {
       artistAudioCollectionStable = ?(_Iter.toArray(artistAudioCollectionById.entries()));
       artistAudioHighlightStable = ?(_Iter.toArray(artistAudioHighlightById.entries()));
       artistAudioApprovedUrlsStable = ?(_Iter.toArray(artistAudioApprovedUrlsById.entries()));
+      artistAudioFullSiteApprovedUrlsStable = ?(_Iter.toArray(artistAudioFullSiteApprovedUrlsById.entries()));
       heroProfileImageReviewNotesStable = ?(_Iter.toArray(heroProfileImageReviewNotesById.entries()));
       audioEntryReviewNotesStable = ?(_Iter.toArray(audioEntryReviewNotesByKey.entries()));
     };
@@ -2780,6 +2950,10 @@ persistent actor {
       case (?rows) { rows };
     };
     artistAudioApprovedIdsStable := switch (snapshot.artistAudioApprovedIdsStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    artistAudioFullSiteApprovedIdsStable := switch (snapshot.artistAudioFullSiteApprovedIdsStable) {
       case null { [] };
       case (?rows) { rows };
     };
@@ -2854,6 +3028,10 @@ persistent actor {
       case null { [] };
       case (?rows) { rows };
     };
+    artistAudioFullSiteApprovedUrlsStable := switch (snapshot.artistAudioFullSiteApprovedUrlsStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
     heroProfileImageReviewNotesStable := switch (snapshot.heroProfileImageReviewNotesStable) {
       case null { [] };
       case (?rows) { rows };
@@ -2866,6 +3044,8 @@ persistent actor {
       case null { [] };
       case (?rows) { rows };
     };
+    // Import may predate full-site maps — allow migration to copy profile → full-site.
+    audioFullSiteMigratedV1 := false;
     rebuildTransientFromImportedStableArrays();
   };
 
@@ -2891,6 +3071,30 @@ persistent actor {
   public shared query (msg) func integrationGetMembershipAccessForPrincipal(p : Principal) : async Types.MembershipAccessResult {
     assertIntegrationCaller(msg.caller);
     membershipAccessForPrincipal(p);
+  };
+
+  /// Integration API: membership ids/status/exempt for cancel-on-confirm and Studio sync.
+  public shared query (msg) func integrationGetMembershipSnapshotJson(memberPrincipal : Principal) : async Text {
+    assertIntegrationCaller(msg.caller);
+    switch (accountsByPrincipal.get(memberPrincipal)) {
+      case null {
+        return "{\"hasAccount\":false,\"membershipExemptManual\":false,\"paypalSubscriptionId\":null,\"paypalSubscriptionStatus\":null,\"stripeSubscriptionId\":null,\"stripeSubscriptionStatus\":null,\"paymentProvider\":null}";
+      };
+      case (?_) {};
+    };
+    let m = switch (membershipByPrincipal.get(memberPrincipal)) {
+      case null { defaultMembership() };
+      case (?x) { x };
+    };
+    "{"
+      # "\"hasAccount\":true"
+      # ",\"membershipExemptManual\":" # jsonBool(m.membershipExemptManual)
+      # ",\"paypalSubscriptionId\":" # optJsonText(m.paypalSubscriptionId)
+      # ",\"paypalSubscriptionStatus\":" # optJsonText(m.paypalSubscriptionStatus)
+      # ",\"stripeSubscriptionId\":" # optJsonText(m.stripeSubscriptionId)
+      # ",\"stripeSubscriptionStatus\":" # optJsonText(m.stripeSubscriptionStatus)
+      # ",\"paymentProvider\":" # optJsonText(m.paymentProvider)
+      # "}"
   };
 
   private let APP_FEE_GUEST_CENTS : Nat = 5000;
@@ -3582,24 +3786,14 @@ persistent actor {
   /// Admin: set whether this member is exempt from subscription (manual veteran / complimentary).
   public shared (msg) func adminSetMembershipExemptManual(memberPrincipal : Principal, exempt : Bool) : async () {
     assertAdmin(msg.caller);
-    switch (accountsByPrincipal.get(memberPrincipal)) {
-      case null { Debug.trap("No account for principal") };
-      case (?_) {};
-    };
-    let m0 = switch (membershipByPrincipal.get(memberPrincipal)) {
-      case null { defaultMembership() };
-      case (?x) { x };
-    };
-    let m1 : Types.MembershipFields = {
-      stripeCustomerId = m0.stripeCustomerId;
-      stripeSubscriptionId = m0.stripeSubscriptionId;
-      stripeSubscriptionStatus = m0.stripeSubscriptionStatus;
-      paypalSubscriptionId = m0.paypalSubscriptionId;
-      paypalSubscriptionStatus = m0.paypalSubscriptionStatus;
-      paymentProvider = m0.paymentProvider;
-      membershipExemptManual = exempt;
-    };
-    membershipByPrincipal.put(memberPrincipal, m1);
+    setProgramMemberExempt(memberPrincipal, exempt);
+  };
+
+  /// Staff (Applicants): set membership exempt for confirmed / deposit-secured members.
+  public shared (msg) func staffSetMembershipExemptManual(memberPrincipal : Principal, exempt : Bool) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "applicants");
+    setProgramMemberExempt(memberPrincipal, exempt);
   };
 
   /// Admin: PEM identity used by the integration API to record Stripe subscription updates.
@@ -6084,6 +6278,26 @@ persistent actor {
       case null { null };
       case (?s) { s.activePlanId };
     };
+    // Manual / repair paths sometimes send 0 for deposit/total due — keep prior or default $1,000
+    // so cumulative manual payments can still flip depositStatus to paid.
+    let effectiveDeposit =
+      if (depositAmountCents > 0) { depositAmountCents }
+      else {
+        switch (prior) {
+          case (?s) {
+            if (s.depositAmountCents > 0) { s.depositAmountCents } else { 100000 };
+          };
+          case null { 100000 };
+        };
+      };
+    let effectiveTotalDue =
+      if (totalDueCents > 0) { totalDueCents }
+      else {
+        switch (prior) {
+          case (?s) { s.totalDueCents };
+          case null { 0 };
+        };
+      };
     let paidDelta =
       if (row.status == "succeeded" or row.status == "paid") {
         if (row.paymentType == "refund") { 0 } else { row.amountCents }
@@ -6091,11 +6305,11 @@ persistent actor {
         0
       };
     let nextPaid = priorPaid + paidDelta;
-    let outstanding = natSubFloor(totalDueCents, nextPaid);
+    let outstanding = natSubFloor(effectiveTotalDue, nextPaid);
     let depositStatus =
-      if (nextPaid >= totalDueCents and totalDueCents > 0) {
+      if (nextPaid >= effectiveTotalDue and effectiveTotalDue > 0) {
         "paid_full"
-      } else if (nextPaid >= depositAmountCents and depositAmountCents > 0) {
+      } else if (nextPaid >= effectiveDeposit and effectiveDeposit > 0) {
         "paid"
       } else if ((row.paymentType == "deposit" or row.paymentType == "full_payment") and paidDelta > 0) {
         "paid"
@@ -6111,8 +6325,8 @@ persistent actor {
       programId = row.programId;
       applicationId = row.applicationId;
       depositStatus = depositStatus;
-      totalDueCents = totalDueCents;
-      depositAmountCents = depositAmountCents;
+      totalDueCents = effectiveTotalDue;
+      depositAmountCents = effectiveDeposit;
       totalPaidCents = nextPaid;
       outstandingCents = outstanding;
       refundedCents = refundedCents;
@@ -6857,18 +7071,48 @@ persistent actor {
     };
   };
 
-  /// Public: artist ids whose audio bite is approved for sound env / profile / journal.
+  /// Public: artist ids whose audio is approved for public profile playback.
   public query func listArtistAudioApprovedPublic() : async [Text] {
     approvedAudioIdsSorted();
   };
 
-  /// Staff/admin: approve or revoke artist audio for public playback surfaces.
+  /// Public: artist ids whose audio is approved for full-site play (sound env / site rows).
+  public query func listArtistAudioFullSiteApprovedPublic() : async [Text] {
+    approvedFullSiteAudioIdsSorted();
+  };
+
+  /// Staff/admin: approve or revoke artist audio for public profile.
   public shared (msg) func staffSetArtistAudioApproved(artistId : Text, approved : Bool) : async () {
     assertStaffOrAdmin(msg.caller);
     assertStudioFeatureEdit(msg.caller, "artists");
     switch (artistsById.get(artistId)) {
       case null { Debug.trap("Unknown artist id") };
-      case (?_) { setAudioApprovedForArtist(artistId, approved) };
+      case (?_) {
+        setAudioApprovedForArtist(artistId, approved);
+        if (not approved) {
+          ignore artistAudioFullSiteApprovedUrlsById.remove(artistId);
+        };
+      };
+    };
+  };
+
+  /// Staff/admin: approve or revoke artist audio for full-site play.
+  public shared (msg) func staffSetArtistAudioFullSiteApproved(artistId : Text, approved : Bool) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "artists");
+    switch (artistsById.get(artistId)) {
+      case null { Debug.trap("Unknown artist id") };
+      case (?_) {
+        setAudioFullSiteApprovedForArtist(artistId, approved);
+        if (approved) {
+          let hl = getAudioHighlight(artistId);
+          if (hl.size() > 0) {
+            setAudioUrlFullSiteApproved(artistId, hl, true);
+          };
+        } else {
+          ignore artistAudioFullSiteApprovedUrlsById.remove(artistId);
+        };
+      };
     };
   };
 
@@ -6886,10 +7130,15 @@ persistent actor {
     _Iter.toArray(artistAudioApprovedUrlsById.entries());
   };
 
+  public query func listArtistAudioFullSiteApprovedUrls() : async [(Text, [Text])] {
+    _Iter.toArray(artistAudioFullSiteApprovedUrlsById.entries());
+  };
+
   public shared query (msg) func getMyArtistAudioCollection() : async ?{
     entries : [Types.ArtistAudioEntry];
     highlightUrl : Text;
     approvedUrls : [Text];
+    fullSiteApprovedUrls : [Text];
   } {
     if (Principal.equal(msg.caller, anonPrincipal)) return null;
     switch (accountsByPrincipal.get(msg.caller)) {
@@ -6902,6 +7151,7 @@ persistent actor {
               entries = getAudioCollection(aid);
               highlightUrl = getAudioHighlight(aid);
               approvedUrls = getApprovedAudioUrls(aid);
+              fullSiteApprovedUrls = getFullSiteApprovedAudioUrls(aid);
             };
           };
         };
@@ -6960,6 +7210,8 @@ persistent actor {
               artistAudioCollectionById.put(aid, filtered);
             };
             setAudioUrlApproved(aid, url, false);
+            removeFullSiteApprovedUrl(aid, url);
+            syncArtistLevelFullSiteApproval(aid);
             if (getAudioHighlight(aid) == url) {
               if (filtered.size() > 0) {
                 artistAudioHighlightById.put(aid, filtered[0].url);
@@ -7002,6 +7254,15 @@ persistent actor {
     switch (artistsById.get(artistId)) {
       case null { Debug.trap("Unknown artist id") };
       case (?_) { setAudioUrlApproved(artistId, url, approved) };
+    };
+  };
+
+  public shared (msg) func staffSetArtistAudioEntryFullSiteApproved(artistId : Text, url : Text, approved : Bool) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "artists");
+    switch (artistsById.get(artistId)) {
+      case null { Debug.trap("Unknown artist id") };
+      case (?_) { setAudioUrlFullSiteApproved(artistId, url, approved) };
     };
   };
 
@@ -7052,6 +7313,39 @@ persistent actor {
           imageUrl = imageUrl;
           reviewedAt = Int.toText(Time.now());
           approved = approved;
+        };
+        audioEntryReviewNotesByKey.put(compositeKey, note);
+      };
+    };
+  };
+
+  /// Staff: set profile + full-site URL approval and review note in one call.
+  public shared (msg) func staffSetAudioEntryReviewNoteWithScopes(
+    artistId : Text,
+    url : Text,
+    profileApproved : Bool,
+    fullSiteApproved : Bool,
+    reason : Text,
+    imageUrl : Text,
+  ) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "artists");
+    switch (artistsById.get(artistId)) {
+      case null { Debug.trap("Unknown artist id") };
+      case (?_) {
+        let siteOk = fullSiteApproved and profileApproved;
+        if (siteOk) {
+          setAudioUrlFullSiteApproved(artistId, url, true);
+        } else {
+          setAudioUrlFullSiteApproved(artistId, url, false);
+          setAudioUrlApproved(artistId, url, profileApproved);
+        };
+        let compositeKey = artistId # "|" # url;
+        let note : Types.AssetReviewNote = {
+          reason = reason;
+          imageUrl = imageUrl;
+          reviewedAt = Int.toText(Time.now());
+          approved = profileApproved or siteOk;
         };
         audioEntryReviewNotesByKey.put(compositeKey, note);
       };
@@ -7122,9 +7416,11 @@ persistent actor {
         ignore artistHeroProfileImageById.remove(artistId);
         ignore artistHeroProfileImageApprovedById.remove(artistId);
         ignore artistAudioApprovedById.remove(artistId);
+        ignore artistAudioFullSiteApprovedById.remove(artistId);
         ignore artistAudioCollectionById.remove(artistId);
         ignore artistAudioHighlightById.remove(artistId);
         ignore artistAudioApprovedUrlsById.remove(artistId);
+        ignore artistAudioFullSiteApprovedUrlsById.remove(artistId);
         ignore heroProfileImageReviewNotesById.remove(artistId);
         let prefix = artistId # "|";
         let keysToRemove = Buffer.Buffer<Text>(0);
@@ -7422,6 +7718,123 @@ persistent actor {
     enterProgramAwardForPrincipal(memberPrincipal, programId, paypalOrderId, currentQuarterKey, payloadJson)
   };
 
+  /// Staff: manually enter someone into the Program Award pool.
+  /// `memberPrincipalText` may be empty when the payer never finished account/II linking.
+  /// Non-empty `paypalOrderId` requires a principal (ledger attestation path).
+  /// Empty order id creates a staff-attested paid entry (no award credit consumed).
+  public shared (msg) func staffEnterProgramAwardManual(
+    programId : Text,
+    memberPrincipalText : Text,
+    payloadJson : Text,
+    paypalOrderId : Text,
+    currentQuarterKey : Text,
+  ) : async Types.ProgramAwardEntry {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "applicants");
+    let principalRaw = Text.trim(memberPrincipalText, #char ' ');
+    let hasPrincipal = principalRaw.size() > 0;
+    let memberPrincipal = if (hasPrincipal) {
+      Principal.fromText(principalRaw)
+    } else {
+      anonPrincipal
+    };
+    if (hasPrincipal and Principal.equal(memberPrincipal, anonPrincipal)) {
+      Debug.trap("Invalid member principal");
+    };
+    let orderId = Text.trim(paypalOrderId, #char ' ');
+    if (orderId.size() > 0) {
+      if (not hasPrincipal) {
+        Debug.trap("Member principal is required when attaching a PayPal order id");
+      };
+      return enterProgramAwardForPrincipal(
+        memberPrincipal,
+        programId,
+        orderId,
+        currentQuarterKey,
+        payloadJson,
+      );
+    };
+    let payload = validateAwardPayloadJson(payloadJson);
+    if (programId.size() == 0) { Debug.trap("programId required") };
+    switch (programsById.get(programId)) {
+      case null { Debug.trap("Unknown program") };
+      case (?_) {};
+    };
+    let cfg = switch (programDrawConfigById.get(programId)) {
+      case null { Debug.trap("Program Award is not configured") };
+      case (?c) { c };
+    };
+    if (not cfg.active) { Debug.trap("Program Award is not active") };
+    let emailKey = Text.toLowercase(Text.trim(extractJsonStringField(payload, "email"), #char ' '));
+    if (emailKey.size() == 0) { Debug.trap("Email required") };
+
+    // With principal: same path/idempotency rules as paid enter.
+    // Without: stable id from email so ops can recover payers who never linked II.
+    let pk =
+      if (hasPrincipal) { pathKey(memberPrincipal, programId) }
+      else { "staffaward:" # emailKey # "|" # programId };
+
+    if (hasPrincipal) {
+      let yearKey = yearKeyFromQuarterKey(currentQuarterKey);
+      switch (awardWinPeriodByPrincipal.get(memberPrincipal)) {
+        case (?w) {
+          if (w == yearKey) {
+            Debug.trap("Already won a Program Award this year");
+          };
+        };
+        case null {};
+      };
+      switch (programPathByKey.get(pk)) {
+        case (?path) {
+          if (path == "application") {
+            Debug.trap("Already applying to this program — withdraw the application before entering the Program Draw");
+          };
+          if (path == "award") {
+            switch (programAwardEntriesById.get(pk)) {
+              case (?existing) {
+                if (existing.status == "entered") {
+                  programAwardPayloadById.put(pk, payload);
+                  return existing;
+                };
+              };
+              case null {};
+            };
+          };
+        };
+        case null {};
+      };
+    } else {
+      switch (programAwardEntriesById.get(pk)) {
+        case (?existing) {
+          if (existing.status == "entered") {
+            programAwardPayloadById.put(pk, payload);
+            return existing;
+          };
+        };
+        case null {};
+      };
+    };
+    if (countActiveAwardEntries(programId) >= cfg.totalSlots) {
+      Debug.trap("Program Award slots are full");
+    };
+    let now = nowText();
+    let entry : Types.ProgramAwardEntry = {
+      id = pk;
+      programId = programId;
+      principalText = if (hasPrincipal) { Principal.toText(memberPrincipal) } else { "" };
+      status = "entered";
+      enteredAt = now;
+      updatedAt = now;
+      paidEntry = true;
+    };
+    programAwardEntriesById.put(pk, entry);
+    programAwardPayloadById.put(pk, payload);
+    if (hasPrincipal) {
+      programPathByKey.put(pk, "award");
+    };
+    entry
+  };
+
   /// Exit Program Award (does not refund consumed entry). Clears path for formal apply.
   public shared (msg) func exitProgramAward(programId : Text) : async () {
     if (Principal.equal(msg.caller, anonPrincipal)) {
@@ -7575,6 +7988,45 @@ persistent actor {
     }
   };
 
+  /// Masked public display name: "F. Lastname" from award payload (no email/principal).
+  private func maskedAwardApplicantDisplayName(payloadJson : Text) : Text {
+    let first = Text.trim(extractJsonStringField(payloadJson, "firstName"), #char ' ');
+    let last = Text.trim(extractJsonStringField(payloadJson, "lastName"), #char ' ');
+    var initial = "";
+    label take {
+      for (c in Text.toIter(first)) {
+        initial := Char.toText(c);
+        break take;
+      };
+    };
+    if (initial.size() > 0 and last.size() > 0) {
+      initial # ". " # last
+    } else if (last.size() > 0) {
+      last
+    } else if (initial.size() > 0) {
+      initial # "."
+    } else {
+      "Artist"
+    }
+  };
+
+  /// Public: current draw pool display names only (first initial + last name).
+  public query func listProgramAwardApplicantNamesPublic(programId : Text) : async [Text] {
+    let pid = Text.trim(programId, #char ' ');
+    if (pid.size() == 0) { return [] };
+    let buf = Buffer.Buffer<Text>(0);
+    for ((id, e) in programAwardEntriesById.entries()) {
+      if (e.programId == pid and e.status == "entered") {
+        let payload = switch (programAwardPayloadById.get(id)) {
+          case (?p) { p };
+          case null { "" };
+        };
+        buf.add(maskedAwardApplicantDisplayName(payload));
+      };
+    };
+    Buffer.toArray(buf)
+  };
+
   /// Mark winner for a program; enforces one win per calendar year. Optional gift to another principal.
   public shared (msg) func adminSelectProgramAwardWinner(
     programId : Text,
@@ -7701,6 +8153,11 @@ persistent actor {
     artistMediaByArtistId.put(artistId, m);
     if (audioUrl != prevUrl) {
       setAudioApprovedForArtist(artistId, false);
+      ignore artistAudioFullSiteApprovedById.remove(artistId);
+      if (prevUrl.size() > 0) {
+        removeFullSiteApprovedUrl(artistId, prevUrl);
+        setAudioUrlApproved(artistId, prevUrl, false);
+      };
     };
   };
 
@@ -8442,6 +8899,14 @@ persistent actor {
       };
     };
     programPaymentSummariesByKey.put(key, prior);
+    // Confirmed via staff manual deposit: complimentary membership + program confirmation sidecar.
+    switch (accountsByPrincipal.get(principal)) {
+      case null {};
+      case (?_) {
+        setProgramMemberExempt(principal, true);
+        markArtistConfirmedForProgram(principal, programId, updatedAt);
+      };
+    };
   };
 
   public shared query (msg) func staffIsApplicantSlotSecured(applicantId : Text, programId : Text) : async Bool {

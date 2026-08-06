@@ -23,10 +23,10 @@ export const DEFAULT_PAYPAL_CLIENT_ID_LIVE =
 export const LS_RESEND_TEST_TO = 'fusion-studio-resend-test-to';
 /** Optional Resend From override for Studio test email (must be allowed in Resend) */
 export const LS_RESEND_FROM_OVERRIDE = 'fusion-studio-resend-from-override';
-/** Comma/newline-separated admin recipients for new application notifications (merged with {@link DEFAULT_APPLICATION_STAFF_EMAIL}). */
+/** Comma/newline-separated admin recipients for new application / Program Draw notifications (merged with {@link DEFAULT_APPLICATION_STAFF_EMAIL}). */
 export const LS_APPLICATION_ADMIN_EMAILS = 'fusion-studio-application-admin-emails';
 
-/** Always receives new-application notifications in addition to {@link getApplicationAdminEmails} entries. */
+/** Always receives new-application and Program Draw entry notifications in addition to {@link getApplicationAdminEmails} entries. */
 export const DEFAULT_APPLICATION_STAFF_EMAIL = 'info@fusionart.world';
 export const LS_S3_REGION = 'fusion-studio-s3-region-note';
 export const LS_S3_BUCKET = 'fusion-studio-s3-bucket-note';

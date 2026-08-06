@@ -947,6 +947,8 @@ module {
         artistHeroProfileImageApprovedIdsStable : ?[Text];
         /// Artist ids whose audio bite is approved for public play (parallel map; default not approved).
         artistAudioApprovedIdsStable : ?[Text];
+        /// Artist ids whose audio is approved for full-site play (sound env / site rows); optional for older backups.
+        artistAudioFullSiteApprovedIdsStable : ?[Text];
         artistsStable : [(Text, ArtistRecord)];
         programsStable : [(Text, ProgramRecord)];
         /// Program Draw / Award config by program id; optional for backups before this field existed.
@@ -986,6 +988,8 @@ module {
         artistAudioHighlightStable : ?[(Text, Text)];
         /// Artist id → list of staff-approved audio URLs (per-bite approval).
         artistAudioApprovedUrlsStable : ?[(Text, [Text])];
+        /// Artist id → list of full-site-approved audio URLs; optional for older backups.
+        artistAudioFullSiteApprovedUrlsStable : ?[(Text, [Text])];
         /// Staff review notes for hero profile images (keyed by artist id).
         heroProfileImageReviewNotesStable : ?[(Text, AssetReviewNote)];
         /// Staff review notes for audio entries (keyed by "artistId|audioUrl").

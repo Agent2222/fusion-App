@@ -548,21 +548,133 @@ function programPaymentMetadata(body, paymentType, amountCents) {
     };
 }
 
+/**
+ * Cancel platform membership for a program-confirmed member (Stripe + PayPal).
+ * Motoko exempt is set separately via integrationMarkProgramDepositAccepted / staff sync.
+ * @param {string} principalText
+ * @returns {Promise<{
+ *   ok: boolean,
+ *   stripe?: Record<string, unknown>,
+ *   paypal?: Record<string, unknown>,
+ * }>}
+ */
 async function cancelPlatformSubscriptionImmediately(principalText) {
-    if (!stripe) return { ok: false, reason: 'stripe_not_configured' };
-    const picked = await getStripeCustomerAndBestSubscription(stripe, principalText);
-    if (!picked.ok) return { ok: false, reason: picked.reason };
-    const { customer, subscription } = picked;
-    if (subscription.status === 'canceled') {
-        return { ok: true, subscriptionId: subscription.id, status: subscription.status };
+    const pText = String(principalText || '').trim();
+    /** @type {{ ok: boolean, stripe?: Record<string, unknown>, paypal?: Record<string, unknown> }} */
+    const out = { ok: true };
+
+    if (!stripe) {
+        out.stripe = { ok: false, reason: 'stripe_not_configured' };
+    } else {
+        try {
+            const picked = await getStripeCustomerAndBestSubscription(stripe, pText);
+            if (!picked.ok) {
+                out.stripe = { ok: true, skipped: true, reason: picked.reason };
+            } else {
+                const { customer, subscription } = picked;
+                if (subscription.status === 'canceled') {
+                    out.stripe = {
+                        ok: true,
+                        alreadyCanceled: true,
+                        subscriptionId: subscription.id,
+                        status: subscription.status,
+                    };
+                } else {
+                    const canceled = await stripe.subscriptions.cancel(subscription.id, {
+                        prorate: false,
+                    });
+                    try {
+                        await pushSubscriptionToCanister(canceled, customer.id);
+                    } catch (e) {
+                        console.warn('[stripe] immediate program-payment cancel canister sync:', e);
+                    }
+                    out.stripe = {
+                        ok: true,
+                        canceled: true,
+                        subscriptionId: canceled.id,
+                        status: canceled.status,
+                    };
+                }
+            }
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            console.warn('[stripe] program-confirm cancel failed:', msg);
+            out.stripe = { ok: false, error: msg };
+            out.ok = false;
+        }
     }
-    const canceled = await stripe.subscriptions.cancel(subscription.id, { prorate: false });
-    try {
-        await pushSubscriptionToCanister(canceled, customer.id);
-    } catch (e) {
-        console.warn('[stripe] immediate program-payment cancel canister sync:', e);
+
+    if (!isPayPalConfigured()) {
+        out.paypal = { ok: false, reason: 'paypal_not_configured' };
+    } else {
+        try {
+            const {
+                cancelPayPalSubscription,
+                getPayPalSubscription,
+                parsePayPalCustomId,
+                subscriptionCustomId,
+            } = await import('./payments/providers/paypalProvider.js');
+            const { pushPayPalSubscriptionToCanister } = await import('./canisterActor.js');
+            const actor = await getIntegrationActor();
+            let paypalSubId = '';
+            let paypalStatus = '';
+            if (actor && typeof actor.integrationGetMembershipSnapshotJson === 'function') {
+                const raw = await actor.integrationGetMembershipSnapshotJson(
+                    Principal.fromText(pText),
+                );
+                const snap =
+                    typeof raw === 'string'
+                        ? JSON.parse(raw || '{}')
+                        : raw && typeof raw === 'object'
+                          ? raw
+                          : {};
+                paypalSubId = String(snap.paypalSubscriptionId || '').trim();
+                paypalStatus = String(snap.paypalSubscriptionStatus || '').toUpperCase();
+            }
+            if (!paypalSubId) {
+                out.paypal = { ok: true, skipped: true, reason: 'no_paypal_subscription' };
+            } else if (paypalStatus === 'CANCELLED' || paypalStatus === 'EXPIRED') {
+                out.paypal = {
+                    ok: true,
+                    alreadyCanceled: true,
+                    subscriptionId: paypalSubId,
+                    status: paypalStatus,
+                };
+            } else {
+                await cancelPayPalSubscription(
+                    paypalSubId,
+                    'Program deposit confirmed — membership complimentary',
+                );
+                const sub = await getPayPalSubscription(paypalSubId);
+                const meta = parsePayPalCustomId(sub.custom_id || '');
+                const linked = {
+                    ...sub,
+                    custom_id: subscriptionCustomId({
+                        ...meta,
+                        principal: pText,
+                    }),
+                };
+                try {
+                    await pushPayPalSubscriptionToCanister(linked);
+                } catch (e) {
+                    console.warn('[paypal] program-confirm cancel canister sync:', e);
+                }
+                out.paypal = {
+                    ok: true,
+                    canceled: true,
+                    subscriptionId: sub.id,
+                    status: String(sub.status || ''),
+                };
+            }
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            console.warn('[paypal] program-confirm cancel failed:', msg);
+            out.paypal = { ok: false, error: msg };
+            out.ok = false;
+        }
     }
-    return { ok: true, subscriptionId: canceled.id, status: canceled.status };
+
+    return out;
 }
 
 function unwrapCanisterOpt(value) {
@@ -2796,6 +2908,7 @@ app.post('/storage/private-video/multipart/abort', requireApiKey, async (req, re
 
 registerPaymentRoutes(app, {
     requireApiKey,
+    cancelPlatformSubscriptionImmediately,
     programPaymentDeps: {
         sendProgramPaymentConfirmationEmails,
         markProgramPaymentEmailsSent,

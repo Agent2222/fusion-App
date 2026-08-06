@@ -7,7 +7,7 @@ import {
     isJournalEntryPublished,
     resolveJournalEntryByRef,
 } from '../utils/journalPublicVisibility.js';
-import { artistHasPublicPlayableAudio, getApprovedAudioEntries } from '../utils/artistCardImageMode.js';
+import { artistHasFullSitePlayableAudio, getFullSiteAudioEntries } from '../utils/artistCardImageMode.js';
 
 function escAttr(v) {
     return String(v ?? '')
@@ -65,7 +65,7 @@ function pickArtistForRow(row, artists, type) {
     const mode = String(row?.selectionMode || '').toLowerCase();
     const pool =
         type === 'audio'
-            ? artists.filter((a) => artistHasPublicPlayableAudio(a))
+            ? artists.filter((a) => artistHasFullSitePlayableAudio(a))
             : artists.filter((a) => String(a?.quote ?? '').trim());
     if (!pool.length) return null;
     if (mode === 'manual' && row?.artistId) {
@@ -125,7 +125,7 @@ export default async function initJournal() {
             } else if (type === 'audio') {
                 const artist = pickArtistForRow(row, Array.isArray(artists) ? artists : [], 'audio');
                 if (!artist) continue;
-                const entries = getApprovedAudioEntries(artist);
+                const entries = getFullSiteAudioEntries(artist);
                 const artistSlug = String(artist?.slug ?? '').trim();
                 const artistHrefAttr = artistSlug
                     ? ` data-artist-href="${escAttr(`/profile/${artistSlug}`)}"`

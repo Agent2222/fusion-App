@@ -743,10 +743,10 @@ export function buildApplicantApplicationSectionHtml(payloadJson, opts) {
         ? `${String(siteOrigin || '').replace(/\/$/, '')}/profile/${encodeURIComponent(profileSlug)}`
         : '';
     const profileCell = profile
-        ? `<a href="${escapeHtml(profile)}" target="_blank" rel="noopener noreferrer" class="studio-app-payload-link">/${escapeHtml(profileSlug || '')}</a>`
+        ? `<a href="${escapeHtml(profile)}" target="_blank" rel="noopener noreferrer" class="studio-app-payload-link">Open public profile (/${escapeHtml(profileSlug || '')})</a>`
         : '—';
     rows.push(
-        `<div class="studio-app-payload-dl__row"><dt>Artist profile</dt><dd>${profileCell}</dd></div>`,
+        `<div class="studio-app-payload-dl__row"><dt>Public profile</dt><dd>${profileCell}</dd></div>`,
     );
     let otherBlock = '';
     if (other && Object.keys(other).length) {

@@ -1105,6 +1105,56 @@ export async function confirmPayPalOneTimePayment(orderId, opts = {}) {
 }
 
 /**
+ * Staff/ops: re-import a completed PayPal program payment onto the Motoko ledger.
+ * Does not sync Stripe membership subscriptions.
+ * @param {{
+ *   orderId?: string,
+ *   captureId?: string,
+ *   transactionId?: string,
+ *   principal: string,
+ *   programId: string,
+ *   applicationId: string,
+ *   paymentType: string,
+ *   totalDueCents?: number,
+ *   depositAmountCents?: number,
+ *   ownFlight?: boolean,
+ *   flightCreditCents?: number,
+ *   applicantEmail?: string,
+ *   email?: string,
+ *   applicantName?: string,
+ *   fullName?: string,
+ *   payloadJson?: string,
+ *   payload?: Record<string, unknown>,
+ *   currentQuarterKey?: string,
+ * }} body
+ */
+export async function repairPayPalProgramPayment(body) {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const payloadJson =
+        typeof body.payloadJson === 'string'
+            ? body.payloadJson
+            : body.payload && typeof body.payload === 'object'
+              ? JSON.stringify(body.payload)
+              : undefined;
+    const res = await fetch(`${base}/payments/paypal/repair`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify({
+            ...body,
+            ...(payloadJson ? { payloadJson } : {}),
+        }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(
+            mapIntegrationUserMessage(err.error || `PayPal repair HTTP ${res.status}`, res.status),
+        );
+    }
+    return res.json();
+}
+
+/**
  * @param {{ principal?: string, email: string, metadata?: Record<string, string>, payFirst?: boolean, subscriptionTier?: 'monthly' | 'monthly_application' | 'quarterly' | 'annual' | 'bimonthly' }} opts
  */
 export async function createPayPalSubscription(opts) {
@@ -1216,6 +1266,33 @@ export async function cancelPayPalSubscriptionAtPeriodEnd(subscriptionId) {
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(mapIntegrationUserMessage(err.error || `PayPal cancel HTTP ${res.status}`, res.status));
+    }
+    return res.json();
+}
+
+/**
+ * Cancel Stripe + PayPal platform membership after program deposit / confirm.
+ * @param {string} principalText
+ * @returns {Promise<{ ok: boolean, stripe?: object, paypal?: object }>}
+ */
+export async function cancelPlatformSubscriptionForProgramConfirm(principalText) {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const principal = String(principalText || '').trim();
+    if (!principal) throw new Error('principal required');
+    const res = await fetch(`${base}/payments/subscription/cancel-for-program`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify({ principal }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(
+            mapIntegrationUserMessage(
+                err.error || `Cancel-for-program HTTP ${res.status}`,
+                res.status,
+            ),
+        );
     }
     return res.json();
 }

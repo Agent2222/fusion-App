@@ -6,8 +6,8 @@ import '../components/subComponents/joinNetwork.js';
 import '../components/subComponents/audioRow.js';
 import { getArtists, getContentBundleForStudio } from '../utils/database.js';
 import {
-    artistHasPublicPlayableAudio,
-    getApprovedAudioEntries,
+    artistHasFullSitePlayableAudio,
+    getFullSiteAudioEntries,
 } from '../utils/artistCardImageMode.js';
 import { applyDocumentSeo } from '../utils/documentSeo.js';
 import { startJoinCollageRotation } from '../utils/joinCollageRotate.js';
@@ -254,14 +254,14 @@ async function mountRandomArtistAudio(root, artistsPrefetch) {
     if (!(mount instanceof HTMLElement)) return;
     try {
         const artists = artistsPrefetch || (await getArtists());
-        const pool = (Array.isArray(artists) ? artists : []).filter((a) => artistHasPublicPlayableAudio(a));
+        const pool = (Array.isArray(artists) ? artists : []).filter((a) => artistHasFullSitePlayableAudio(a));
         if (!pool.length) {
             mount.hidden = true;
             mount.innerHTML = '';
             return;
         }
         const artist = pool[Math.floor(Math.random() * pool.length)];
-        const entries = getApprovedAudioEntries(artist);
+        const entries = getFullSiteAudioEntries(artist);
         const artistSlug = String(/** @type {any} */ (artist)?.slug ?? '').trim();
         const row = document.createElement('app-audio-row');
         row.setAttribute('active', 'true');

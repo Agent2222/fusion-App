@@ -486,14 +486,30 @@ export function isApplicantSlotSecured(applicant, index) {
     const depositStatus = String(summary?.depositStatus || '');
     if (depositStatus === 'paid' || depositStatus === 'paid_full') return true;
     if (normalizeCents(summary?.totalDueCents) === 0 && summary) return true;
+    const deposit =
+        normalizeCents(summary?.depositAmountCents) || PROGRAM_DEFAULT_DEPOSIT_CENTS;
+    if (normalizeCents(summary?.totalPaidCents) >= deposit && deposit > 0) return true;
     const ledger = index.ledgerByApplicationId.get(appId) || [];
-    return ledger.some((row) => {
+    if (
+        ledger.some((row) => {
+            const type = String(row?.paymentType || '');
+            return (
+                isLedgerRowSucceeded(row) &&
+                (type === 'deposit' || type === 'full_payment' || type === 'staff_manual')
+            );
+        })
+    ) {
+        return true;
+    }
+    // Cumulative PayPal "manual" (and other succeeded) payments that cover the deposit.
+    let paidSum = 0;
+    for (const row of ledger) {
+        if (!isLedgerRowSucceeded(row)) continue;
         const type = String(row?.paymentType || '');
-        return (
-            isLedgerRowSucceeded(row) &&
-            (type === 'deposit' || type === 'full_payment' || type === 'staff_manual')
-        );
-    });
+        if (type === 'refund' || type === 'program_award_entry') continue;
+        paidSum += normalizeCents(row?.amountCents);
+    }
+    return paidSum >= deposit && deposit > 0;
 }
 
 /**

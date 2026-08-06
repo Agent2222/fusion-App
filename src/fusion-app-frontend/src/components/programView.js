@@ -8,6 +8,7 @@ import {
   getContentBundleForStudio,
   getCurrentProgramSeason,
   getMyArtistRecord,
+  getMyProgramAwardEntryDetailed,
   getProgramDrawConfigPublic,
 } from "../utils/database.js";
 import { buildResidencyAlumniEntries } from "../utils/residencyAlumniEntries.js";
@@ -429,14 +430,35 @@ function wireProgramApplicationSection(programId, applicationsOpen = true) {
 
   /** @type {boolean} */
   let drawConfigActive = false;
+  /** @type {number} */
+  let drawTotalSlots = 100;
+  /** @type {boolean} */
+  let drawUserEntered = false;
 
   /**
-   * Always show the draw CTA; label/sub flip with ProgramDrawConfig.active.
+   * @returns {Promise<boolean>}
+   */
+  const resolveDrawEntered = async () => {
+    try {
+      const snap = await getAuthSnapshot();
+      if (!snap?.authenticated || !programId) return false;
+      const detailed = await getMyProgramAwardEntryDetailed(programId);
+      return String(detailed?.entry?.status || "") === "entered";
+    } catch {
+      return false;
+    }
+  };
+
+  /**
+   * Always show the draw CTA; label/sub flip with ProgramDrawConfig.active / entered.
    * @param {boolean} awardActive
    * @param {number} [totalSlots]
+   * @param {boolean} [entered]
    */
-  const setDrawCtaVisibility = (awardActive, totalSlots = 100) => {
+  const setDrawCtaVisibility = (awardActive, totalSlots = 100, entered = drawUserEntered) => {
     drawConfigActive = Boolean(awardActive);
+    drawTotalSlots = Math.max(1, Number(totalSlots) || 100);
+    drawUserEntered = Boolean(entered);
     for (const cell of drawCells) {
       cell.hidden = false;
       cell.removeAttribute("hidden");
@@ -445,8 +467,8 @@ function wireProgramApplicationSection(programId, applicationsOpen = true) {
     for (const pair of ctaPairs) {
       pair.classList.add("program-intro-cta-pair--with-draw");
     }
-    const label = programDrawCtaLabel(drawConfigActive);
-    const sub = programDrawCtaSubLabel(totalSlots, drawConfigActive);
+    const label = programDrawCtaLabel(drawConfigActive, drawUserEntered);
+    const sub = programDrawCtaSubLabel(drawTotalSlots, drawConfigActive);
     for (const el of drawCtAs) {
       el.textContent = label;
     }
@@ -455,16 +477,25 @@ function wireProgramApplicationSection(programId, applicationsOpen = true) {
     });
   };
 
-  // Show inactive defaults immediately; flip label when config resolves.
+  /**
+   * @param {boolean} [awardActive]
+   * @param {number} [totalSlots]
+   */
+  const refreshDrawCta = async (awardActive = drawConfigActive, totalSlots = drawTotalSlots) => {
+    const entered = await resolveDrawEntered();
+    setDrawCtaVisibility(awardActive, totalSlots, entered);
+  };
+
+  // Show inactive defaults immediately; flip label when config + entry resolve.
   setDrawCtaVisibility(false);
   void getProgramDrawConfigPublic(programId)
-    .then((cfg) => {
+    .then(async (cfg) => {
       const active = Boolean(cfg?.active);
       const slots = Math.max(1, Number(cfg?.totalSlots) || 100);
-      setDrawCtaVisibility(active, slots);
+      await refreshDrawCta(active, slots);
     })
     .catch(() => {
-      setDrawCtaVisibility(false);
+      void refreshDrawCta(false, 100);
     });
 
   setApplySubCopy();
@@ -584,24 +615,34 @@ function wireProgramApplicationSection(programId, applicationsOpen = true) {
   };
 
   void refreshAuthUi();
-  window.addEventListener("fusion-auth-change", () => void refreshAuthUi(), {
-    signal,
-  });
+  window.addEventListener(
+    "fusion-auth-change",
+    () => {
+      void refreshAuthUi();
+      void refreshDrawCta();
+    },
+    { signal },
+  );
   window.addEventListener(
     "fusion-localechange",
     () => {
       void refreshAuthUi();
       void getProgramDrawConfigPublic(programId)
         .then((cfg) => {
-          setDrawCtaVisibility(Boolean(cfg?.active), Number(cfg?.totalSlots) || 100);
+          void refreshDrawCta(Boolean(cfg?.active), Number(cfg?.totalSlots) || 100);
         })
-        .catch(() => setDrawCtaVisibility(false));
+        .catch(() => void refreshDrawCta(false, 100));
     },
     { signal },
   );
   window.addEventListener(
     "fusion-program-application-submitted",
     () => void refreshAuthUi(),
+    { signal },
+  );
+  window.addEventListener(
+    "fusion-program-draw-entry-change",
+    () => void refreshDrawCta(),
     { signal },
   );
 }

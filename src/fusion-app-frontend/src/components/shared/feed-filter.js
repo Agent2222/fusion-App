@@ -763,6 +763,9 @@ function renderArtistFilterChips(host, artists) {
         const chips = [chipButton('allConnection', 'All', true)];
         if (avail.connectionIds.includes('alumniConnection')) chips.push(chipButton('alumniConnection', 'Alumni'));
         if (avail.connectionIds.includes('userConnection')) chips.push(chipButton('userConnection', 'Artists'));
+        if (avail.connectionIds.includes('drawRecipientsConnection')) {
+            chips.push(chipButton('drawRecipientsConnection', 'Draw Recipients'));
+        }
         for (const y of avail.cohortYears) {
             chips.push(chipButton(`${y}CohortConnection`, String(y)));
         }
@@ -912,6 +915,21 @@ class FeedFilterComponent extends HTMLElement {
         if (state === 'artists' && Array.isArray(detail?.artists)) {
             this._rosterArtists = detail.artists;
             renderArtistFilterChips(this, detail.artists);
+            try {
+                const params = new URLSearchParams(window.location.search || '');
+                const connection = String(params.get('connection') || '').trim();
+                if (connection === 'drawRecipients') {
+                    const conn = this.querySelector('#connectionFilter');
+                    const chip = conn?.querySelector('#drawRecipientsConnection');
+                    if (chip instanceof HTMLElement) {
+                        conn?.querySelectorAll('.filterButton').forEach((b) => {
+                            b.classList.toggle('active', b.id === 'drawRecipientsConnection');
+                        });
+                    }
+                }
+            } catch {
+                /* ignore */
+            }
         } else if (state === 'editions' && Array.isArray(detail?.editions)) {
             this._rosterEditions = detail.editions;
             renderEditionFilterChips(this, detail.editions);

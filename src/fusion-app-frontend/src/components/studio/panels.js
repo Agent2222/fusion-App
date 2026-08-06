@@ -70,11 +70,12 @@ import {
     applyDrawRecipientFromStudioSaveLive,
     applyHeroProfileImageApprovedFromStudioSaveLive,
     applyArtistAudioApprovedFromStudioSaveLive,
+    applyArtistAudioFullSiteApprovedFromStudioSaveLive,
     fetchArtistAudioCollectionsMap,
     fetchArtistAudioApprovedUrlsMap,
-    applyArtistAudioEntryApprovedFromStudioSaveLive,
+    fetchArtistAudioFullSiteApprovedUrlsMap,
     staffSetHeroProfileImageReviewNote,
-    staffSetAudioEntryReviewNote,
+    staffSetAudioEntryReviewNoteWithScopes,
     fetchHeroProfileImageReviewNotesMap,
     fetchAudioEntryReviewNotesMap,
     approveAllHeroProfileImagesStudio,
@@ -99,6 +100,10 @@ import {
     getApplicantSlotSecuredStudio,
     syncApplicantManualDepositStudio,
     syncApplicantCategoryPaymentStudio,
+    applyConfirmedApplicantMembershipSideEffectsStudio,
+    resolvePrincipalForApplicantStudio,
+    staffSetMembershipExemptManualStudio,
+    getStaffProgramPaymentsFinanceStudio,
     setDataSource,
     setResendSegmentConfigOnCanister,
     setSubscriberAudiencesForStudio,
@@ -111,6 +116,7 @@ import {
     listProgramDrawConfigsStudio,
     upsertProgramDrawConfigStudio,
     listProgramAwardEntriesStudio,
+    staffEnterProgramAwardManualStudio,
     normalizeProgramVisibility,
     upsertSubscriberRow,
     saveArtistTestOverlayJson,
@@ -232,6 +238,7 @@ import {
     patchManageFormWorldFields,
     renderArtistManageModalHtml,
     syncStudioPublicWorldSource,
+    wireArtistAudioApprovalTierCheckboxes,
 } from '../../utils/studioArtistForm.js';
 import {
     collectAccessCodesFromArtists,
@@ -581,9 +588,13 @@ function renderApplicants() {
                 <summary class="studio-section-accordion__summary">Add applicant &amp; admin tools</summary>
                 <div class="studio-section-accordion__body">
             <div id="studio-applicants-banner" class="studio-banner studio-banner--info"></div>
-            <div class="studio-modal-actions" style="margin:0.25rem 0 0.5rem">
+            <div class="studio-modal-actions" style="margin:0.25rem 0 0.5rem;display:flex;flex-wrap:wrap;gap:0.5rem">
                 <button type="button" class="studio-btn-secondary" id="studio-applicants-generate-access-code">Generate access code</button>
+                <button type="button" class="studio-btn-secondary" id="studio-applicants-sync-status">Sync applicant status</button>
             </div>
+            <p class="studio-muted mpd-field-hint" style="margin:0 0 0.75rem">
+              Sync applicant status audits Confirmed (slot-secured) applicants: sets membership exempt and cancels active Stripe/PayPal subscriptions.
+            </p>
             <div class="studio-applicant-add">
                 <h3 class="studio-subheading">Add applicant</h3>
                 <div class="studio-form-grid">
@@ -1627,7 +1638,7 @@ function renderServices() {
                                 <button type="button" class="studio-btn-primary" id="studio-svc-resend-segments-save">Save segments to canister</button>
                             </div>
                             <h4 class="studio-subheading studio-field--full" style="margin-top:0.5rem">New Applicant Notification</h4>
-                            <p class="studio-muted studio-field--full">When someone submits a program application, staff receive an email with the subject <strong>New Fusion &lt;program name&gt; Applicant</strong> (name, website, link to Studio → Applicants). <code>info@fusionart.world</code> always receives these; add more addresses below (comma-separated).</p>
+                            <p class="studio-muted studio-field--full">When someone submits a program application or Program Draw entry, staff receive an email (<strong>New Fusion &lt;program name&gt; Applicant</strong> or <strong>… Program Draw Entry</strong>) with name, website, and a link to Studio → Applicants. <code>info@fusionart.world</code> always receives these; add more addresses below (comma-separated).</p>
                             <div class="studio-field studio-field--full studio-svc-app-notify-row">
                                 <label class="studio-svc-app-notify-row__input">
                                     <span>Additional staff emails</span>
@@ -2006,6 +2017,7 @@ function openStudioArtistManageFromRow(tableRow, afterSave, hostEl, listSurface 
         initArtistBlindspotsTab(root, full);
         bindArtistCreditsPanel(root, full);
         void initArtistProgramsTab(root, full);
+        wireArtistAudioApprovalTierCheckboxes(root);
         initAssetPreviews();
         syncStudioPublicWorldSource(
             root,
@@ -2250,6 +2262,10 @@ function openStudioArtistManageFromRow(tableRow, afterSave, hostEl, listSurface 
                         String(full.id),
                         Boolean(raw.audioApproved),
                     );
+                    await applyArtistAudioFullSiteApprovedFromStudioSaveLive(
+                        String(full.id),
+                        Boolean(raw.audioApprovedFullSite),
+                    );
                 } catch (err) {
                     alert(err instanceof Error ? err.message : String(err));
                     return;
@@ -2432,13 +2448,17 @@ function formatStudioAccountUpdatedAt(iso) {
 
 /**
  * @param {object[]} artists
- * @returns {Map<string, string>}
+ * @returns {Map<string, string>} email (lowercase) → public profile slug
  */
 function buildApplicantEmailToSlugMap(artists) {
     const m = new Map();
     for (const a of artists || []) {
         const slug = String(a.slug || '').trim();
         if (!slug) continue;
+        const topEmail = String(a.contactEmail ?? a.email ?? '')
+            .trim()
+            .toLowerCase();
+        if (topEmail.includes('@')) m.set(topEmail, slug);
         const locs = a.locales && typeof a.locales === 'object' ? a.locales : null;
         if (!locs) continue;
         for (const code of ['en', 'ja']) {
@@ -2452,6 +2472,48 @@ function buildApplicantEmailToSlugMap(artists) {
         }
     }
     return m;
+}
+
+/**
+ * Resolve a roster artist's public profile slug for an applicant row.
+ * Prefers email match; falls back to `artistId|programId` applicant ids.
+ * @param {{ id?: string, email?: string } | null | undefined} row
+ * @param {Map<string, string>} emailToSlug
+ * @param {object[]} artists
+ * @returns {string | null}
+ */
+function resolveApplicantPublicProfileSlug(row, emailToSlug, artists) {
+    const em = String(row?.email || '')
+        .trim()
+        .toLowerCase();
+    if (em && emailToSlug instanceof Map) {
+        const byEmail = emailToSlug.get(em);
+        if (byEmail) return byEmail;
+    }
+    const id = String(row?.id || '').trim();
+    const pipe = id.indexOf('|');
+    const artistId = pipe > 0 ? id.slice(0, pipe) : '';
+    if (!artistId) return null;
+    const hit = (Array.isArray(artists) ? artists : []).find(
+        (a) => String(a?.id || '').trim() === artistId,
+    );
+    const slug = String(hit?.slug || '').trim();
+    return slug || null;
+}
+
+/**
+ * Prominent public-profile link for applicant modals.
+ * @param {string | null | undefined} profileSlug
+ * @param {(s: string) => string} escapeHtml
+ * @returns {string}
+ */
+function applicantPublicProfileLinkHtml(profileSlug, escapeHtml) {
+    const slug = String(profileSlug || '').trim();
+    if (!slug) {
+        return '<p class="studio-muted">Public profile: <span>—</span> <span class="studio-muted">(no linked artist roster match)</span></p>';
+    }
+    const href = `/profile/${encodeURIComponent(slug)}`;
+    return `<p><strong>Public profile:</strong> <a class="studio-action-link" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(href)}</a></p>`;
 }
 
 function studioArtistApplicantName(artist) {
@@ -3678,7 +3740,108 @@ async function initApplicants(mainEl) {
         drawDetailHost.innerHTML = applicantDrawDetailSectionHtml(model);
         const section = drawDetailHost.querySelector('#studio-applicants-draw-detail');
         if (section instanceof HTMLElement) section.hidden = false;
+        const addEntryBtn = drawDetailHost.querySelector('#studio-applicants-draw-add-entry');
+        if (addEntryBtn instanceof HTMLButtonElement) {
+            addEntryBtn.disabled = !canEditApplicants;
+            addEntryBtn.addEventListener('click', () => {
+                if (!canEditApplicants) return;
+                openAddAwardEntryModal(programId);
+            });
+        }
         // Active toggle removed — Programs → Edit → Program Award is the sole write surface.
+    };
+
+    /**
+     * Staff: manually add someone to the Program Award pool (paid-but-not-entered recovery).
+     * @param {string} programId
+     */
+    const openAddAwardEntryModal = (programId) => {
+        const pid = String(programId || '').trim();
+        if (!pid) return;
+        const programRow = allPrograms.find((p) => String(p?.id || '') === pid);
+        const programTitle = programRow ? getProgramDisplayNameFromRow(programRow) : pid;
+        const body = `
+            <div class="studio-finance-ledger-modal">
+                <p class="studio-muted">Add a Program Award entry for <strong>${escapeHtml(programTitle)}</strong>. Use this when someone paid $50 but never finished entering the draw. Member principal is optional when the account was never linked — name and email are enough for a staff-attested entry. A PayPal order ID still requires a principal (ledger match).</p>
+                <form id="studio-award-add-entry-form">
+                    <label class="studio-field studio-field--full"><span>Member principal (optional)</span>
+                        <input type="text" class="studio-input" id="studio-award-add-principal" placeholder="Leave blank if none — aaaaa-…" autocomplete="off" />
+                    </label>
+                    <label class="studio-field"><span>First name</span>
+                        <input type="text" class="studio-input" id="studio-award-add-first" required autocomplete="off" />
+                    </label>
+                    <label class="studio-field"><span>Last name</span>
+                        <input type="text" class="studio-input" id="studio-award-add-last" required autocomplete="off" />
+                    </label>
+                    <label class="studio-field studio-field--full"><span>Email</span>
+                        <input type="email" class="studio-input" id="studio-award-add-email" required autocomplete="off" />
+                    </label>
+                    <label class="studio-field studio-field--full"><span>PayPal order ID (optional)</span>
+                        <input type="text" class="studio-input" id="studio-award-add-order" placeholder="Requires principal if set" autocomplete="off" />
+                    </label>
+                    <div class="studio-modal-actions">
+                        <button type="submit" class="studio-btn-primary">Add entry</button>
+                        <button type="button" class="studio-btn-ghost" data-studio-modal-close="1">Cancel</button>
+                    </div>
+                    <p class="studio-muted mpd-field-hint" id="studio-award-add-status" role="status"></p>
+                </form>
+            </div>`;
+        const { close, root } = openStudioModal(body, {
+            title: 'Add Program Award entry',
+            wide: true,
+        });
+        const form = root.querySelector('#studio-award-add-entry-form');
+        if (!(form instanceof HTMLFormElement)) return;
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const statusEl = root.querySelector('#studio-award-add-status');
+            const principal = String(
+                /** @type {HTMLInputElement | null} */ (
+                    root.querySelector('#studio-award-add-principal')
+                )?.value || '',
+            ).trim();
+            const firstName = String(
+                /** @type {HTMLInputElement | null} */ (
+                    root.querySelector('#studio-award-add-first')
+                )?.value || '',
+            ).trim();
+            const lastName = String(
+                /** @type {HTMLInputElement | null} */ (
+                    root.querySelector('#studio-award-add-last')
+                )?.value || '',
+            ).trim();
+            const email = String(
+                /** @type {HTMLInputElement | null} */ (
+                    root.querySelector('#studio-award-add-email')
+                )?.value || '',
+            ).trim();
+            const paypalOrderId = String(
+                /** @type {HTMLInputElement | null} */ (
+                    root.querySelector('#studio-award-add-order')
+                )?.value || '',
+            ).trim();
+            const submitBtn = form.querySelector('button[type="submit"]');
+            if (submitBtn instanceof HTMLButtonElement) submitBtn.disabled = true;
+            if (statusEl) statusEl.textContent = 'Saving…';
+            try {
+                await staffEnterProgramAwardManualStudio(pid, {
+                    principal,
+                    firstName,
+                    lastName,
+                    email,
+                    paypalOrderId,
+                });
+                close();
+                await loadAwardEntriesForProgram(pid);
+                syncDrawDetailPanel();
+                renderPage();
+            } catch (err) {
+                if (statusEl) {
+                    statusEl.textContent = err instanceof Error ? err.message : String(err);
+                }
+                if (submitBtn instanceof HTMLButtonElement) submitBtn.disabled = false;
+            }
+        });
     };
 
     const syncStatusTabs = () => {
@@ -3991,10 +4154,16 @@ async function initApplicants(mainEl) {
     const openAwardEntryViewModal = (id) => {
         const r = findAwardEntryRow(id);
         if (!r) return;
+        const profileSlug = resolveApplicantPublicProfileSlug(
+            r,
+            applicantEmailToSlug,
+            applicantArtistsFull,
+        );
         const body = `
           <div class="studio-modal-form">
             <p><strong>Email:</strong> ${escapeHtml(r.email)}</p>
             <p><strong>Name:</strong> ${escapeHtml(r.fullName || '—')}</p>
+            ${applicantPublicProfileLinkHtml(profileSlug, escapeHtml)}
             <p><strong>Program:</strong> ${escapeHtml(r.programId)}</p>
             <p><strong>Status:</strong> ${applicantStatusPillHtml(r.status)}</p>
             <p><strong>Entered:</strong> ${escapeHtml(formatStudioDate(r.createdAt))}</p>
@@ -4015,11 +4184,12 @@ async function initApplicants(mainEl) {
     const openApplicantViewModal = (id) => {
         const r = allRows.find((x) => x.id === id);
         if (!r) return;
-        const em = String(r.email || '')
-            .trim()
-            .toLowerCase();
         const siteOrigin = getPublicSiteOrigin();
-        const profileSlug = em ? applicantEmailToSlug.get(em) || null : null;
+        const profileSlug = resolveApplicantPublicProfileSlug(
+            r,
+            applicantEmailToSlug,
+            applicantArtistsFull,
+        );
         const { internalNotes } = parseApplicantPayload(r.payloadJson);
         const appBlock = buildApplicantApplicationSectionHtml(r.payloadJson, { siteOrigin, profileSlug, escapeHtml });
         const internalBlock =
@@ -4030,6 +4200,7 @@ async function initApplicants(mainEl) {
           <div class="studio-modal-form">
             <p><strong>Email:</strong> ${escapeHtml(r.email)}</p>
             <p><strong>Name:</strong> ${escapeHtml(r.fullName || '—')}</p>
+            ${applicantPublicProfileLinkHtml(profileSlug, escapeHtml)}
             <p><strong>Program:</strong> ${escapeHtml(r.programId)}</p>
             <p><strong>Status:</strong> ${applicantStatusPillHtml(r.status)}</p>
             <p><strong>Created:</strong> ${escapeHtml(formatStudioDate(r.createdAt))}</p>
@@ -4068,11 +4239,12 @@ async function initApplicants(mainEl) {
         const initialSponsoredInputMode = getApplicantSponsoredCreditInputMode(r.payloadJson);
         const initialSponsoredUsd =
             initialSponsoredCreditCents > 0 ? (initialSponsoredCreditCents / 100).toFixed(2) : '';
-        const em = String(r.email || '')
-            .trim()
-            .toLowerCase();
         const siteOrigin = getPublicSiteOrigin();
-        const profileSlug = em ? applicantEmailToSlug.get(em) || null : null;
+        const profileSlug = resolveApplicantPublicProfileSlug(
+            r,
+            applicantEmailToSlug,
+            applicantArtistsFull,
+        );
         const appBlock = buildApplicantApplicationSectionHtml(r.payloadJson, { siteOrigin, profileSlug, escapeHtml });
         const rawInvalidBanner = rawInvalid
             ? '<p class="studio-banner studio-banner--warn" style="margin-top:0.5rem">Application payload is not valid JSON. Save keeps the stored payload unchanged until it is valid JSON; internal note edits are ignored in that case.</p>'
@@ -4086,6 +4258,7 @@ async function initApplicants(mainEl) {
           <div class="studio-modal-form">
             <p class="studio-muted">Reference: <code class="studio-code-inline">${escapeHtml(shortRefLabel(r.id))}</code></p>
             <p><strong>${escapeHtml(r.email)}</strong>${r.fullName ? ` — ${escapeHtml(r.fullName)}` : ''}</p>
+            ${applicantPublicProfileLinkHtml(profileSlug, escapeHtml)}
             ${rawInvalidBanner}
             <h3 class="studio-subheading">Application</h3>
             ${appBlock}
@@ -4373,7 +4546,20 @@ async function initApplicants(mainEl) {
             try {
                 await upsertApplicantStudio({ ...r, status, payloadJson });
                 if (manualDepositSubmitted) {
-                    await syncApplicantManualDepositStudio(r.id);
+                    try {
+                        await applyConfirmedApplicantMembershipSideEffectsStudio({
+                            id: r.id,
+                            email: r.email,
+                            programId: r.programId,
+                        });
+                    } catch (sideErr) {
+                        console.warn('[applicants] confirm membership side effects:', sideErr);
+                        alert(
+                            `Applicant saved, but membership cancel/exempt may have failed: ${
+                                sideErr instanceof Error ? sideErr.message : String(sideErr)
+                            }`,
+                        );
+                    }
                 }
                 // Recompute Motoko totalDue (category + special price + sponsorship).
                 await syncApplicantCategoryPaymentStudio(r.id);
@@ -4531,6 +4717,197 @@ async function initApplicants(mainEl) {
         } catch (e) {
             alert(e instanceof Error ? e.message : String(e));
         }
+    });
+
+    /**
+     * Audit/fix Confirmed (slot-secured) applicants: exempt + cancel Stripe/PayPal memberships.
+     */
+    const openSyncApplicantStatusModal = async () => {
+        const { cancelPlatformSubscriptionForProgramConfirm } = await import(
+            '../../utils/integrationApi.js'
+        );
+        const inner = `
+            <div class="studio-finance-ledger-modal">
+                <p class="studio-muted">Checking Confirmed (slot-secured) applicants for membership exempt status and active subscriptions…</p>
+                <div class="studio-world-batch-progress" id="studio-app-sync-progress" style="margin:1rem 0">
+                    <div class="studio-world-batch-progress-track" aria-hidden="true">
+                        <div class="studio-world-batch-progress-bar" id="studio-app-sync-progress-bar" style="width:0%"></div>
+                    </div>
+                    <span class="studio-muted studio-world-batch-progress-label" id="studio-app-sync-progress-label">Loading…</span>
+                </div>
+                <div id="studio-app-sync-results" class="studio-muted" style="max-height:16rem;overflow:auto;font-size:0.88rem;line-height:1.45"></div>
+                <div class="studio-modal-actions" style="margin-top:1rem">
+                    <button type="button" class="studio-btn-primary" data-studio-modal-close="1" id="studio-app-sync-close" disabled>Close</button>
+                </div>
+            </div>`;
+        const { root } = openStudioModal(inner, {
+            title: 'Sync applicant status',
+            wide: true,
+        });
+        const bar = root.querySelector('#studio-app-sync-progress-bar');
+        const label = root.querySelector('#studio-app-sync-progress-label');
+        const resultsEl = root.querySelector('#studio-app-sync-results');
+        const closeBtn = root.querySelector('#studio-app-sync-close');
+        const setProgress = (done, total, text) => {
+            const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+            if (bar instanceof HTMLElement) bar.style.width = `${pct}%`;
+            if (label) label.textContent = text || `${done} / ${total}`;
+        };
+        const appendResult = (line, kind = 'ok') => {
+            if (!(resultsEl instanceof HTMLElement)) return;
+            const p = document.createElement('p');
+            p.style.margin = '0.2rem 0';
+            p.style.color = kind === 'err' ? '#b91c1c' : kind === 'skip' ? '#64748b' : '#0f172a';
+            p.textContent = line;
+            resultsEl.appendChild(p);
+        };
+
+        try {
+            await reload();
+            const confirmed = allRows.filter(
+                (r) =>
+                    Boolean(r?.slotSecured) &&
+                    String(r?.status || '') !== 'pulledOut' &&
+                    !getApplicantIsTester(String(r?.payloadJson || '')),
+            );
+            if (!confirmed.length) {
+                setProgress(0, 0, 'No confirmed applicants');
+                appendResult('No Confirmed (slot-secured) applicants to sync.', 'skip');
+                if (closeBtn instanceof HTMLButtonElement) closeBtn.disabled = false;
+                return;
+            }
+
+            setProgress(0, confirmed.length, `0 / ${confirmed.length}`);
+            let accounts = [];
+            /** @type {Map<string, { email?: string }>} */
+            let contactsByPrincipal = new Map();
+            let financeSummaries = [];
+            try {
+                accounts = await getAccountsForStudio();
+            } catch {
+                accounts = [];
+            }
+            try {
+                const contactRows = await adminListAccountContactsForStudio();
+                for (const row of Array.isArray(contactRows) ? contactRows : []) {
+                    const p =
+                        row?.[0] && typeof row[0]?.toText === 'function'
+                            ? row[0].toText()
+                            : String(row?.[0] || '').trim();
+                    const c = row?.[1] && typeof row[1] === 'object' ? row[1] : {};
+                    if (p) {
+                        contactsByPrincipal.set(p, {
+                            email: String(c.email || '').trim(),
+                        });
+                    }
+                }
+            } catch {
+                /* optional */
+            }
+            try {
+                const finance = await getStaffProgramPaymentsFinanceStudio();
+                financeSummaries = Array.isArray(finance?.summaries) ? finance.summaries : [];
+            } catch {
+                financeSummaries = [];
+            }
+
+            /** @type {Map<string, object>} */
+            const accountByPrincipal = new Map(
+                accounts.map((a) => [String(a?.principal || '').trim(), a]),
+            );
+
+            let alreadyOk = 0;
+            let fixedExempt = 0;
+            let canceled = 0;
+            let skipped = 0;
+            let errors = 0;
+
+            for (let i = 0; i < confirmed.length; i += 1) {
+                const row = confirmed[i];
+                const name = String(row.fullName || row.email || row.id || '').trim();
+                setProgress(i, confirmed.length, `${i} / ${confirmed.length} — ${name}`);
+                try {
+                    const principal = await resolvePrincipalForApplicantStudio(row, {
+                        accounts,
+                        contactsByPrincipal,
+                        financeSummaries,
+                    });
+                    if (!principal) {
+                        skipped += 1;
+                        appendResult(`${name}: skipped (no principal)`, 'skip');
+                        continue;
+                    }
+                    const account = accountByPrincipal.get(principal);
+                    let didExempt = false;
+                    if (!account?.membershipExemptManual) {
+                        await staffSetMembershipExemptManualStudio(principal, true);
+                        fixedExempt += 1;
+                        didExempt = true;
+                        if (account) account.membershipExemptManual = true;
+                    }
+                    const cancelResult = await cancelPlatformSubscriptionForProgramConfirm(principal);
+                    const stripeCanceled = Boolean(cancelResult?.stripe?.canceled);
+                    const paypalCanceled = Boolean(cancelResult?.paypal?.canceled);
+                    const stripeAlready = Boolean(cancelResult?.stripe?.alreadyCanceled);
+                    const paypalAlready = Boolean(cancelResult?.paypal?.alreadyCanceled);
+                    const stripeSkip = Boolean(cancelResult?.stripe?.skipped);
+                    const paypalSkip = Boolean(cancelResult?.paypal?.skipped);
+                    if (stripeCanceled || paypalCanceled) {
+                        canceled += 1;
+                        appendResult(
+                            `${name}: ${didExempt ? 'exempt set; ' : ''}canceled ${[
+                                stripeCanceled ? 'Stripe' : '',
+                                paypalCanceled ? 'PayPal' : '',
+                            ]
+                                .filter(Boolean)
+                                .join(' + ')}`,
+                        );
+                    } else if (
+                        (stripeAlready || stripeSkip) &&
+                        (paypalAlready || paypalSkip) &&
+                        !didExempt
+                    ) {
+                        alreadyOk += 1;
+                        appendResult(`${name}: already OK (exempt, no active sub)`);
+                    } else {
+                        alreadyOk += 1;
+                        appendResult(
+                            `${name}: ${didExempt ? 'exempt set; ' : ''}subscriptions already inactive/skipped`,
+                        );
+                    }
+                    if (cancelResult?.stripe?.ok === false || cancelResult?.paypal?.ok === false) {
+                        errors += 1;
+                        appendResult(
+                            `${name}: cancel warning — Stripe: ${cancelResult?.stripe?.error || cancelResult?.stripe?.reason || 'ok'}; PayPal: ${cancelResult?.paypal?.error || cancelResult?.paypal?.reason || 'ok'}`,
+                            'err',
+                        );
+                    }
+                } catch (err) {
+                    errors += 1;
+                    appendResult(
+                        `${name}: ${err instanceof Error ? err.message : String(err)}`,
+                        'err',
+                    );
+                }
+                setProgress(i + 1, confirmed.length, `${i + 1} / ${confirmed.length}`);
+            }
+
+            appendResult('');
+            appendResult(
+                `Done — ${confirmed.length} confirmed · ${alreadyOk} OK · ${fixedExempt} exempt fixed · ${canceled} canceled · ${skipped} skipped · ${errors} errors`,
+            );
+            setProgress(confirmed.length, confirmed.length, 'Complete');
+        } catch (e) {
+            appendResult(e instanceof Error ? e.message : String(e), 'err');
+            setProgress(0, 0, 'Failed');
+        } finally {
+            if (closeBtn instanceof HTMLButtonElement) closeBtn.disabled = false;
+        }
+    };
+
+    mainEl.querySelector('#studio-applicants-sync-status')?.addEventListener('click', () => {
+        if (!canEditApplicants) return;
+        void openSyncApplicantStatusModal();
     });
 
     mainEl.querySelector('#studio-app-new-artist')?.addEventListener('change', syncApplicantArtistFields);
@@ -5577,16 +5954,17 @@ async function initAudioFiles(mainEl) {
     }
 
     const canEdit = perm.canEdit;
-    /** @type {{ artistId: string, slug: string, name: string, url: string, title: string, approved: boolean }[]} */
+    /** @type {{ artistId: string, slug: string, name: string, url: string, title: string, approved: boolean, fullSiteApproved: boolean }[]} */
     let allRows = [];
     /** @type {Map<string, {reason:string, imageUrl:string, reviewedAt:string, approved:boolean}>} */
     let reviewNotesMap = new Map();
 
     const runLoad = async () => {
-        const [all, collectionsMap, approvedUrlsMap, notes] = await Promise.all([
+        const [all, collectionsMap, approvedUrlsMap, fullSiteUrlsMap, notes] = await Promise.all([
             getArtistsForStudio(),
             fetchArtistAudioCollectionsMap(),
             fetchArtistAudioApprovedUrlsMap(),
+            fetchArtistAudioFullSiteApprovedUrlsMap(),
             fetchAudioEntryReviewNotesMap(),
         ]);
         reviewNotesMap = notes;
@@ -5597,6 +5975,7 @@ async function initAudioFiles(mainEl) {
             const name = `${a.firstName ?? ''} ${a.lastName ?? ''}`.trim() || slug;
             const entries = collectionsMap.get(id) || [];
             const approvedUrls = new Set(approvedUrlsMap.get(id) || []);
+            const fullSiteUrls = new Set(fullSiteUrlsMap.get(id) || []);
             if (entries.length > 0) {
                 for (const entry of entries) {
                     const isApproved = approvedUrls.has(entry.url);
@@ -5606,8 +5985,9 @@ async function initAudioFiles(mainEl) {
                     if (note && !note.approved && note.reason) continue;
                     allRows.push({
                         artistId: id, slug, name,
-                        url: entry.url, title: entry.title || 'Audio bite',
+                        url: entry.url, title: entry.title || 'Audio',
                         approved: false,
+                        fullSiteApproved: fullSiteUrls.has(entry.url),
                     });
                 }
             } else {
@@ -5620,8 +6000,9 @@ async function initAudioFiles(mainEl) {
                     if (note && !note.approved && note.reason) continue;
                     allRows.push({
                         artistId: id, slug, name,
-                        url: legacyUrl, title: String(a.audioTitle ?? 'Audio bite'),
+                        url: legacyUrl, title: String(a.audioTitle ?? 'Audio'),
                         approved: false,
+                        fullSiteApproved: Boolean(a.audioApprovedFullSite),
                     });
                 }
             }
@@ -5682,6 +6063,7 @@ async function initAudioFiles(mainEl) {
         const note = reviewNotesMap.get(compositeKey) || null;
         const row = allRows.find((r) => r.artistId === artistId && r.url === url);
         const approved = Boolean(row?.approved);
+        const fullSiteApproved = Boolean(row?.fullSiteApproved);
 
         const body = `
             <div class="studio-mod-manage-modal">
@@ -5694,7 +6076,11 @@ async function initAudioFiles(mainEl) {
                     <h3 class="studio-mod-manage-heading">Decision</h3>
                     <div class="studio-field studio-field--checkbox">
                         <input type="checkbox" id="studio-mod-manage-approved" ${approved ? 'checked' : ''} />
-                        <label for="studio-mod-manage-approved">Approve this audio for public playback</label>
+                        <label for="studio-mod-manage-approved">Approved for public profile</label>
+                    </div>
+                    <div class="studio-field studio-field--checkbox">
+                        <input type="checkbox" id="studio-mod-manage-approved-full-site" ${fullSiteApproved ? 'checked' : ''} />
+                        <label for="studio-mod-manage-approved-full-site">Approved for full site (sound environment + site audio)</label>
                     </div>
                 </div>
 
@@ -5731,14 +6117,25 @@ async function initAudioFiles(mainEl) {
 
         const { close, root } = openStudioModal(body, { title: `Review — ${escapeHtml(name)}`, compact: true });
 
+        const profileCb = root.querySelector('#studio-mod-manage-approved');
+        const fullSiteCb = root.querySelector('#studio-mod-manage-approved-full-site');
+        if (profileCb instanceof HTMLInputElement && fullSiteCb instanceof HTMLInputElement) {
+            fullSiteCb.addEventListener('change', () => {
+                if (fullSiteCb.checked) profileCb.checked = true;
+            });
+            profileCb.addEventListener('change', () => {
+                if (!profileCb.checked) fullSiteCb.checked = false;
+            });
+        }
+
         const imageInput = root.querySelector('#studio-mod-manage-image');
         const imageFileInput = root.querySelector('#studio-mod-manage-image-file');
         const imagePreview = root.querySelector('#studio-mod-manage-image-preview');
         const uploadStatus = root.querySelector('#studio-mod-manage-upload-status');
 
-        const showImagePreview = (url) => {
+        const showImagePreview = (previewUrl) => {
             if (imagePreview) {
-                imagePreview.innerHTML = `<img src="${escapeHtml(url)}" alt="Reference" /><button type="button" class="studio-mod-manage-image-remove" aria-label="Remove image">&times;</button>`;
+                imagePreview.innerHTML = `<img src="${escapeHtml(previewUrl)}" alt="Reference" /><button type="button" class="studio-mod-manage-image-remove" aria-label="Remove image">&times;</button>`;
                 imagePreview.hidden = false;
                 imagePreview.querySelector('.studio-mod-manage-image-remove')?.addEventListener('click', () => {
                     if (imageInput instanceof HTMLInputElement) imageInput.value = '';
@@ -5755,9 +6152,9 @@ async function initAudioFiles(mainEl) {
                 const { prepareImageFileForUpload: prep } = await import('../../utils/imageUploadPrep.js');
                 const { file: prepared } = await prep(file);
                 const { uploadBlobToS3: upload } = await import('../../utils/studioS3Upload.js');
-                const url = await upload(prepared, imageInput instanceof HTMLInputElement ? imageInput : null, { area: 'studio/misc' });
-                if (imageInput instanceof HTMLInputElement) imageInput.value = url;
-                showImagePreview(url);
+                const uploaded = await upload(prepared, imageInput instanceof HTMLInputElement ? imageInput : null, { area: 'studio/misc' });
+                if (imageInput instanceof HTMLInputElement) imageInput.value = uploaded;
+                showImagePreview(uploaded);
                 if (uploadStatus instanceof HTMLElement) uploadStatus.hidden = true;
             } catch (err) {
                 console.error('Reference image upload failed', err);
@@ -5773,9 +6170,12 @@ async function initAudioFiles(mainEl) {
         }
 
         root.querySelector('#studio-mod-manage-save')?.addEventListener('click', async () => {
-            const cb = root.querySelector('#studio-mod-manage-approved');
             const reasonEl = root.querySelector('#studio-mod-manage-reason');
-            const newApproved = cb instanceof HTMLInputElement ? cb.checked : approved;
+            let newApproved = profileCb instanceof HTMLInputElement ? profileCb.checked : approved;
+            let newFullSite =
+                fullSiteCb instanceof HTMLInputElement ? fullSiteCb.checked : fullSiteApproved;
+            if (newFullSite) newApproved = true;
+            if (!newApproved) newFullSite = false;
             const reason = reasonEl instanceof HTMLTextAreaElement ? reasonEl.value.trim() : '';
             const image = imageInput instanceof HTMLInputElement ? imageInput.value.trim() : '';
 
@@ -5783,10 +6183,25 @@ async function initAudioFiles(mainEl) {
             if (saveBtn instanceof HTMLButtonElement) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
 
             try {
-                await staffSetAudioEntryReviewNote(artistId, url, newApproved, reason, image);
-                reviewNotesMap.set(compositeKey, { reason, imageUrl: image, reviewedAt: new Date().toISOString(), approved: newApproved });
+                await staffSetAudioEntryReviewNoteWithScopes(
+                    artistId,
+                    url,
+                    newApproved,
+                    newFullSite,
+                    reason,
+                    image,
+                );
+                reviewNotesMap.set(compositeKey, {
+                    reason,
+                    imageUrl: image,
+                    reviewedAt: new Date().toISOString(),
+                    approved: newApproved,
+                });
                 const r = allRows.find((x) => x.artistId === artistId && x.url === url);
-                if (r) r.approved = newApproved;
+                if (r) {
+                    r.approved = newApproved;
+                    r.fullSiteApproved = newFullSite;
+                }
                 applyFilter();
                 close();
             } catch (err) {

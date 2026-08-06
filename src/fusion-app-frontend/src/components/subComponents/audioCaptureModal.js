@@ -54,7 +54,7 @@ function showPermissionHelp(modal) {
 }
 
 /**
- * @param {{ artistId?: string, slug?: string, onCaptured?: (info: { url: string, blob: Blob, durationMs: number }) => void }} opts
+ * @param {{ artistId?: string, slug?: string, onCaptured?: (info: { url: string, blob: Blob, durationMs: number, title: string }) => void }} opts
  */
 export function openMpdAudioCaptureModal(opts = {}) {
   const existing = document.getElementById('mpdAudioCaptureModal');
@@ -266,6 +266,13 @@ export function openMpdAudioCaptureModal(opts = {}) {
       setStatus('No recording to save.');
       return;
     }
+    const titleEl = /** @type {HTMLInputElement | null} */ (document.getElementById('mpd_audio_title'));
+    const title = String(titleEl?.value || '').trim();
+    if (!title) {
+      setStatus('Add an audio title on the Media Library form before using this recording.');
+      titleEl?.focus();
+      return;
+    }
     if (useBtn) useBtn.disabled = true;
     if (recordBtn) recordBtn.disabled = true;
     setStatus('Uploading…');
@@ -285,11 +292,7 @@ export function openMpdAudioCaptureModal(opts = {}) {
         fieldKey: 'audio',
       });
       const urlEl = /** @type {HTMLInputElement | null} */ (document.getElementById('mpd_audio_url'));
-      const titleEl = /** @type {HTMLInputElement | null} */ (document.getElementById('mpd_audio_title'));
       if (urlEl) urlEl.value = url;
-      if (titleEl && !String(titleEl.value || '').trim()) {
-        titleEl.value = 'Audio bite';
-      }
       const statusBadge = document.getElementById('mpd_audio_approval_status');
       if (statusBadge) {
         statusBadge.hidden = false;
@@ -297,8 +300,8 @@ export function openMpdAudioCaptureModal(opts = {}) {
         statusBadge.classList.remove('is-approved');
         statusBadge.classList.add('is-pending');
       }
-      opts.onCaptured?.({ url, blob: recordedBlob, durationMs: Date.now() - startedAt });
-      setStatus('Uploaded. Save your Media Library to keep this clip. Staff approval is required for public playback.');
+      opts.onCaptured?.({ url, blob: recordedBlob, durationMs: Date.now() - startedAt, title });
+      setStatus('Uploaded. Staff will review for public profile and/or full-site play.');
       setTimeout(close, 700);
     } catch (err) {
       setStatus(`Upload failed: ${err instanceof Error ? err.message : String(err)}`);

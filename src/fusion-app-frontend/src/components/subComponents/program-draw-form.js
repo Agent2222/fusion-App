@@ -13,13 +13,19 @@ import {
     getMyProgramAwardEntryDetailed,
     getMyProgramPath,
     getProgramDrawConfigPublic,
+    invalidateProgramDrawProgressCache,
     PROGRAM_APPLICATION_ERROR_CODE,
     setMyAccountContactForCaller,
 } from '../../utils/database.js';
 import { categoryToUserRole } from '../../utils/authHeader.js';
 import { ERROR_USER_INTERRUPT } from '@dfinity/auth-client';
-import { getAuthSnapshot, loginInternetIdentity } from '../../utils/icAuth.js';
 import {
+    dispatchFusionAuthChange,
+    getAuthSnapshot,
+    loginInternetIdentity,
+} from '../../utils/icAuth.js';
+import {
+    clearAuthenticatedFusionBackendActorCache,
     getAuthenticatedFusionBackendActor,
     submitEarlyAccessToCanister,
 } from '../../utils/earlyAccessSubscribe.js';
@@ -58,8 +64,10 @@ import { metaTrack } from '../../utils/metaPixel.js';
 import { navigate } from '../../router.js';
 import posthog from 'posthog-js';
 import './program-draw-display.js';
+import { invalidateProgramDrawDisplayCache } from './program-draw-display.js';
 import './program-draw-notify-modal.js';
 import './program-draw-paid-modal.js';
+import { ensureProgramDrawFinishModal } from './program-draw-finish-modal.js';
 import paymentCardIcon from '../../assets/icons/fusion_svg_icons_b2/payment-card.svg';
 import benefitCheckIcon from '../../assets/icons/fusion_svg_icons_b2/benefit-check.svg';
 import popularCrownIcon from '../../assets/icons/fusion_svg_icons_b2/popular-crown.svg';
@@ -333,15 +341,50 @@ function drawPaidOrderSessionKey(programId) {
 /**
  * @param {string} programId
  * @param {string} orderId
+ * @param {Record<string, string> | null | undefined} [payload]
  */
-function persistCapturedDrawOrder(programId, orderId) {
+function persistCapturedDrawOrder(programId, orderId, payload) {
     const id = String(programId || '').trim();
     const oid = String(orderId || '').trim();
     if (!id || !oid || typeof sessionStorage === 'undefined') return;
     try {
-        sessionStorage.setItem(drawPaidOrderSessionKey(id), oid);
+        const body = {
+            orderId: oid,
+            payload:
+                payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {},
+            savedAt: new Date().toISOString(),
+        };
+        sessionStorage.setItem(drawPaidOrderSessionKey(id), JSON.stringify(body));
     } catch {
         /* ignore */
+    }
+}
+
+/**
+ * @param {string} programId
+ * @returns {{ orderId: string, payload: Record<string, string> }}
+ */
+function readCapturedDrawOrderState(programId) {
+    const id = String(programId || '').trim();
+    if (!id || typeof sessionStorage === 'undefined') {
+        return { orderId: '', payload: {} };
+    }
+    try {
+        const raw = String(sessionStorage.getItem(drawPaidOrderSessionKey(id)) || '').trim();
+        if (!raw) return { orderId: '', payload: {} };
+        if (raw.startsWith('{')) {
+            const parsed = JSON.parse(raw);
+            const orderId = String(parsed?.orderId || '').trim();
+            const payload =
+                parsed?.payload && typeof parsed.payload === 'object' && !Array.isArray(parsed.payload)
+                    ? /** @type {Record<string, string>} */ (parsed.payload)
+                    : {};
+            return { orderId, payload };
+        }
+        // Legacy: bare order id string
+        return { orderId: raw, payload: {} };
+    } catch {
+        return { orderId: '', payload: {} };
     }
 }
 
@@ -350,13 +393,7 @@ function persistCapturedDrawOrder(programId, orderId) {
  * @returns {string}
  */
 function readCapturedDrawOrder(programId) {
-    const id = String(programId || '').trim();
-    if (!id || typeof sessionStorage === 'undefined') return '';
-    try {
-        return String(sessionStorage.getItem(drawPaidOrderSessionKey(id)) || '').trim();
-    } catch {
-        return '';
-    }
+    return readCapturedDrawOrderState(programId).orderId;
 }
 
 /**
@@ -642,7 +679,12 @@ class ProgramDrawFormComponent extends HTMLElement {
     /**
      * Enter with short retries after a successful PayPal capture.
      * @param {boolean} paidEntryReceipt
-     * @param {{ skipAccountCheck?: boolean, retries?: number, paypalOrderId?: string }} [opts]
+     * @param {{
+     *   skipAccountCheck?: boolean,
+     *   retries?: number,
+     *   paypalOrderId?: string,
+     *   skipFinishModal?: boolean,
+     * }} [opts]
      * @returns {Promise<boolean>}
      */
     async _enterWithRetry(paidEntryReceipt, opts = {}) {
@@ -654,6 +696,7 @@ class ProgramDrawFormComponent extends HTMLElement {
                     skipAccountCheck: opts.skipAccountCheck,
                     suppressErrorMsg: true,
                     paypalOrderId: opts.paypalOrderId || this._lastPaidOrderId,
+                    skipFinishModal: opts.skipFinishModal,
                 });
                 if (ok) return true;
                 return false;
@@ -986,7 +1029,11 @@ class ProgramDrawFormComponent extends HTMLElement {
 
         this._syncMembershipFinishSignInUi(false);
         this._setMsg(D.membershipFinishing, 'neutral');
+        this._openFinishModal('finishing');
         const principal = snap.principal.toText();
+        const finishRetry = () => {
+            void this._finishMembershipEntry({ promptLogin: true });
+        };
 
         try {
             savePendingMembershipPayload({
@@ -1010,6 +1057,7 @@ class ProgramDrawFormComponent extends HTMLElement {
             const actor = await getAuthenticatedFusionBackendActor();
             if (actor && typeof actor.registerOrUpdateAccount === 'function') {
                 await actor.registerOrUpdateAccount(categoryToUserRole('artist'));
+                await this._refreshAuthUiAfterAccount();
             }
 
             try {
@@ -1055,26 +1103,35 @@ class ProgramDrawFormComponent extends HTMLElement {
                         /* ignore */
                     }
                     this._setMsg(D.success, 'ok');
+                    this._invalidateDrawProgressCaches(programId);
+                    this._membershipFinishCtx = null;
+                    await this._refreshAuthUiAfterAccount();
+                    await this._refresh();
+                    this._notifyDrawEntryChange('entered', programId);
+                    this._setFinishModalPhase('success');
                 } else {
                     this._setMsg(D.membershipApproved, 'ok');
+                    this._membershipFinishCtx = null;
+                    await this._refreshAuthUiAfterAccount();
+                    await this._refresh();
+                    this._setFinishModalPhase('success');
                 }
-                this._membershipFinishCtx = null;
-                await this._refresh();
                 return true;
             } catch (enterErr) {
                 this._captureDrawEvent('program_draw_failed', {
                     entry_path: 'membership',
                     error_code: 'enter_failed',
                 });
-                this._setMsg(
-                    enterErr instanceof Error ? enterErr.message : String(enterErr),
-                    'error',
-                );
+                const msg = enterErr instanceof Error ? enterErr.message : String(enterErr);
+                this._setMsg(msg, 'error');
+                this._setFinishModalPhase('error', { errorMessage: msg, onRetry: finishRetry });
                 return false;
             }
         } catch (e) {
-            this._setMsg(e instanceof Error ? e.message : String(e), 'error');
+            const msg = e instanceof Error ? e.message : String(e);
+            this._setMsg(msg, 'error');
             this._syncMembershipFinishSignInUi(true);
+            this._setFinishModalPhase('error', { errorMessage: msg, onRetry: finishRetry });
             return false;
         }
     }
@@ -1658,6 +1715,95 @@ class ProgramDrawFormComponent extends HTMLElement {
         });
     }
 
+    _closePaidCompletionModal() {
+        const modal = this.shadowRoot?.querySelector('#draw-paid-modal');
+        if (modal && typeof modal.close === 'function') modal.close();
+    }
+
+    _closeFinishModal() {
+        const modal = document.querySelector('app-program-draw-finish-modal');
+        if (modal && typeof modal.close === 'function') modal.close();
+    }
+
+    /**
+     * Body-mounted finish modal (survives `_refresh`).
+     * @param {'finishing' | 'success' | 'error'} phase
+     * @param {{ errorMessage?: string, onRetry?: () => void }} [opts]
+     */
+    _openFinishModal(phase, opts = {}) {
+        const modal = ensureProgramDrawFinishModal();
+        if (typeof modal.open === 'function') {
+            modal.open({
+                phase,
+                errorMessage: opts.errorMessage,
+                onRetry: opts.onRetry,
+            });
+        }
+    }
+
+    /**
+     * @param {'finishing' | 'success' | 'error'} phase
+     * @param {{ errorMessage?: string, onRetry?: () => void }} [opts]
+     */
+    _setFinishModalPhase(phase, opts = {}) {
+        const modal = ensureProgramDrawFinishModal();
+        if (typeof modal.setPhase === 'function') {
+            modal.setPhase(phase, opts);
+        } else if (typeof modal.open === 'function') {
+            modal.open({ phase, ...opts });
+        }
+    }
+
+    /** Scroll to “You’re entered” / withdraw panel inside this form’s shadow. */
+    _scrollToEnteredPanel() {
+        const panel = this.shadowRoot?.querySelector('#draw-applied-panel');
+        scrollElementTopToViewportGap(
+            panel instanceof Element ? panel : this,
+            PROGRAM_APPLICATION_VIEWPORT_TOP_GAP_PX,
+        );
+    }
+
+    /**
+     * After register/enter: clear actor cache + refresh header Join → Studio.
+     * @returns {Promise<void>}
+     */
+    async _refreshAuthUiAfterAccount() {
+        try {
+            clearAuthenticatedFusionBackendActorCache();
+            await dispatchFusionAuthChange();
+        } catch {
+            /* header will catch up on next auth event */
+        }
+    }
+
+    /**
+     * Bust progress caches so remounted display shows updated entered count.
+     * @param {string} [programId]
+     */
+    _invalidateDrawProgressCaches(programId) {
+        const id = String(programId || this._programId() || '').trim();
+        invalidateProgramDrawDisplayCache();
+        invalidateProgramDrawProgressCache(id || undefined);
+    }
+
+    /**
+     * Notify program page CTAs (Enter Program Draw → Program Draw) after enter/exit.
+     * @param {'entered' | 'exited'} status
+     * @param {string} [programId]
+     */
+    _notifyDrawEntryChange(status, programId) {
+        const id = String(programId || this._programId() || '').trim();
+        try {
+            window.dispatchEvent(
+                new CustomEvent('fusion-program-draw-entry-change', {
+                    detail: { programId: id, status },
+                }),
+            );
+        } catch {
+            /* ignore */
+        }
+    }
+
     /**
      * After PayPal popup approve: capture first, then modal (guest) or finish enter (signed-in).
      * @param {{
@@ -1702,7 +1848,7 @@ class ProgramDrawFormComponent extends HTMLElement {
 
             // Capture succeeded (ledger may still await principal for guests).
             this._paidEnterPending = true;
-            persistCapturedDrawOrder(programId, orderId);
+            persistCapturedDrawOrder(programId, orderId, payload);
 
             const payVal = DRAW_ENTRY_FEE_CENTS / 100;
             this._captureDrawEvent('program_draw_payment_completed', {
@@ -1722,6 +1868,12 @@ class ProgramDrawFormComponent extends HTMLElement {
                 /* ignore */
             }
 
+            const alreadyEntered = Boolean(
+                confirmResult &&
+                    typeof confirmResult === 'object' &&
+                    /** @type {{ entered?: boolean }} */ (confirmResult).entered,
+            );
+
             if (principal && !awaitingPrincipal) {
                 this._setMsg(D.paidFinishing, 'neutral');
                 await this._finishPaidEntryAfterCheckout({
@@ -1730,6 +1882,7 @@ class ProgramDrawFormComponent extends HTMLElement {
                     payload,
                     promptLogin: false,
                     skipCaptureConfirm: true,
+                    preferIntegrationEntered: alreadyEntered,
                 });
                 return;
             }
@@ -1759,6 +1912,7 @@ class ProgramDrawFormComponent extends HTMLElement {
      *   payload?: Record<string, string>,
      *   promptLogin?: boolean,
      *   skipCaptureConfirm?: boolean,
+     *   preferIntegrationEntered?: boolean,
      * }} opts
      * @returns {Promise<boolean>}
      */
@@ -1766,8 +1920,13 @@ class ProgramDrawFormComponent extends HTMLElement {
         const D = drawLocaleCopy();
         const orderId = String(opts?.orderId || this._lastPaidOrderId || '').trim();
         const programId = String(opts?.programId || this._programId() || '').trim();
+        const stored = readCapturedDrawOrderState(programId);
         const payload =
-            opts?.payload && typeof opts.payload === 'object' ? opts.payload : this._collectPayload();
+            opts?.payload && typeof opts.payload === 'object'
+                ? opts.payload
+                : Object.keys(stored.payload || {}).length
+                  ? stored.payload
+                  : this._collectPayload();
         if (!orderId || !programId) {
             this._setMsg(D.paidCheckoutNotCompleted, 'error');
             return false;
@@ -1775,13 +1934,26 @@ class ProgramDrawFormComponent extends HTMLElement {
         this._lastPaidOrderId = orderId;
         // Entry unfinished after a confirmed capture (session / Retry).
         this._paidEnterPending = true;
-        persistCapturedDrawOrder(programId, orderId);
+        persistCapturedDrawOrder(programId, orderId, payload);
+
+        this._closePaidCompletionModal();
+        this._openFinishModal('finishing');
+
+        const finishRetry = () => {
+            void this._finishPaidEntryAfterCheckout({
+                orderId,
+                programId,
+                payload,
+                promptLogin: true,
+            });
+        };
 
         let snap = await getAuthSnapshot();
         if (!snap?.authenticated) {
             if (opts.promptLogin === false) {
                 this._setMsg(D.paidSignInToFinish, 'neutral');
                 this._showRetryEnterControl();
+                this._closeFinishModal();
                 this._openPaidCompletionModal({ orderId, programId, captured: true });
                 return false;
             }
@@ -1792,27 +1964,36 @@ class ProgramDrawFormComponent extends HTMLElement {
                 if (e === ERROR_USER_INTERRUPT) {
                     this._setMsg(D.paidSignInCancelled, 'error');
                     this._showRetryEnterControl();
+                    this._closeFinishModal();
                     this._openPaidCompletionModal({ orderId, programId, captured: true });
                     return false;
                 }
-                this._setMsg(e instanceof Error ? e.message : String(e), 'error');
+                const msg = e instanceof Error ? e.message : String(e);
+                this._setMsg(msg, 'error');
                 this._showRetryEnterControl();
+                this._setFinishModalPhase('error', { errorMessage: msg, onRetry: finishRetry });
                 return false;
             }
             snap = await getAuthSnapshot();
             if (!snap?.authenticated) {
                 this._setMsg(D.paidSignInCancelled, 'error');
                 this._showRetryEnterControl();
+                this._closeFinishModal();
                 this._openPaidCompletionModal({ orderId, programId, captured: true });
                 return false;
             }
         }
 
         this._setMsg(D.paidFinishing, 'neutral');
+        this._setFinishModalPhase('finishing');
         const principal = String(snap.principal?.toText?.() || '').trim();
         if (!principal) {
             this._setMsg(D.needSignIn, 'error');
             this._showRetryEnterControl();
+            this._setFinishModalPhase('error', {
+                errorMessage: D.needSignIn,
+                onRetry: finishRetry,
+            });
             return false;
         }
 
@@ -1834,6 +2015,7 @@ class ProgramDrawFormComponent extends HTMLElement {
             const actor = await getAuthenticatedFusionBackendActor();
             if (actor && typeof actor.registerOrUpdateAccount === 'function') {
                 await actor.registerOrUpdateAccount(categoryToUserRole('artist'));
+                await this._refreshAuthUiAfterAccount();
             }
             try {
                 await ensureMyLinkedArtistProfileForApplication();
@@ -1851,23 +2033,54 @@ class ProgramDrawFormComponent extends HTMLElement {
                 });
             }
 
-            const entered = await this._enterWithRetry(true, {
-                skipAccountCheck: true,
-                retries: 3,
-                paypalOrderId: orderId,
-            });
+            // Integration confirm may already have entered; FE enter is idempotent backup.
+            let entered = opts.preferIntegrationEntered === true;
+            if (!entered) {
+                entered = await this._enterWithRetry(true, {
+                    skipAccountCheck: true,
+                    retries: 3,
+                    paypalOrderId: orderId,
+                    skipFinishModal: true,
+                });
+            } else {
+                try {
+                    await this._enterWithRetry(true, {
+                        skipAccountCheck: true,
+                        retries: 1,
+                        paypalOrderId: orderId,
+                        skipFinishModal: true,
+                        suppressErrorMsg: true,
+                    });
+                } catch {
+                    /* already entered via integration */
+                }
+                entered = true;
+            }
             if (entered) {
                 this._paidEnterPending = false;
                 clearCapturedDrawOrder(programId);
+                await this._refreshAuthUiAfterAccount();
+                this._setFinishModalPhase('success');
+            } else {
+                this._setFinishModalPhase('error', {
+                    errorMessage: D.paidEnterFailed,
+                    onRetry: finishRetry,
+                });
             }
             return entered;
         } catch (e) {
             if (this._handleAccountGateError(e)) {
                 this._showRetryEnterControl();
+                this._setFinishModalPhase('error', {
+                    errorMessage: e instanceof Error ? e.message : String(e),
+                    onRetry: finishRetry,
+                });
                 return false;
             }
-            this._setMsg(e instanceof Error ? e.message : String(e), 'error');
+            const msg = e instanceof Error ? e.message : String(e);
+            this._setMsg(msg, 'error');
             this._showRetryEnterControl();
+            this._setFinishModalPhase('error', { errorMessage: msg, onRetry: finishRetry });
             return false;
         }
     }
@@ -1897,7 +2110,12 @@ class ProgramDrawFormComponent extends HTMLElement {
 
     /**
      * @param {boolean} paidEntryReceipt
-     * @param {{ skipAccountCheck?: boolean, suppressErrorMsg?: boolean, paypalOrderId?: string }} [opts]
+     * @param {{
+     *   skipAccountCheck?: boolean,
+     *   suppressErrorMsg?: boolean,
+     *   paypalOrderId?: string,
+     *   skipFinishModal?: boolean,
+     * }} [opts]
      * @returns {Promise<boolean>}
      */
     async _enter(paidEntryReceipt, opts = {}) {
@@ -1909,6 +2127,8 @@ class ProgramDrawFormComponent extends HTMLElement {
             const ready = await this._ensureAccountReadyForPay();
             if (!ready) return false;
         }
+        const ownFinishModal = !opts.skipFinishModal;
+        if (ownFinishModal) this._openFinishModal('finishing');
         this._setMsg(D.entering, 'neutral');
         const payload = this._collectPayload();
         void this._syncDrawSubscriber(payload);
@@ -1945,7 +2165,10 @@ class ProgramDrawFormComponent extends HTMLElement {
                 /* ignore */
             }
             this._setMsg(D.success, 'ok');
+            this._invalidateDrawProgressCaches(id);
             await this._refresh();
+            this._notifyDrawEntryChange('entered', id);
+            if (ownFinishModal) this._setFinishModalPhase('success');
             return true;
         } catch (e) {
             const code =
@@ -1956,6 +2179,14 @@ class ProgramDrawFormComponent extends HTMLElement {
                 entry_path: paidEntryReceipt ? 'paid' : 'award_credit',
                 error_code: code || 'unknown',
             });
+            if (ownFinishModal) {
+                this._setFinishModalPhase('error', {
+                    errorMessage: e instanceof Error ? e.message : String(e),
+                    onRetry: () => {
+                        void this._enter(paidEntryReceipt, opts);
+                    },
+                });
+            }
             if (paidEntryReceipt && this._handleAccountGateError(e)) return false;
             if (opts.suppressErrorMsg) throw e;
             this._setMsg(e instanceof Error ? e.message : String(e), 'error');
@@ -2128,14 +2359,14 @@ class ProgramDrawFormComponent extends HTMLElement {
             this.shadowRoot.querySelector('#draw-display')?.addEventListener(
                 'fusion-draw-display-apply',
                 () => {
-                    void revealProgramApplicationOrOpenJoin();
+                    this._scrollToEnteredPanel();
                 },
                 { signal },
             );
             this.shadowRoot.querySelector('#draw-display')?.addEventListener(
                 'fusion-draw-display-view-all',
                 () => {
-                    navigate('/artists');
+                    navigate('/artists?connection=drawRecipients');
                 },
                 { signal },
             );
@@ -2146,7 +2377,9 @@ class ProgramDrawFormComponent extends HTMLElement {
                     this._setMsg(D.exiting, 'neutral');
                     try {
                         await exitProgramAward(id);
+                        this._invalidateDrawProgressCaches(id);
                         await this._refresh();
+                        this._notifyDrawEntryChange('exited', id);
                     } catch (e) {
                         this._setMsg(e instanceof Error ? e.message : String(e), 'error');
                     }
@@ -2402,6 +2635,10 @@ class ProgramDrawFormComponent extends HTMLElement {
         this.shadowRoot.querySelector('#draw-display')?.addEventListener(
             'fusion-draw-display-apply',
             () => {
+                if (entered || path === 'award') {
+                    this._scrollToEnteredPanel();
+                    return;
+                }
                 void revealProgramApplicationOrOpenJoin();
             },
             { signal },
@@ -2409,7 +2646,7 @@ class ProgramDrawFormComponent extends HTMLElement {
         this.shadowRoot.querySelector('#draw-display')?.addEventListener(
             'fusion-draw-display-view-all',
             () => {
-                navigate('/artists');
+                navigate('/artists?connection=drawRecipients');
             },
             { signal },
         );
@@ -2476,10 +2713,34 @@ class ProgramDrawFormComponent extends HTMLElement {
                 { signal },
             );
         });
-        const storedOrder = id ? readCapturedDrawOrder(id) : '';
-        if (storedOrder) {
-            this._lastPaidOrderId = storedOrder;
+        const stored = id ? readCapturedDrawOrderState(id) : { orderId: '', payload: {} };
+        if (stored.orderId) {
+            this._lastPaidOrderId = stored.orderId;
             this._paidEnterPending = true;
+            // Restore contact fields so Retry finish has a valid payload after a closed tab.
+            if (stored.payload && typeof stored.payload === 'object') {
+                for (const [key, value] of Object.entries(stored.payload)) {
+                    const el = this.shadowRoot?.querySelector(`[name="${key}"]`);
+                    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+                        if (!String(el.value || '').trim() && value != null) {
+                            el.value = String(value);
+                        }
+                    }
+                }
+            }
+        }
+        if (this._paidEnterPending && this._lastPaidOrderId) {
+            // If they already entered (e.g. integration enter succeeded before close), clear pending.
+            try {
+                const detailed = await getMyProgramAwardEntryDetailed(id);
+                const status = String(detailed?.entry?.status || '');
+                if (status === 'entered') {
+                    this._paidEnterPending = false;
+                    clearCapturedDrawOrder(id);
+                }
+            } catch {
+                /* keep retry affordance */
+            }
         }
         if (this._paidEnterPending && this._lastPaidOrderId) {
             this._showRetryEnterControl();

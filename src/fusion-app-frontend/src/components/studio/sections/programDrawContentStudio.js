@@ -87,13 +87,16 @@ function fieldsHtml(loc, locale) {
         ['awardTitle', 'Award title'],
         ['awardDate', 'Award body (use {{program}} for program name)'],
         ['awardNote', 'Award note (optional)'],
+        ['applicantsLabel', 'Applicants link (under entries remaining)'],
+        ['applicantsHideLabel', 'Hide applicants link'],
+        ['applicantsEmpty', 'Empty applicants list message'],
         ['pastRecipientsLabel', 'Past recipients link'],
         ['pastRecipientsHideLabel', 'Hide past recipients link'],
         ['moreDetailsLabel', 'More details link'],
         ['moreDetailsHideLabel', 'Hide details link'],
         ['pastTitle', 'Past recipients section title'],
         ['viewAllLabel', 'View all label'],
-        ['supportLead', 'Support lead'],
+        ['supportLead', 'Support lead (use {{recipients}} for past recipient count)'],
         ['supportCta', 'Support CTA'],
         ['emptyRecipientsLead', 'Empty past recipients — line 1'],
         ['emptyRecipientsBody', 'Empty past recipients — line 2 (use {{n}})'],
@@ -153,7 +156,7 @@ function fieldsHtml(loc, locale) {
 
     return `
     <div class="studio-pd" data-pd-root data-pd-locale="${esc(locale)}">
-      <p class="studio-muted">Global Program Draw copy (EN/JA). Display panel powers the public draw subcomponent; About / Eligibility / Additional terms appear when visitors expand details. Templates: <code>{{n}}</code> round number, <code>{{total}}</code> entry goal, <code>{{count}}</code> remaining, <code>{{program}}</code> program name.</p>
+      <p class="studio-muted">Global Program Draw copy (EN/JA). Display panel powers the public draw subcomponent; About / Eligibility / Additional terms appear when visitors expand details. Templates: <code>{{n}}</code> round number, <code>{{total}}</code> entry goal, <code>{{count}}</code> remaining, <code>{{recipients}}</code> past recipient count, <code>{{program}}</code> program name.</p>
       <div class="studio-jnp__locale-tabs" role="tablist" style="margin:0.75rem 0 1rem">
         <button type="button" class="studio-jnp__locale-tab${locale === 'en' ? ' is-active' : ''}" data-pd-locale-tab="en">EN</button>
         <button type="button" class="studio-jnp__locale-tab${locale === 'ja' ? ' is-active' : ''}" data-pd-locale-tab="ja">JA</button>

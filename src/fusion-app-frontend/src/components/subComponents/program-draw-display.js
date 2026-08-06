@@ -9,6 +9,7 @@ import {
     getProgramDrawConfigPublic,
     getProgramDrawProgressPublic,
     listArtistDrawRecipientsPublic,
+    listProgramAwardApplicantNamesPublic,
 } from '../../utils/database.js';
 import { DRAW_SLOT_GOAL_DEFAULT } from '../../utils/applicantsDrawModel.js';
 import {
@@ -23,9 +24,10 @@ import {
     PROGRAM_DRAW_PENDING_WRAPPER_STYLES,
     programHeroLoaderHtml,
 } from '../../utils/programHeroLoader.js';
-import { artistDisplayName, artistLocaleBlock } from '../../utils/artistSlug.js';
+import { artistDisplayDiscipline, artistDisplayName } from '../../utils/artistSlug.js';
 import { resolveArtistPublicCardImageUrl } from '../../utils/artistCardImageMode.js';
 import { resolveArtistCardImageUrl } from '../../utils/artistCardPlaceholder.js';
+import { navigate } from '../../router.js';
 import entryTicketIcon from '../../assets/icons/fusion_svg_icons_b2/entry-ticket.svg';
 import memberUserIcon from '../../assets/icons/fusion_svg_icons_b2/member-user.svg';
 import includedGiftIcon from '../../assets/icons/fusion_svg_icons_b2/included-gift.svg';
@@ -38,12 +40,20 @@ function pddIconHtml(iconUrl) {
 }
 
 /**
- * @typedef {{ cycle: number, name: string, place: string, residencyDate: string, image: string }} DrawRecipient
+ * @typedef {{
+ *   cycle: number,
+ *   name: string,
+ *   discipline: string,
+ *   residencyDate: string,
+ *   image: string,
+ *   slug: string,
+ * }} DrawRecipient
  * @typedef {{
  *   key: string,
  *   cmsBundle: unknown,
  *   cycle: { claimed: number, total: number, cycle: number },
  *   recipients: DrawRecipient[],
+ *   applicantNames: string[],
  *   programLabel: string,
  *   drawActive: boolean,
  * }} ProgramDrawDisplayCache
@@ -55,6 +65,16 @@ let displayDataCache = null;
 let displayDataInflightKey = '';
 /** @type {Promise<ProgramDrawDisplayCache> | null} */
 let displayDataInflight = null;
+
+/**
+ * Clear session display cache so enter/exit remounts re-fetch progress.
+ * Call before remounting `<app-program-draw-display>` after award enter/exit.
+ */
+export function invalidateProgramDrawDisplayCache() {
+    displayDataCache = null;
+    displayDataInflightKey = '';
+    displayDataInflight = null;
+}
 
 function escapeHtml(s) {
     return String(s ?? '')
@@ -77,27 +97,34 @@ function displayCacheKey(programId = '', locale = currentLocale()) {
 }
 
 /**
- * @param {object | null | undefined} artist
- * @param {string} locale
+ * Support lead with live past-recipient count (`{{recipients}}`).
+ * Uses singular grammar when count is 1 (`artist has` / singular CMS template).
+ * Legacy CMS strings with a hard-coded number are rewritten to use the live count.
+ * @param {string} template
+ * @param {{ program?: string, total?: number, n?: number, recipients?: number }} vars
+ * @param {string} [singularTemplate]
  */
-function artistPlaceLine(artist, locale) {
-    const loc = artistLocaleBlock(artist, locale);
-    if (loc && typeof loc === 'object') {
-        const o = /** @type {Record<string, unknown>} */ (loc);
-        for (const key of ['basedIn', 'location', 'place', 'city']) {
-            const v = o[key];
-            if (v != null && String(v).trim()) return String(v).trim();
+function formatSupportLeadCopy(template, vars, singularTemplate = '') {
+    const n = Math.max(0, Math.floor(Number(vars?.recipients) || 0));
+    const singular = String(singularTemplate || '').trim();
+    let raw = String(n === 1 && singular ? singular : template || '');
+    if (!/\{\{recipients\}\}/i.test(raw)) {
+        raw = raw.replace(/\b\d+\b/, '{{recipients}}');
+    }
+    // Prefer dedicated singular/plural CMS strings; otherwise adjust only the count phrase.
+    if (!(n === 1 && singular)) {
+        if (n === 1) {
+            raw = raw
+                .replace(/\bartists have already\b/gi, 'artist has already')
+                .replace(/\bartists\b/gi, 'artist')
+                .replace(/\bhave already\b/gi, 'has already');
+        } else {
+            raw = raw
+                .replace(/\bartist has already\b/gi, 'artists have already')
+                .replace(/\bartists?\b(?=\s+have\b)/gi, 'artists');
         }
     }
-    const filter =
-        artist && typeof artist === 'object'
-            ? /** @type {Record<string, unknown>} */ (artist).filter
-            : null;
-    if (filter && typeof filter === 'object') {
-        const lk = /** @type {Record<string, unknown>} */ (filter).locationKey;
-        if (lk != null && String(lk).trim()) return String(lk).trim();
-    }
-    return '';
+    return formatProgramDrawCopyTemplate(raw, vars);
 }
 
 /**
@@ -124,10 +151,13 @@ function notifyDisplayDataEnriched(key) {
 function enrichProgramDrawDisplayData(pid, key, locale, base) {
     void (async () => {
         try {
-            const [progress, rows, artists] = await Promise.all([
+            const [progress, rows, artists, applicantNamesRaw] = await Promise.all([
                 pid ? getProgramDrawProgressPublic(pid).catch(() => null) : Promise.resolve(null),
                 listArtistDrawRecipientsPublic().catch(() => []),
                 getArtists().catch(() => []),
+                pid
+                    ? listProgramAwardApplicantNamesPublic(pid).catch(() => [])
+                    : Promise.resolve([]),
             ]);
             if (displayDataCache?.key !== key) return;
 
@@ -155,14 +185,22 @@ function enrichProgramDrawDisplayData(pid, key, locale, base) {
                 const image = artist
                     ? resolveArtistCardImageUrl(resolveArtistPublicCardImageUrl(artist))
                     : '';
+                const discipline = artist ? artistDisplayDiscipline(artist, locale) : '';
+                const slug = artist ? String(artist.slug || '').trim() : '';
                 recipients.push({
                     cycle: Number(row.cycle) || 1,
                     name,
-                    place: artist ? artistPlaceLine(artist, locale) : '',
+                    discipline,
                     residencyDate: String(row.awardLabel || '').trim(),
                     image,
+                    slug,
                 });
             }
+
+            const applicantNames = (Array.isArray(applicantNamesRaw) ? applicantNamesRaw : [])
+                .map((n) => String(n || '').trim())
+                .filter(Boolean)
+                .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 
             /** @type {ProgramDrawDisplayCache} */
             const packed = {
@@ -170,6 +208,7 @@ function enrichProgramDrawDisplayData(pid, key, locale, base) {
                 key,
                 cycle: { claimed, total, cycle },
                 recipients,
+                applicantNames,
                 drawActive:
                     progress != null ? Boolean(progress.active) : base.drawActive !== false,
             };
@@ -217,6 +256,7 @@ export function preloadProgramDrawDisplayData(programId = '') {
             cmsBundle,
             cycle: { claimed: 0, total, cycle: 1 },
             recipients: [],
+            applicantNames: [],
             programLabel: programDrawBrandLabel(pid),
             drawActive: cfg == null ? true : Boolean(cfg.active),
         };
@@ -241,10 +281,14 @@ class ProgramDrawDisplayComponent extends HTMLElement {
         this._recipientsOpen = false;
         /** @type {boolean} */
         this._aboutOpen = false;
+        /** @type {boolean} */
+        this._applicantsOpen = false;
         /** @type {{ claimed: number, total: number, cycle: number }} */
         this._cycle = { claimed: 0, total: DRAW_SLOT_GOAL_DEFAULT, cycle: 1 };
         /** @type {DrawRecipient[]} */
         this._recipients = [];
+        /** @type {string[]} */
+        this._applicantNames = [];
         /** @type {unknown} */
         this._cmsBundle = null;
         /** @type {string} */
@@ -253,7 +297,7 @@ class ProgramDrawDisplayComponent extends HTMLElement {
         this._drawActiveFromConfig = true;
         /** @type {string} */
         this._loadedKey = '';
-        /** @type {{ pastRecipientsLabel: string, pastRecipientsHideLabel: string, moreDetailsLabel: string, moreDetailsHideLabel: string, learnHowLabel: string, drawActive: boolean } | null} */
+        /** @type {{ pastRecipientsLabel: string, pastRecipientsHideLabel: string, moreDetailsLabel: string, moreDetailsHideLabel: string, learnHowLabel: string, applicantsLabel: string, applicantsHideLabel: string, drawActive: boolean } | null} */
         this._toggleLabels = null;
         this._onLocale = () => {
             this._loadedKey = '';
@@ -343,6 +387,7 @@ class ProgramDrawDisplayComponent extends HTMLElement {
         this._cmsBundle = packed.cmsBundle;
         this._cycle = packed.cycle;
         this._recipients = packed.recipients;
+        this._applicantNames = Array.isArray(packed.applicantNames) ? packed.applicantNames : [];
         this._programLabel = packed.programLabel || programDrawBrandLabel(this._programId());
         this._drawActiveFromConfig = packed.drawActive !== false;
         this._loadedKey = packed.key;
@@ -364,13 +409,18 @@ class ProgramDrawDisplayComponent extends HTMLElement {
         const L = this._toggleLabels;
         const recipients = this.shadowRoot.querySelector('#pdd-recipients');
         const about = this.shadowRoot.querySelector('#pdd-about');
+        const applicants = this.shadowRoot.querySelector('#pdd-applicants');
         const pastBtn = this.shadowRoot.querySelector('[data-pdd-past-toggle]');
         const aboutBtn = this.shadowRoot.querySelector('[data-pdd-about-toggle]');
+        const applicantsBtn = this.shadowRoot.querySelector('[data-pdd-applicants-toggle]');
         if (recipients instanceof HTMLElement) {
             recipients.hidden = !this._recipientsOpen;
         }
         if (about instanceof HTMLElement) {
             about.hidden = !this._aboutOpen;
+        }
+        if (applicants instanceof HTMLElement) {
+            applicants.hidden = !this._applicantsOpen;
         }
         if (pastBtn instanceof HTMLButtonElement) {
             pastBtn.setAttribute('aria-expanded', this._recipientsOpen ? 'true' : 'false');
@@ -385,6 +435,12 @@ class ProgramDrawDisplayComponent extends HTMLElement {
             } else {
                 aboutBtn.textContent = this._aboutOpen ? L.moreDetailsHideLabel : L.moreDetailsLabel;
             }
+        }
+        if (applicantsBtn instanceof HTMLButtonElement) {
+            applicantsBtn.setAttribute('aria-expanded', this._applicantsOpen ? 'true' : 'false');
+            applicantsBtn.textContent = this._applicantsOpen
+                ? L.applicantsHideLabel
+                : L.applicantsLabel;
         }
     }
 
@@ -410,6 +466,8 @@ class ProgramDrawDisplayComponent extends HTMLElement {
             moreDetailsLabel: L.moreDetailsLabel,
             moreDetailsHideLabel: L.moreDetailsHideLabel,
             learnHowLabel: L.learnHowLabel,
+            applicantsLabel: L.applicantsLabel || 'Applicants',
+            applicantsHideLabel: L.applicantsHideLabel || 'Hide applicants',
             drawActive,
         };
         const { claimed, total, cycle } = this._cycle;
@@ -417,10 +475,14 @@ class ProgramDrawDisplayComponent extends HTMLElement {
         const pct = total > 0 ? Math.min(100, Math.round((claimed / total) * 100)) : 0;
         const recipientsOpen = this._recipientsOpen;
         const aboutOpen = this._aboutOpen;
+        const applicantsOpen = this._applicantsOpen;
+        const recipientCount = this._recipients.length;
+        const applicantNames = Array.isArray(this._applicantNames) ? this._applicantNames : [];
         const copyVars = {
             program: this._programLabel || programDrawBrandLabel(this._programId()),
             total,
             n: cycle,
+            recipients: recipientCount,
         };
         const cycleLabel = formatProgramDrawCopyTemplate(L.roundLabelTemplate, copyVars);
         const howBody = formatProgramDrawCopyTemplate(L.howBody, copyVars);
@@ -469,6 +531,9 @@ class ProgramDrawDisplayComponent extends HTMLElement {
                 <span class="pdd__bar-fill" style="width:${pct}%"></span>
               </div>
               <p class="pdd__remaining">${escapeHtml(formatRemainingTemplate(L.remainingTemplate, remaining))}</p>
+              <button type="button" class="pdd__text-link pdd__applicants-link" data-pdd-applicants-toggle aria-expanded="${applicantsOpen ? 'true' : 'false'}" aria-controls="pdd-applicants">
+                ${escapeHtml(applicantsOpen ? L.applicantsHideLabel || 'Hide applicants' : L.applicantsLabel || 'Applicants')}
+              </button>
             </div>
           </div>`
             : `<div class="pdd__col">
@@ -480,21 +545,25 @@ class ProgramDrawDisplayComponent extends HTMLElement {
             </div>
           </div>`;
 
-        const hasRecipients = this._recipients.length > 0;
+        const hasRecipients = recipientCount > 0;
         const recipientsHtml = hasRecipients
             ? this._recipients
-                  .map(
-                      (r) => `
-      <article class="pdd__recipient">
+                  .map((r) => {
+                      const href = r.slug ? `/profile/${encodeURIComponent(r.slug)}` : '';
+                      const tag = href ? 'a' : 'article';
+                      const hrefAttr = href ? ` href="${escapeHtml(href)}"` : '';
+                      const meta = String(r.discipline || '').trim();
+                      return `
+      <${tag} class="pdd__recipient"${hrefAttr}>
         <img class="pdd__recipient-img" src="${escapeHtml(r.image)}" alt="" width="64" height="64" loading="lazy" />
         <div class="pdd__recipient-copy">
           <p class="pdd__recipient-cycle">${escapeHtml(formatProgramDrawCopyTemplate(L.roundLabelTemplate, { ...copyVars, n: r.cycle }))}</p>
           <p class="pdd__recipient-name">${escapeHtml(r.name)}</p>
-          <p class="pdd__recipient-meta">${escapeHtml(r.place)}</p>
-          <p class="pdd__recipient-meta">${escapeHtml(r.residencyDate)}</p>
+          ${meta ? `<p class="pdd__recipient-meta">${escapeHtml(meta)}</p>` : ''}
+          ${r.residencyDate ? `<p class="pdd__recipient-meta">${escapeHtml(r.residencyDate)}</p>` : ''}
         </div>
-      </article>`,
-                  )
+      </${tag}>`;
+                  })
                   .join('')
             : '';
 
@@ -503,6 +572,12 @@ class ProgramDrawDisplayComponent extends HTMLElement {
             <p>${escapeHtml(formatProgramDrawCopyTemplate(L.emptyRecipientsBody, copyVars))}</p>
             <p class="pdd__empty-soft">${escapeHtml(formatProgramDrawCopyTemplate(L.emptyRecipientsSoft, copyVars))}</p>
           </div>`;
+
+        const applicantsListHtml = applicantNames.length
+            ? `<ul class="pdd__applicants-list">${applicantNames
+                  .map((name) => `<li class="pdd__applicants-item">${escapeHtml(name)}</li>`)
+                  .join('')}</ul>`
+            : `<p class="pdd__applicants-empty">${escapeHtml(L.applicantsEmpty || 'No applicants yet.')}</p>`;
 
         const aboutParagraphs = (about.paragraphs || [])
             .map((p) => `<p class="pdd__about-p">${escapeHtml(formatProgramDrawCopyTemplate(p, copyVars))}</p>`)
@@ -576,6 +651,10 @@ class ProgramDrawDisplayComponent extends HTMLElement {
             </div>
           </div>
         </div>
+        <div class="pdd__applicants" id="pdd-applicants" ${applicantsOpen ? '' : 'hidden'}>
+          <h4 class="pdd__applicants-title">${escapeHtml(L.applicantsLabel || 'Applicants')}</h4>
+          ${applicantsListHtml}
+        </div>
         <div class="pdd__recipients" id="pdd-recipients" ${recipientsOpen ? '' : 'hidden'}>
           <div class="pdd__recipients-head">
             <h4 class="pdd__recipients-title">${escapeHtml(L.pastTitle)}</h4>
@@ -590,7 +669,7 @@ class ProgramDrawDisplayComponent extends HTMLElement {
                   ? `<div class="pdd__recipients-row">
             <div class="pdd__recipients-grid">${recipientsHtml}</div>
             <aside class="pdd__support">
-              <p class="pdd__support-lead">${escapeHtml(L.supportLead)}</p>
+              <p class="pdd__support-lead">${escapeHtml(formatSupportLeadCopy(L.supportLead, copyVars, L.supportLeadSingular))}</p>
               <p class="pdd__support-cta">${escapeHtml(L.supportCta)}</p>
             </aside>
           </div>`
@@ -640,6 +719,10 @@ class ProgramDrawDisplayComponent extends HTMLElement {
             this._aboutOpen = !this._aboutOpen;
             this._syncExpandUi();
         });
+        this.shadowRoot.querySelector('[data-pdd-applicants-toggle]')?.addEventListener('click', () => {
+            this._applicantsOpen = !this._applicantsOpen;
+            this._syncExpandUi();
+        });
         this.shadowRoot.querySelector('[data-pdd-view-all]')?.addEventListener('click', () => {
             this.dispatchEvent(
                 new CustomEvent('fusion-draw-display-view-all', {
@@ -647,6 +730,15 @@ class ProgramDrawDisplayComponent extends HTMLElement {
                     composed: true,
                 }),
             );
+        });
+        this.shadowRoot.querySelectorAll('a.pdd__recipient[href^="/"]').forEach((el) => {
+            el.addEventListener('click', (e) => {
+                const a = /** @type {HTMLAnchorElement} */ (e.currentTarget);
+                const href = a.getAttribute('href');
+                if (!href || !href.startsWith('/')) return;
+                e.preventDefault();
+                navigate(href);
+            });
         });
     }
 
@@ -978,6 +1070,25 @@ class ProgramDrawDisplayComponent extends HTMLElement {
         font-variation-settings: var(--fv-body);
       }
 
+      .pdd__applicants-link {
+        display: inline-block;
+        margin-top: 0.35rem;
+        padding: 0;
+        border: 0;
+        background: none;
+        font: inherit;
+        font-size: 0.78rem;
+        color: var(--c2, #111);
+        text-decoration: underline;
+        text-underline-offset: 0.15em;
+        cursor: pointer;
+        font-variation-settings: var(--fv-body);
+      }
+
+      .pdd__applicants-link:hover {
+        opacity: 0.75;
+      }
+
       .pdd__col-copy,
       .pdd__col-note {
         margin: 0;
@@ -995,7 +1106,8 @@ class ProgramDrawDisplayComponent extends HTMLElement {
       }
 
       .pdd__recipients,
-      .pdd__about {
+      .pdd__about,
+      .pdd__applicants {
         border-top: 1px solid color-mix(in srgb, var(--c2, #111) 28%, transparent);
         padding: 1.1rem 1.35rem 1.2rem;
         background: var(--bg, #f8f4f0);
@@ -1007,8 +1119,42 @@ class ProgramDrawDisplayComponent extends HTMLElement {
       }
 
       .pdd__recipients[hidden],
-      .pdd__about[hidden] {
+      .pdd__about[hidden],
+      .pdd__applicants[hidden] {
         display: none !important;
+      }
+
+      .pdd__applicants-title {
+        margin: 0 0 0.65rem;
+        font-size: 0.62rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--c2, #111);
+        font-variation-settings: var(--fv-body-wide);
+        font-weight: 600;
+      }
+
+      .pdd__applicants-list {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+        gap: 0.35rem 1rem;
+      }
+
+      .pdd__applicants-item {
+        margin: 0;
+        font-size: 0.88rem;
+        color: var(--c2, #111);
+        font-variation-settings: var(--fv-body);
+      }
+
+      .pdd__applicants-empty {
+        margin: 0;
+        font-size: 0.84rem;
+        color: color-mix(in srgb, var(--c2, #111) 70%, transparent);
+        font-variation-settings: var(--fv-body);
       }
 
       @keyframes pdd-expand {
@@ -1099,6 +1245,17 @@ class ProgramDrawDisplayComponent extends HTMLElement {
         grid-template-columns: 64px minmax(0, 1fr);
         gap: 0.7rem;
         align-items: start;
+        text-decoration: none;
+        color: inherit;
+        border-radius: 2px;
+      }
+      a.pdd__recipient:hover .pdd__recipient-name,
+      a.pdd__recipient:focus-visible .pdd__recipient-name {
+        text-decoration: underline;
+      }
+      a.pdd__recipient:focus-visible {
+        outline: 2px solid color-mix(in srgb, var(--c2, #111) 55%, transparent);
+        outline-offset: 3px;
       }
 
       .pdd__recipient-img {

@@ -388,16 +388,29 @@ export async function createPayPalSubscription(reqBody) {
 }
 
 /**
+ * Cancel a PayPal billing subscription (stops future billing).
  * @param {string} subscriptionId
+ * @param {string} [reason]
  */
-export async function cancelPayPalSubscriptionAtPeriodEnd(subscriptionId) {
+export async function cancelPayPalSubscription(
+    subscriptionId,
+    reason = 'Program deposit confirmed — membership complimentary',
+) {
     return paypalRequest(
         `/v1/billing/subscriptions/${encodeURIComponent(subscriptionId)}/cancel`,
         {
             method: 'POST',
-            body: { reason: 'Member requested cancellation at period end' },
+            body: { reason: String(reason || 'Subscription cancelled').slice(0, 128) },
         },
     );
+}
+
+/**
+ * @param {string} subscriptionId
+ * @deprecated Prefer cancelPayPalSubscription — PayPal /cancel stops future billing immediately.
+ */
+export async function cancelPayPalSubscriptionAtPeriodEnd(subscriptionId) {
+    return cancelPayPalSubscription(subscriptionId, 'Member requested cancellation at period end');
 }
 
 /**

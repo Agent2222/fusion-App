@@ -99,13 +99,46 @@ async function ensureLinkedArtistOrOpenProfileSetup() {
 }
 
 /**
+ * Resolve program id from the draw or application form on the page.
+ * @returns {string}
+ */
+function currentProgramPageId() {
+    const drawForm = document.getElementById('programDrawFormSection');
+    if (drawForm instanceof HTMLElement) {
+        const fromDraw = String(drawForm.getAttribute('data-program-id') || '').trim();
+        if (fromDraw) return fromDraw;
+    }
+    const applyForm = document.getElementById('programApplicationSection');
+    if (applyForm instanceof HTMLElement) {
+        return String(applyForm.getAttribute('data-program-id') || '').trim();
+    }
+    return '';
+}
+
+/**
+ * Scroll to the draw “You’re entered” / withdraw panel inside the draw form shadow.
+ * @param {HTMLElement | null} drawForm
+ */
+function scrollToDrawEnteredPanel(drawForm) {
+    if (!(drawForm instanceof HTMLElement)) return;
+    const panel = drawForm.shadowRoot?.querySelector('#draw-applied-panel');
+    scrollElementTopToViewportGap(
+        panel instanceof Element ? panel : drawForm,
+        PROGRAM_APPLICATION_VIEWPORT_TOP_GAP_PX,
+    );
+}
+
+/**
  * Show one form and fully hide the other so they replace each other in the wrap.
  * @param {'apply' | 'draw'} mode
+ * @param {{ scrollToEntered?: boolean }} [opts]
+ * @returns {Promise<void>}
  */
-function revealProgramFormMode(mode) {
+async function revealProgramFormMode(mode, opts = {}) {
     const wrap = document.getElementById('programApplicationWrap');
     const applyForm = document.getElementById('programApplicationSection');
     const drawForm = document.getElementById('programDrawFormSection');
+    const details = document.getElementById('programDetailsSection');
     if (wrap) {
         wrap.removeAttribute('hidden');
         wrap.removeAttribute('inert');
@@ -125,10 +158,17 @@ function revealProgramFormMode(mode) {
             }
             drawForm.setAttribute('active', 'true');
             if (typeof drawForm.refresh === 'function') {
-                void drawForm.refresh();
+                await drawForm.refresh();
             }
         }
-        scrollElementTopToViewportGap(drawForm, PROGRAM_APPLICATION_VIEWPORT_TOP_GAP_PX);
+        if (details && typeof /** @type {{ setFormMode?: (m: string) => void }} */ (details).setFormMode === 'function') {
+            /** @type {{ setFormMode: (m: string) => void }} */ (details).setFormMode('draw');
+        }
+        if (opts.scrollToEntered) {
+            scrollToDrawEnteredPanel(drawForm instanceof HTMLElement ? drawForm : null);
+        } else {
+            scrollElementTopToViewportGap(drawForm, PROGRAM_APPLICATION_VIEWPORT_TOP_GAP_PX);
+        }
         return;
     }
     if (drawForm instanceof HTMLElement) {
@@ -141,6 +181,9 @@ function revealProgramFormMode(mode) {
         applyForm.hidden = false;
         applyForm.setAttribute('active', 'true');
     }
+    if (details && typeof /** @type {{ setFormMode?: (m: string) => void }} */ (details).setFormMode === 'function') {
+        /** @type {{ setFormMode: (m: string) => void }} */ (details).setFormMode('apply');
+    }
     scrollElementTopToViewportGap(applyForm, PROGRAM_APPLICATION_VIEWPORT_TOP_GAP_PX);
     if (applyForm && typeof applyForm.notifyApplicationFunnelRevealed === 'function') {
         applyForm.notifyApplicationFunnelRevealed();
@@ -150,12 +193,33 @@ function revealProgramFormMode(mode) {
 /**
  * Program page CTAs: show `#programApplicationWrap`, activate `#programApplicationSection`, scroll into view.
  * Signed-in users without a linked roster profile are still sent to profile setup first; guests go straight to the form.
+ * While the caller has an active Program Draw (award) entry for this program, opens the draw entered/withdraw
+ * panel instead of the formal application form.
  *
  * @returns {Promise<void>}
  */
 export async function revealProgramApplicationOrOpenJoin() {
     if (!(await ensureLinkedArtistOrOpenProfileSetup())) return;
-    revealProgramFormMode('apply');
+
+    const programId = currentProgramPageId();
+    if (programId) {
+        try {
+            const { getAuthSnapshot } = await import('./icAuth.js');
+            const snap = await getAuthSnapshot();
+            if (snap?.authenticated) {
+                const { getMyProgramPath } = await import('./database.js');
+                const path = String((await getMyProgramPath(programId)) || '').trim();
+                if (path === 'award') {
+                    await revealProgramFormMode('draw', { scrollToEntered: true });
+                    return;
+                }
+            }
+        } catch {
+            /* fall through to apply */
+        }
+    }
+
+    await revealProgramFormMode('apply');
 }
 
 /**
@@ -183,7 +247,7 @@ export async function revealProgramDrawFormOrOpenJoin() {
             : '';
     preloadProgramDrawDisplay(programId);
     if (!(await ensureLinkedArtistOrOpenProfileSetup())) return;
-    revealProgramFormMode('draw');
+    await revealProgramFormMode('draw');
 }
 
 /**
@@ -199,5 +263,5 @@ export async function revealProgramDrawInactivePanel() {
             ? String(drawForm.getAttribute('data-program-id') || '').trim()
             : '';
     preloadProgramDrawDisplay(programId);
-    revealProgramFormMode('draw');
+    await revealProgramFormMode('draw');
 }

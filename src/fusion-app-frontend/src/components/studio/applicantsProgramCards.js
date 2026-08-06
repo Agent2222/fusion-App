@@ -200,6 +200,11 @@ export function applicantDrawDetailSectionHtml(model) {
               Live intake from Program Draw entries (paid $50 or award credit). Edit active status and slot totals in Programs → Edit → Program Award.
               Formal applications and award entries are mutually exclusive for the same program.
             </p>
+            <div class="studio-applicants-draw__actions" style="margin-top:0.75rem">
+              <button type="button" class="studio-btn-primary" id="studio-applicants-draw-add-entry" data-draw-program-id="${escapeHtml(m.programId)}">
+                Add entry
+              </button>
+            </div>
           </div>
           <div class="studio-applicants-draw__active studio-applicants-draw__active--readonly" id="studio-applicants-draw-active-badge">
             <span class="studio-applicants-draw__active-copy">

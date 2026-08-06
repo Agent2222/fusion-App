@@ -13,6 +13,9 @@
  *   currentCycleLabel: string,
  *   membersSuffix: string,
  *   remainingTemplate: string,
+ *   applicantsLabel: string,
+ *   applicantsHideLabel: string,
+ *   applicantsEmpty: string,
  *   roundLabelTemplate: string,
  *   howTitle: string,
  *   howBody: string,
@@ -28,6 +31,7 @@
  *   pastTitle: string,
  *   viewAllLabel: string,
  *   supportLead: string,
+ *   supportLeadSingular?: string,
  *   supportCta: string,
  *   emptyRecipientsLead: string,
  *   emptyRecipientsBody: string,
@@ -75,6 +79,9 @@ export function emptyProgramDrawDisplay() {
         currentCycleLabel: '',
         membersSuffix: '',
         remainingTemplate: '',
+        applicantsLabel: '',
+        applicantsHideLabel: '',
+        applicantsEmpty: '',
         roundLabelTemplate: '',
         howTitle: '',
         howBody: '',
@@ -90,6 +97,7 @@ export function emptyProgramDrawDisplay() {
         pastTitle: '',
         viewAllLabel: '',
         supportLead: '',
+        supportLeadSingular: '',
         supportCta: '',
         emptyRecipientsLead: '',
         emptyRecipientsBody: '',
@@ -143,14 +151,17 @@ export function emptyProgramDrawBundle() {
 export function defaultProgramDrawLocaleEn() {
     return {
         display: {
-            badge: 'Member Draw',
-            headline: 'One member will receive a fully sponsored residency placement.',
+            badge: 'Program Draw',
+            headline: 'One artist will receive a fully sponsored residency placement.',
             sub: 'Not automatic. You must submit your application to enter the draw.',
             submitLabel: 'Submit to Draw',
             enteredLabel: "You're entered",
             currentCycleLabel: 'Current Round',
             membersSuffix: 'Entries',
             remainingTemplate: '{{count}} entries remaining',
+            applicantsLabel: 'Applicants',
+            applicantsHideLabel: 'Hide applicants',
+            applicantsEmpty: 'No applicants yet.',
             roundLabelTemplate: 'Round #{{n}}',
             howTitle: 'How it Works',
             howBody: 'Submit your entry to join the current round.',
@@ -166,7 +177,9 @@ export function defaultProgramDrawLocaleEn() {
             pastTitle: 'Past Recipients',
             viewAllLabel: 'View all recipients →',
             supportLead:
-                '12 artists have already received support through the FUSION Artist Support Draw.',
+                '{{recipients}} artists have already received support through the FUSION Artist Support Draw.',
+            supportLeadSingular:
+                '{{recipients}} artist has already received support through the FUSION Artist Support Draw.',
             supportCta: "Be part of what's next.",
             emptyRecipientsLead: 'This is the first FUSION Program Draw.',
             emptyRecipientsBody: 'The first recipient will be announced after Round #{{n}}.',
@@ -219,14 +232,17 @@ export function defaultProgramDrawLocaleEn() {
 export function defaultProgramDrawLocaleJa() {
     return {
         display: {
-            badge: 'メンバー抽選',
-            headline: '1名のメンバーが、全額支援のレジデンシー枠を受け取ります。',
+            badge: 'プログラム抽選',
+            headline: '1名のアーティストが、全額支援のレジデンシー枠を受け取ります。',
             sub: '自動では入りません。抽選に参加するには応募の提出が必要です。',
             submitLabel: '抽選に申し込む',
             enteredLabel: 'エントリー済み',
             currentCycleLabel: '現在のラウンド',
             membersSuffix: 'エントリー',
             remainingTemplate: '残り {{count}} エントリー',
+            applicantsLabel: '応募者',
+            applicantsHideLabel: '応募者を閉じる',
+            applicantsEmpty: 'まだ応募者はいません。',
             roundLabelTemplate: 'ラウンド #{{n}}',
             howTitle: '仕組み',
             howBody: 'エントリーを提出して、現在のラウンドに参加します。',
@@ -242,7 +258,9 @@ export function defaultProgramDrawLocaleJa() {
             pastTitle: '過去の受賞者',
             viewAllLabel: 'すべての受賞者を見る →',
             supportLead:
-                'すでに 12 名のアーティストが FUSION Artist Support Draw を通じて支援を受けています。',
+                'すでに {{recipients}} 名のアーティストが FUSION Artist Support Draw を通じて支援を受けています。',
+            supportLeadSingular:
+                'すでに {{recipients}} 名のアーティストが FUSION Artist Support Draw を通じて支援を受けています。',
             supportCta: '次の一歩に参加しよう。',
             emptyRecipientsLead: 'これが初めての FUSION プログラム抽選です。',
             emptyRecipientsBody: '最初の受賞者はラウンド #{{n}} の後に発表されます。',
@@ -362,16 +380,33 @@ export function normalizeProgramDrawLocale(raw, fallback) {
         const v = String(dSrc[key] ?? '').trim();
         return v || String(dFb[/** @type {keyof ProgramDrawDisplayCopy} */ (key)] ?? '');
     };
+    /** Prefer current product wording when CMS still has older “Member Draw” copy. */
+    const rewriteBadge = (raw, fallback) => {
+        const v = String(raw || '').trim();
+        if (/^member\s*draw$/i.test(v) || v === 'メンバー抽選') {
+            return String(fallback || 'Program Draw');
+        }
+        return v;
+    };
+    const badge = rewriteBadge(d('badge'), dFb.badge);
+    const badgeInactive = rewriteBadge(d('badgeInactive'), dFb.badgeInactive || dFb.badge);
+    const headline = d('headline')
+        .replace(/\bOne member\b/gi, 'One artist')
+        .replace(/1名のメンバーが/g, '1名のアーティストが')
+        .replace(/\bmember will receive\b/gi, 'artist will receive');
     return {
         display: {
-            badge: d('badge'),
-            headline: d('headline'),
+            badge,
+            headline,
             sub: d('sub'),
             submitLabel: d('submitLabel'),
             enteredLabel: d('enteredLabel'),
             currentCycleLabel: d('currentCycleLabel'),
             membersSuffix: d('membersSuffix'),
             remainingTemplate: d('remainingTemplate'),
+            applicantsLabel: d('applicantsLabel'),
+            applicantsHideLabel: d('applicantsHideLabel'),
+            applicantsEmpty: d('applicantsEmpty'),
             roundLabelTemplate: d('roundLabelTemplate'),
             howTitle: d('howTitle'),
             howBody: d('howBody'),
@@ -387,11 +422,12 @@ export function normalizeProgramDrawLocale(raw, fallback) {
             pastTitle: d('pastTitle'),
             viewAllLabel: d('viewAllLabel'),
             supportLead: d('supportLead'),
+            supportLeadSingular: d('supportLeadSingular'),
             supportCta: d('supportCta'),
             emptyRecipientsLead: d('emptyRecipientsLead'),
             emptyRecipientsBody: d('emptyRecipientsBody'),
             emptyRecipientsSoft: d('emptyRecipientsSoft'),
-            badgeInactive: d('badgeInactive'),
+            badgeInactive,
             subInactive: d('subInactive'),
             getNotifiedLabel: d('getNotifiedLabel'),
             applyToProgramLabel: d('applyToProgramLabel'),
@@ -513,19 +549,23 @@ export function programDrawBrandLabel(programId = '') {
 }
 
 /**
- * Replace `{{program}}` / `{{total}}` / `{{n}}` (and legacy `{{count}}` for total) in draw copy.
+ * Replace `{{program}}` / `{{total}}` / `{{n}}` / `{{recipients}}` (and legacy `{{count}}` for total) in draw copy.
  * @param {string} template
- * @param {{ program?: string, total?: number, n?: number, round?: number }} [vars]
+ * @param {{ program?: string, total?: number, n?: number, round?: number, recipients?: number }} [vars]
  */
 export function formatProgramDrawCopyTemplate(template, vars = {}) {
     const program = String(vars.program || 'FUSION').trim() || 'FUSION';
     const total = Number.isFinite(Number(vars.total)) ? String(Math.floor(Number(vars.total))) : '100';
     const nRaw = vars.n ?? vars.round;
     const n = Number.isFinite(Number(nRaw)) ? String(Math.floor(Number(nRaw))) : '';
+    const recipients = Number.isFinite(Number(vars.recipients))
+        ? String(Math.floor(Number(vars.recipients)))
+        : '0';
     return String(template || '')
         .replace(/\{\{program\}\}/gi, program)
         .replace(/\{\{total\}\}/gi, total)
         .replace(/\{\{count\}\}/gi, total)
+        .replace(/\{\{recipients\}\}/gi, recipients)
         .replace(/\{\{n\}\}/gi, n)
         .replace(/\{\{round\}\}/gi, n);
 }

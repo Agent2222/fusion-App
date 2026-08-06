@@ -30,6 +30,7 @@ import {
 } from '../../utils/database.js';
 import {
     fetchMembershipRevenueSummary,
+    repairPayPalProgramPayment,
     syncPayPalSubscription,
     syncSubscriptionFromStripe,
     syncSubscriptionFromStripeByEmail,
@@ -288,9 +289,13 @@ export function renderFinance() {
                     <div class="studio-finance-programs-panel">
                         <div class="mpd-payments-section-head" style="margin-bottom:0.75rem">
                             <div id="studio-finance-program-revenue-stat" class="studio-finance-program-revenue-stat" aria-live="polite"></div>
-                            <button type="button" class="studio-btn-ghost" id="studio-finance-programs-refresh">Refresh payments</button>
+                            <div class="studio-finance-programs-actions" style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">
+                                <button type="button" class="studio-btn-ghost" id="studio-finance-programs-refresh">Refresh payments</button>
+                                <button type="button" class="studio-btn-ghost" id="studio-finance-programs-sync">Sync payments</button>
+                            </div>
                         </div>
                         <p class="studio-muted mpd-field-hint" id="studio-finance-programs-refresh-status" role="status"></p>
+                        <p class="studio-muted mpd-field-hint">Sync payments re-imports a completed PayPal program payment by order or capture ID. It does not pull Stripe membership subscriptions.</p>
                         <div class="studio-finance-program-cards-rail studio-finance-program-cards-rail--unified" id="studio-finance-program-cards-unified" role="list" aria-label="Programs"></div>
                         <div id="studio-finance-program-table-wrap" class="studio-finance-program-table-wrap" aria-live="polite"></div>
                         <div id="studio-finance-program-promotions-wrap" class="studio-finance-program-promotions-wrap" aria-live="polite"></div>
@@ -379,9 +384,12 @@ export function renderFinance() {
                     <section class="member-profile-dashboard__card">
                         <div class="mpd-payments-section-head">
                             <h2>Payment diagnostics</h2>
-                            <button type="button" class="studio-btn-ghost" id="studio-finance-diagnostics-refresh">Refresh</button>
+                            <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+                                <button type="button" class="studio-btn-ghost" id="studio-finance-diagnostics-refresh">Refresh</button>
+                                <button type="button" class="studio-btn-ghost" id="studio-finance-diagnostics-sync">Sync payments</button>
+                            </div>
                         </div>
-                        <p class="studio-muted">Temporary tool. Cross-checks every recorded ledger payment (Stripe, PayPal, staff) against applicant records so you can see why a payment may not appear in the Programs table. A payment only shows in Programs when it matches an applicant on an <strong>active/open/full</strong> program and that applicant is <strong>slot-secured</strong>. If a ledger row exists but the applicant is missing, use <strong>Assign…</strong> to attach it.</p>
+                        <p class="studio-muted">Temporary tool. Cross-checks every recorded ledger payment (Stripe, PayPal, staff) against applicant records so you can see why a payment may not appear in the Programs table. A payment only shows in Programs when it matches an applicant on an <strong>active/open/full</strong> program and that applicant is <strong>slot-secured</strong>. If a ledger row exists but the applicant is missing, use <strong>Assign…</strong> to attach it. Use <strong>Sync payments</strong> to re-import a completed PayPal capture that never landed on the canister.</p>
                         <div id="studio-finance-diagnostics-body" aria-live="polite"></div>
                     </section>
                 </div>
@@ -2241,6 +2249,205 @@ export async function initFinance(mainEl) {
     };
 
     /**
+     * Re-import a completed PayPal program payment (order/capture id) onto the Motoko ledger.
+     * @param {{ applicantId?: string }} [opts]
+     */
+    const openSyncPaymentsModal = (opts = {}) => {
+        /** @type {Map<string, object>} */
+        const programById = new Map();
+        for (const p of allPrograms) programById.set(String(p?.id || '').trim(), p);
+
+        const options = [...allApplicants]
+            .map((applicant) => {
+                const id = String(applicant?.id || '').trim();
+                const programId = String(applicant?.programId || '').trim();
+                const names = applicantDisplayNamesFromPayload(
+                    String(applicant?.payloadJson || ''),
+                    String(applicant?.fullName || ''),
+                );
+                const program = programById.get(programId) || null;
+                const programLabel = program
+                    ? getProgramDisplayNameFromRow(program)
+                    : programId || '—';
+                const name = `${names.firstName} ${names.lastName}`.trim() || id;
+                const email = String(applicant?.email || '').trim();
+                return {
+                    id,
+                    programId,
+                    email,
+                    label: `${name}${email ? ` · ${email}` : ''} — ${programLabel}`,
+                };
+            })
+            .filter((o) => o.id)
+            .sort((a, b) => a.label.localeCompare(b.label));
+
+        const preselect = String(opts.applicantId || '').trim();
+        const optionsHtml = options
+            .map(
+                (o) =>
+                    `<option value="${escapeHtml(o.id)}" data-program-id="${escapeHtml(o.programId)}" data-email="${escapeHtml(o.email)}" ${o.id === preselect ? 'selected' : ''}>${escapeHtml(o.label)}</option>`,
+            )
+            .join('');
+
+        const resolvePrincipalForApplicant = (applicantId) => {
+            const appId = String(applicantId || '').trim();
+            if (!appId) return '';
+            const summary = (financeBundle.summaries || []).find(
+                (s) => String(s?.applicationId || '') === appId,
+            );
+            if (summary?.principal) return String(summary.principal).trim();
+            const ledgerHit = (financeBundle.ledger || []).find(
+                (r) => String(r?.applicationId || '') === appId && r?.principal,
+            );
+            if (ledgerHit?.principal) return String(ledgerHit.principal).trim();
+            const applicant = applicantById.get(appId);
+            const email = String(applicant?.email || '')
+                .trim()
+                .toLowerCase();
+            if (email) {
+                for (const [principal, contact] of contactByPrincipal.entries()) {
+                    if (String(contact?.email || '').trim().toLowerCase() === email) {
+                        return String(principal).trim();
+                    }
+                }
+                for (const acc of allAccounts) {
+                    const p = String(acc?.principal || '').trim();
+                    const contact = contactByPrincipal.get(p);
+                    if (String(contact?.email || '').trim().toLowerCase() === email) return p;
+                }
+            }
+            return '';
+        };
+
+        const inner = `
+            <div class="studio-finance-ledger-modal">
+                <p class="studio-muted">Re-import a <strong>completed</strong> PayPal program payment by order or capture ID. This writes the Motoko ledger/summary so the payment can appear in Finance and Applicants. Does <strong>not</strong> sync Stripe membership subscriptions.</p>
+                <form id="studio-finance-sync-form">
+                    <label class="studio-field studio-field--full"><span>Applicant</span>
+                        <select class="studio-select" id="studio-finance-sync-applicant" required>
+                            <option value="" disabled ${preselect ? '' : 'selected'}>Select an applicant…</option>
+                            ${optionsHtml}
+                        </select>
+                    </label>
+                    <label class="studio-field studio-field--full"><span>Member principal</span>
+                        <input type="text" class="studio-input" id="studio-finance-sync-principal" required placeholder="aaaaa-…" autocomplete="off" />
+                    </label>
+                    <label class="studio-field"><span>Payment type</span>
+                        <select class="studio-select" id="studio-finance-sync-type">
+                            <option value="deposit">Deposit</option>
+                            <option value="full_payment">Full payment</option>
+                            <option value="manual" selected>Manual</option>
+                            <option value="program_award_entry">Program Award entry ($50)</option>
+                        </select>
+                    </label>
+                    <label class="studio-field studio-field--full"><span>PayPal order ID</span>
+                        <input type="text" class="studio-input" id="studio-finance-sync-order" placeholder="Optional if capture ID is set" autocomplete="off" />
+                    </label>
+                    <label class="studio-field studio-field--full"><span>PayPal capture / transaction ID</span>
+                        <input type="text" class="studio-input" id="studio-finance-sync-capture" placeholder="Optional if order ID is set" autocomplete="off" />
+                    </label>
+                    <div class="studio-modal-actions">
+                        <button type="submit" class="studio-btn-primary">Sync payment</button>
+                        <button type="button" class="studio-btn-ghost" data-studio-modal-close="1">Cancel</button>
+                    </div>
+                    <p class="studio-muted mpd-field-hint" id="studio-finance-sync-status" role="status"></p>
+                </form>
+            </div>`;
+        const { close, root } = openStudioModal(inner, {
+            title: 'Sync PayPal payment',
+            wide: true,
+        });
+        const form = root.querySelector('#studio-finance-sync-form');
+        const applicantSelect = root.querySelector('#studio-finance-sync-applicant');
+        const principalInput = root.querySelector('#studio-finance-sync-principal');
+        const fillPrincipal = () => {
+            if (!(applicantSelect instanceof HTMLSelectElement)) return;
+            if (!(principalInput instanceof HTMLInputElement)) return;
+            const resolved = resolvePrincipalForApplicant(applicantSelect.value);
+            if (resolved) principalInput.value = resolved;
+        };
+        applicantSelect?.addEventListener('change', fillPrincipal);
+        fillPrincipal();
+        if (!(form instanceof HTMLFormElement)) return;
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const statusEl = root.querySelector('#studio-finance-sync-status');
+            const select = /** @type {HTMLSelectElement | null} */ (applicantSelect);
+            const applicantId = select?.value || '';
+            const selectedOption = select?.selectedOptions?.[0] || null;
+            const programId = selectedOption?.getAttribute('data-program-id') || '';
+            const email = selectedOption?.getAttribute('data-email') || '';
+            const principal =
+                principalInput instanceof HTMLInputElement
+                    ? principalInput.value.trim()
+                    : '';
+            const paymentType = String(
+                /** @type {HTMLSelectElement | null} */ (
+                    root.querySelector('#studio-finance-sync-type')
+                )?.value || 'manual',
+            );
+            const orderId = String(
+                /** @type {HTMLInputElement | null} */ (
+                    root.querySelector('#studio-finance-sync-order')
+                )?.value || '',
+            ).trim();
+            const captureId = String(
+                /** @type {HTMLInputElement | null} */ (
+                    root.querySelector('#studio-finance-sync-capture')
+                )?.value || '',
+            ).trim();
+            if (!applicantId || !programId) {
+                if (statusEl) statusEl.textContent = 'Select an applicant.';
+                return;
+            }
+            if (!principal) {
+                if (statusEl) statusEl.textContent = 'Member principal is required.';
+                return;
+            }
+            if (!orderId && !captureId) {
+                if (statusEl) statusEl.textContent = 'Enter a PayPal order ID and/or capture ID.';
+                return;
+            }
+            const submitBtn = form.querySelector('button[type="submit"]');
+            if (submitBtn instanceof HTMLButtonElement) submitBtn.disabled = true;
+            if (statusEl) statusEl.textContent = 'Syncing from PayPal…';
+            try {
+                const summary = (financeBundle.summaries || []).find(
+                    (s) => String(s?.applicationId || '') === applicantId,
+                );
+                const names = applicantDisplayNamesFromPayload(
+                    String(applicantById.get(applicantId)?.payloadJson || ''),
+                    String(applicantById.get(applicantId)?.fullName || ''),
+                );
+                await repairPayPalProgramPayment({
+                    orderId: orderId || undefined,
+                    captureId: captureId || undefined,
+                    principal,
+                    programId,
+                    applicationId: applicantId,
+                    paymentType,
+                    totalDueCents: Number(summary?.totalDueCents || 0),
+                    depositAmountCents: Number(summary?.depositAmountCents || 100000),
+                    applicantEmail: email || undefined,
+                    applicantName: `${names.firstName} ${names.lastName}`.trim() || undefined,
+                });
+                if (statusEl) statusEl.textContent = 'Synced. Reloading finance…';
+                close();
+                await reloadFinancePayments();
+                const refreshStatus = mainEl.querySelector('#studio-finance-programs-refresh-status');
+                if (refreshStatus) {
+                    refreshStatus.textContent = 'PayPal payment synced onto the ledger.';
+                }
+            } catch (err) {
+                if (statusEl) {
+                    statusEl.textContent = err instanceof Error ? err.message : String(err);
+                }
+                if (submitBtn instanceof HTMLButtonElement) submitBtn.disabled = false;
+            }
+        });
+    };
+
+    /**
      * @param {string} rowId
      */
     const openAssignLedgerModal = (rowId) => {
@@ -3133,6 +3340,12 @@ export async function initFinance(mainEl) {
         } finally {
             if (programsRefreshBtn instanceof HTMLButtonElement) programsRefreshBtn.disabled = false;
         }
+    });
+    mainEl.querySelector('#studio-finance-programs-sync')?.addEventListener('click', () => {
+        openSyncPaymentsModal();
+    });
+    mainEl.querySelector('#studio-finance-diagnostics-sync')?.addEventListener('click', () => {
+        openSyncPaymentsModal();
     });
 
     const usersRefreshBtn = mainEl.querySelector('#studio-finance-users-refresh');

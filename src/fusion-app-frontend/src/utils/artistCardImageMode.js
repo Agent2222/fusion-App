@@ -26,7 +26,7 @@ export function isArtistHeroProfileImageApproved(artist) {
 }
 
 /**
- * Staff-approved audio bite for public play surfaces.
+ * Staff-approved for public profile (and legacy “public playback”).
  * @param {unknown} artist
  * @returns {boolean}
  */
@@ -37,37 +37,35 @@ export function isArtistAudioApproved(artist) {
 }
 
 /**
- * True if the artist has at least one approved audio URL available for public playback.
- * Checks the multi-bite `approvedAudioUrls` array first, then falls back to the
- * legacy single `audioUrl` + `audioApproved` flag for backward compat.
+ * Staff-approved for full-site play (sound environment + site audio rows).
  * @param {unknown} artist
  * @returns {boolean}
  */
-export function artistHasPublicPlayableAudio(artist) {
+export function isArtistAudioFullSiteApproved(artist) {
     if (!artist || typeof artist !== 'object') return false;
     const o = /** @type {Record<string, unknown>} */ (artist);
-    const approvedUrls = Array.isArray(o.approvedAudioUrls) ? o.approvedAudioUrls : [];
-    if (approvedUrls.length > 0) return true;
-    return Boolean(String(o.audioUrl ?? '').trim() && isArtistAudioApproved(artist));
+    return Boolean(o.audioApprovedFullSite ?? o.audio_approved_full_site);
 }
 
 /**
- * Returns all approved audio entries for public playback (multi-bite).
- * Falls back to single audioUrl if no collection data is available.
  * @param {unknown} artist
+ * @param {string[]} urlKeys
+ * @param {boolean} artistLevel
  * @returns {{ url: string, title: string }[]}
  */
-export function getApprovedAudioEntries(artist) {
+function audioEntriesForApprovedUrls(artist, urlKeys, artistLevel) {
     if (!artist || typeof artist !== 'object') return [];
     const o = /** @type {Record<string, unknown>} */ (artist);
     const entries = Array.isArray(o.audioEntries) ? o.audioEntries : [];
-    const approvedUrls = Array.isArray(o.approvedAudioUrls) ? o.approvedAudioUrls : [];
     const highlightUrl = String(o.highlightAudioUrl ?? '');
-    const approvedSet = new Set(approvedUrls.map(String));
+    const approvedSet = new Set((urlKeys || []).map(String));
     if (entries.length > 0 && approvedSet.size > 0) {
         const approved = entries
             .filter((e) => approvedSet.has(String(e?.url ?? '')))
-            .map((e) => ({ url: String(e.url ?? ''), title: String(e.title ?? '') }));
+            .map((e) => ({
+                url: String(e.url ?? ''),
+                title: String(e.title ?? '').trim() || 'Audio',
+            }));
         if (highlightUrl) {
             const hlIdx = approved.findIndex((e) => e.url === highlightUrl);
             if (hlIdx > 0) {
@@ -77,10 +75,82 @@ export function getApprovedAudioEntries(artist) {
         }
         return approved;
     }
-    if (String(o.audioUrl ?? '').trim() && isArtistAudioApproved(artist)) {
-        return [{ url: String(o.audioUrl), title: String(o.audioTitle ?? 'Artist audio') }];
+    if (String(o.audioUrl ?? '').trim() && artistLevel) {
+        return [
+            {
+                url: String(o.audioUrl),
+                title: String(o.audioTitle ?? '').trim() || 'Audio',
+            },
+        ];
     }
     return [];
+}
+
+/**
+ * True if the artist has profile-approved audio (public profile player).
+ * @param {unknown} artist
+ * @returns {boolean}
+ */
+export function artistHasPublicPlayableAudio(artist) {
+    return artistHasProfilePlayableAudio(artist);
+}
+
+/**
+ * @param {unknown} artist
+ * @returns {boolean}
+ */
+export function artistHasProfilePlayableAudio(artist) {
+    if (!artist || typeof artist !== 'object') return false;
+    const o = /** @type {Record<string, unknown>} */ (artist);
+    const approvedUrls = Array.isArray(o.approvedAudioUrls) ? o.approvedAudioUrls : [];
+    if (approvedUrls.length > 0) return true;
+    return Boolean(String(o.audioUrl ?? '').trim() && isArtistAudioApproved(artist));
+}
+
+/**
+ * @param {unknown} artist
+ * @returns {boolean}
+ */
+export function artistHasFullSitePlayableAudio(artist) {
+    if (!artist || typeof artist !== 'object') return false;
+    const o = /** @type {Record<string, unknown>} */ (artist);
+    const urls = Array.isArray(o.fullSiteApprovedAudioUrls)
+        ? o.fullSiteApprovedAudioUrls
+        : [];
+    if (urls.length > 0) return true;
+    return Boolean(String(o.audioUrl ?? '').trim() && isArtistAudioFullSiteApproved(artist));
+}
+
+/**
+ * Profile-tier approved entries (public profile).
+ * @param {unknown} artist
+ * @returns {{ url: string, title: string }[]}
+ */
+export function getApprovedAudioEntries(artist) {
+    return getProfileAudioEntries(artist);
+}
+
+/**
+ * @param {unknown} artist
+ * @returns {{ url: string, title: string }[]}
+ */
+export function getProfileAudioEntries(artist) {
+    if (!artist || typeof artist !== 'object') return [];
+    const o = /** @type {Record<string, unknown>} */ (artist);
+    const approvedUrls = Array.isArray(o.approvedAudioUrls) ? o.approvedAudioUrls : [];
+    return audioEntriesForApprovedUrls(artist, approvedUrls, isArtistAudioApproved(artist));
+}
+
+/**
+ * Full-site-tier approved entries (sound env / journal / site rows).
+ * @param {unknown} artist
+ * @returns {{ url: string, title: string }[]}
+ */
+export function getFullSiteAudioEntries(artist) {
+    if (!artist || typeof artist !== 'object') return [];
+    const o = /** @type {Record<string, unknown>} */ (artist);
+    const urls = Array.isArray(o.fullSiteApprovedAudioUrls) ? o.fullSiteApprovedAudioUrls : [];
+    return audioEntriesForApprovedUrls(artist, urls, isArtistAudioFullSiteApproved(artist));
 }
 
 /**

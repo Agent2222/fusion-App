@@ -54,11 +54,14 @@ export function programApplicationCtaSubLabel() {
 
 /**
  * @param {boolean} [active=true] ProgramDrawConfig.active
+ * @param {boolean} [entered=false] Caller already has an entered draw for this program
  * @returns {string}
  */
-export function programDrawCtaLabel(active = true) {
+export function programDrawCtaLabel(active = true, entered = false) {
     const row = localeRow();
-    return active ? row.draw : row.drawInactive;
+    // Entered (or inactive): short brand label, not "Enter Program Draw".
+    if (!active || entered) return row.drawInactive;
+    return row.draw;
 }
 
 /**

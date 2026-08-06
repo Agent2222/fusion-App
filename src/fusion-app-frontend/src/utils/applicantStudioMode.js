@@ -80,6 +80,7 @@ export function applicationsIncludeTester(appliedRaw) {
  * @param {{
  *   membershipGate: string,
  *   applicationCount: number,
+ *   awardEntryCount?: number,
  *   applicationOnlyDisplay: boolean,
  *   applicationOnlyToggleVisible?: boolean,
  * }} args
@@ -94,14 +95,18 @@ export function shouldUseApplicantStudioMode(args) {
     if (args.applicationOnlyDisplay) return true;
     const gate = String(args.membershipGate || '');
     if (gate !== 'needsSubscription') return false;
-    return Number(args.applicationCount) >= 1;
+    const apps = Number(args.applicationCount) || 0;
+    const draws = Number(args.awardEntryCount) || 0;
+    return apps >= 1 || draws >= 1;
 }
 
 /**
- * Light gate: needs subscription, no applications (still show Become a member / unlock).
+ * Light gate: needs subscription, no applications and no Program Draw entries
+ * (still show Become a member / unlock).
  * @param {{
  *   membershipGate: string,
  *   applicationCount: number,
+ *   awardEntryCount?: number,
  *   applicationOnlyDisplay: boolean,
  *   applicationOnlyToggleVisible?: boolean,
  * }} args
@@ -111,9 +116,12 @@ export function shouldUseApplicantLightGate(args) {
         return false;
     }
     if (args.applicationOnlyDisplay) return false;
+    const apps = Number(args.applicationCount) || 0;
+    const draws = Number(args.awardEntryCount) || 0;
     return (
         String(args.membershipGate || '') === 'needsSubscription' &&
-        Number(args.applicationCount) < 1
+        apps < 1 &&
+        draws < 1
     );
 }
 

@@ -141,6 +141,7 @@ Entry-path selection (`adminSelectProgramAwardWinner`, `awardWinPeriodByPrincipa
 | Past recipients list joined to `getArtists()` | Done |
 | Inactive → Get notified waitlist | Done (`program-draw-notify-modal.js`) |
 | Guest paid → completion modal | Done (`program-draw-paid-modal.js`) |
+| Post-entry finish modal | Done (`program-draw-finish-modal.js` on `document.body`) |
 | “View all recipients” | Thin: navigates to `/artists` (not a dedicated recipients page) |
 
 ### Entry form UX (shipped)
@@ -153,9 +154,18 @@ Entry-path selection (`adminSelectProgramAwardWinner`, `awardWinPeriodByPrincipa
 | Already entered | Applied panel + exit (no refund) |
 | Formal application path | Blocked until Settings withdraw |
 
-**Guest paid path:** create PayPal order (empty principal OK) → approve → **capture** via confirm without principal (`awaitingPrincipal`) → payment-received modal → Continue / II → confirm **with** principal (ledger + enter) → `enterProgramAward` with order id. Retry / session storage reuse captured order id. Credit path: empty order id.
+**Guest paid path:** create PayPal order (empty principal OK) → approve → **capture** via confirm without principal (`awaitingPrincipal`) → payment-received modal → Continue → body-mounted **finish modal** (loading) → II → register + confirm **with** principal → `enterProgramAward` → finish modal **success** + “Open Fusion Studio” (`/settings/profile#programs` → My programs). Retry / session storage reuse captured order id. Credit path: empty order id (same finish modal).
 
-**Signed-in paid path:** approve → confirm with principal (capture + ledger) → enter (no guest modal).
+**Signed-in paid path:** approve → confirm with principal (capture + ledger) → enter (finish modal; no guest payment-received modal).
+
+**Post-entry UX:**
+
+- Finish modal survives form `_refresh` (mounted on `document.body`).
+- After `registerOrUpdateAccount`, FE clears actor cache + `dispatchFusionAuthChange` so header **Join → Studio**.
+- Enter/exit invalidate `displayDataCache` + `_drawProgressCache` so the public entered count updates immediately.
+- “Apply to program instead” while path is `award` / entered scrolls to `#draw-applied-panel` (withdraw); does not open the formal application form (`revealProgramApplicationOrOpenJoin` hard-gates on `getMyProgramPath === 'award'`).
+- Settings **Applicant Studio** treats entered Program Draw entries like formal applications for mode selection: default panel is **Programs → My programs** (draw status). Join unlock shows for locked tabs / Become a member, not as the landing page for draw-only guests (including no linked artist yet).
+- Staff notification: successful `enterProgramAward` emails `info@fusionart.world` (plus Studio application-admin list) with subject **New Fusion &lt;program&gt; Program Draw Entry** — same Resend path as formal applications.
 
 ---
 
@@ -210,6 +220,8 @@ Signed-in: confirm with principal does capture + ledger in one step
 | Webhook (no principal) | Soft-skip ledger for award entry; keep pending for FE finish |
 | Ledger | Award rows skip deposit summary / confirmed-artist / payment-confirmation email side effects |
 
+**Close-after-pay recovery:** captured order id + form payload persist in `sessionStorage`; returning to the form offers Retry / finish modal. Integration confirm with principal + `payloadJson` may enter via `integrationEnterProgramAward` (FE enter is idempotent backup). Studio Applicants → Program Award → **Add entry** is the staff backstop when Retry/repair is insufficient.
+
 Still optional: PayPal webhook **signature** verification (`PAYPAL_WEBHOOK_ID`). Details also in [`PAYMENTS.md`](./PAYMENTS.md).
 
 **Deploy note:** Redeploy the **integration API** for capture-without-principal confirm + webhook soft-skip. After Motoko changes, run `dfx generate` (or frontend `prebuild`) so client bindings match.
@@ -225,4 +237,4 @@ Still optional: PayPal webhook **signature** verification (`PAYPAL_WEBHOOK_ID`).
 
 ---
 
-*Last updated: Guest pay-first captures before II + payment-received modal. Remaining: Studio selection UI, sidecar auto-sync, real cycle counter.*
+*Last updated: Applicant Studio defaults to Programs → My programs for entered draw guests (award entries count like applications). Remaining: Studio selection UI, sidecar auto-sync, real cycle counter.*

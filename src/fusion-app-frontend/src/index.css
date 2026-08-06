@@ -476,12 +476,13 @@ body {
 
 .profile-audio-container {
   width: 100%;
-  max-width: 100%;
+  max-width: min(36rem, 100%);
   box-sizing: border-box;
-  padding-left: clamp(0.75rem, 4vw, 3rem);
-  padding-right: clamp(0.75rem, 4vw, 3rem);
-  margin-top: 4rem;
-  margin-bottom: 2rem;
+  margin: 2.5rem auto 1.5rem;
+  padding-left: clamp(0.75rem, 4vw, 2rem);
+  padding-right: clamp(0.75rem, 4vw, 2rem);
+  display: flex;
+  justify-content: center;
 }
 
 .profile-audio-container[hidden] {

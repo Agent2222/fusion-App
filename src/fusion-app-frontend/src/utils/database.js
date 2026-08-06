@@ -881,6 +881,8 @@ async function fetchArtistHeroProfileMap(actor) {
 const studioHeroProfileApprovedKnown = new Set();
 /** Session-known audio approvals after Studio saves (before public list refreshes). */
 const studioAudioApprovedKnown = new Set();
+/** Session-known full-site audio approvals after Studio saves. */
+const studioAudioFullSiteApprovedKnown = new Set();
 
 /**
  * @param {string} id
@@ -901,7 +903,25 @@ function noteStudioAudioApproved(id, approved) {
     const sid = String(id || '').trim();
     if (!sid) return;
     if (approved) studioAudioApprovedKnown.add(sid);
-    else studioAudioApprovedKnown.delete(sid);
+    else {
+        studioAudioApprovedKnown.delete(sid);
+        studioAudioFullSiteApprovedKnown.delete(sid);
+    }
+}
+
+/**
+ * @param {string} id
+ * @param {boolean} approved
+ */
+function noteStudioAudioFullSiteApproved(id, approved) {
+    const sid = String(id || '').trim();
+    if (!sid) return;
+    if (approved) {
+        studioAudioFullSiteApprovedKnown.add(sid);
+        studioAudioApprovedKnown.add(sid);
+    } else {
+        studioAudioFullSiteApprovedKnown.delete(sid);
+    }
 }
 
 /**
@@ -916,6 +936,13 @@ function mergeStudioHeroProfileApprovedKnown(m) {
 
 function mergeStudioAudioApprovedKnown(m) {
     for (const id of studioAudioApprovedKnown) {
+        m.set(id, true);
+    }
+    return m;
+}
+
+function mergeStudioAudioFullSiteApprovedKnown(m) {
+    for (const id of studioAudioFullSiteApprovedKnown) {
         m.set(id, true);
     }
     return m;
@@ -1002,6 +1029,26 @@ function mergeAudioApproved(base, id, audioApprovedByArtistId) {
 }
 
 /**
+ * @param {object} base
+ * @param {string} id
+ * @param {Map<string, boolean> | undefined} audioFullSiteApprovedByArtistId
+ */
+function mergeAudioFullSiteApproved(base, id, audioFullSiteApprovedByArtistId) {
+    if (!id) return base;
+    const fromBase = Boolean(
+        /** @type {Record<string, unknown>} */ (base).audioApprovedFullSite ??
+            /** @type {Record<string, unknown>} */ (base).audio_approved_full_site,
+    );
+    if (audioFullSiteApprovedByArtistId instanceof Map) {
+        return { ...base, audioApprovedFullSite: audioFullSiteApprovedByArtistId.has(id) };
+    }
+    if (studioAudioFullSiteApprovedKnown.has(id)) {
+        return { ...base, audioApprovedFullSite: true };
+    }
+    return { ...base, audioApprovedFullSite: fromBase };
+}
+
+/**
  * @param {import('@dfinity/agent').ActorSubclass} actor
  * @returns {Promise<Map<string, boolean>>}
  */
@@ -1023,6 +1070,43 @@ async function fetchArtistAudioApprovedMap(actor) {
         /* older canister — treat as none approved until generate+deploy */
     }
     return mergeStudioAudioApprovedKnown(m);
+}
+
+/**
+ * @param {import('@dfinity/agent').ActorSubclass} actor
+ * @returns {Promise<Map<string, boolean>>}
+ */
+async function fetchArtistAudioFullSiteApprovedMap(actor) {
+    const m = new Map();
+    if (!actor) return mergeStudioAudioFullSiteApprovedKnown(m);
+    try {
+        if (typeof actor.listArtistAudioFullSiteApprovedPublic === 'function') {
+            const ids = await actor.listArtistAudioFullSiteApprovedPublic();
+            if (Array.isArray(ids)) {
+                for (const id of ids) {
+                    const sid = String(id ?? '').trim();
+                    if (sid) m.set(sid, true);
+                }
+            }
+            return mergeStudioAudioFullSiteApprovedKnown(m);
+        }
+    } catch {
+        /* older canister — fall back to profile approvals until generate+deploy */
+        try {
+            if (typeof actor.listArtistAudioApprovedPublic === 'function') {
+                const ids = await actor.listArtistAudioApprovedPublic();
+                if (Array.isArray(ids)) {
+                    for (const id of ids) {
+                        const sid = String(id ?? '').trim();
+                        if (sid) m.set(sid, true);
+                    }
+                }
+            }
+        } catch {
+            /* ignore */
+        }
+    }
+    return mergeStudioAudioFullSiteApprovedKnown(m);
 }
 
 /**
@@ -1128,6 +1212,10 @@ function normalizeArtistDefaults(a) {
             /** @type {Record<string, unknown>} */ (a).audioApproved ??
                 /** @type {Record<string, unknown>} */ (a).audio_approved,
         ),
+        audioApprovedFullSite: Boolean(
+            /** @type {Record<string, unknown>} */ (a).audioApprovedFullSite ??
+                /** @type {Record<string, unknown>} */ (a).audio_approved_full_site,
+        ),
     };
 }
 
@@ -1138,8 +1226,17 @@ function normalizeArtistDefaults(a) {
  * @param {Map<string, string>} [heroByArtistId]
  * @param {Map<string, boolean>} [approvedByArtistId]
  * @param {Map<string, boolean>} [audioApprovedByArtistId]
+ * @param {Map<string, boolean>} [audioFullSiteApprovedByArtistId]
  */
-function artistFromRecord(rec, cohortByArtistId, mediaByArtistId, heroByArtistId, approvedByArtistId, audioApprovedByArtistId) {
+function artistFromRecord(
+    rec,
+    cohortByArtistId,
+    mediaByArtistId,
+    heroByArtistId,
+    approvedByArtistId,
+    audioApprovedByArtistId,
+    audioFullSiteApprovedByArtistId,
+) {
     if (!rec || typeof rec !== 'object') return null;
     const prof = rec.profile;
     if (!prof || typeof prof !== 'object') return null;
@@ -1164,10 +1261,14 @@ function artistFromRecord(rec, cohortByArtistId, mediaByArtistId, heroByArtistId
             /* ignore invalid JSON */
         }
     }
-    return mergeAudioApproved(
-        mergeHeroProfileImageApproved(out, id, approvedByArtistId),
+    return mergeAudioFullSiteApproved(
+        mergeAudioApproved(
+            mergeHeroProfileImageApproved(out, id, approvedByArtistId),
+            id,
+            audioApprovedByArtistId,
+        ),
         id,
-        audioApprovedByArtistId,
+        audioFullSiteApprovedByArtistId,
     );
 }
 
@@ -1504,6 +1605,36 @@ export async function listArtistDrawRecipientsPublic() {
 }
 
 /**
+ * Flag roster rows that appear in the public Program Draw past-recipients list.
+ * @param {object[]} artists
+ * @returns {Promise<object[]>}
+ */
+async function mergeDrawRecipientFlagsOntoArtists(artists) {
+    if (!Array.isArray(artists) || !artists.length) return artists || [];
+    try {
+        const rows = await listArtistDrawRecipientsPublic();
+        /** @type {Set<string>} */
+        const ids = new Set();
+        for (const row of rows || []) {
+            const id = String(row?.artistId || '').trim();
+            if (id) ids.add(id);
+        }
+        if (!ids.size) {
+            return artists.map((a) =>
+                a && typeof a === 'object' ? { ...a, drawRecipient: Boolean(a.drawRecipient) } : a,
+            );
+        }
+        return artists.map((a) => {
+            if (!a || typeof a !== 'object') return a;
+            const id = String(/** @type {Record<string, unknown>} */ (a).id || '').trim();
+            return { ...a, drawRecipient: ids.has(id) || Boolean(a.drawRecipient) };
+        });
+    } catch {
+        return artists;
+    }
+}
+
+/**
  * Live: persist profile-image approval (staff). Test: writes to artists overlay.
  * @param {string} id
  * @param {boolean} approved
@@ -1545,6 +1676,7 @@ export async function applyArtistAudioApprovedFromStudioSaveLive(id, approved) {
         overlay[sid] = normalizeArtistDefaults({
             ...base,
             audioApproved: Boolean(approved),
+            ...(approved ? {} : { audioApprovedFullSite: false }),
         });
         writeStudioLs(LS_ARTISTS_OVERLAY, overlay);
         noteStudioAudioApproved(sid, Boolean(approved));
@@ -1557,6 +1689,36 @@ export async function applyArtistAudioApprovedFromStudioSaveLive(id, approved) {
     }
     await actor.staffSetArtistAudioApproved(sid, Boolean(approved));
     noteStudioAudioApproved(sid, Boolean(approved));
+    if (!approved) noteStudioAudioFullSiteApproved(sid, false);
+}
+
+/**
+ * Live: persist full-site audio approval (staff). Test: writes to artists overlay.
+ * @param {string} id
+ * @param {boolean} approved
+ */
+export async function applyArtistAudioFullSiteApprovedFromStudioSaveLive(id, approved) {
+    const sid = String(id || '').trim();
+    if (!sid) return;
+    if (getDataSource() === 'test') {
+        const overlay = readStudioLs(LS_ARTISTS_OVERLAY) || {};
+        const base = overlay[sid] && typeof overlay[sid] === 'object' ? overlay[sid] : {};
+        overlay[sid] = normalizeArtistDefaults({
+            ...base,
+            audioApprovedFullSite: Boolean(approved),
+            ...(approved ? { audioApproved: true } : {}),
+        });
+        writeStudioLs(LS_ARTISTS_OVERLAY, overlay);
+        noteStudioAudioFullSiteApproved(sid, Boolean(approved));
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.staffSetArtistAudioFullSiteApproved !== 'function') {
+        noteStudioAudioFullSiteApproved(sid, Boolean(approved));
+        return;
+    }
+    await actor.staffSetArtistAudioFullSiteApproved(sid, Boolean(approved));
+    noteStudioAudioFullSiteApproved(sid, Boolean(approved));
 }
 
 /**
@@ -1711,21 +1873,32 @@ async function getLivePublicArtists() {
         if (typeof actor.listArtistRecordsPublic === 'function') {
             const metaForMerge = await fetchFeaturedMergeMetaLive();
             _lastFeaturedMergeMeta = metaForMerge;
-            const [rows, cohortMap, mediaMap, heroMap, approvedMap, audioApprovedMap] = await Promise.all([
-                actor.listArtistRecordsPublic(),
-                fetchArtistCohortMap(actor),
-                fetchArtistMediaMap(actor),
-                fetchArtistHeroProfileMap(actor),
-                fetchArtistHeroProfileApprovedMap(actor),
-                fetchArtistAudioApprovedMap(actor),
-            ]);
+            const [rows, cohortMap, mediaMap, heroMap, approvedMap, audioApprovedMap, audioFullSiteMap] =
+                await Promise.all([
+                    actor.listArtistRecordsPublic(),
+                    fetchArtistCohortMap(actor),
+                    fetchArtistMediaMap(actor),
+                    fetchArtistHeroProfileMap(actor),
+                    fetchArtistHeroProfileApprovedMap(actor),
+                    fetchArtistAudioApprovedMap(actor),
+                    fetchArtistAudioFullSiteApprovedMap(actor),
+                ]);
             if (!Array.isArray(rows)) return [];
             const out = [];
             for (const r of rows) {
-                const a = artistFromRecord(r, cohortMap, mediaMap, heroMap, approvedMap, audioApprovedMap);
+                const a = artistFromRecord(
+                    r,
+                    cohortMap,
+                    mediaMap,
+                    heroMap,
+                    approvedMap,
+                    audioApprovedMap,
+                    audioFullSiteMap,
+                );
                 if (a) out.push(a);
             }
             await mergeMostRecentProgramsFromCanister(actor, out);
+            await enrichArtistsWithAudioCollectionsAndApprovals(actor, out);
             return dedupePublicArtistRows(out.map((a) => mergeArtistFeaturedExtension(a, metaForMerge)));
         }
     } catch {
@@ -1737,10 +1910,25 @@ async function getLivePublicArtists() {
     }
     const metaForMerge = await fetchFeaturedMergeMetaLive();
     _lastFeaturedMergeMeta = metaForMerge;
-    const [rows, mediaMap] = await Promise.all([actor.listArtists(), fetchArtistMediaMap(actor)]);
+    const [rows, mediaMap, audioApprovedMap, audioFullSiteMap] = await Promise.all([
+        actor.listArtists(),
+        fetchArtistMediaMap(actor),
+        fetchArtistAudioApprovedMap(actor),
+        fetchArtistAudioFullSiteApprovedMap(actor),
+    ]);
     if (!Array.isArray(rows)) return [];
+    const mapped = rows.map((r) => {
+        const row = mapCanisterArtistRow(r, undefined, mediaMap);
+        const id = String(row.id ?? '');
+        return mergeAudioFullSiteApproved(
+            mergeAudioApproved(row, id, audioApprovedMap),
+            id,
+            audioFullSiteMap,
+        );
+    });
+    await enrichArtistsWithAudioCollectionsAndApprovals(actor, mapped);
     return dedupePublicArtistRows(
-        rows.map((r) => mergeArtistFeaturedExtension(mapCanisterArtistRow(r, undefined, mediaMap), metaForMerge))
+        mapped.map((a) => mergeArtistFeaturedExtension(a, metaForMerge)),
     );
 }
 
@@ -1749,9 +1937,13 @@ async function getLivePublicArtists() {
  */
 export async function getArtists() {
     if (getDataSource() === 'test') {
-        return getMergedTestArtists().filter((a) => artistRosterInPublicDirectory(a.visibility));
+        const merged = getMergedTestArtists().filter((a) =>
+            artistRosterInPublicDirectory(a.visibility),
+        );
+        return mergeDrawRecipientFlagsOntoArtists(merged);
     }
-    return getLivePublicArtists();
+    const live = await getLivePublicArtists();
+    return mergeDrawRecipientFlagsOntoArtists(live);
 }
 
 /**
@@ -1771,7 +1963,15 @@ export async function getCommunityArtistsPublic() {
  * @param {Map<string, string>} [heroByArtistId]
  * @param {Map<string, boolean>} [approvedByArtistId]
  */
-function mapStudioArtistFromFullRecord(rec, cohortByArtistId, mediaByArtistId, heroByArtistId, approvedByArtistId, audioApprovedByArtistId) {
+function mapStudioArtistFromFullRecord(
+    rec,
+    cohortByArtistId,
+    mediaByArtistId,
+    heroByArtistId,
+    approvedByArtistId,
+    audioApprovedByArtistId,
+    audioFullSiteApprovedByArtistId,
+) {
     const prof = rec.profile;
     if (!prof || typeof prof !== 'object') {
         return { id: '', slug: '', imported: false, accessCode: '' };
@@ -1798,19 +1998,23 @@ function mapStudioArtistFromFullRecord(rec, cohortByArtistId, mediaByArtistId, h
             /* ignore invalid JSON */
         }
     }
-    return mergeAudioApproved(
-        mergeHeroProfileImageApproved(
-            {
-                ...base,
-                imported: Boolean(rec.imported),
-                accessCode: String(rec.access_code ?? rec.accessCode ?? ''),
-                ...(locales ? { locales } : {}),
-            },
+    return mergeAudioFullSiteApproved(
+        mergeAudioApproved(
+            mergeHeroProfileImageApproved(
+                {
+                    ...base,
+                    imported: Boolean(rec.imported),
+                    accessCode: String(rec.access_code ?? rec.accessCode ?? ''),
+                    ...(locales ? { locales } : {}),
+                },
+                bid,
+                approvedByArtistId,
+            ),
             bid,
-            approvedByArtistId,
+            audioApprovedByArtistId,
         ),
         bid,
-        audioApprovedByArtistId,
+        audioFullSiteApprovedByArtistId,
     );
 }
 
@@ -1827,22 +2031,33 @@ export async function getArtistsForStudio() {
         if (typeof actor.listArtistRecordsForStudio === 'function') {
             const metaForMerge = await fetchFeaturedMergeMetaLive();
             _lastFeaturedMergeMeta = metaForMerge;
-            const [rows, cohortMap, mediaMap, heroMap, approvedMap, audioApprovedMap] = await Promise.all([
-                actor.listArtistRecordsForStudio(),
-                fetchArtistCohortMap(actor),
-                fetchArtistMediaMap(actor),
-                fetchArtistHeroProfileMap(actor),
-                fetchArtistHeroProfileApprovedMap(actor),
-                fetchArtistAudioApprovedMap(actor),
-            ]);
+            const [rows, cohortMap, mediaMap, heroMap, approvedMap, audioApprovedMap, audioFullSiteMap] =
+                await Promise.all([
+                    actor.listArtistRecordsForStudio(),
+                    fetchArtistCohortMap(actor),
+                    fetchArtistMediaMap(actor),
+                    fetchArtistHeroProfileMap(actor),
+                    fetchArtistHeroProfileApprovedMap(actor),
+                    fetchArtistAudioApprovedMap(actor),
+                    fetchArtistAudioFullSiteApprovedMap(actor),
+                ]);
             if (!Array.isArray(rows)) return [];
             const mapped = rows.map((r) =>
                 mergeArtistFeaturedExtension(
-                    mapStudioArtistFromFullRecord(r, cohortMap, mediaMap, heroMap, approvedMap, audioApprovedMap),
-                    metaForMerge
-                )
+                    mapStudioArtistFromFullRecord(
+                        r,
+                        cohortMap,
+                        mediaMap,
+                        heroMap,
+                        approvedMap,
+                        audioApprovedMap,
+                        audioFullSiteMap,
+                    ),
+                    metaForMerge,
+                ),
             );
             await mergeMostRecentProgramsFromCanister(actor, mapped);
+            await enrichArtistsWithAudioCollectionsAndApprovals(actor, mapped);
             return mapped;
         }
     } catch {
@@ -2194,14 +2409,24 @@ export async function getArtistBySlug(slug) {
             const recOpt = await actor.getArtistRecordBySlug(slug);
             const rec = unwrapOpt(recOpt);
             if (rec) {
-                const [cohortMap, mediaMap, heroMap, approvedMap, audioApprovedMap] = await Promise.all([
-                    fetchArtistCohortMap(actor),
-                    fetchArtistMediaMap(actor),
-                    fetchArtistHeroProfileMap(actor),
-                    fetchArtistHeroProfileApprovedMap(actor),
-                    fetchArtistAudioApprovedMap(actor),
-                ]);
-                const merged = artistFromRecord(rec, cohortMap, mediaMap, heroMap, approvedMap, audioApprovedMap);
+                const [cohortMap, mediaMap, heroMap, approvedMap, audioApprovedMap, audioFullSiteMap] =
+                    await Promise.all([
+                        fetchArtistCohortMap(actor),
+                        fetchArtistMediaMap(actor),
+                        fetchArtistHeroProfileMap(actor),
+                        fetchArtistHeroProfileApprovedMap(actor),
+                        fetchArtistAudioApprovedMap(actor),
+                        fetchArtistAudioFullSiteApprovedMap(actor),
+                    ]);
+                const merged = artistFromRecord(
+                    rec,
+                    cohortMap,
+                    mediaMap,
+                    heroMap,
+                    approvedMap,
+                    audioApprovedMap,
+                    audioFullSiteMap,
+                );
                 if (merged) {
                     if (typeof actor.getArtistBySlug === 'function') {
                         const profOpt = await actor.getArtistBySlug(slug);
@@ -2218,6 +2443,7 @@ export async function getArtistBySlug(slug) {
                             }
                         }
                     }
+                    await enrichArtistsWithAudioCollectionsAndApprovals(actor, [merged]);
                     return mergeArtistFeaturedExtension(merged, meta);
                 }
             }
@@ -2226,17 +2452,23 @@ export async function getArtistBySlug(slug) {
             const profOpt = await actor.getArtistBySlug(slug);
             const p = unwrapOpt(profOpt);
             if (p) {
-                const [approvedMap, audioApprovedMap, mediaMap] = await Promise.all([
+                const [approvedMap, audioApprovedMap, audioFullSiteMap, mediaMap] = await Promise.all([
                     fetchArtistHeroProfileApprovedMap(actor),
                     fetchArtistAudioApprovedMap(actor),
+                    fetchArtistAudioFullSiteApprovedMap(actor),
                     fetchArtistMediaMap(actor),
                 ]);
                 const row = mapCanisterArtistRow(p, undefined, mediaMap);
-                const withApproval = mergeAudioApproved(
-                    mergeHeroProfileImageApproved(row, String(row.id ?? ''), approvedMap),
+                const withApproval = mergeAudioFullSiteApproved(
+                    mergeAudioApproved(
+                        mergeHeroProfileImageApproved(row, String(row.id ?? ''), approvedMap),
+                        String(row.id ?? ''),
+                        audioApprovedMap,
+                    ),
                     String(row.id ?? ''),
-                    audioApprovedMap,
+                    audioFullSiteMap,
                 );
+                await enrichArtistsWithAudioCollectionsAndApprovals(actor, [withApproval]);
                 return mergeArtistFeaturedExtension(withApproval, meta);
             }
         }
@@ -2403,6 +2635,73 @@ export function buildNewApplicantStaffNotificationEmail(opts) {
         `Review applicants in Studio: ${applicantsUrl}`,
     ].join('\n');
     return { subject, text };
+}
+
+/**
+ * Staff email for new Program Draw / Award entries (Integration API + Resend).
+ * @param {{
+ *   programName: string,
+ *   payloadFields: Record<string, string>,
+ *   enteredAt?: string,
+ *   paidEntry?: boolean,
+ *   applicantsUrl?: string,
+ * }} opts
+ * @returns {{ subject: string, text: string }}
+ */
+export function buildNewDrawEntrantStaffNotificationEmail(opts) {
+    const programName = String(opts.programName || 'Program').trim() || 'Program';
+    const payloadFields = opts.payloadFields || {};
+    const entrantName =
+        `${String(payloadFields.firstName || '').trim()} ${String(payloadFields.lastName || '').trim()}`.trim() ||
+        '—';
+    const email = String(payloadFields.email || '').trim() || '—';
+    const websiteRaw = String(payloadFields.website || '').trim();
+    const website = websiteRaw || '—';
+    const enteredAt = String(opts.enteredAt || new Date().toISOString());
+    const entryPath = opts.paidEntry ? 'Paid ($50)' : 'Award credit';
+    const base = getPublicSiteOrigin().replace(/\/$/, '');
+    const applicantsUrl = (opts.applicantsUrl || `${base}/studio#applicants`).replace(/\/$/, '');
+    const subject = `New Fusion ${programName} Program Draw Entry`;
+    const text = [
+        `A new Program Draw entry was submitted for ${programName}.`,
+        '',
+        `Entrant: ${entrantName}`,
+        `Email: ${email}`,
+        `Website: ${website}`,
+        `Path: ${entryPath}`,
+        `Entered: ${enteredAt}`,
+        '',
+        `Review Program Award entries in Studio → Applicants (Award mode): ${applicantsUrl}`,
+    ].join('\n');
+    return { subject, text };
+}
+
+/**
+ * @param {string} programId
+ * @param {Record<string, string>} payloadFields
+ * @param {{ enteredAt?: string, paidEntry?: boolean }} [meta]
+ */
+async function notifyProgramDrawEnteredByEmail(programId, payloadFields, meta = {}) {
+    const pid = String(programId || '').trim();
+    if (!pid) return;
+    const staffRecipients = getApplicationStaffNotificationEmails();
+    if (!staffRecipients.length) return;
+    const programName = await getProgramDisplayNameForNotification(pid);
+    const { subject, text } = buildNewDrawEntrantStaffNotificationEmail({
+        programName,
+        payloadFields,
+        enteredAt: meta.enteredAt,
+        paidEntry: Boolean(meta.paidEntry),
+    });
+    await Promise.allSettled(
+        staffRecipients.map((to) =>
+            sendEmail({
+                to,
+                subject,
+                text,
+            }),
+        ),
+    );
 }
 
 /**
@@ -2774,17 +3073,31 @@ export async function enterProgramAward(programId, opts = {}) {
     const id = String(programId || '').trim();
     if (!id) throw new Error('programId required');
     const { calendarQuarterKey } = await import('./applicationFeePolicy.js');
+    /** @type {Record<string, string>} */
+    let payloadFields = {};
+    if (opts.payload && typeof opts.payload === 'object' && !Array.isArray(opts.payload)) {
+        payloadFields = /** @type {Record<string, string>} */ (opts.payload);
+    } else if (typeof opts.payload === 'string') {
+        try {
+            const parsed = JSON.parse(opts.payload);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                payloadFields = /** @type {Record<string, string>} */ (parsed);
+            }
+        } catch {
+            /* ignore */
+        }
+    }
     const payloadJson =
         typeof opts.payload === 'string'
             ? opts.payload
-            : JSON.stringify(opts.payload && typeof opts.payload === 'object' ? opts.payload : {});
+            : JSON.stringify(payloadFields);
     const paypalOrderId = String(opts.paypalOrderId || '').trim();
     // Legacy: paidEntryReceipt true without order id is no longer accepted on-canister.
     if (opts.paidEntryReceipt === true && !paypalOrderId) {
         throw new Error('Paid Program Award entry requires a PayPal order id.');
     }
     if (getDataSource() === 'test') {
-        return {
+        const entry = {
             id: `test|${id}`,
             programId: id,
             principalText: 'test',
@@ -2794,13 +3107,39 @@ export async function enterProgramAward(programId, opts = {}) {
             paidEntry: Boolean(paypalOrderId),
             payloadJson,
         };
+        try {
+            await notifyProgramDrawEnteredByEmail(id, payloadFields, {
+                enteredAt: entry.enteredAt,
+                paidEntry: entry.paidEntry,
+            });
+        } catch {
+            /* staff email is best-effort */
+        }
+        return entry;
     }
     const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
     const actor = await getAuthenticatedFusionBackendActor();
     if (!actor || typeof actor.enterProgramAward !== 'function') {
         throw new Error('enterProgramAward missing — deploy backend and run dfx generate.');
     }
-    return actor.enterProgramAward(id, paypalOrderId, calendarQuarterKey(), payloadJson);
+    const entry = await actor.enterProgramAward(id, paypalOrderId, calendarQuarterKey(), payloadJson);
+    try {
+        const paidEntry =
+            entry && typeof entry === 'object'
+                ? Boolean(/** @type {{ paidEntry?: boolean }} */ (entry).paidEntry)
+                : Boolean(paypalOrderId);
+        const enteredAt =
+            entry && typeof entry === 'object'
+                ? String(/** @type {{ enteredAt?: string }} */ (entry).enteredAt || '')
+                : '';
+        await notifyProgramDrawEnteredByEmail(id, payloadFields, {
+            enteredAt: enteredAt || new Date().toISOString(),
+            paidEntry,
+        });
+    } catch {
+        /* staff email is best-effort — do not fail the enter */
+    }
+    return entry;
 }
 
 /** @param {string} programId */
@@ -2893,6 +3232,19 @@ const _drawProgressCache = new Map();
 const DRAW_PROGRESS_CACHE_MS = 8000;
 /** Cap hung IC calls so display preload cannot stall on progress. */
 const DRAW_PROGRESS_TIMEOUT_MS = 2500;
+
+/**
+ * Clear progress TTL cache after enter/exit so the public bar updates immediately.
+ * @param {string} [programId] — when omitted, clears all program ids
+ */
+export function invalidateProgramDrawProgressCache(programId) {
+    const id = String(programId || '').trim();
+    if (!id) {
+        _drawProgressCache.clear();
+        return;
+    }
+    _drawProgressCache.delete(id);
+}
 
 /**
  * Public draw progress (entered count + slot cap). Degrades if bindings lag.
@@ -3018,6 +3370,96 @@ export async function listProgramAwardEntriesStudio(programId) {
         if (typeof actor.listProgramAwardEntries !== 'function') return [];
         const rows = await actor.listProgramAwardEntries(id);
         return Array.isArray(rows) ? rows.map((e) => ({ ...e, payloadJson: '' })) : [];
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Staff: manually add a Program Award / Draw pool entry.
+ * Principal is optional (staff-attested recovery when II/account never linked).
+ * PayPal order id still requires a principal for ledger attestation.
+ * @param {string} programId
+ * @param {{
+ *   principal?: string,
+ *   firstName: string,
+ *   lastName: string,
+ *   email: string,
+ *   website?: string,
+ *   bioStatement?: string,
+ *   paypalOrderId?: string,
+ * }} opts
+ */
+export async function staffEnterProgramAwardManualStudio(programId, opts = {}) {
+    const id = String(programId || '').trim();
+    const principalText = String(opts.principal || '').trim();
+    if (!id) throw new Error('programId required');
+    const firstName = String(opts.firstName || '').trim();
+    const lastName = String(opts.lastName || '').trim();
+    const email = String(opts.email || '').trim();
+    if (!firstName || !lastName || !email) {
+        throw new Error('First name, last name, and email are required');
+    }
+    const paypalOrderId = String(opts.paypalOrderId || '').trim();
+    if (paypalOrderId && !principalText) {
+        throw new Error('Member principal is required when attaching a PayPal order id.');
+    }
+    const payloadJson = JSON.stringify({
+        firstName,
+        lastName,
+        email,
+        website: String(opts.website || '').trim(),
+        bioStatement: String(opts.bioStatement || '').trim(),
+        staffManualEntry: true,
+    });
+    if (getDataSource() === 'test') {
+        const entryId = principalText
+            ? `${principalText}|${id}`
+            : `staffaward:${email.toLowerCase()}|${id}`;
+        return {
+            id: entryId,
+            programId: id,
+            principalText,
+            status: 'entered',
+            enteredAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            paidEntry: true,
+            payloadJson,
+        };
+    }
+    const { calendarQuarterKey } = await import('./applicationFeePolicy.js');
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffEnterProgramAwardManual !== 'function') {
+        throw new Error(
+            'staffEnterProgramAwardManual missing — deploy backend and run dfx generate.',
+        );
+    }
+    return actor.staffEnterProgramAwardManual(
+        id,
+        principalText,
+        payloadJson,
+        paypalOrderId,
+        calendarQuarterKey(),
+    );
+}
+
+/**
+ * Public masked draw applicant names ("F. Lastname").
+ * @param {string} programId
+ * @returns {Promise<string[]>}
+ */
+export async function listProgramAwardApplicantNamesPublic(programId) {
+    const id = String(programId || '').trim();
+    if (!id) return [];
+    if (getDataSource() === 'test') return [];
+    try {
+        const { getFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+        const actor = await getFusionBackendActor();
+        if (!actor || typeof actor.listProgramAwardApplicantNamesPublic !== 'function') {
+            return [];
+        }
+        const rows = await actor.listProgramAwardApplicantNamesPublic(id);
+        return Array.isArray(rows) ? rows.map((n) => String(n || '').trim()).filter(Boolean) : [];
     } catch {
         return [];
     }
@@ -3631,13 +4073,32 @@ export async function getMyArtistRecord() {
             const approved = new Set(
                 (Array.isArray(ids) ? ids : []).map((id) => String(id ?? '').trim()).filter(Boolean),
             );
+            let fullSite = new Set();
+            try {
+                if (typeof actor.listArtistAudioFullSiteApprovedPublic === 'function') {
+                    const fsIds = await actor.listArtistAudioFullSiteApprovedPublic();
+                    fullSite = new Set(
+                        (Array.isArray(fsIds) ? fsIds : [])
+                            .map((id) => String(id ?? '').trim())
+                            .filter(Boolean),
+                    );
+                } else {
+                    fullSite = approved;
+                }
+            } catch {
+                fullSite = approved;
+            }
             const p0 = recWithMedia.profile;
             if (p0 && typeof p0 === 'object') {
                 const p = /** @type {Record<string, unknown>} */ (p0);
                 const id = String(p.id ?? '');
                 recWithMedia = {
                     ...recWithMedia,
-                    profile: { ...p, audioApproved: approved.has(id) },
+                    profile: {
+                        ...p,
+                        audioApproved: approved.has(id),
+                        audioApprovedFullSite: fullSite.has(id),
+                    },
                 };
             }
         } catch {
@@ -3805,31 +4266,56 @@ export async function updateMyArtistQuoteAudioPatch(patch, updatedAt) {
 // ── Multi-bite audio collection ──
 
 /**
- * @returns {Promise<{ entries: { url: string, title: string, addedAt: string }[], highlightUrl: string, approvedUrls: string[] } | null>}
+ * @returns {Promise<{
+ *   entries: { url: string, title: string, addedAt: string }[],
+ *   highlightUrl: string,
+ *   approvedUrls: string[],
+ *   fullSiteApprovedUrls: string[],
+ * } | null>}
  */
 export async function getMyArtistAudioCollection() {
     if (getDataSource() === 'test') {
         const id = getProfileSettingsDevArtistId();
         const raw = readStudioLs('audioCollection_' + id);
-        if (raw && typeof raw === 'object') return raw;
-        return { entries: [], highlightUrl: '', approvedUrls: [] };
+        if (raw && typeof raw === 'object') {
+            return {
+                entries: Array.isArray(raw.entries) ? raw.entries : [],
+                highlightUrl: String(raw.highlightUrl ?? ''),
+                approvedUrls: Array.isArray(raw.approvedUrls) ? raw.approvedUrls : [],
+                fullSiteApprovedUrls: Array.isArray(raw.fullSiteApprovedUrls)
+                    ? raw.fullSiteApprovedUrls
+                    : Array.isArray(raw.approvedUrls)
+                      ? raw.approvedUrls
+                      : [],
+            };
+        }
+        return { entries: [], highlightUrl: '', approvedUrls: [], fullSiteApprovedUrls: [] };
     }
     const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
     const actor = await getAuthenticatedFusionBackendActor();
     if (!actor || typeof actor.getMyArtistAudioCollection !== 'function') return null;
     const opt = await actor.getMyArtistAudioCollection();
     const rec = unwrapOpt(opt);
-    if (!rec) return { entries: [], highlightUrl: '', approvedUrls: [] };
+    if (!rec) return { entries: [], highlightUrl: '', approvedUrls: [], fullSiteApprovedUrls: [] };
+    const approvedUrls = Array.isArray(rec.approvedUrls ?? rec.approved_urls)
+        ? (rec.approvedUrls ?? rec.approved_urls).map((u) => String(u))
+        : [];
+    const fullSiteApprovedUrls = Array.isArray(
+        rec.fullSiteApprovedUrls ?? rec.full_site_approved_urls,
+    )
+        ? (rec.fullSiteApprovedUrls ?? rec.full_site_approved_urls).map((u) => String(u))
+        : approvedUrls;
     return {
-        entries: Array.isArray(rec.entries) ? rec.entries.map((e) => ({
-            url: String(e.url ?? ''),
-            title: String(e.title ?? ''),
-            addedAt: String(e.addedAt ?? e.added_at ?? ''),
-        })) : [],
-        highlightUrl: String(rec.highlightUrl ?? rec.highlight_url ?? ''),
-        approvedUrls: Array.isArray(rec.approvedUrls ?? rec.approved_urls)
-            ? (rec.approvedUrls ?? rec.approved_urls).map((u) => String(u))
+        entries: Array.isArray(rec.entries)
+            ? rec.entries.map((e) => ({
+                  url: String(e.url ?? ''),
+                  title: String(e.title ?? ''),
+                  addedAt: String(e.addedAt ?? e.added_at ?? ''),
+              }))
             : [],
+        highlightUrl: String(rec.highlightUrl ?? rec.highlight_url ?? ''),
+        approvedUrls,
+        fullSiteApprovedUrls,
     };
 }
 
@@ -3884,7 +4370,7 @@ export async function setMyArtistHighlightAudio(url) {
 }
 
 /**
- * Staff: fetch per-artist approved audio URL lists.
+ * Staff: fetch per-artist approved audio URL lists (profile tier).
  * @returns {Promise<Map<string, string[]>>}
  */
 export async function fetchArtistAudioApprovedUrlsMap() {
@@ -3900,6 +4386,86 @@ export async function fetchArtistAudioApprovedUrlsMap() {
         }
     } catch { /* older canister */ }
     return m;
+}
+
+/**
+ * Per-artist full-site approved audio URL lists.
+ * @returns {Promise<Map<string, string[]>>}
+ */
+export async function fetchArtistAudioFullSiteApprovedUrlsMap() {
+    const m = new Map();
+    try {
+        const actor = await getFusionBackendActor();
+        if (typeof actor.listArtistAudioFullSiteApprovedUrls !== 'function') {
+            // Until bindings regenerate: treat profile-approved URLs as full-site.
+            return fetchArtistAudioApprovedUrlsMap();
+        }
+        const rows = await actor.listArtistAudioFullSiteApprovedUrls();
+        if (!Array.isArray(rows)) return m;
+        for (const row of rows) {
+            if (!Array.isArray(row) || row.length < 2) continue;
+            m.set(String(row[0] ?? ''), (row[1] || []).map((u) => String(u)));
+        }
+    } catch {
+        try {
+            return await fetchArtistAudioApprovedUrlsMap();
+        } catch {
+            /* older canister */
+        }
+    }
+    return m;
+}
+
+/**
+ * Attach audio collection entries + profile/full-site approved URL lists onto artist rows.
+ * @param {import('@dfinity/agent').ActorSubclass | null} actor
+ * @param {object[]} artists
+ */
+async function enrichArtistsWithAudioCollectionsAndApprovals(actor, artists) {
+    if (!actor || !Array.isArray(artists) || !artists.length) return;
+    try {
+        const [collectionsMap, approvedUrlsMap, fullSiteUrlsMap, highlightsMap] = await Promise.all([
+            fetchArtistAudioCollectionsMap(),
+            fetchArtistAudioApprovedUrlsMap(),
+            fetchArtistAudioFullSiteApprovedUrlsMap(),
+            (async () => {
+                const m = new Map();
+                try {
+                    if (typeof actor.listArtistAudioHighlights !== 'function') return m;
+                    const rows = await actor.listArtistAudioHighlights();
+                    if (!Array.isArray(rows)) return m;
+                    for (const row of rows) {
+                        if (!Array.isArray(row) || row.length < 2) continue;
+                        m.set(String(row[0] ?? ''), String(row[1] ?? ''));
+                    }
+                } catch {
+                    /* older canister */
+                }
+                return m;
+            })(),
+        ]);
+        for (const a of artists) {
+            if (!a || typeof a !== 'object') continue;
+            const id = String(/** @type {Record<string, unknown>} */ (a).id ?? '');
+            if (!id) continue;
+            const entries = collectionsMap.get(id);
+            if (Array.isArray(entries) && entries.length) {
+                /** @type {Record<string, unknown>} */ (a).audioEntries = entries;
+            }
+            const hl = highlightsMap.get(id);
+            if (hl) /** @type {Record<string, unknown>} */ (a).highlightAudioUrl = hl;
+            const approved = approvedUrlsMap.get(id);
+            if (Array.isArray(approved)) {
+                /** @type {Record<string, unknown>} */ (a).approvedAudioUrls = approved;
+            }
+            const fullSite = fullSiteUrlsMap.get(id);
+            if (Array.isArray(fullSite)) {
+                /** @type {Record<string, unknown>} */ (a).fullSiteApprovedAudioUrls = fullSite;
+            }
+        }
+    } catch {
+        /* best-effort enrichment */
+    }
 }
 
 /**
@@ -3927,7 +4493,7 @@ export async function fetchArtistAudioCollectionsMap() {
 }
 
 /**
- * Staff: toggle per-entry audio approval.
+ * Staff: toggle per-entry profile-tier audio approval.
  * @param {string} artistId
  * @param {string} url
  * @param {boolean} approved
@@ -3935,11 +4501,36 @@ export async function fetchArtistAudioCollectionsMap() {
 export async function applyArtistAudioEntryApprovedFromStudioSaveLive(artistId, url, approved) {
     if (getDataSource() === 'test') {
         noteStudioAudioApproved(artistId, approved);
+        if (!approved) noteStudioAudioFullSiteApproved(artistId, false);
         return;
     }
     const actor = await getStudioAuthenticatedActor();
     await actor.staffSetArtistAudioEntryApproved(artistId, url, approved);
     noteStudioAudioApproved(artistId, approved);
+    if (!approved) noteStudioAudioFullSiteApproved(artistId, false);
+}
+
+/**
+ * Staff: toggle per-entry full-site audio approval.
+ * @param {string} artistId
+ * @param {string} url
+ * @param {boolean} approved
+ */
+export async function applyArtistAudioEntryFullSiteApprovedFromStudioSaveLive(artistId, url, approved) {
+    if (getDataSource() === 'test') {
+        noteStudioAudioFullSiteApproved(artistId, approved);
+        if (approved) noteStudioAudioApproved(artistId, true);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.staffSetArtistAudioEntryFullSiteApproved !== 'function') {
+        noteStudioAudioFullSiteApproved(artistId, approved);
+        if (approved) noteStudioAudioApproved(artistId, true);
+        return;
+    }
+    await actor.staffSetArtistAudioEntryFullSiteApproved(artistId, url, approved);
+    noteStudioAudioFullSiteApproved(artistId, approved);
+    if (approved) noteStudioAudioApproved(artistId, true);
 }
 
 // ── Asset Review Notes ─────────────────────────────────────────
@@ -3958,7 +4549,7 @@ export async function staffSetHeroProfileImageReviewNote(artistId, approved, rea
 }
 
 /**
- * Staff: set audio entry approval + review note.
+ * Staff: set audio entry approval + review note (profile tier only; legacy).
  * @param {string} artistId
  * @param {string} url
  * @param {boolean} approved
@@ -3969,6 +4560,61 @@ export async function staffSetAudioEntryReviewNote(artistId, url, approved, reas
     if (getDataSource() === 'test') return;
     const actor = await getStudioAuthenticatedActor();
     await actor.staffSetAudioEntryReviewNote(artistId, url, approved, reason ?? '', imageUrl ?? '');
+}
+
+/**
+ * Staff: set audio entry review note with profile + full-site approval scopes.
+ * @param {string} artistId
+ * @param {string} url
+ * @param {boolean} profileApproved
+ * @param {boolean} fullSiteApproved
+ * @param {string} reason
+ * @param {string} imageUrl
+ */
+export async function staffSetAudioEntryReviewNoteWithScopes(
+    artistId,
+    url,
+    profileApproved,
+    fullSiteApproved,
+    reason,
+    imageUrl,
+) {
+    if (getDataSource() === 'test') {
+        noteStudioAudioApproved(artistId, profileApproved);
+        noteStudioAudioFullSiteApproved(artistId, fullSiteApproved && profileApproved);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.staffSetAudioEntryReviewNoteWithScopes === 'function') {
+        await actor.staffSetAudioEntryReviewNoteWithScopes(
+            artistId,
+            url,
+            Boolean(profileApproved),
+            Boolean(fullSiteApproved),
+            reason ?? '',
+            imageUrl ?? '',
+        );
+        noteStudioAudioApproved(artistId, Boolean(profileApproved));
+        noteStudioAudioFullSiteApproved(artistId, Boolean(fullSiteApproved && profileApproved));
+        return;
+    }
+    // Older canister: profile note + optional full-site entry toggle.
+    await actor.staffSetAudioEntryReviewNote(
+        artistId,
+        url,
+        Boolean(profileApproved),
+        reason ?? '',
+        imageUrl ?? '',
+    );
+    if (typeof actor.staffSetArtistAudioEntryFullSiteApproved === 'function') {
+        await actor.staffSetArtistAudioEntryFullSiteApproved(
+            artistId,
+            url,
+            Boolean(fullSiteApproved && profileApproved),
+        );
+    }
+    noteStudioAudioApproved(artistId, Boolean(profileApproved));
+    noteStudioAudioFullSiteApproved(artistId, Boolean(fullSiteApproved && profileApproved));
 }
 
 /**
@@ -6665,22 +7311,35 @@ export async function getCommunityArtistsForStudio() {
         if (actor && typeof actor.listArtistRecordsForStudio === 'function') {
             const metaForMerge = await fetchFeaturedMergeMetaLive();
             _lastFeaturedMergeMeta = metaForMerge;
-            const [rows, cohortMap, mediaMap, heroMap] = await Promise.all([
-                actor.listArtistRecordsForStudio(),
-                fetchArtistCohortMap(actor),
-                fetchArtistMediaMap(actor),
-                fetchArtistHeroProfileMap(actor),
-            ]);
+            const [rows, cohortMap, mediaMap, heroMap, approvedMap, audioApprovedMap, audioFullSiteMap] =
+                await Promise.all([
+                    actor.listArtistRecordsForStudio(),
+                    fetchArtistCohortMap(actor),
+                    fetchArtistMediaMap(actor),
+                    fetchArtistHeroProfileMap(actor),
+                    fetchArtistHeroProfileApprovedMap(actor),
+                    fetchArtistAudioApprovedMap(actor),
+                    fetchArtistAudioFullSiteApprovedMap(actor),
+                ]);
             if (Array.isArray(rows)) {
                 const mapped = rows
                     .map((r) =>
                         mergeArtistFeaturedExtension(
-                            mapStudioArtistFromFullRecord(r, cohortMap, mediaMap, heroMap),
-                            metaForMerge
-                        )
+                            mapStudioArtistFromFullRecord(
+                                r,
+                                cohortMap,
+                                mediaMap,
+                                heroMap,
+                                approvedMap,
+                                audioApprovedMap,
+                                audioFullSiteMap,
+                            ),
+                            metaForMerge,
+                        ),
                     )
                     .filter((a) => String(a?.id ?? '').trim() !== '');
                 await mergeMostRecentProgramsFromCanister(actor, mapped);
+                await enrichArtistsWithAudioCollectionsAndApprovals(actor, mapped);
                 return mapped;
             }
         }
@@ -7386,6 +8045,7 @@ export async function getApplicantSlotSecuredStudio(applicantId, programId, payl
 
 /**
  * After staff marks manual deposit on an applicant, sync linked member payment summary when possible.
+ * Motoko also sets membership exempt when a principal can be resolved.
  * @param {string} applicantId
  */
 export async function syncApplicantManualDepositStudio(applicantId) {
@@ -7394,6 +8054,132 @@ export async function syncApplicantManualDepositStudio(applicantId) {
     const actor = await getStudioAuthenticatedActor();
     if (typeof actor.staffSyncManualDepositPaymentSummary !== 'function') return;
     await actor.staffSyncManualDepositPaymentSummary(id, new Date().toISOString());
+}
+
+/**
+ * Resolve member principal for an applicant (linked artist, email contact, or payment summary).
+ * @param {{ id?: string, email?: string, programId?: string }} applicant
+ * @param {{
+ *   accounts?: Array<{ principal?: string, linkedArtistId?: string }>,
+ *   contactsByPrincipal?: Map<string, { email?: string }>,
+ *   financeSummaries?: Array<{ applicationId?: string, principal?: string }>,
+ * }} [ctx]
+ * @returns {Promise<string>}
+ */
+export async function resolvePrincipalForApplicantStudio(applicant, ctx = {}) {
+    const appId = String(applicant?.id || '').trim();
+    const email = String(applicant?.email || '')
+        .trim()
+        .toLowerCase();
+    const artistId = appId.includes('|') ? appId.split('|')[0] : '';
+
+    let accounts = Array.isArray(ctx.accounts) ? ctx.accounts : null;
+    let contactsByPrincipal = ctx.contactsByPrincipal instanceof Map ? ctx.contactsByPrincipal : null;
+    let financeSummaries = Array.isArray(ctx.financeSummaries) ? ctx.financeSummaries : null;
+
+    if (!accounts) {
+        try {
+            accounts = await getAccountsForStudio();
+        } catch {
+            accounts = [];
+        }
+    }
+    if (!contactsByPrincipal) {
+        contactsByPrincipal = new Map();
+        try {
+            const rows = await adminListAccountContactsForStudio();
+            for (const row of Array.isArray(rows) ? rows : []) {
+                const p =
+                    row?.[0] && typeof row[0]?.toText === 'function'
+                        ? row[0].toText()
+                        : String(row?.[0] || '').trim();
+                const contact = row?.[1] && typeof row[1] === 'object' ? row[1] : {};
+                if (p) {
+                    contactsByPrincipal.set(p, {
+                        email: String(contact.email || '').trim(),
+                        firstName: String(contact.firstName || '').trim(),
+                        lastName: String(contact.lastName || '').trim(),
+                    });
+                }
+            }
+        } catch {
+            /* contacts optional */
+        }
+    }
+    if (!financeSummaries) {
+        try {
+            const finance = await getStaffProgramPaymentsFinanceStudio();
+            financeSummaries = Array.isArray(finance?.summaries) ? finance.summaries : [];
+        } catch {
+            financeSummaries = [];
+        }
+    }
+
+    if (appId) {
+        for (const s of financeSummaries) {
+            if (String(s?.applicationId || '') === appId && s?.principal) {
+                return String(s.principal).trim();
+            }
+        }
+    }
+    if (artistId) {
+        for (const acc of accounts) {
+            if (String(acc?.linkedArtistId || '').trim() === artistId && acc?.principal) {
+                return String(acc.principal).trim();
+            }
+        }
+    }
+    if (email) {
+        for (const [principal, contact] of contactsByPrincipal.entries()) {
+            if (String(contact?.email || '').trim().toLowerCase() === email) {
+                return String(principal).trim();
+            }
+        }
+    }
+    return '';
+}
+
+/**
+ * Staff: set membershipExemptManual for a principal (Applicants feature).
+ * @param {string} principalText
+ * @param {boolean} exempt
+ */
+export async function staffSetMembershipExemptManualStudio(principalText, exempt = true) {
+    const p = String(principalText || '').trim();
+    if (!p) throw new Error('principal required');
+    if (getDataSource() === 'test') return;
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffSetMembershipExemptManual !== 'function') {
+        throw new Error(
+            'staffSetMembershipExemptManual missing — deploy backend and run dfx generate.',
+        );
+    }
+    const { Principal } = await import('@dfinity/principal');
+    await actor.staffSetMembershipExemptManual(Principal.fromText(p), Boolean(exempt));
+}
+
+/**
+ * After manual deposit: ensure Motoko summary/exempt, then cancel platform Stripe/PayPal membership.
+ * @param {{ id?: string, email?: string, programId?: string }} applicant
+ * @returns {Promise<{ principal: string, canceled?: object, skipped?: string }>}
+ */
+export async function applyConfirmedApplicantMembershipSideEffectsStudio(applicant) {
+    const id = String(applicant?.id || '').trim();
+    if (id) {
+        await syncApplicantManualDepositStudio(id);
+    }
+    const principal = await resolvePrincipalForApplicantStudio(applicant);
+    if (!principal) {
+        return { principal: '', skipped: 'no_principal' };
+    }
+    try {
+        await staffSetMembershipExemptManualStudio(principal, true);
+    } catch (e) {
+        console.warn('[applicants] set exempt failed:', e);
+    }
+    const { cancelPlatformSubscriptionForProgramConfirm } = await import('./integrationApi.js');
+    const canceled = await cancelPlatformSubscriptionForProgramConfirm(principal);
+    return { principal, canceled };
 }
 
 /**
