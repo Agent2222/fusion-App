@@ -31,6 +31,7 @@ import {
 } from './artistPreviewModel.js';
 import { isArtistHeroProfileImageApproved } from './artistCardImageMode.js';
 import { ensureArtistPreviewModalHost } from '../components/subComponents/artistPreviewModal.js';
+import { normalizeYoutubeEmbedSrc } from './youtubeEmbed.js';
 
 /** Used by Studio “Translate to New World” to map `world.*` → `worldNew.*` via LLM. */
 export const STUDIO_WORLD_TO_NEW_PATHS = [
@@ -553,6 +554,11 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
           </label>
           <input type="hidden" name="art-draw-recipient-program-id" id="studio-art-draw-recipient-program-id" value="${esc(escapeHtml, String(a.drawRecipientProgramId ?? ''))}" />
         </div>
+        <label class="studio-field studio-art-draw-recipient-meta" id="studio-art-draw-recipient-video-wrap" ${a.drawRecipient === true ? '' : 'hidden'}>
+          <span>Public story video (YouTube URL or embed)</span>
+          <textarea name="art-draw-recipient-story-video" id="studio-art-draw-recipient-story-video" class="studio-input" rows="3" placeholder="https://www.youtube.com/watch?v=… or paste a YouTube iframe embed">${esc(escapeHtml, String(a.drawRecipientStoryVideoUrl ?? ''))}</textarea>
+          <span class="studio-muted" style="font-size:0.85rem;margin-top:0.25rem">Shown in the Past recipient modal on Program Draw. Paste a watch link, embed URL, or full iframe HTML.</span>
+        </label>
         <div class="studio-modal-fields-row" style="align-items:flex-end;flex-wrap:wrap;gap:0.5rem">
           <label class="studio-field studio-field--grow"><span>accessCode (8 digits)</span><input name="art-accessCode" id="studio-art-access-code" class="studio-input" inputmode="numeric" autocomplete="off" maxlength="8" value="${esc(escapeHtml, String(a.accessCode ?? ''))}" title="Roster claim code — cleared on the canister after a successful artist link. Generate a new code if empty." /></label>
           ${genCodeBtn}
@@ -1074,11 +1080,19 @@ export function collectArtistRecordFromForm(root, baseArtist) {
         featurable: featurableCb instanceof HTMLInputElement && featurableCb.checked,
     };
     const drawRecipientCb = form.querySelector('#studio-art-draw-recipient');
+    const rawStoryVideo = String(fd.get('art-draw-recipient-story-video') ?? '').trim();
+    const storyVideoUrl = rawStoryVideo ? normalizeYoutubeEmbedSrc(rawStoryVideo) : '';
+    if (rawStoryVideo && !storyVideoUrl) {
+        throw new Error(
+            'Story video must be a YouTube watch/embed URL or iframe. Example: https://www.youtube.com/watch?v=eYVQDNmJcU0',
+        );
+    }
     const _drawRecipientFlags = {
         enabled: drawRecipientCb instanceof HTMLInputElement && drawRecipientCb.checked,
         cycle: Math.max(1, Math.floor(Number(fd.get('art-draw-recipient-cycle') || 1))),
         programId: String(fd.get('art-draw-recipient-program-id') ?? '').trim(),
         awardLabel: String(fd.get('art-draw-recipient-award-label') ?? '').trim(),
+        storyVideoUrl,
     };
     const audioApprovedCb = form.querySelector('#studio-art-audio-approved');
     const audioFullSiteCb = form.querySelector('#studio-art-audio-approved-full-site');
@@ -1320,9 +1334,12 @@ export function initArtistManageTabs(root) {
 
     const drawCb = root.querySelector('#studio-art-draw-recipient');
     const drawMeta = root.querySelector('#studio-art-draw-recipient-meta');
-    if (drawCb instanceof HTMLInputElement && drawMeta instanceof HTMLElement) {
+    const drawVideo = root.querySelector('#studio-art-draw-recipient-video-wrap');
+    if (drawCb instanceof HTMLInputElement) {
         const syncDrawMeta = () => {
-            drawMeta.hidden = !drawCb.checked;
+            const on = drawCb.checked;
+            if (drawMeta instanceof HTMLElement) drawMeta.hidden = !on;
+            if (drawVideo instanceof HTMLElement) drawVideo.hidden = !on;
         };
         drawCb.addEventListener('change', syncDrawMeta);
         syncDrawMeta();

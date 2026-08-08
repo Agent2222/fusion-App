@@ -12,6 +12,7 @@ import {
     patchPendingPayPalMetadata,
 } from '../payments/pendingPaymentStore.js';
 import { recordVerifiedPayPalOrder } from '../payments/recordPayment.js';
+import { maybeSendProgramAwardPaymentConfirmationAfterCapture } from '../payments/programAwardEmail.js';
 import { pushPayPalSubscriptionToCanister } from '../canisterActor.js';
 
 /**
@@ -21,6 +22,11 @@ import { pushPayPalSubscriptionToCanister } from '../canisterActor.js';
 export async function handlePayPalWebhookEvent(event, programPaymentDeps = {}) {
     const eventType = String(event.event_type || '');
     const resource = event.resource || {};
+    const sendAwardPaymentEmail =
+        typeof programPaymentDeps.maybeSendProgramAwardPaymentConfirmationAfterCapture ===
+        'function'
+            ? programPaymentDeps.maybeSendProgramAwardPaymentConfirmationAfterCapture
+            : maybeSendProgramAwardPaymentConfirmationAfterCapture;
     if (eventType === 'PAYMENT.CAPTURE.COMPLETED') {
         let orderId = resource.supplementary_data?.related_ids?.order_id;
         if (!orderId && resource.id) {
@@ -55,16 +61,48 @@ export async function handlePayPalWebhookEvent(event, programPaymentDeps = {}) {
                         paymentType === 'program_award_entry' ||
                         purpose === 'program_award_entry' ||
                         applicationId.startsWith('award:');
+                    const capture = (pu.payments?.captures || [])[0] || {};
+                    const captureId = safePayPalMetaValue(capture.id || resource.id, 120);
+                    const amountCents = Math.max(
+                        0,
+                        Math.round(
+                            Number.parseFloat(
+                                String(capture.amount?.value || pu.amount?.value || '0'),
+                            ) * 100,
+                        ),
+                    );
+                    const capturedAt = new Date().toISOString();
+                    const mergedForEmail = {
+                        ...pending,
+                        paymentType: paymentType || (awardEntry ? 'program_award_entry' : paymentType),
+                        captured: 'true',
+                        captureId,
+                        capturedAt: pending.capturedAt || capturedAt,
+                    };
+
+                    if (awardEntry && typeof sendAwardPaymentEmail === 'function') {
+                        await sendAwardPaymentEmail({
+                            metaRef,
+                            merged: mergedForEmail,
+                            orderId,
+                            amountCents: amountCents || Number(pending.amountCents) || 5000,
+                            captureId,
+                            awaitingAccountLink: !principalText,
+                            patchPending: patchPendingPayPalMetadata,
+                            ...(programPaymentDeps.awardEmailDeps || {}),
+                        });
+                    }
+
                     // Guest draw: capture may land before II — keep pending for FE confirm+principal.
                     if (awardEntry && !principalText) {
                         if (metaRef) {
-                            const capture = (pu.payments?.captures || [])[0] || {};
+                            const pendingAfter = await getPendingPayPalMetadata(metaRef);
                             await patchPendingPayPalMetadata(metaRef, {
-                                ...pending,
+                                ...pendingAfter,
                                 paymentType: paymentType || 'program_award_entry',
                                 captured: 'true',
-                                captureId: safePayPalMetaValue(capture.id || resource.id, 120),
-                                capturedAt: new Date().toISOString(),
+                                captureId,
+                                capturedAt: pendingAfter.capturedAt || capturedAt,
                             });
                         }
                         console.warn(

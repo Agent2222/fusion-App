@@ -27,6 +27,8 @@ import {
 import { artistDisplayDiscipline, artistDisplayName } from '../../utils/artistSlug.js';
 import { resolveArtistPublicCardImageUrl } from '../../utils/artistCardImageMode.js';
 import { resolveArtistCardImageUrl } from '../../utils/artistCardPlaceholder.js';
+import { openProgramDrawRecipientModal } from './program-draw-recipient-modal.js';
+import { normalizeYoutubeEmbedSrc } from '../../utils/youtubeEmbed.js';
 import { navigate } from '../../router.js';
 import entryTicketIcon from '../../assets/icons/fusion_svg_icons_b2/entry-ticket.svg';
 import memberUserIcon from '../../assets/icons/fusion_svg_icons_b2/member-user.svg';
@@ -47,6 +49,7 @@ function pddIconHtml(iconUrl) {
  *   residencyDate: string,
  *   image: string,
  *   slug: string,
+ *   storyVideoUrl: string,
  * }} DrawRecipient
  * @typedef {{
  *   key: string,
@@ -83,6 +86,14 @@ function escapeHtml(s) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
 }
+
+/** @param {number} t 0..1 */
+function easeInOutCubic(t) {
+    const x = Math.min(1, Math.max(0, t));
+    return x < 0.5 ? 4 * x * x * x : 1 - (-2 * x + 2) ** 3 / 2;
+}
+
+const PDD_PROGRESS_ANIM_MS = 1400;
 
 function currentLocale() {
     return typeof window.getLocale === 'function' && window.getLocale() === 'ja' ? 'ja' : 'en';
@@ -194,6 +205,7 @@ function enrichProgramDrawDisplayData(pid, key, locale, base) {
                     residencyDate: String(row.awardLabel || '').trim(),
                     image,
                     slug,
+                    storyVideoUrl: String(row.storyVideoUrl || '').trim(),
                 });
             }
 
@@ -299,8 +311,15 @@ class ProgramDrawDisplayComponent extends HTMLElement {
         this._loadedKey = '';
         /** @type {{ pastRecipientsLabel: string, pastRecipientsHideLabel: string, moreDetailsLabel: string, moreDetailsHideLabel: string, learnHowLabel: string, applicantsLabel: string, applicantsHideLabel: string, drawActive: boolean } | null} */
         this._toggleLabels = null;
+        /** @type {string} */
+        this._progressAnimDoneKey = '';
+        /** @type {number} */
+        this._progressAnimRaf = 0;
+        /** @type {IntersectionObserver | null} */
+        this._progressIo = null;
         this._onLocale = () => {
             this._loadedKey = '';
+            this._progressAnimDoneKey = '';
             void this.render();
         };
         this._onEnriched = (ev) => {
@@ -321,6 +340,7 @@ class ProgramDrawDisplayComponent extends HTMLElement {
         if (oldVal === newVal) return;
         if (prop === 'data-program-id') {
             this._loadedKey = '';
+            this._progressAnimDoneKey = '';
             void this.render();
         } else if (prop === 'data-draw-active' || prop === 'data-user-entered') {
             void this.render();
@@ -349,6 +369,127 @@ class ProgramDrawDisplayComponent extends HTMLElement {
     disconnectedCallback() {
         window.removeEventListener('fusion-localechange', this._onLocale);
         window.removeEventListener('fusion-program-draw-display-enriched', this._onEnriched);
+        this._teardownProgressAnimation();
+    }
+
+    _progressAnimKey() {
+        const { claimed, total, cycle } = this._cycle;
+        return `${claimed}|${total}|${cycle}`;
+    }
+
+    _teardownProgressAnimation() {
+        if (this._progressAnimRaf) {
+            cancelAnimationFrame(this._progressAnimRaf);
+            this._progressAnimRaf = 0;
+        }
+        this._progressIo?.disconnect();
+        this._progressIo = null;
+    }
+
+    /**
+     * Count-up claimed entries + fill progress bar once the mounted display is in view.
+     * @param {{ claimed: number, total: number, remaining: number, remainingTemplate: string }} opts
+     */
+    _scheduleProgressAnimation(opts) {
+        const { claimed, total, remaining, remainingTemplate } = opts;
+        const key = this._progressAnimKey();
+        if (this._progressAnimDoneKey === key) return;
+        if (!this.shadowRoot?.querySelector('[data-pdd-claimed-num]')) return;
+
+        this._teardownProgressAnimation();
+
+        const start = () => {
+            if (this._progressAnimDoneKey === key) return;
+            if (!this.isConnected || !this.shadowRoot) return;
+            this._runProgressAnimation({
+                claimed,
+                total,
+                remaining,
+                remainingTemplate,
+                key,
+            });
+        };
+
+        if (typeof IntersectionObserver === 'undefined') {
+            start();
+            return;
+        }
+
+        this._progressIo = new IntersectionObserver(
+            (entries) => {
+                if (!entries.some((e) => e.isIntersecting && e.intersectionRatio > 0)) return;
+                this._progressIo?.disconnect();
+                this._progressIo = null;
+                start();
+            },
+            { threshold: [0, 0.25, 0.4], rootMargin: '0px 0px -8% 0px' },
+        );
+        this._progressIo.observe(this);
+    }
+
+    /**
+     * @param {{ claimed: number, total: number, remaining: number, remainingTemplate: string, key: string }} opts
+     */
+    _runProgressAnimation(opts) {
+        const { claimed, total, remaining, remainingTemplate, key } = opts;
+        const root = this.shadowRoot;
+        if (!root) return;
+        const claimedEl = root.querySelector('[data-pdd-claimed-num]');
+        const barFill = root.querySelector('.pdd__bar-fill');
+        const bar = root.querySelector('.pdd__bar');
+        const remainingEl = root.querySelector('.pdd__remaining');
+        if (!(claimedEl instanceof HTMLElement) || !(barFill instanceof HTMLElement)) {
+            this._progressAnimDoneKey = key;
+            return;
+        }
+
+        const targetPct = total > 0 ? Math.min(100, (claimed / total) * 100) : 0;
+        const duration = PDD_PROGRESS_ANIM_MS;
+        const t0 = performance.now();
+
+        const frame = (now) => {
+            if (!this.isConnected || this._progressAnimDoneKey === key) return;
+            if (this.shadowRoot?.querySelector('[data-pdd-claimed-num]') !== claimedEl) return;
+
+            const t = Math.min(1, (now - t0) / duration);
+            const e = easeInOutCubic(t);
+            const curClaimed = Math.round(claimed * e);
+            const curPct = targetPct * e;
+            const curRemaining = Math.max(0, total - curClaimed);
+
+            claimedEl.textContent = String(curClaimed);
+            barFill.style.width = `${curPct}%`;
+            if (bar instanceof HTMLElement) {
+                bar.setAttribute('aria-valuenow', String(Math.round(curPct)));
+            }
+            if (remainingEl instanceof HTMLElement) {
+                remainingEl.textContent = formatRemainingTemplate(remainingTemplate, curRemaining);
+            }
+
+            if (t < 1) {
+                this._progressAnimRaf = requestAnimationFrame(frame);
+                return;
+            }
+
+            claimedEl.textContent = String(claimed);
+            barFill.style.width = `${targetPct}%`;
+            if (bar instanceof HTMLElement) {
+                bar.setAttribute('aria-valuenow', String(Math.round(targetPct)));
+            }
+            if (remainingEl instanceof HTMLElement) {
+                remainingEl.textContent = formatRemainingTemplate(remainingTemplate, remaining);
+            }
+            this._progressAnimRaf = 0;
+            this._progressAnimDoneKey = key;
+        };
+
+        claimedEl.textContent = '0';
+        barFill.style.width = '0%';
+        if (bar instanceof HTMLElement) bar.setAttribute('aria-valuenow', '0');
+        if (remainingEl instanceof HTMLElement) {
+            remainingEl.textContent = formatRemainingTemplate(remainingTemplate, total);
+        }
+        this._progressAnimRaf = requestAnimationFrame(frame);
     }
 
     _programId() {
@@ -473,6 +614,11 @@ class ProgramDrawDisplayComponent extends HTMLElement {
         const { claimed, total, cycle } = this._cycle;
         const remaining = Math.max(0, total - claimed);
         const pct = total > 0 ? Math.min(100, Math.round((claimed / total) * 100)) : 0;
+        const progressAnimKey = `${claimed}|${total}|${cycle}`;
+        const progressAnimDone = this._progressAnimDoneKey === progressAnimKey;
+        const displayClaimed = progressAnimDone ? claimed : 0;
+        const displayPct = progressAnimDone ? pct : 0;
+        const displayRemaining = progressAnimDone ? remaining : total;
         const recipientsOpen = this._recipientsOpen;
         const aboutOpen = this._aboutOpen;
         const applicantsOpen = this._applicantsOpen;
@@ -525,12 +671,12 @@ class ProgramDrawDisplayComponent extends HTMLElement {
             <p class="pdd__eyebrow">${escapeHtml(L.currentCycleLabel)}</p>
             <div class="pdd__col-body">
               <p class="pdd__cycle-title">${escapeHtml(cycleLabel)}</p>
-              <p class="pdd__stat"><span class="pdd__stat-num">${claimed}</span><span class="pdd__stat-sep"> / </span><span class="pdd__stat-num">${total}</span></p>
+              <p class="pdd__stat"><span class="pdd__stat-num" data-pdd-claimed-num>${displayClaimed}</span><span class="pdd__stat-sep"> / </span><span class="pdd__stat-num">${total}</span></p>
               <p class="pdd__stat-label">${escapeHtml(L.membersSuffix)}</p>
-              <div class="pdd__bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="${escapeHtml(L.currentCycleLabel)}">
-                <span class="pdd__bar-fill" style="width:${pct}%"></span>
+              <div class="pdd__bar" role="progressbar" aria-valuenow="${displayPct}" aria-valuemin="0" aria-valuemax="100" aria-label="${escapeHtml(L.currentCycleLabel)}">
+                <span class="pdd__bar-fill" style="width:${displayPct}%"></span>
               </div>
-              <p class="pdd__remaining">${escapeHtml(formatRemainingTemplate(L.remainingTemplate, remaining))}</p>
+              <p class="pdd__remaining">${escapeHtml(formatRemainingTemplate(L.remainingTemplate, displayRemaining))}</p>
               <button type="button" class="pdd__text-link pdd__applicants-link" data-pdd-applicants-toggle aria-expanded="${applicantsOpen ? 'true' : 'false'}" aria-controls="pdd-applicants">
                 ${escapeHtml(applicantsOpen ? L.applicantsHideLabel || 'Hide applicants' : L.applicantsLabel || 'Applicants')}
               </button>
@@ -548,21 +694,31 @@ class ProgramDrawDisplayComponent extends HTMLElement {
         const hasRecipients = recipientCount > 0;
         const recipientsHtml = hasRecipients
             ? this._recipients
-                  .map((r) => {
-                      const href = r.slug ? `/profile/${encodeURIComponent(r.slug)}` : '';
-                      const tag = href ? 'a' : 'article';
-                      const hrefAttr = href ? ` href="${escapeHtml(href)}"` : '';
+                  .map((r, idx) => {
                       const meta = String(r.discipline || '').trim();
-                      return `
-      <${tag} class="pdd__recipient"${hrefAttr}>
+                      const hasVideo = Boolean(normalizeYoutubeEmbedSrc(r.storyVideoUrl));
+                      const profileHref = r.slug ? `/profile/${encodeURIComponent(r.slug)}` : '';
+                      const inner = `
         <img class="pdd__recipient-img" src="${escapeHtml(r.image)}" alt="" width="64" height="64" loading="lazy" />
         <div class="pdd__recipient-copy">
           <p class="pdd__recipient-cycle">${escapeHtml(formatProgramDrawCopyTemplate(L.roundLabelTemplate, { ...copyVars, n: r.cycle }))}</p>
           <p class="pdd__recipient-name">${escapeHtml(r.name)}</p>
           ${meta ? `<p class="pdd__recipient-meta">${escapeHtml(meta)}</p>` : ''}
           ${r.residencyDate ? `<p class="pdd__recipient-meta">${escapeHtml(r.residencyDate)}</p>` : ''}
-        </div>
-      </${tag}>`;
+        </div>`;
+                      if (hasVideo) {
+                          return `
+      <button type="button" class="pdd__recipient" data-pdd-recipient-idx="${idx}" aria-haspopup="dialog">${inner}
+      </button>`;
+                      }
+                      if (profileHref) {
+                          return `
+      <a class="pdd__recipient" href="${escapeHtml(profileHref)}">${inner}
+      </a>`;
+                      }
+                      return `
+      <article class="pdd__recipient pdd__recipient--static">${inner}
+      </article>`;
                   })
                   .join('')
             : '';
@@ -731,6 +887,22 @@ class ProgramDrawDisplayComponent extends HTMLElement {
                 }),
             );
         });
+        this.shadowRoot.querySelectorAll('[data-pdd-recipient-idx]').forEach((el) => {
+            el.addEventListener('click', () => {
+                const idx = Number(el.getAttribute('data-pdd-recipient-idx'));
+                const r = this._recipients[idx];
+                if (!r || !normalizeYoutubeEmbedSrc(r.storyVideoUrl)) return;
+                openProgramDrawRecipientModal({
+                    cycle: r.cycle,
+                    name: r.name,
+                    discipline: r.discipline,
+                    residencyDate: r.residencyDate,
+                    slug: r.slug,
+                    storyVideoUrl: r.storyVideoUrl,
+                    programLabel: this._programLabel,
+                });
+            });
+        });
         this.shadowRoot.querySelectorAll('a.pdd__recipient[href^="/"]').forEach((el) => {
             el.addEventListener('click', (e) => {
                 const a = /** @type {HTMLAnchorElement} */ (e.currentTarget);
@@ -740,6 +912,15 @@ class ProgramDrawDisplayComponent extends HTMLElement {
                 navigate(href);
             });
         });
+
+        if (drawActive) {
+            this._scheduleProgressAnimation({
+                claimed,
+                total,
+                remaining,
+                remainingTemplate: L.remainingTemplate,
+            });
+        }
     }
 
     _styles() {
@@ -1059,8 +1240,10 @@ class ProgramDrawDisplayComponent extends HTMLElement {
       .pdd__bar-fill {
         display: block;
         height: 100%;
+        width: 0%;
         background: var(--c2, #111);
         border-radius: 999px;
+        will-change: width;
       }
 
       .pdd__remaining {
@@ -1245,14 +1428,28 @@ class ProgramDrawDisplayComponent extends HTMLElement {
         grid-template-columns: 64px minmax(0, 1fr);
         gap: 0.7rem;
         align-items: start;
+        text-align: left;
         text-decoration: none;
         color: inherit;
+        border: 0;
         border-radius: 2px;
+        padding: 0;
+        margin: 0;
+        background: transparent;
+        font: inherit;
+        cursor: pointer;
+        width: 100%;
       }
+      .pdd__recipient--static {
+        cursor: default;
+      }
+      button.pdd__recipient:hover .pdd__recipient-name,
+      button.pdd__recipient:focus-visible .pdd__recipient-name,
       a.pdd__recipient:hover .pdd__recipient-name,
       a.pdd__recipient:focus-visible .pdd__recipient-name {
         text-decoration: underline;
       }
+      button.pdd__recipient:focus-visible,
       a.pdd__recipient:focus-visible {
         outline: 2px solid color-mix(in srgb, var(--c2, #111) 55%, transparent);
         outline-offset: 3px;

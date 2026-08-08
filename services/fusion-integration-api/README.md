@@ -80,6 +80,9 @@ stripe listen --forward-to localhost:8787/webhooks/stripe
 - `POST /payments/subscription/status` — Studio Live PayPal check (body `{ subscriptionId }`) — returns `status`, `tier` (`monthly`|`quarterly`|`annual`), `planId`, `subscriberEmail`; **no canister write**. Tier inference needs `PAYPAL_SUBSCRIPTION_MONTHLY_ID` / `_QUARTERLY_ID` / `_ANNUAL_ID` (or `PAYPAL_PLAN_ANNUAL_ID`) on the integration host. There is no PayPal list-by-email — staff paste `I-…` from the Business dashboard.
 - `POST /payments/subscription/revise` — PayPal plan change (returns `approveUrl` for buyer re-consent)
 - `POST /payments/member-billing-summary` — PayPal tier labels for Settings Membership
+- `POST /payments/one-time/confirm` — capture PayPal order; for `program_award_entry`, sends applicant Program Draw payment receipt (CC `info@fusionart.world`) once per pending ref (`awardPaymentEmailSent`); guest may return `awaitingPrincipal: true` before ledger
+- `POST /payments/paypal/repair` — re-resolve completed order + record; same award email dedupe when first capture is repaired
+- `POST /webhooks/paypal` — PayPal events; `PAYMENT.CAPTURE.COMPLETED` for award entries emails on first capture (same dedupe) even when ledger awaits principal
 - `POST /stripe/create-subscription` — body `{ principal?, email, metadata?, payFirst?, subscriptionTier? }` — legacy Stripe path when provider is Stripe
 - `POST /stripe/subscription-status-by-email` — body `{ email }` — looks up Stripe customer by email, returns best subscription + `membershipActive` (`true` when status is `active` or `trialing`). Studio “Manage user” live Stripe check (API key required)
 - `POST /stripe/membership-revenue-summary` — no body — aggregates active/trialing Fusion membership subscriptions from Stripe into `mrrCents`, per-cadence cycle totals (`monthlyCents`, `bimonthlyCents`, `annualCents`), and subscriber counts. Studio Finance → Users (API key required)

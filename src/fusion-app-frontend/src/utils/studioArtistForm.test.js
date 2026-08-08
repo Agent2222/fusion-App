@@ -52,6 +52,8 @@ describe('studioArtistForm', () => {
         expect(html).toContain('data-art-kind="discipline-select"');
         expect(html).toContain('value="sound"');
         expect(html).toContain('Film/Video');
+        expect(html).toContain('id="studio-art-draw-recipient-story-video"');
+        expect(html).toContain('Public story video');
     });
 
     it('renderArtistManageModalHtml maps stored discipline label to select option', () => {

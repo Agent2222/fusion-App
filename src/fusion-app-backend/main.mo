@@ -136,6 +136,8 @@ persistent actor {
 
   /// Program Draw past recipients (Studio Manage checkbox) — keyed by artist id.
   stable var artistDrawRecipientsStable : [(Text, Types.ArtistDrawRecipient)] = [];
+  /// Past-recipient public story video (YouTube URL or embed src) — keyed by artist id.
+  stable var artistDrawStoryVideoStable : [(Text, Text)] = [];
 
   /// Studio → Permissions: role-tab defaults (`staff`, …), per-principal overrides, super-staff principals.
   stable var studioPermissionDefaultsStable : [(Text, Types.StudioPermissionMatrix)] = [];
@@ -422,6 +424,8 @@ persistent actor {
 
   transient var artistDrawRecipientById : _HashMap.HashMap<Text, Types.ArtistDrawRecipient> =
     _HashMap.HashMap<Text, Types.ArtistDrawRecipient>(0, Text.equal, Text.hash);
+  transient var artistDrawStoryVideoById : _HashMap.HashMap<Text, Text> =
+    _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
 
   transient var joinInvitesByCode : _HashMap.HashMap<Text, Types.JoinInviteRecord> =
     _HashMap.HashMap<Text, Types.JoinInviteRecord>(0, Text.equal, Text.hash);
@@ -719,6 +723,9 @@ persistent actor {
   };
   for (entry in artistDrawRecipientsStable.vals()) {
     artistDrawRecipientById.put(entry.0, entry.1);
+  };
+  for (entry in artistDrawStoryVideoStable.vals()) {
+    artistDrawStoryVideoById.put(entry.0, entry.1);
   };
 
   for (entry in joinInvitesStable.vals()) {
@@ -1386,6 +1393,7 @@ persistent actor {
     ignore artistFeaturedFeaturableById.remove(artistId);
     removeManualFeaturedId(artistId);
     ignore artistDrawRecipientById.remove(artistId);
+    ignore artistDrawStoryVideoById.remove(artistId);
   };
 
   private func compareDrawRecipientsDesc(a : Types.ArtistDrawRecipient, b : Types.ArtistDrawRecipient) : Order.Order {
@@ -2032,6 +2040,7 @@ persistent actor {
     artistFeaturedFeaturableIdsStable := featurableIdsSorted();
     artistFeaturedManualIdsStable := Buffer.toArray(manualFeaturedArtistIds);
     artistDrawRecipientsStable := _Iter.toArray(artistDrawRecipientById.entries());
+    artistDrawStoryVideoStable := _Iter.toArray(artistDrawStoryVideoById.entries());
     joinInvitesStable := _Iter.toArray(joinInvitesByCode.entries());
     joinInviteTrialMonthsStable := _Iter.toArray(joinInviteTrialMonthsByCode.entries());
     accountRecoveryCodesStable := _Iter.toArray(accountRecoveryCodesByCode.entries());
@@ -2574,6 +2583,16 @@ persistent actor {
     };
     artistDrawRecipientsStable := [];
 
+    artistDrawStoryVideoById := _HashMap.HashMap<Text, Text>(
+      artistDrawStoryVideoStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in artistDrawStoryVideoStable.vals()) {
+      artistDrawStoryVideoById.put(entry.0, entry.1);
+    };
+    artistDrawStoryVideoStable := [];
+
     reloadStudioPermissionTransientFromStable();
     ensureStudioFeatureKeysMergedWithDefaults();
     migrateStudioPermissionMatrices();
@@ -2839,6 +2858,15 @@ persistent actor {
       artistDrawRecipientById.put(entry.0, entry.1);
     };
 
+    artistDrawStoryVideoById := _HashMap.HashMap<Text, Text>(
+      artistDrawStoryVideoStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in artistDrawStoryVideoStable.vals()) {
+      artistDrawStoryVideoById.put(entry.0, entry.1);
+    };
+
     joinInvitesByCode := _HashMap.HashMap<Text, Types.JoinInviteRecord>(
       joinInvitesStable.size(),
       Text.equal,
@@ -2904,6 +2932,7 @@ persistent actor {
       artistFeaturedFeaturableIdsStable = featurableIdsSorted();
       artistFeaturedManualIdsStable = Buffer.toArray(manualFeaturedArtistIds);
       artistDrawRecipientsStable = ?(_Iter.toArray(artistDrawRecipientById.entries()));
+      artistDrawStoryVideoStable = ?(_Iter.toArray(artistDrawStoryVideoById.entries()));
       joinInvitesStable = _Iter.toArray(joinInvitesByCode.entries());
       joinInviteTrialMonthsStable = ?(_Iter.toArray(joinInviteTrialMonthsByCode.entries()));
       accountRecoveryCodesStable = ?(_Iter.toArray(accountRecoveryCodesByCode.entries()));
@@ -3041,6 +3070,10 @@ persistent actor {
       case (?rows) { rows };
     };
     artistDrawRecipientsStable := switch (snapshot.artistDrawRecipientsStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    artistDrawStoryVideoStable := switch (snapshot.artistDrawStoryVideoStable) {
       case null { [] };
       case (?rows) { rows };
     };
@@ -4517,6 +4550,7 @@ persistent actor {
     cycle : Nat,
     programId : Text,
     awardLabel : Text,
+    storyVideoUrl : Text,
   ) : async () {
     assertStaffOrAdmin(msg.caller);
     assertStudioFeatureEdit(msg.caller, "artists");
@@ -4535,11 +4569,36 @@ persistent actor {
               updatedAt = nowText();
             },
           );
+          let video = Text.trim(storyVideoUrl, #char ' ');
+          if (video.size() > 2000) {
+            Debug.trap("Story video URL too long");
+          };
+          if (video.size() > 0) {
+            artistDrawStoryVideoById.put(artistId, video);
+          } else {
+            ignore artistDrawStoryVideoById.remove(artistId);
+          };
         } else {
           ignore artistDrawRecipientById.remove(artistId);
+          ignore artistDrawStoryVideoById.remove(artistId);
         };
       };
     };
+  };
+
+  /// Staff: story video URL for a past recipient (empty when unset).
+  public shared query (msg) func getArtistDrawStoryVideo(artistId : Text) : async Text {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "artists");
+    switch (artistDrawStoryVideoById.get(artistId)) {
+      case null { "" };
+      case (?u) { u };
+    };
+  };
+
+  /// Public: artist id → story video URL for Past recipient modals.
+  public query func listArtistDrawStoryVideosPublic() : async [(Text, Text)] {
+    _Iter.toArray(artistDrawStoryVideoById.entries());
   };
 
   /// Staff: load draw-recipient sidecar for Studio Manage.
@@ -6260,6 +6319,53 @@ persistent actor {
       ownFlight,
     );
     putProgramPaymentFlightPreference(msg.caller, programId, applicationId, ownFlight, flightCreditCents, totalDueCents, updatedAt, false);
+  };
+
+  /// Studio Finance: staff override for Own Flight pricing credit (unlocked even after payments).
+  public shared (msg) func staffSetProgramPaymentFlightPreference(
+    applicantId : Text,
+    ownFlight : Bool,
+    updatedAt : Text,
+  ) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "financePrograms");
+    if (applicantId.size() == 0) {
+      Debug.trap("applicantId required");
+    };
+    let rec = switch (applicantRecordOpt(applicantId)) {
+      case null { Debug.trap("Applicant not found") };
+      case (?r) { r };
+    };
+    var resolvedPrincipal : ?Principal = null;
+    for ((_, summary) in programPaymentSummariesByKey.entries()) {
+      if (summary.applicationId == applicantId and summary.programId == rec.programId) {
+        resolvedPrincipal := ?summary.principal;
+      };
+    };
+    let principal = switch (resolvedPrincipal) {
+      case (?p) { p };
+      case null {
+        switch (principalForApplicantId(applicantId)) {
+          case null {
+            Debug.trap("No account linked for this applicant — cannot set flight preference");
+          };
+          case (?p) { p };
+        };
+      };
+    };
+    let category = applicantCategoryFromPayloadJson(rec.payloadJson);
+    let flightCreditCents = if (ownFlight) { PROGRAM_OWN_FLIGHT_CREDIT_CENTS } else { 0 };
+    let totalDueCents = applicantEffectiveTotalDueFromPayload(rec.payloadJson, category, ownFlight);
+    putProgramPaymentFlightPreference(
+      principal,
+      rec.programId,
+      applicantId,
+      ownFlight,
+      flightCreditCents,
+      totalDueCents,
+      updatedAt,
+      true,
+    );
   };
 
   private func putProgramPaymentSummaryFromLedger(

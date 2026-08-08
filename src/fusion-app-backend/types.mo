@@ -996,5 +996,7 @@ module {
         audioEntryReviewNotesStable : ?[(Text, AssetReviewNote)];
         /// Program Draw past recipients by artist id; optional for backups before this field existed.
         artistDrawRecipientsStable : ?[(Text, ArtistDrawRecipient)];
+        /// Artist id → past-recipient story video URL / YouTube embed src; optional for older backups.
+        artistDrawStoryVideoStable : ?[(Text, Text)];
     };
 };

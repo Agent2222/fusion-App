@@ -1472,7 +1472,7 @@ export async function applyFeaturedFlagsFromStudioSaveLive(id, flags) {
 }
 
 /**
- * @typedef {{ artistId: string, cycle: number, programId: string, awardLabel: string, updatedAt: string }} ArtistDrawRecipientRow
+ * @typedef {{ artistId: string, cycle: number, programId: string, awardLabel: string, storyVideoUrl: string, updatedAt: string }} ArtistDrawRecipientRow
  */
 
 /**
@@ -1498,15 +1498,54 @@ function mapDrawRecipientRow(row) {
         cycle: Number.isFinite(cycleRaw) && cycleRaw > 0 ? Math.floor(cycleRaw) : 1,
         programId: String(r.programId ?? r.program_id ?? '').trim(),
         awardLabel: String(r.awardLabel ?? r.award_label ?? '').trim(),
+        storyVideoUrl: String(r.storyVideoUrl ?? r.story_video_url ?? '').trim(),
         updatedAt: String(r.updatedAt ?? r.updated_at ?? ''),
     };
+}
+
+/**
+ * @returns {Promise<Map<string, string>>}
+ */
+async function listArtistDrawStoryVideosPublicMap() {
+    /** @type {Map<string, string>} */
+    const map = new Map();
+    if (getDataSource() === 'test') {
+        for (const row of Object.values(readDrawRecipientsLs())) {
+            const id = String(row?.artistId || '').trim();
+            const url = String(row?.storyVideoUrl || '').trim();
+            if (id && url) map.set(id, url);
+        }
+        return map;
+    }
+    try {
+        const actor = await getFusionBackendActor();
+        if (typeof actor.listArtistDrawStoryVideosPublic !== 'function') {
+            for (const row of Object.values(readDrawRecipientsLs())) {
+                const id = String(row?.artistId || '').trim();
+                const url = String(row?.storyVideoUrl || '').trim();
+                if (id && url) map.set(id, url);
+            }
+            return map;
+        }
+        const rows = await actor.listArtistDrawStoryVideosPublic();
+        if (!Array.isArray(rows)) return map;
+        for (const entry of rows) {
+            if (!Array.isArray(entry) || entry.length < 2) continue;
+            const id = String(entry[0] || '').trim();
+            const url = String(entry[1] || '').trim();
+            if (id && url) map.set(id, url);
+        }
+    } catch {
+        /* empty */
+    }
+    return map;
 }
 
 /**
  * Live/staff: set or clear Program Draw past-recipient flag for a roster artist.
  * Test: localStorage overlay.
  * @param {string} id
- * @param {{ enabled: boolean, cycle?: number, programId?: string, awardLabel?: string }} flags
+ * @param {{ enabled: boolean, cycle?: number, programId?: string, awardLabel?: string, storyVideoUrl?: string }} flags
  */
 export async function applyDrawRecipientFromStudioSaveLive(id, flags) {
     const sid = String(id || '').trim();
@@ -1515,6 +1554,7 @@ export async function applyDrawRecipientFromStudioSaveLive(id, flags) {
     const cycle = Math.max(1, Math.floor(Number(flags?.cycle) || 1));
     const programId = String(flags?.programId ?? '').trim();
     const awardLabel = String(flags?.awardLabel ?? '').trim();
+    const storyVideoUrl = String(flags?.storyVideoUrl ?? '').trim();
 
     if (getDataSource() === 'test') {
         const map = readDrawRecipientsLs();
@@ -1524,6 +1564,7 @@ export async function applyDrawRecipientFromStudioSaveLive(id, flags) {
                 cycle,
                 programId,
                 awardLabel,
+                storyVideoUrl,
                 updatedAt: new Date().toISOString(),
             };
         } else {
@@ -1542,6 +1583,7 @@ export async function applyDrawRecipientFromStudioSaveLive(id, flags) {
                 cycle,
                 programId,
                 awardLabel,
+                storyVideoUrl,
                 updatedAt: new Date().toISOString(),
             };
         } else {
@@ -1550,7 +1592,14 @@ export async function applyDrawRecipientFromStudioSaveLive(id, flags) {
         writeStudioLs(LS_DRAW_RECIPIENTS, map);
         return;
     }
-    await actor.staffSetArtistDrawRecipient(sid, enabled, BigInt(cycle), programId, awardLabel);
+    await actor.staffSetArtistDrawRecipient(
+        sid,
+        enabled,
+        BigInt(cycle),
+        programId,
+        awardLabel,
+        storyVideoUrl,
+    );
 }
 
 /**
@@ -1572,7 +1621,17 @@ export async function getArtistDrawRecipientStudio(id) {
         const row = await actor.getArtistDrawRecipient(sid);
         if (row == null) return null;
         const unwrapped = Array.isArray(row) ? row[0] : row;
-        return mapDrawRecipientRow(unwrapped);
+        const mapped = mapDrawRecipientRow(unwrapped);
+        if (!mapped) return null;
+        if (typeof actor.getArtistDrawStoryVideo === 'function') {
+            try {
+                const video = await actor.getArtistDrawStoryVideo(sid);
+                mapped.storyVideoUrl = String(video || '').trim();
+            } catch {
+                /* keep empty */
+            }
+        }
+        return mapped;
     } catch {
         return mapDrawRecipientRow(readDrawRecipientsLs()[sid]);
     }
@@ -1596,9 +1655,20 @@ export async function listArtistDrawRecipientsPublic() {
                 .map(mapDrawRecipientRow)
                 .filter(Boolean);
         }
-        const rows = await actor.listArtistDrawRecipientsPublic();
+        const [rows, videoMap] = await Promise.all([
+            actor.listArtistDrawRecipientsPublic(),
+            listArtistDrawStoryVideosPublicMap(),
+        ]);
         if (!Array.isArray(rows)) return [];
-        return rows.map(mapDrawRecipientRow).filter(Boolean);
+        return rows
+            .map((row) => {
+                const mapped = mapDrawRecipientRow(row);
+                if (!mapped) return null;
+                const fromMap = videoMap.get(mapped.artistId);
+                if (fromMap) mapped.storyVideoUrl = fromMap;
+                return mapped;
+            })
+            .filter(Boolean);
     } catch {
         return [];
     }
@@ -2090,6 +2160,7 @@ export async function loadArtistForStudioEdit(slug, tableRow = null) {
             drawRecipientCycle: draw?.cycle ?? 1,
             drawRecipientProgramId: draw?.programId ?? '',
             drawRecipientAwardLabel: draw?.awardLabel ?? '',
+            drawRecipientStoryVideoUrl: draw?.storyVideoUrl ?? '',
         };
     }
     const tr = tableRow && typeof tableRow === 'object' ? tableRow : {};
@@ -2117,6 +2188,7 @@ export async function loadArtistForStudioEdit(slug, tableRow = null) {
         drawRecipientCycle: draw?.cycle ?? 1,
         drawRecipientProgramId: draw?.programId ?? '',
         drawRecipientAwardLabel: draw?.awardLabel ?? '',
+        drawRecipientStoryVideoUrl: draw?.storyVideoUrl ?? '',
     };
 }
 
@@ -3662,6 +3734,56 @@ export async function setMyProgramPaymentFlightPreference(opts) {
         String(opts.applicationId || '').trim(),
         Boolean(opts.ownFlight),
         new Date().toISOString()
+    );
+}
+
+/**
+ * Studio Finance: set Own Flight pricing credit for an applicant (staff; unlocked after payments).
+ * @param {{ applicantId: string, ownFlight: boolean }} opts
+ * @returns {Promise<void>}
+ */
+export async function staffSetProgramPaymentFlightPreferenceStudio(opts) {
+    const applicantId = String(opts?.applicantId || '').trim();
+    const ownFlight = opts?.ownFlight === true;
+    if (!applicantId) throw new Error('applicantId required');
+    if (getDataSource() === 'test') {
+        const stored = readStudioLs(LS_STAFF_FINANCE_PAYMENTS) || {
+            summaries: [],
+            ledger: [],
+            plans: [],
+        };
+        stored.summaries = Array.isArray(stored.summaries) ? stored.summaries : [];
+        let summary = stored.summaries.find((s) => String(s?.applicationId || '') === applicantId);
+        if (!summary) {
+            summary = {
+                key: `test|${applicantId}`,
+                applicationId: applicantId,
+                programId: '',
+                depositStatus: 'due',
+                totalDueCents: 0,
+                depositAmountCents: 100000,
+                totalPaidCents: 0,
+                outstandingCents: 0,
+                refundedCents: 0,
+                ownFlight: false,
+            };
+            stored.summaries.push(summary);
+        }
+        summary.ownFlight = ownFlight;
+        summary.flightCreditCents = ownFlight ? 80000 : 0;
+        writeStudioLs(LS_STAFF_FINANCE_PAYMENTS, stored);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffSetProgramPaymentFlightPreference !== 'function') {
+        throw new Error(
+            'Staff flight preference API is not available. Deploy backend and run dfx generate.',
+        );
+    }
+    await actor.staffSetProgramPaymentFlightPreference(
+        applicantId,
+        ownFlight,
+        new Date().toISOString(),
     );
 }
 

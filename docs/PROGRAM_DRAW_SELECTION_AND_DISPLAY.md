@@ -205,26 +205,40 @@ Closes the old hole where Motoko trusted a client `paidEntryReceipt` boolean.
 
 ```
 Guest: PayPal approve → POST /payments/one-time/confirm (no principal)
-  → capture only; pending meta marked captured; awaitingPrincipal
+  → capture; applicant payment-confirmation email (+ CC info@); pending marked captured; awaitingPrincipal
   → FE modal “Payment received” → II → confirm with principal
   → integrationRecordProgramPayment + optional integrationEnterProgramAward
   → FE enterProgramAward(programId, paypalOrderId, …)
-Signed-in: confirm with principal does capture + ledger in one step
+Signed-in: confirm with principal does capture + email (once) + ledger in one step
 ```
 
 | Path | Behavior |
 |------|----------|
-| Credit | Empty `paypalOrderId` → consume 1 award credit; `paidEntry = false` |
-| Paid guest | Capture before II; ledger/enter after II; Retry uses captured order id |
-| Paid signed-in | Confirm with principal → enter |
-| Webhook (no principal) | Soft-skip ledger for award entry; keep pending for FE finish |
-| Ledger | Award rows skip deposit summary / confirmed-artist / payment-confirmation email side effects |
+| Credit | Empty `paypalOrderId` → consume 1 award credit; `paidEntry = false` (no $50 capture email) |
+| Paid guest | Capture before II; **email on capture** (before II); ledger/enter after II; Retry uses captured order id |
+| Paid signed-in | Confirm with principal → email once → enter |
+| Webhook (no principal) | Soft-skip ledger for award entry; send award email if unset; keep pending for FE finish |
+| Repair | Same award email + `awardPaymentEmailSent` dedupe before ledger |
+| Ledger | Award rows skip deposit summary / confirmed-artist / **deposit** payment-confirmation emails (separate draw receipt) |
+
+### Award payment confirmation email (shipped)
+
+On first successful `$50` capture for `program_award_entry`, the integration API emails the applicant (Resend) with application fields and always CCs `info@fusionart.world`. Pending meta flag `awardPaymentEmailSent` prevents double-send on guest re-confirm, webhook, or repair. Confirm JSON includes `awardPaymentEmailSent`. Email failure is best-effort (confirm still `ok`). Staff “entered” mail after `enterProgramAward` is unchanged.
+
+**Redeploy:** ship **fusion-integration-api** (`RESEND_API_KEY`, `RESEND_FROM` already required for mail).
+
+**Smoke checks:**
+
+1. **Guest:** pay $50 → confirm → email at applicant + info@ CC **before** finishing II.
+2. **Signed-in:** pay → same email once.
+3. **Re-confirm / repair / webhook replay:** no second email (`awardPaymentEmailSent` stays true).
+4. Confirm/repair still returns `ok` if Resend is down.
 
 **Close-after-pay recovery:** captured order id + form payload persist in `sessionStorage`; returning to the form offers Retry / finish modal. Integration confirm with principal + `payloadJson` may enter via `integrationEnterProgramAward` (FE enter is idempotent backup). Studio Applicants → Program Award → **Add entry** is the staff backstop when Retry/repair is insufficient.
 
 Still optional: PayPal webhook **signature** verification (`PAYPAL_WEBHOOK_ID`). Details also in [`PAYMENTS.md`](./PAYMENTS.md).
 
-**Deploy note:** Redeploy the **integration API** for capture-without-principal confirm + webhook soft-skip. After Motoko changes, run `dfx generate` (or frontend `prebuild`) so client bindings match.
+**Deploy note:** Redeploy the **integration API** for capture-without-principal confirm, award payment email, + webhook soft-skip. After Motoko changes, run `dfx generate` (or frontend `prebuild`) so client bindings match.
 
 ---
 
@@ -233,8 +247,8 @@ Still optional: PayPal webhook **signature** verification (`PAYPAL_WEBHOOK_ID`).
 1. Studio “Run draw” (or gift) UI wired to existing Motoko admin select/gift APIs.
 2. After select: write `ArtistDrawRecipient` from linked artist id.
 3. Cycle / audit record (seed, pool size, operator, timestamp); stop hardcoding `cycle: 1`.
-4. Optional: PayPal webhook signature verification; dedicated Past recipients page; email notifications.
+4. Optional: PayPal webhook signature verification; dedicated Past recipients page.
 
 ---
 
-*Last updated: Applicant Studio defaults to Programs → My programs for entered draw guests (award entries count like applications). Remaining: Studio selection UI, sidecar auto-sync, real cycle counter.*
+*Last updated: Program Draw $50 capture sends applicant confirmation email (CC info@) before II. Remaining: Studio selection UI, sidecar auto-sync, real cycle counter.*

@@ -234,6 +234,11 @@ app.post('/webhooks/paypal', express.raw({ type: 'application/json' }), async (r
                 markProgramPaymentEmailsSent,
                 cancelPlatformSubscriptionImmediately,
                 addConfirmedArtistToProgram,
+                awardEmailDeps: {
+                    resend,
+                    from: resendFrom,
+                    logoRewrite: maybeApplyFusionLogoUrl,
+                },
             });
         } catch (e) {
             console.error('[paypal webhook] handler', e);
@@ -2914,6 +2919,11 @@ registerPaymentRoutes(app, {
         markProgramPaymentEmailsSent,
         cancelPlatformSubscriptionImmediately,
         addConfirmedArtistToProgram,
+        awardEmailDeps: {
+            resend,
+            from: resendFrom,
+            logoRewrite: maybeApplyFusionLogoUrl,
+        },
     },
 });
 

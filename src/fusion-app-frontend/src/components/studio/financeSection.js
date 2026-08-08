@@ -24,6 +24,7 @@ import {
     upsertProgramTeamPaidEntryStudio,
     voidProgramTeamOwedEntryStudio,
     voidProgramTeamPaidEntryStudio,
+    staffSetProgramPaymentFlightPreferenceStudio,
     updateStaffManualProgramLedgerStudio,
     upsertApplicantStudio,
     upsertFinancePromotionStudio,
@@ -1863,33 +1864,43 @@ export async function initFinance(mainEl) {
 
         if (mode === 'tickets') {
             const flightUsd = (row.ticketsCents / 100).toFixed(2);
-            const ownFlightNote = row.ownFlight
-                ? '<p class="studio-muted mpd-field-hint">Applicant selected Own Flight (pricing credit applied in Price category).</p>'
-                : '';
-            const editForm = programsCanEdit
-                ? `<form class="studio-finance-ledger-add" id="studio-finance-tickets-form">
+            const ownFlightChecked = row.ownFlight ? 'checked' : '';
+            const ownFlightDisabled = programsCanEdit ? '' : 'disabled';
+            const amountDisabled = programsCanEdit ? '' : 'disabled';
+            const editForm = `<form class="studio-finance-ledger-add" id="studio-finance-tickets-form">
                     <h4 class="studio-subheading">Flight / ticket cost</h4>
+                    <label class="studio-field studio-field--inline-check">
+                        <input type="checkbox" class="studio-checkbox" id="studio-finance-tickets-own-flight" ${ownFlightChecked} ${ownFlightDisabled} />
+                        <span>Own flight ($800 credit)</span>
+                    </label>
+                    <p class="studio-muted mpd-field-hint">Checked when the applicant selected Own Flight. Staff can change this to update Price category credit.</p>
                     <label class="studio-field"><span>Amount (USD)</span>
-                        <input type="text" class="studio-input" id="studio-finance-tickets-amount" inputmode="decimal" placeholder="0.00" value="${escapeHtml(flightUsd === '0.00' ? '' : flightUsd)}" />
+                        <input type="text" class="studio-input" id="studio-finance-tickets-amount" inputmode="decimal" placeholder="0.00" value="${escapeHtml(flightUsd === '0.00' ? '' : flightUsd)}" ${amountDisabled} />
                     </label>
                     <div class="studio-modal-actions">
-                        <button type="submit" class="studio-btn-primary">Save ticket cost</button>
+                        ${
+                            programsCanEdit
+                                ? '<button type="submit" class="studio-btn-primary">Save</button>'
+                                : ''
+                        }
                         <button type="button" class="studio-btn-ghost" data-studio-modal-close="1">Close</button>
                     </div>
                     <p class="studio-muted mpd-field-hint" id="studio-finance-ledger-status" role="status"></p>
-                </form>`
-                : '';
-            const inner = `<div class="studio-finance-ledger-modal">${ownFlightNote}${editForm || '<p class="studio-muted">View only.</p>'}</div>`;
+                </form>`;
+            const inner = `<div class="studio-finance-ledger-modal">${editForm}</div>`;
             const { close, root } = openStudioModal(inner, { title, wide: true });
             const form = root.querySelector('#studio-finance-tickets-form');
-            if (!(form instanceof HTMLFormElement) || !applicant) return;
+            if (!(form instanceof HTMLFormElement) || !applicant || !programsCanEdit) return;
             form.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 const statusEl = root.querySelector('#studio-finance-ledger-status');
                 const amountInput = root.querySelector('#studio-finance-tickets-amount');
+                const ownFlightInput = root.querySelector('#studio-finance-tickets-own-flight');
                 const flightCostCents = parseUsdInputToCents(
                     amountInput instanceof HTMLInputElement ? amountInput.value : '',
                 );
+                const nextOwnFlight =
+                    ownFlightInput instanceof HTMLInputElement ? ownFlightInput.checked : false;
                 const submitBtn = form.querySelector('button[type="submit"]');
                 if (submitBtn instanceof HTMLButtonElement) submitBtn.disabled = true;
                 if (statusEl) statusEl.textContent = 'Saving…';
@@ -1899,6 +1910,12 @@ export async function initFinance(mainEl) {
                         row.payloadJson,
                     );
                     await upsertApplicantStudio({ ...applicant, payloadJson });
+                    if (nextOwnFlight !== Boolean(row.ownFlight)) {
+                        await staffSetProgramPaymentFlightPreferenceStudio({
+                            applicantId: row.applicantId,
+                            ownFlight: nextOwnFlight,
+                        });
+                    }
                     close();
                     await reloadApplicantsAndFinance();
                 } catch (err) {

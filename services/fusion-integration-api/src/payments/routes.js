@@ -31,19 +31,27 @@ import {
     putPendingPayPalMetadata,
 } from './pendingPaymentStore.js';
 import { recordVerifiedPayPalOrder, pushPayPalSubscriptionToCanister } from './recordPayment.js';
+import { maybeSendProgramAwardPaymentConfirmationAfterCapture } from './programAwardEmail.js';
 
 /** Re-enable when PayPal supports per-user installment plan creation. */
 const PROGRAM_PAYMENT_PLAN_START_ENABLED = false;
 
 /**
  * @param {import('express').Express} app
- * @param {{ requireApiKey: import('express').RequestHandler; programPaymentDeps?: object }} opts
+ * @param {{
+ *   requireApiKey: import('express').RequestHandler;
+ *   programPaymentDeps?: object;
+ *   cancelPlatformSubscriptionImmediately?: (principal: string) => Promise<unknown>;
+ *   maybeSendProgramAwardPaymentConfirmationAfterCapture?: typeof maybeSendProgramAwardPaymentConfirmationAfterCapture;
+ * }} opts
  */
 export function registerPaymentRoutes(app, opts) {
     const {
         requireApiKey,
         programPaymentDeps = {},
         cancelPlatformSubscriptionImmediately,
+        maybeSendProgramAwardPaymentConfirmationAfterCapture:
+            sendAwardPaymentEmail = maybeSendProgramAwardPaymentConfirmationAfterCapture,
     } = opts;
 
     app.get('/payments/config', (_req, res) => {
@@ -159,16 +167,50 @@ export function registerPaymentRoutes(app, opts) {
                 metaOverride.paymentType = paymentTypeFinal;
             }
 
+            const capture = (pu.payments?.captures || [])[0] || {};
+            const captureId = safePayPalMetaValue(capture.id, 120);
+            const amountCents = Math.max(
+                0,
+                Math.round(
+                    Number.parseFloat(String(capture.amount?.value || pu.amount?.value || '0')) * 100,
+                ),
+            );
+            const mergedForEmail = {
+                ...merged,
+                paymentType: paymentTypeFinal || merged.paymentType,
+                captured: 'true',
+                captureId,
+                capturedAt: merged.capturedAt || new Date().toISOString(),
+            };
+
+            /** @type {{ awardPaymentEmailSent: boolean }} */
+            let awardEmail = { awardPaymentEmailSent: false };
+            if (awardEntry && typeof sendAwardPaymentEmail === 'function') {
+                awardEmail = await sendAwardPaymentEmail({
+                    metaRef,
+                    merged: mergedForEmail,
+                    orderId,
+                    amountCents: amountCents || Number(merged.amountCents) || 5000,
+                    captureId,
+                    awaitingAccountLink: !principalText,
+                    patchPending: patchPendingPayPalMetadata,
+                    ...(programPaymentDeps.awardEmailDeps || {}),
+                });
+                if (awardEmail.awardPaymentEmailSent) {
+                    mergedForEmail.awardPaymentEmailSent = 'true';
+                    mergedForEmail.awardPaymentEmailSentAt = new Date().toISOString();
+                }
+            }
+
             // Guest Program Draw: capture now; attach principal + ledger on a later confirm.
             if (awardEntry && !principalText) {
-                const capture = (pu.payments?.captures || [])[0] || {};
                 if (metaRef) {
                     await patchPendingPayPalMetadata(metaRef, {
-                        ...merged,
+                        ...mergedForEmail,
                         paymentType: paymentTypeFinal,
                         captured: 'true',
-                        captureId: safePayPalMetaValue(capture.id, 120),
-                        capturedAt: new Date().toISOString(),
+                        captureId,
+                        capturedAt: mergedForEmail.capturedAt,
                     });
                 }
                 return res.json({
@@ -176,7 +218,8 @@ export function registerPaymentRoutes(app, opts) {
                     orderId,
                     captured: true,
                     awaitingPrincipal: true,
-                    chargeId: safePayPalMetaValue(capture.id, 120),
+                    chargeId: captureId,
+                    awardPaymentEmailSent: Boolean(awardEmail.awardPaymentEmailSent),
                 });
             }
 
@@ -185,7 +228,14 @@ export function registerPaymentRoutes(app, opts) {
                 programPaymentDeps,
                 metaOverride,
             );
-            return res.json({ ok: true, orderId, captured: true, awaitingPrincipal: false, ...recorded });
+            return res.json({
+                ok: true,
+                orderId,
+                captured: true,
+                awaitingPrincipal: false,
+                awardPaymentEmailSent: Boolean(awardEmail.awardPaymentEmailSent),
+                ...recorded,
+            });
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             return res.status(500).json({ error: msg });
@@ -250,6 +300,46 @@ export function registerPaymentRoutes(app, opts) {
             if (order.status !== 'COMPLETED') {
                 return res.status(409).json({ error: `Order not completed: ${order.status}` });
             }
+            const puRepair = (order.purchase_units || [])[0] || {};
+            const metaRefRepair = safePayPalMetaValue(puRepair.custom_id, 127);
+            const pendingRepair = metaRefRepair ? await getPendingPayPalMetadata(metaRefRepair) : {};
+            const mergedRepair = { ...pendingRepair, ...metaOverride };
+            const awardRepair =
+                paymentType === 'program_award_entry' ||
+                safePayPalMetaValue(mergedRepair.purpose, 80) === 'program_award_entry' ||
+                applicationId.startsWith('award:');
+            /** @type {{ awardPaymentEmailSent: boolean }} */
+            let awardEmailRepair = { awardPaymentEmailSent: false };
+            if (awardRepair && typeof sendAwardPaymentEmail === 'function') {
+                const captureRepair = (puRepair.payments?.captures || [])[0] || {};
+                const amountRepair = Math.max(
+                    0,
+                    Math.round(
+                        Number.parseFloat(
+                            String(captureRepair.amount?.value || puRepair.amount?.value || '0'),
+                        ) * 100,
+                    ),
+                );
+                awardEmailRepair = await sendAwardPaymentEmail({
+                    metaRef: metaRefRepair,
+                    merged: {
+                        ...mergedRepair,
+                        paymentType,
+                        captured: 'true',
+                        captureId: safePayPalMetaValue(
+                            resolved.captureId || captureId || captureRepair.id,
+                            120,
+                        ),
+                        capturedAt: mergedRepair.capturedAt || new Date().toISOString(),
+                    },
+                    orderId: resolved.orderId,
+                    amountCents: amountRepair || Number(mergedRepair.amountCents) || 5000,
+                    captureId: safePayPalMetaValue(resolved.captureId || captureId, 120),
+                    awaitingAccountLink: false,
+                    patchPending: patchPendingPayPalMetadata,
+                    ...(programPaymentDeps.awardEmailDeps || {}),
+                });
+            }
             const recorded = await recordVerifiedPayPalOrder(order, programPaymentDeps, metaOverride);
             return res.json({
                 ok: true,
@@ -257,6 +347,7 @@ export function registerPaymentRoutes(app, opts) {
                 resolvedFrom: resolved.resolvedFrom,
                 captureId: resolved.captureId || captureId || '',
                 repaired: true,
+                awardPaymentEmailSent: Boolean(awardEmailRepair.awardPaymentEmailSent),
                 ...recorded,
             });
         } catch (e) {

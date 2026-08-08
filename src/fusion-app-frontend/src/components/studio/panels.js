@@ -2253,6 +2253,7 @@ function openStudioArtistManageFromRow(tableRow, afterSave, hostEl, listSurface 
                         cycle: Number(drawFlags?.cycle) || 1,
                         programId: String(drawFlags?.programId ?? ''),
                         awardLabel: String(drawFlags?.awardLabel ?? ''),
+                        storyVideoUrl: String(drawFlags?.storyVideoUrl ?? ''),
                     });
                     await applyHeroProfileImageApprovedFromStudioSaveLive(
                         String(full.id),
