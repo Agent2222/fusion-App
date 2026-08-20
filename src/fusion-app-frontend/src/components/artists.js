@@ -102,6 +102,7 @@ export function render() {
             <app-feed-filter state="artists"></app-feed-filter>
             <main id="artistsMain" class="main-cont">
                 <div id="artistsMainContent" class="feed-container">
+                    <h1 class="seo-primary-h1">Artists in Fusion’s curated art network</h1>
                     <app-shout-headline data-content-slug="artists-page"></app-shout-headline>
                     <div class="artist-card-toggle-row"><app-artist-card-image-toggle id="artistsArtistCardImageToggle" aria-label="Artist card image mode"></app-artist-card-image-toggle></div>
                     <app-featured-artist id="featuredArtist2" active="true"></app-featured-artist>

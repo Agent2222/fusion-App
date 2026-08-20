@@ -21,7 +21,7 @@ export function mapIntegrationUserMessage(raw, status) {
 /**
  * @returns {Record<string, string>}
  */
-function integrationHeadersJson() {
+export function integrationHeadersJson() {
     const h = { 'Content-Type': 'application/json' };
     try {
         const token = localStorage.getItem(LS_INTEGRATION_API_KEY)?.trim();

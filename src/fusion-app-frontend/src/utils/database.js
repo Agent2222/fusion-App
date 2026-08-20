@@ -3254,6 +3254,19 @@ export async function withdrawMyProgramApplication(programId) {
             next[artistId] = perArtist;
             writeStudioLs('artistApplications', next);
         }
+        try {
+            const applicant =
+                idx >= 0
+                    ? list[idx]
+                    : { id: appId, programId: id, email: '', fullName: '', status: 'withdrawn' };
+            const { resolveArtistForApplicant, removeApplicantFromProgramConfirmedList } =
+                await import('./studioArtistPrograms.js');
+            const artists = await getArtists();
+            const artist = resolveArtistForApplicant(applicant, artists);
+            await removeApplicantFromProgramConfirmedList(applicant, artist);
+        } catch (err) {
+            console.warn('[withdraw] remove confirmed artist:', err);
+        }
         if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('fusion-data-source-change', { detail: { source: 'test' } }));
         }
@@ -9792,4 +9805,758 @@ export async function adminRemoveSuperStaffStudio(principalText) {
     }
     const { Principal } = await import('@dfinity/principal');
     await actor.adminRemoveSuperStaff(Principal.fromText(String(principalText || '').trim()));
+}
+
+const LS_STAFF_SCHEDULE_EVENTS = 'staffScheduleEvents';
+
+/**
+ * Normalize a schedule event row from canister JSON or local storage.
+ * @param {any} raw
+ * @returns {object | null}
+ */
+function normalizeScheduleEventRow(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const id = String(raw.id || '').trim();
+    if (!id) return null;
+    const assignedStaff = Array.isArray(raw.assignedStaff)
+        ? raw.assignedStaff
+              .map((s) => ({
+                  id: String(s?.id || '').trim(),
+                  name: String(s?.name || '').trim(),
+                  initials: String(s?.initials || '').trim(),
+              }))
+              .filter((s) => s.id && s.name)
+        : [];
+    const participantIds = Array.isArray(raw.participantIds)
+        ? raw.participantIds.map((x) => String(x || '').trim()).filter(Boolean)
+        : [];
+    const activity = Array.isArray(raw.activity)
+        ? raw.activity
+              .map((a) => ({
+                  id: String(a?.id || '').trim(),
+                  at: String(a?.at || '').trim(),
+                  text: String(a?.text || '').trim(),
+              }))
+              .filter((a) => a.id && a.at && a.text)
+        : [];
+    const reminderRaw = raw.reminderMinutes;
+    const reminderMinutes =
+        reminderRaw === null || reminderRaw === undefined || reminderRaw === ''
+            ? null
+            : Math.max(0, Math.round(Number(reminderRaw) || 0)) || null;
+    return {
+        id,
+        title: String(raw.title || '').trim(),
+        date: String(raw.date || '').trim(),
+        startTime: String(raw.startTime || '09:00').trim(),
+        endTime: String(raw.endTime || '10:00').trim(),
+        allDay: Boolean(raw.allDay),
+        timezone: String(raw.timezone || 'New York · EDT').trim(),
+        programId: String(raw.programId || '').trim(),
+        programName: String(raw.programName || '').trim(),
+        team: String(raw.team || '').trim(),
+        locationId: String(raw.locationId || '').trim(),
+        locationName: String(raw.locationName || '').trim(),
+        assignedStaff,
+        participantIds,
+        participantCount: Math.max(0, Math.round(Number(raw.participantCount) || 0)),
+        notes: String(raw.notes || ''),
+        reminderMinutes,
+        reminderSentAt: String(raw.reminderSentAt || '').trim() || '',
+        status: String(raw.status || 'confirmed').trim(),
+        color: String(raw.color || 'sage').trim(),
+        relationKind: String(raw.relationKind || 'program').trim() || 'program',
+        relationProgramId: String(raw.relationProgramId || raw.programId || '').trim(),
+        eventKind: String(raw.eventKind || 'standard').trim() || 'standard',
+        imageUrl: String(raw.imageUrl || '').trim(),
+        publicOnSite: Boolean(raw.publicOnSite),
+        conflicts: Array.isArray(raw.conflicts) ? raw.conflicts : [],
+        createdAt: String(raw.createdAt || ''),
+        updatedAt: String(raw.updatedAt || ''),
+        version: Math.max(1, Math.round(Number(raw.version) || 1)),
+        createdBy: String(raw.createdBy || ''),
+        activity,
+    };
+}
+
+/**
+ * @returns {Promise<object[]>}
+ */
+export async function listScheduleEventsStudio() {
+    if (getDataSource() === 'test') {
+        const stored = readStudioLs(LS_STAFF_SCHEDULE_EVENTS);
+        return Array.isArray(stored)
+            ? stored.map(normalizeScheduleEventRow).filter(Boolean)
+            : [];
+    }
+    try {
+        const actor = await getStudioAuthenticatedActor();
+        if (!actor || typeof actor.staffListScheduleEventsJson !== 'function') {
+            return [];
+        }
+        const raw = await actor.staffListScheduleEventsJson();
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (!Array.isArray(parsed)) return [];
+        return parsed.map(normalizeScheduleEventRow).filter(Boolean);
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * @param {string} id
+ * @returns {Promise<object | null>}
+ */
+export async function getScheduleEventStudio(id) {
+    const eventId = String(id || '').trim();
+    if (!eventId) return null;
+    if (getDataSource() === 'test') {
+        const list = await listScheduleEventsStudio();
+        return list.find((e) => e.id === eventId) || null;
+    }
+    try {
+        const actor = await getStudioAuthenticatedActor();
+        if (!actor || typeof actor.staffGetScheduleEventJson !== 'function') {
+            throw new Error('staffGetScheduleEventJson missing — run dfx generate');
+        }
+        const raw = await actor.staffGetScheduleEventJson(eventId);
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        return normalizeScheduleEventRow(parsed);
+    } catch (err) {
+        const msg = String(err?.message || err || '');
+        if (/not found/i.test(msg)) return null;
+        throw err;
+    }
+}
+
+/**
+ * @param {object} opts
+ * @returns {Promise<string>} event id
+ */
+export async function upsertScheduleEventStudio(opts) {
+    const title = String(opts?.title || '').trim();
+    const date = String(opts?.date || '').trim();
+    const startTime = String(opts?.startTime || '09:00').trim();
+    const endTime = String(opts?.endTime || '10:00').trim();
+    const allDay = Boolean(opts?.allDay);
+    const timezone = String(opts?.timezone || 'New York · EDT').trim();
+    const programId = String(opts?.programId || '').trim();
+    const programName = String(opts?.programName || '').trim();
+    const team = String(opts?.team || '').trim();
+    const locationId = String(opts?.locationId || '').trim();
+    const locationName = String(opts?.locationName || '').trim();
+    const notes = String(opts?.notes || '');
+    const status = String(opts?.status || 'confirmed').trim();
+    const color = String(opts?.color || 'sage').trim();
+    const relationKind = String(opts?.relationKind || 'program').trim() || 'program';
+    const relationProgramId = String(
+        opts?.relationProgramId || (relationKind === 'program' ? opts?.programId : '') || '',
+    ).trim();
+    const eventKind = String(opts?.eventKind || 'standard').trim() || 'standard';
+    const imageUrl = String(opts?.imageUrl || '').trim();
+    const publicOnSite = Boolean(opts?.publicOnSite);
+    const id = String(opts?.id || '').trim();
+    const expectedVersion = Math.max(0, Math.round(Number(opts?.expectedVersion) || 0));
+    const participantCount = Math.max(0, Math.round(Number(opts?.participantCount) || 0));
+    const reminderMinutes =
+        opts?.reminderMinutes === null || opts?.reminderMinutes === undefined || opts?.reminderMinutes === ''
+            ? 0
+            : Math.max(0, Math.round(Number(opts.reminderMinutes) || 0));
+    const assignedStaff = Array.isArray(opts?.assignedStaff)
+        ? opts.assignedStaff.map((s) => ({
+              id: String(s?.id || '').trim(),
+              name: String(s?.name || '').trim(),
+              initials: String(s?.initials || '').trim() || '??',
+          }))
+        : [];
+    const participantIds = Array.isArray(opts?.participantIds)
+        ? opts.participantIds.map((x) => String(x || '').trim()).filter(Boolean)
+        : [];
+    if (!title) throw new Error('Title required');
+    if (!date) throw new Error('Date required');
+    if (!programId) throw new Error('Program required');
+    if (!locationId) throw new Error('Location required');
+    if (!timezone) throw new Error('Timezone required');
+    if (!relationKind) throw new Error('Relation required');
+    if (relationKind === 'program' && !relationProgramId) throw new Error('Relation program required');
+
+    if (getDataSource() === 'test') {
+        const list = await listScheduleEventsStudio();
+        const now = new Date().toISOString();
+        if (id) {
+            const idx = list.findIndex((e) => e.id === id);
+            if (idx < 0) throw new Error('Event not found');
+            const prev = list[idx];
+            if (Number(prev.version) !== expectedVersion) {
+                throw new Error('version conflict');
+            }
+            const next = {
+                ...prev,
+                title,
+                date,
+                startTime,
+                endTime,
+                allDay,
+                timezone,
+                programId,
+                programName,
+                team,
+                locationId,
+                locationName,
+                assignedStaff,
+                participantIds,
+                participantCount,
+                notes,
+                reminderMinutes: reminderMinutes || null,
+                status,
+                color,
+                relationKind,
+                relationProgramId: relationKind === 'program' ? relationProgramId || programId : '',
+                eventKind,
+                imageUrl,
+                publicOnSite,
+                updatedAt: now,
+                version: Number(prev.version) + 1,
+                activity: [
+                    { id: `act-${now}`, at: now, text: 'Event updated' },
+                    ...(Array.isArray(prev.activity) ? prev.activity : []),
+                ],
+            };
+            list[idx] = next;
+            writeStudioLs(LS_STAFF_SCHEDULE_EVENTS, list);
+            return id;
+        }
+        const newId = `evt-test-${Date.now().toString(36)}`;
+        list.push({
+            id: newId,
+            title,
+            date,
+            startTime,
+            endTime,
+            allDay,
+            timezone,
+            programId,
+            programName,
+            team,
+            locationId,
+            locationName,
+            assignedStaff,
+            participantIds,
+            participantCount,
+            notes,
+            reminderMinutes: reminderMinutes || null,
+            status,
+            color,
+            relationKind,
+            relationProgramId: relationKind === 'program' ? relationProgramId || programId : '',
+            eventKind,
+            imageUrl,
+            publicOnSite,
+            conflicts: [],
+            createdAt: now,
+            updatedAt: now,
+            version: 1,
+            createdBy: 'test',
+            activity: [{ id: `act-${now}`, at: now, text: 'Event created' }],
+        });
+        writeStudioLs(LS_STAFF_SCHEDULE_EVENTS, list);
+        return newId;
+    }
+
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffUpsertScheduleEvent !== 'function') {
+        throw new Error('staffUpsertScheduleEvent missing — run dfx generate fusion-app-backend from the project root.');
+    }
+    // Motoko signature includes imageUrl + publicOnSite — regenerate bindings after backend deploy:
+    // `dfx generate fusion-app-backend` (or frontend `prebuild`).
+    return String(
+        await actor.staffUpsertScheduleEvent(
+            id,
+            BigInt(expectedVersion),
+            title,
+            date,
+            startTime,
+            endTime,
+            allDay,
+            timezone,
+            programId,
+            programName,
+            team,
+            locationId,
+            locationName,
+            assignedStaff,
+            participantIds,
+            BigInt(participantCount),
+            notes,
+            BigInt(reminderMinutes),
+            status,
+            color,
+            relationKind,
+            relationKind === 'program' ? relationProgramId || programId : '',
+            eventKind,
+            imageUrl,
+            publicOnSite,
+        ),
+    );
+}
+
+/**
+ * @param {string} id
+ */
+export async function deleteScheduleEventStudio(id) {
+    const eventId = String(id || '').trim();
+    if (!eventId) throw new Error('id required');
+    if (getDataSource() === 'test') {
+        const list = (await listScheduleEventsStudio()).filter((e) => e.id !== eventId);
+        writeStudioLs(LS_STAFF_SCHEDULE_EVENTS, list);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffDeleteScheduleEvent !== 'function') {
+        throw new Error('staffDeleteScheduleEvent missing — run dfx generate fusion-app-backend from the project root.');
+    }
+    await actor.staffDeleteScheduleEvent(eventId);
+}
+
+/**
+ * @param {string} id
+ * @returns {Promise<string>} new event id
+ */
+export async function duplicateScheduleEventStudio(id) {
+    const eventId = String(id || '').trim();
+    if (!eventId) throw new Error('id required');
+    if (getDataSource() === 'test') {
+        const src = await getScheduleEventStudio(eventId);
+        if (!src) throw new Error('Event not found');
+        return upsertScheduleEventStudio({
+            ...src,
+            id: '',
+            expectedVersion: 0,
+            title: `${src.title} (copy)`,
+            status: 'draft',
+            // Copy flier; do not auto-publish the duplicate.
+            imageUrl: String(src.imageUrl || '').trim(),
+            publicOnSite: false,
+        });
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffDuplicateScheduleEvent !== 'function') {
+        throw new Error(
+            'staffDuplicateScheduleEvent missing — run dfx generate fusion-app-backend from the project root.',
+        );
+    }
+    return String(await actor.staffDuplicateScheduleEvent(eventId));
+}
+
+/**
+ * Retired: demo calendar seeding is disabled. Always returns 0.
+ * @returns {Promise<number>}
+ */
+export async function seedScheduleDemoIfEmptyStudio() {
+    return 0;
+}
+
+const LS_STAFF_SCHEDULE_LOCATIONS = 'staffScheduleLocations';
+
+/**
+ * @param {any} raw
+ * @returns {{ id: string, name: string } | null}
+ */
+function normalizeScheduleLocationRow(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const id = String(raw.id || '').trim();
+    const name = String(raw.name || '').trim();
+    if (!id || !name) return null;
+    if (String(raw.status || 'active') === 'archived') return null;
+    return { id, name };
+}
+
+/**
+ * @returns {Promise<{ id: string, name: string }[]>}
+ */
+export async function listScheduleLocationsStudio() {
+    if (getDataSource() === 'test') {
+        const stored = readStudioLs(LS_STAFF_SCHEDULE_LOCATIONS);
+        if (Array.isArray(stored) && stored.length) {
+            return stored.map(normalizeScheduleLocationRow).filter(Boolean);
+        }
+        return [];
+    }
+    try {
+        const actor = await getStudioAuthenticatedActor();
+        if (!actor || typeof actor.staffListScheduleLocationsJson !== 'function') {
+            return [];
+        }
+        const raw = await actor.staffListScheduleLocationsJson();
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (!Array.isArray(parsed)) return [];
+        return parsed.map(normalizeScheduleLocationRow).filter(Boolean);
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Authenticated member location catalog (no staff gate).
+ * @returns {Promise<{ id: string, name: string }[]>}
+ */
+export async function listScheduleLocationsMember() {
+    if (getDataSource() === 'test') {
+        return listScheduleLocationsStudio();
+    }
+    try {
+        const actor = await getStudioAuthenticatedActor();
+        if (!actor || typeof actor.memberListScheduleLocationsJson !== 'function') {
+            // Until dfx generate: fall back to staff list when the caller is staff.
+            return listScheduleLocationsStudio();
+        }
+        const raw = await actor.memberListScheduleLocationsJson();
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (!Array.isArray(parsed)) return [];
+        return parsed.map(normalizeScheduleLocationRow).filter(Boolean);
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * @param {{ id?: string, name: string }} opts
+ * @returns {Promise<string>}
+ */
+export async function upsertScheduleLocationStudio(opts) {
+    const name = String(opts?.name || '').trim();
+    const id = String(opts?.id || '').trim();
+    if (!name) throw new Error('Location name required');
+    if (getDataSource() === 'test') {
+        const list = await listScheduleLocationsStudio();
+        if (id) {
+            const idx = list.findIndex((l) => l.id === id);
+            if (idx < 0) throw new Error('Location not found');
+            list[idx] = { id, name };
+            writeStudioLs(LS_STAFF_SCHEDULE_LOCATIONS, list);
+            return id;
+        }
+        const newId = `loc-test-${Date.now().toString(36)}`;
+        list.push({ id: newId, name });
+        writeStudioLs(LS_STAFF_SCHEDULE_LOCATIONS, list);
+        return newId;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffUpsertScheduleLocation !== 'function') {
+        throw new Error(
+            'staffUpsertScheduleLocation missing — run dfx generate fusion-app-backend from the project root.',
+        );
+    }
+    return String(await actor.staffUpsertScheduleLocation(id, name));
+}
+
+/**
+ * @param {string} id
+ */
+export async function deleteScheduleLocationStudio(id) {
+    const locationId = String(id || '').trim();
+    if (!locationId) throw new Error('id required');
+    if (getDataSource() === 'test') {
+        const list = (await listScheduleLocationsStudio()).filter((l) => l.id !== locationId);
+        writeStudioLs(LS_STAFF_SCHEDULE_LOCATIONS, list);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffDeleteScheduleLocation !== 'function') {
+        throw new Error(
+            'staffDeleteScheduleLocation missing — run dfx generate fusion-app-backend from the project root.',
+        );
+    }
+    await actor.staffDeleteScheduleLocation(locationId);
+}
+
+/**
+ * Retired: dummy location seeding disabled. Always returns 0.
+ * @returns {Promise<number>}
+ */
+export async function seedScheduleLocationsIfEmptyStudio() {
+    return 0;
+}
+
+/**
+ * @param {string} id
+ * @param {string} [recipientSummary]
+ * @returns {Promise<string>} reminderSentAt timestamp text
+ */
+export async function markScheduleReminderSentStudio(id, recipientSummary = '') {
+    const eventId = String(id || '').trim();
+    if (!eventId) throw new Error('id required');
+    if (getDataSource() === 'test') {
+        const list = await listScheduleEventsStudio();
+        const idx = list.findIndex((e) => e.id === eventId);
+        if (idx < 0) throw new Error('Event not found');
+        const now = new Date().toISOString();
+        list[idx] = {
+            ...list[idx],
+            reminderSentAt: now,
+            activity: [
+                {
+                    id: `act-rem-${now}`,
+                    at: now,
+                    text: recipientSummary
+                        ? `Reminder email sent (${recipientSummary})`
+                        : 'Reminder email sent',
+                },
+                ...(Array.isArray(list[idx].activity) ? list[idx].activity : []),
+            ],
+        };
+        writeStudioLs(LS_STAFF_SCHEDULE_EVENTS, list);
+        return now;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffMarkScheduleReminderSent !== 'function') {
+        throw new Error(
+            'staffMarkScheduleReminderSent missing — run dfx generate fusion-app-backend from the project root.',
+        );
+    }
+    return String(await actor.staffMarkScheduleReminderSent(eventId, String(recipientSummary || '')));
+}
+
+const LS_PROGRAM_SCHEDULE_LIVE = 'programScheduleLiveMap';
+
+/**
+ * @param {string} programId
+ * @returns {Promise<boolean>}
+ */
+export async function getProgramScheduleLiveStudio(programId) {
+    const pid = String(programId || '').trim();
+    if (!pid) return false;
+    if (getDataSource() === 'test') {
+        const map = readStudioLs(LS_PROGRAM_SCHEDULE_LIVE) || {};
+        return Boolean(map[pid]);
+    }
+    try {
+        const actor = await getStudioAuthenticatedActor();
+        if (!actor || typeof actor.getProgramScheduleLive !== 'function') return false;
+        return Boolean(await actor.getProgramScheduleLive(pid));
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * @returns {Promise<Record<string, boolean>>}
+ */
+export async function listProgramScheduleLiveStudio() {
+    if (getDataSource() === 'test') {
+        const map = readStudioLs(LS_PROGRAM_SCHEDULE_LIVE) || {};
+        return map && typeof map === 'object' ? { ...map } : {};
+    }
+    try {
+        const actor = await getStudioAuthenticatedActor();
+        if (!actor || typeof actor.listProgramScheduleLiveJson !== 'function') return {};
+        const raw = await actor.listProgramScheduleLiveJson();
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+        return {};
+    }
+}
+
+/**
+ * @param {string} programId
+ * @param {boolean} live
+ */
+export async function setProgramScheduleLiveStudio(programId, live) {
+    const pid = String(programId || '').trim();
+    if (!pid) throw new Error('programId required');
+    if (getDataSource() === 'test') {
+        const map = { ...(readStudioLs(LS_PROGRAM_SCHEDULE_LIVE) || {}) };
+        map[pid] = Boolean(live);
+        writeStudioLs(LS_PROGRAM_SCHEDULE_LIVE, map);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffSetProgramScheduleLive !== 'function') {
+        throw new Error(
+            'staffSetProgramScheduleLive missing — run dfx generate fusion-app-backend from the project root.',
+        );
+    }
+    await actor.staffSetProgramScheduleLive(pid, Boolean(live));
+}
+
+/**
+ * @param {string} id
+ * @param {string} status
+ * @returns {Promise<string>}
+ */
+export async function setScheduleEventStatusStudio(id, status) {
+    const eventId = String(id || '').trim();
+    const next = String(status || '').trim();
+    if (!eventId) throw new Error('id required');
+    if (!next) throw new Error('status required');
+    if (getDataSource() === 'test') {
+        const list = await listScheduleEventsStudio();
+        const idx = list.findIndex((e) => e.id === eventId);
+        if (idx < 0) throw new Error('Event not found');
+        const now = new Date().toISOString();
+        list[idx] = {
+            ...list[idx],
+            status: next,
+            updatedAt: now,
+            version: Number(list[idx].version || 1) + 1,
+            activity: [
+                { id: `act-${now}`, at: now, text: `Status set to ${next}` },
+                ...(Array.isArray(list[idx].activity) ? list[idx].activity : []),
+            ],
+        };
+        writeStudioLs(LS_STAFF_SCHEDULE_EVENTS, list);
+        return eventId;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffSetScheduleEventStatus !== 'function') {
+        throw new Error(
+            'staffSetScheduleEventStatus missing — run dfx generate fusion-app-backend from the project root.',
+        );
+    }
+    return String(await actor.staffSetScheduleEventStatus(eventId, next));
+}
+
+/**
+ * Member calendar events (slot-secured + schedule-live programs).
+ * @returns {Promise<object[]>}
+ */
+export async function listMyScheduleEvents() {
+    if (getDataSource() === 'test') {
+        const liveMap = await listProgramScheduleLiveStudio();
+        const payments = await getMyProgramPayments().catch(() => ({
+            approvedPrograms: [],
+            summaries: [],
+            ledger: [],
+            plans: [],
+        }));
+        const secured = new Set();
+        for (const summary of payments.summaries || []) {
+            const st = String(summary.depositStatus || '');
+            if (st === 'paid' || st === 'paid_full' || st === 'waived') {
+                secured.add(String(summary.programId || ''));
+            }
+        }
+        for (const ap of payments.approvedPrograms || []) {
+            if (ap.manualDepositSubmitted) secured.add(String(ap.programId || ''));
+        }
+        const all = await listScheduleEventsStudio();
+        const caller = 'test';
+        return all.filter((e) => {
+            if (String(e.relationKind || 'program') !== 'program') return false;
+            const pid = String(e.relationProgramId || e.programId || '');
+            if (!pid || !secured.has(pid) || !liveMap[pid]) return false;
+            if (e.status === 'confirmed') return true;
+            if (e.status === 'awaiting_confirmation' && String(e.createdBy || '') === caller) return true;
+            return false;
+        });
+    }
+    try {
+        const actor = await getStudioAuthenticatedActor();
+        if (!actor || typeof actor.listMyScheduleEventsJson !== 'function') {
+            throw new Error(
+                'listMyScheduleEventsJson missing — run dfx generate fusion-app-backend from the project root.',
+            );
+        }
+        const raw = await actor.listMyScheduleEventsJson();
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (!Array.isArray(parsed)) return [];
+        return parsed.map(normalizeScheduleEventRow).filter(Boolean);
+    } catch (err) {
+        throw err;
+    }
+}
+
+/**
+ * @param {object} opts
+ * @returns {Promise<string>}
+ */
+export async function memberCreateProgramEvent(opts) {
+    const programId = String(opts?.programId || '').trim();
+    const eventKind = String(opts?.eventKind || '').trim();
+    const title = String(opts?.title || '').trim();
+    const date = String(opts?.date || '').trim();
+    const startTime = String(opts?.startTime || '09:00').trim();
+    const endTime = String(opts?.endTime || '10:00').trim();
+    const allDay = Boolean(opts?.allDay);
+    const timezone = String(opts?.timezone || 'America/New_York').trim();
+    const locationId = String(opts?.locationId || '').trim();
+    const locationName = String(opts?.locationName || '').trim();
+    const notes = String(opts?.notes || '');
+    const assignedStaff = (Array.isArray(opts?.assignedStaff) ? opts.assignedStaff : [])
+        .map((s) => ({
+            id: String(s?.id || '').trim(),
+            name: String(s?.name || '').trim(),
+            initials: String(s?.initials || '').trim() || '?',
+        }))
+        .filter((s) => s.id && s.name)
+        .slice(0, 12);
+    if (!programId) throw new Error('Program required');
+    if (eventKind !== 'workshop' && eventKind !== 'adventure') {
+        throw new Error('eventKind must be workshop or adventure');
+    }
+    if (!title) throw new Error('Title required');
+    if (!date) throw new Error('Date required');
+    if (!locationId) throw new Error('Location required');
+
+    if (getDataSource() === 'test') {
+        const now = new Date().toISOString();
+        const list = await listScheduleEventsStudio();
+        const newId = `evt-member-${Date.now().toString(36)}`;
+        list.push({
+            id: newId,
+            title,
+            date,
+            startTime,
+            endTime,
+            allDay,
+            timezone,
+            programId,
+            programName: String(opts?.programName || ''),
+            team: '',
+            locationId,
+            locationName,
+            assignedStaff,
+            participantIds: [],
+            participantCount: 0,
+            notes,
+            reminderMinutes: null,
+            status: 'awaiting_confirmation',
+            color: 'sage',
+            relationKind: 'program',
+            relationProgramId: programId,
+            eventKind,
+            conflicts: [],
+            createdAt: now,
+            updatedAt: now,
+            version: 1,
+            createdBy: 'test',
+            activity: [{ id: `act-${now}`, at: now, text: `Member submitted ${eventKind}` }],
+        });
+        writeStudioLs(LS_STAFF_SCHEDULE_EVENTS, list);
+        return newId;
+    }
+
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.memberCreateProgramEvent !== 'function') {
+        throw new Error(
+            'memberCreateProgramEvent missing — run dfx generate fusion-app-backend from the project root.',
+        );
+    }
+    return String(
+        await actor.memberCreateProgramEvent(
+            programId,
+            eventKind,
+            title,
+            date,
+            startTime,
+            endTime,
+            allDay,
+            timezone,
+            locationId,
+            locationName,
+            notes,
+            assignedStaff,
+        ),
+    );
 }

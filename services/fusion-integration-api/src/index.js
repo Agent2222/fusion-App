@@ -14,6 +14,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { presignPutObjectUrl } from './storagePresign.js';
 import { registerPaymentRoutes } from './payments/routes.js';
 import { registerAccountReconnectRoutes } from './accountReconnect.js';
+import { registerRadarRoutes } from './radarRoutes.js';
 import { isPayPalConfigured, getPayPalClientId, getPayPalMode } from './payments/paypalClient.js';
 import { handlePayPalWebhookEvent } from './webhooks/paypal.js';
 import { getIntegrationActor, pushSubscriptionToCanister } from './canisterActor.js';
@@ -2933,6 +2934,8 @@ registerAccountReconnectRoutes(app, {
     getStripeCustomerAndBestSubscriptionByEmail,
     syncStripeSubscriptionByEmailAndPrincipal,
 });
+
+registerRadarRoutes(app, { requireApiKey });
 
 app.use((_req, res) => {
     res.status(404).json({ error: 'Not found' });

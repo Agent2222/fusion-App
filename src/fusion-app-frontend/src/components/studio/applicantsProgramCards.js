@@ -109,8 +109,8 @@ export function buildApplicantProgramCardModel(programRow, applicantsForProgram)
         const secured = Boolean(row?.slotSecured);
         const status = String(row?.status || '');
         if (status === 'pulledOut') pulledOut += 1;
-        if (secured) confirmed += 1;
-        if (status !== 'pulledOut' && !secured) inProcessing += 1;
+        if (secured && status !== 'withdrawn' && status !== 'pulledOut') confirmed += 1;
+        if (status !== 'pulledOut' && status !== 'withdrawn' && !secured) inProcessing += 1;
     }
     return {
         id: String(programRow?.id || '').trim(),

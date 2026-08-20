@@ -72,6 +72,14 @@ describe('EMAIL_CAMPAIGN_TEMPLATES', () => {
         expect(tpl?.templateGroup).toBe('campaigns');
     });
 
+    it('features group includes audio recording template', () => {
+        const tpl = getEmailTemplateById('tpl_audio_recording');
+        expect(tpl?.templateGroup).toBe('features');
+        expect(tpl?.bodyHtml).toContain('/settings/profile');
+        expect(tpl?.bodyHtml.toLowerCase()).toMatch(/rough/);
+        expect(tpl?.bodyHtml.toLowerCase()).toMatch(/voice/);
+    });
+
     it('roster blast template keeps placeholders inside branded shell', () => {
         const tpl = EMAIL_CAMPAIGN_TEMPLATES[ROSTER_OPEN_CALL_TEMPLATE_ID];
         expect(tpl.bodyHtml).toContain('{{ARTIST_FIRST_NAME}}');

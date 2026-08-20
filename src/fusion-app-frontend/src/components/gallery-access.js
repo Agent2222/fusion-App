@@ -13,6 +13,7 @@ export function render() {
             <app-feed-filter state="gallery-access"></app-feed-filter>
             <main id="galleryAccessMain" class="main-cont">
                 <div id="galleryAccessMainContent" class="feed-container">
+                    <h1 class="seo-primary-h1">Gallery access through Fusion’s curated art network</h1>
                     <div class="page-content nav-page-content">
                         <app-artists-ga-feed id="artistsGAFeed"></app-artists-ga-feed>
                         <app-join-network id="joinNetworkGalleryAccess" data-modal-type="access" context="gallery-access" active="true" data-margin-top="48px" data-margin-bottom="96px"></app-join-network>

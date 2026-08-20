@@ -663,6 +663,62 @@ module {
         createdBy : Text;
     };
 
+    /// Studio Schedule — assigned staff on a calendar event.
+    public type CalendarPersonStored = {
+        id : Text;
+        name : Text;
+        initials : Text;
+    };
+
+    /// Studio Schedule — audit trail entry on a calendar event.
+    public type CalendarEventActivity = {
+        id : Text;
+        at : Text;
+        text : Text;
+    };
+
+    /// Studio Schedule — staff calendar event (conflicts derived client-side).
+    public type CalendarEvent = {
+        id : Text;
+        title : Text;
+        date : Text;
+        startTime : Text;
+        endTime : Text;
+        allDay : Bool;
+        timezone : Text;
+        programId : Text;
+        programName : Text;
+        team : Text;
+        locationId : Text;
+        locationName : Text;
+        assignedStaff : [CalendarPersonStored];
+        participantIds : [Text];
+        participantCount : Nat;
+        notes : Text;
+        /// 0 = none
+        reminderMinutes : Nat;
+        /// draft | awaiting_confirmation | confirmed | cancelled
+        status : Text;
+        /// sage | blue | sand | blush
+        color : Text;
+        createdAt : Text;
+        updatedAt : Text;
+        version : Nat;
+        createdBy : Text;
+        activity : [CalendarEventActivity];
+    };
+
+    /// Studio Schedule — reusable event location catalog.
+    public type CalendarLocation = {
+        id : Text;
+        name : Text;
+        createdAt : Text;
+        updatedAt : Text;
+        createdBy : Text;
+        /// "active" | "archived"
+        status : Text;
+    };
+
     /// Studio Finance → Programs team member (expenses + manual disbursements).
     public type ProgramTeamMember = {
         id : Text;

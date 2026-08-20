@@ -271,6 +271,55 @@ button[type="submit"] {
   border: 0;
 }
 
+.seo-support-lead {
+  width: 100%;
+  max-width: min(100%, 42rem);
+  margin: 0 auto clamp(1rem, 3vw, 1.75rem);
+  font-size: clamp(0.98rem, 1.8vw, 1.1rem);
+  line-height: 1.55;
+  color: inherit;
+}
+
+.seo-support-lead a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.programs-page-intro {
+  width: 100%;
+  max-width: min(100%, 52rem);
+  margin: 0 auto clamp(1.5rem, 4vw, 2.75rem);
+  padding: clamp(1.25rem, 3vw, 2rem) clamp(1rem, 4vw, 2rem) 0;
+  box-sizing: border-box;
+}
+
+.programs-page-intro__title {
+  margin: 0 0 0.65rem;
+  font-family: 'momochidori-variable', sans-serif;
+  font-variation-settings: var(--fv-emphasis);
+  font-size: clamp(1.35rem, 2.4vw, 2rem);
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  color: var(--c2);
+}
+
+.programs-page-intro__lead {
+  margin: 0;
+  font-family: 'momochidori-variable', sans-serif;
+  font-variation-settings: var(--fv-body);
+  font-size: clamp(0.95rem, 1.35vw, 1.1rem);
+  line-height: 1.55;
+  color: var(--c2);
+  opacity: 0.9;
+}
+
+.programs-page-intro__lead a {
+  color: var(--c2);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
 /* Routing System Styles */
 * {
   margin: 0;
@@ -2954,6 +3003,34 @@ html[data-theme='dark'] .join-fusion-page__err {
   padding-top: 5%;
   background-color:var(--bg);
   border-bottom: 1px solid var(--c2);
+}
+
+.program-view-hub-link {
+  margin: 0 0 0.75rem;
+  text-align: center;
+  font-family: 'momochidori-variable', sans-serif;
+  font-variation-settings: var(--fv-caption);
+  font-size: clamp(0.65rem, 0.85vw, 0.75rem);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.program-view-hub-link a {
+  color: var(--c2);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+  opacity: 0.85;
+}
+
+.program-view-hub-link a:hover {
+  opacity: 1;
+}
+
+.program-view-hub-link__note {
+  text-transform: none;
+  letter-spacing: 0.02em;
+  opacity: 0.7;
+  font-variation-settings: var(--fv-body);
 }
 
 #programIntroTitle {

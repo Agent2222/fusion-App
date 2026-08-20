@@ -190,6 +190,37 @@ describe('emailCampaignContentSources', () => {
         expect(draft?.subject).toContain('Artist One');
     });
 
+    it('reminder template keeps last-chance copy when program source is applied', () => {
+        const draft = buildTemplateDraftFromSource(
+            'tpl_reminder',
+            { type: 'program', id: 'kaga' },
+            {
+                programs: [
+                    {
+                        id: 'kaga',
+                        routeLink: '/program/kaga-ishikawa',
+                        enCard: {
+                            focus: 'Japan Artist Residency',
+                            location: 'Kaga City, Ishikawa',
+                            year: '2026',
+                            imageSrc: 'https://cdn.example/kaga.jpg',
+                            briefDescription: 'Generic program update brief that must not replace reminder copy.',
+                        },
+                    },
+                ],
+            },
+        );
+        expect(draft).not.toBeNull();
+        expect(draft?.bodyHtml).toContain('This is<br>your window.');
+        expect(draft?.bodyHtml).toContain('DEADLINE APPROACHING');
+        expect(draft?.bodyHtml).toContain('APPLY BEFORE THE DEADLINE');
+        expect(draft?.bodyHtml).toContain('https://cdn.example/kaga.jpg');
+        expect(draft?.bodyHtml).toContain('/program/kaga-ishikawa');
+        expect(draft?.bodyHtml).not.toContain('Program Update');
+        expect(draft?.bodyHtml).not.toContain('Generic program update brief');
+        expect(draft?.subject.toLowerCase()).toContain('last chance');
+    });
+
     it('mergeQuickDesignSlots preserves source factual fields and normalizes body', () => {
         const merged = mergeQuickDesignSlots(
             {

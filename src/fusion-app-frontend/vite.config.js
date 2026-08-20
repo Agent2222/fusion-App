@@ -6,6 +6,7 @@ import environment from 'vite-plugin-environment';
 import { VitePWA } from 'vite-plugin-pwa';
 import dotenv from 'dotenv';
 import { DEFAULT_SITE_DESCRIPTION } from './src/utils/documentSeo.js';
+import { seoMoneyPagePrerenderPlugin } from './scripts/seoMoneyPagePrerenderPlugin.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '../..');
@@ -83,6 +84,7 @@ export default defineConfig(({ mode }) => {
         plugins: [
             environment('all', { prefix: 'CANISTER_' }),
             environment('all', { prefix: 'DFX_' }),
+            seoMoneyPagePrerenderPlugin({ outDir: path.resolve(__dirname, 'dist') }),
             VitePWA({
                 registerType: 'autoUpdate',
                 includeAssets: ['favicon.ico', 'apple-touch-icon.png'],

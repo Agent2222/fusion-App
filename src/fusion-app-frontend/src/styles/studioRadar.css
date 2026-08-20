@@ -1,0 +1,288 @@
+/* Fusion Radar — Studio relationship intelligence */
+
+.studio-radar-page {
+  --radar-ink: #1a1a1a;
+  --radar-muted: #6b6b6b;
+  --radar-line: rgba(0, 0, 0, 0.1);
+  --radar-high: #2f6b4f;
+  --radar-mid: #9a6b2f;
+  --radar-low: #7a7a7a;
+  --radar-bg: #f7f5f1;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-height: 60vh;
+}
+
+.studio-radar-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  border-bottom: 1px solid var(--radar-line);
+  padding-bottom: 0.5rem;
+}
+
+.studio-radar-tabs button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0.45rem 0.75rem;
+  font: inherit;
+  cursor: pointer;
+  color: var(--radar-muted);
+  border-radius: 4px;
+}
+
+.studio-radar-tabs button.is-active {
+  color: var(--radar-ink);
+  background: rgba(0, 0, 0, 0.06);
+  font-weight: 600;
+}
+
+.studio-radar-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.studio-radar-toolbar input,
+.studio-radar-toolbar select {
+  font: inherit;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--radar-line);
+  border-radius: 4px;
+  background: #fff;
+}
+
+.studio-radar-btn {
+  appearance: none;
+  border: 1px solid var(--radar-line);
+  background: #fff;
+  padding: 0.4rem 0.75rem;
+  border-radius: 4px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.studio-radar-btn--primary {
+  background: var(--radar-ink);
+  color: #fff;
+  border-color: var(--radar-ink);
+}
+
+.studio-radar-score {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.studio-radar-score--high {
+  background: var(--radar-high);
+}
+.studio-radar-score--mid {
+  background: var(--radar-mid);
+}
+.studio-radar-score--low {
+  background: var(--radar-low);
+}
+
+.studio-radar-chip {
+  display: inline-block;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--radar-ink);
+  text-transform: capitalize;
+}
+
+.studio-radar-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--radar-line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.studio-radar-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.studio-radar-table th,
+.studio-radar-table td {
+  padding: 0.55rem 0.65rem;
+  border-bottom: 1px solid var(--radar-line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.studio-radar-table th {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--radar-muted);
+  background: var(--radar-bg);
+}
+
+.studio-radar-table tr {
+  cursor: pointer;
+}
+
+.studio-radar-table tr:hover td {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.studio-radar-kanban {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(180px, 1fr));
+  gap: 0.75rem;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .studio-radar-kanban {
+    grid-template-columns: repeat(2, minmax(160px, 1fr));
+  }
+}
+
+.studio-radar-col {
+  background: var(--radar-bg);
+  border-radius: 8px;
+  padding: 0.65rem;
+  min-height: 12rem;
+}
+
+.studio-radar-col h3 {
+  margin: 0 0 0.65rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--radar-muted);
+}
+
+.studio-radar-card {
+  background: #fff;
+  border: 1px solid var(--radar-line);
+  border-radius: 6px;
+  padding: 0.65rem;
+  margin-bottom: 0.5rem;
+  cursor: pointer;
+}
+
+.studio-radar-card strong {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.studio-radar-card .studio-radar-why {
+  font-size: 0.82rem;
+  color: var(--radar-muted);
+  line-height: 1.4;
+}
+
+.studio-radar-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 0.75rem;
+}
+
+.studio-radar-stat {
+  background: #fff;
+  border: 1px solid var(--radar-line);
+  border-radius: 8px;
+  padding: 0.85rem;
+}
+
+.studio-radar-stat .n {
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+
+.studio-radar-stat .l {
+  font-size: 0.75rem;
+  color: var(--radar-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.studio-radar-lead-modal .studio-radar-why-block {
+  background: var(--radar-bg);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  margin: 0.75rem 0;
+}
+
+.studio-radar-lead-modal .studio-radar-why-block h4 {
+  margin: 0 0 0.35rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--radar-muted);
+}
+
+.studio-radar-timeline {
+  border-left: 2px solid var(--radar-line);
+  margin: 0.75rem 0 0 0.35rem;
+  padding-left: 0.85rem;
+}
+
+.studio-radar-timeline li {
+  margin-bottom: 0.65rem;
+  list-style: none;
+  font-size: 0.85rem;
+}
+
+.studio-radar-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+}
+
+.studio-radar-form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--radar-muted);
+}
+
+.studio-radar-form-grid input,
+.studio-radar-form-grid select,
+.studio-radar-form-grid textarea {
+  font: inherit;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--radar-line);
+  border-radius: 4px;
+}
+
+.studio-radar-form-grid .full {
+  grid-column: 1 / -1;
+}
+
+.studio-radar-muted {
+  color: var(--radar-muted);
+  font-size: 0.9rem;
+}
+
+.studio-radar-bar {
+  height: 0.55rem;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 0.35rem;
+}
+
+.studio-radar-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--radar-high);
+}

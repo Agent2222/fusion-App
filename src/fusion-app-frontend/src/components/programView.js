@@ -1,5 +1,6 @@
 import placeholderImg from "../assets/dev/program_hero-1.jpg";
 import { findArtistForConfirmedListLabel } from "../utils/artistSlug.js";
+import { canonicalProgramSeoPath } from "../utils/canonicalProgramSeoPath.js";
 import {
   findProgramPairByPathname,
   getAllProgramsBlock,
@@ -428,8 +429,9 @@ function wireProgramApplicationSection(programId, applicationsOpen = true) {
     });
   };
 
+  /** Optimistic: treat draw as active until config loads (avoids “Get notified” flash). */
   /** @type {boolean} */
-  let drawConfigActive = false;
+  let drawConfigActive = true;
   /** @type {number} */
   let drawTotalSlots = 100;
   /** @type {boolean} */
@@ -486,16 +488,16 @@ function wireProgramApplicationSection(programId, applicationsOpen = true) {
     setDrawCtaVisibility(awardActive, totalSlots, entered);
   };
 
-  // Show inactive defaults immediately; flip label when config + entry resolve.
-  setDrawCtaVisibility(false);
+  // Show active defaults immediately; flip to inactive only after config says so.
+  setDrawCtaVisibility(true);
   void getProgramDrawConfigPublic(programId)
     .then(async (cfg) => {
-      const active = Boolean(cfg?.active);
+      const active = cfg == null ? true : Boolean(cfg.active);
       const slots = Math.max(1, Number(cfg?.totalSlots) || 100);
       await refreshDrawCta(active, slots);
     })
     .catch(() => {
-      void refreshDrawCta(false, 100);
+      void refreshDrawCta(true, 100);
     });
 
   setApplySubCopy();
@@ -547,9 +549,10 @@ function wireProgramApplicationSection(programId, applicationsOpen = true) {
         setApplySubCopy();
         void getProgramDrawConfigPublic(programId)
           .then((cfg) => {
-            setDrawCtaVisibility(Boolean(cfg?.active), Number(cfg?.totalSlots) || 100);
+            const active = cfg == null ? true : Boolean(cfg.active);
+            setDrawCtaVisibility(active, Number(cfg?.totalSlots) || 100);
           })
-          .catch(() => setDrawCtaVisibility(false));
+          .catch(() => setDrawCtaVisibility(true));
       },
       { signal },
     );
@@ -629,9 +632,10 @@ function wireProgramApplicationSection(programId, applicationsOpen = true) {
       void refreshAuthUi();
       void getProgramDrawConfigPublic(programId)
         .then((cfg) => {
-          void refreshDrawCta(Boolean(cfg?.active), Number(cfg?.totalSlots) || 100);
+          const active = cfg == null ? true : Boolean(cfg.active);
+          void refreshDrawCta(active, Number(cfg?.totalSlots) || 100);
         })
-        .catch(() => void refreshDrawCta(false, 100));
+        .catch(() => void refreshDrawCta(true, 100));
     },
     { signal },
   );
@@ -659,6 +663,12 @@ export function generateProgramViewContent() {
                             </div>
                         </div>
                         <div id="programIntroSection">
+                            <p class="program-view-hub-link">
+                                <a href="/programs">Japan artist residency programs</a>
+                                <span aria-hidden="true"> · </span>
+                                <a href="/join-network">Curated art network</a>
+                                <span class="program-view-hub-link__note"> — for galleries, curators, and collectors</span>
+                            </p>
                             <div id="programIntroTitle"></div>
                             <div id="programIntroSubLines">
                                 <p id="programIntroSubLine1"></p>
@@ -671,8 +681,8 @@ export function generateProgramViewContent() {
                                         <p class="program-intro-cta-sub" data-program-apply-sub>Apply for the residency program</p>
                                     </div>
                                     <div id="programIntroDrawCell1" class="program-intro-cta-cell program-intro-cta-cell--draw" aria-hidden="false">
-                                        <div id="programIntroCTADraw1" class="program-intro-cta program-intro-cta--draw" role="button" tabindex="0">Program Draw</div>
-                                        <p class="program-intro-cta-sub" data-program-draw-sub>Get notified when it opens</p>
+                                        <div id="programIntroCTADraw1" class="program-intro-cta program-intro-cta--draw" role="button" tabindex="0">Enter Program Draw</div>
+                                        <p class="program-intro-cta-sub" data-program-draw-sub>Submit for the program draw (1 in 100)</p>
                                     </div>
                                 </div>
                                 <div id="programIntroCTA2">
@@ -704,8 +714,8 @@ export function generateProgramViewContent() {
                                 <p class="program-intro-cta-sub" data-program-apply-sub>Apply for the residency program</p>
                             </div>
                             <div id="programIntroDrawCell3" class="program-intro-cta-cell program-intro-cta-cell--draw" aria-hidden="false">
-                                <div id="programIntroCTADraw3" class="program-intro-cta program-intro-cta--draw" role="button" tabindex="0">Program Draw</div>
-                                <p class="program-intro-cta-sub" data-program-draw-sub>Get notified when it opens</p>
+                                <div id="programIntroCTADraw3" class="program-intro-cta program-intro-cta--draw" role="button" tabindex="0">Enter Program Draw</div>
+                                <p class="program-intro-cta-sub" data-program-draw-sub>Submit for the program draw (1 in 100)</p>
                             </div>
                         </div>
                         <div id="programDetailNotFound" class="program-detail-not-found" hidden>
@@ -1081,17 +1091,42 @@ async function applyProgramToDom(programPair) {
       const currentSeason = await getCurrentProgramSeason();
       alumniTable.setAlumni(
         buildResidencyAlumniEntries(enPrograms, artistPool || [], currentSeason),
+        artistPool || [],
       );
     } catch {
       alumniTable.hidden = true;
     }
   }
 
-  const pageTitle = `${titleText || "Program"} · Fusion`;
+  const pageTitle = (() => {
+    const loc = String(titleText || "").trim();
+    const head = String(programPage?.headline || "").trim();
+    if (loc && /japan|kaga|ishikawa|tokyo/i.test(`${loc} ${head}`)) {
+      return `${loc} Japan Artist Residency · Fusion`;
+    }
+    if (head) return `${head} · Fusion`;
+    if (loc) return `${loc} · Fusion`;
+    return "Japan Artist Residency · Fusion";
+  })();
   document.title = pageTitle;
 
-  const pagePath =
-    typeof window !== "undefined" ? window.location.pathname : "/programs";
+  const rawPath =
+    typeof window !== "undefined" ? window.location.pathname : "/program/kaga-ishikawa";
+  const seoPath = canonicalProgramSeoPath(rawPath) || "/programs";
+  if (
+    typeof window !== "undefined" &&
+    seoPath.startsWith("/program/") &&
+    !seoPath.includes("/private/") &&
+    rawPath.startsWith("/programs/") &&
+    seoPath !== rawPath
+  ) {
+    window.history.replaceState(
+      {},
+      "",
+      seoPath + window.location.search + window.location.hash,
+    );
+  }
+  const isPrivateProgramPath = seoPath.includes("/private/");
   const metaDesc =
     String(summaryText || descriptionText || subheadlineText || "").trim() ||
     "Japan artist residency program on Fusion — schedule, details, and how to apply.";
@@ -1110,13 +1145,14 @@ async function applyProgramToDom(programPair) {
   applyDocumentSeo({
     title: pageTitle,
     description: metaDesc,
-    path: pagePath,
+    path: seoPath,
     ogType: "article",
     imageUrl: heroImageForOg || undefined,
+    robots: isPrivateProgramPath ? "noindex, nofollow" : undefined,
     breadcrumbItems: [
       { name: "Home", path: "/" },
       { name: "Programs", path: "/programs" },
-      { name: crumbName, path: pagePath },
+      { name: crumbName, path: seoPath },
     ],
   });
 

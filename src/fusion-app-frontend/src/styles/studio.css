@@ -1753,6 +1753,44 @@ button.studio-audience-pill.studio-pill.studio-pill--active {
   gap: 0.75rem 0.85rem;
 }
 
+.studio-prog-editor-schedule-live {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0.7rem;
+  margin: 0.95rem 0 0.15rem;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid var(--prog-editor-border);
+  border-radius: var(--prog-editor-radius-input);
+  background: rgba(15, 23, 42, 0.025);
+  cursor: pointer;
+}
+
+.studio-prog-editor-schedule-live input[type='checkbox'] {
+  width: 1.05rem;
+  height: 1.05rem;
+  margin: 0.15rem 0 0;
+  flex: 0 0 auto;
+  accent-color: var(--c2, #0f172a);
+  cursor: pointer;
+}
+
+.studio-prog-editor-schedule-live__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.studio-prog-editor-schedule-live__copy .studio-prog-editor-field__label {
+  margin: 0;
+}
+
+.studio-prog-editor-schedule-live__hint {
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
 .studio-prog-editor-field {
   display: flex;
   flex-direction: column;

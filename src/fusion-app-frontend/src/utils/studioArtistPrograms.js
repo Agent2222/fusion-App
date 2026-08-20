@@ -499,3 +499,62 @@ export async function initArtistProgramsTab(root, full) {
         }
     }
 }
+
+/**
+ * @param {object | null | undefined} artist
+ */
+function studioArtistApplicantEmail(artist) {
+    if (!artist || typeof artist !== 'object') return '';
+    const locales = artist.locales && typeof artist.locales === 'object' ? artist.locales : null;
+    const direct = String(artist.contactEmail || artist.email || '').trim();
+    if (direct) return direct;
+    if (!locales) return '';
+    for (const code of ['en', 'ja']) {
+        const block = locales[code];
+        if (!block || typeof block !== 'object') continue;
+        const localeEmail = String(block.email ?? block.contactEmail ?? '').trim();
+        if (localeEmail) return localeEmail;
+    }
+    return '';
+}
+
+/**
+ * @param {object} applicantRow
+ * @param {object[]} artists
+ * @returns {object | null}
+ */
+export function resolveArtistForApplicant(applicantRow, artists) {
+    const row = applicantRow && typeof applicantRow === 'object' ? applicantRow : {};
+    const id = String(row.id || '');
+    const pipe = id.indexOf('|');
+    if (pipe > 0) {
+        const artistId = id.slice(0, pipe);
+        const found = (Array.isArray(artists) ? artists : []).find((a) => String(a?.id || '') === artistId);
+        if (found) return found;
+    }
+    const em = String(row.email || '')
+        .trim()
+        .toLowerCase();
+    if (!em) return null;
+    for (const artist of Array.isArray(artists) ? artists : []) {
+        const direct = studioArtistApplicantEmail(artist).trim().toLowerCase();
+        if (direct && direct === em) return artist;
+    }
+    return null;
+}
+
+/**
+ * Remove an applicant's artist from the program public confirmed-artists list.
+ * @param {object} applicant
+ * @param {object | null | undefined} artist
+ */
+export async function removeApplicantFromProgramConfirmedList(applicant, artist) {
+    if (!applicant || !artist) return;
+    const programId = String(applicant.programId || '').trim();
+    if (!programId) return;
+    await updateProgramReservedArtist({
+        programId,
+        artist,
+        reserved: false,
+    });
+}

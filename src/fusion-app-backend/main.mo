@@ -80,6 +80,24 @@ persistent actor {
   stable var siteSettingsStable : [(Text, Text)] = [];
   /// Studio Finance → Promotions.
   stable var financePromotionsStable : [(Text, Types.FinancePromotion)] = [];
+  /// Studio Schedule → calendar events.
+  stable var scheduleEventsStable : [(Text, Types.CalendarEvent)] = [];
+  /// Studio Schedule → event locations catalog.
+  stable var scheduleLocationsStable : [(Text, Types.CalendarLocation)] = [];
+  /// Studio Schedule → event id → ISO timestamp of last reminder email send.
+  stable var scheduleReminderSentStable : [(Text, Text)] = [];
+  /// Program id → schedule visible to slot-secured members.
+  stable var programScheduleLiveStable : [(Text, Bool)] = [];
+  /// Event id → relation kind (global|staff|artists|collector|curator|gallery|program).
+  stable var scheduleEventRelationKindStable : [(Text, Text)] = [];
+  /// Event id → program id when relation kind is program.
+  stable var scheduleEventRelationProgramIdStable : [(Text, Text)] = [];
+  /// Event id → event kind (standard|workshop|adventure).
+  stable var scheduleEventKindStable : [(Text, Text)] = [];
+  /// Event id → public flier / cover image URL (empty when none).
+  stable var scheduleEventImageUrlStable : [(Text, Text)] = [];
+  /// Event id → show on public site / journal (CMS events + layout).
+  stable var scheduleEventPublicOnSiteStable : [(Text, Bool)] = [];
   /// Studio Finance → Program team members (disbursements / expenses).
   stable var programTeamMembersStable : [(Text, Types.ProgramTeamMember)] = [];
   stable var programTeamOwedEntriesStable : [(Text, Types.ProgramTeamOwedEntry)] = [];
@@ -356,6 +374,33 @@ persistent actor {
 
   transient var financePromotionsById : _HashMap.HashMap<Text, Types.FinancePromotion> =
     _HashMap.HashMap<Text, Types.FinancePromotion>(0, Text.equal, Text.hash);
+
+  transient var scheduleEventsById : _HashMap.HashMap<Text, Types.CalendarEvent> =
+    _HashMap.HashMap<Text, Types.CalendarEvent>(0, Text.equal, Text.hash);
+
+  transient var scheduleLocationsById : _HashMap.HashMap<Text, Types.CalendarLocation> =
+    _HashMap.HashMap<Text, Types.CalendarLocation>(0, Text.equal, Text.hash);
+
+  transient var scheduleReminderSentById : _HashMap.HashMap<Text, Text> =
+    _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
+
+  transient var programScheduleLiveById : _HashMap.HashMap<Text, Bool> =
+    _HashMap.HashMap<Text, Bool>(0, Text.equal, Text.hash);
+
+  transient var scheduleEventRelationKindById : _HashMap.HashMap<Text, Text> =
+    _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
+
+  transient var scheduleEventRelationProgramIdById : _HashMap.HashMap<Text, Text> =
+    _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
+
+  transient var scheduleEventKindById : _HashMap.HashMap<Text, Text> =
+    _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
+
+  transient var scheduleEventImageUrlById : _HashMap.HashMap<Text, Text> =
+    _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
+
+  transient var scheduleEventPublicOnSiteById : _HashMap.HashMap<Text, Bool> =
+    _HashMap.HashMap<Text, Bool>(0, Text.equal, Text.hash);
 
   transient var programTeamMembersById : _HashMap.HashMap<Text, Types.ProgramTeamMember> =
     _HashMap.HashMap<Text, Types.ProgramTeamMember>(0, Text.equal, Text.hash);
@@ -816,6 +861,7 @@ persistent actor {
       "financeProducts",
       "financePromotions",
       "travel",
+      "radar",
       "pending-approval",
       "artists",
       "programs",
@@ -2012,6 +2058,15 @@ persistent actor {
     programPaymentLedgerStableV2 := _Iter.toArray(programPaymentLedgerById.entries());
     programPaymentLedgerStableV1 := [];
     financePromotionsStable := _Iter.toArray(financePromotionsById.entries());
+    scheduleEventsStable := _Iter.toArray(scheduleEventsById.entries());
+    scheduleLocationsStable := _Iter.toArray(scheduleLocationsById.entries());
+    scheduleReminderSentStable := _Iter.toArray(scheduleReminderSentById.entries());
+    programScheduleLiveStable := _Iter.toArray(programScheduleLiveById.entries());
+    scheduleEventRelationKindStable := _Iter.toArray(scheduleEventRelationKindById.entries());
+    scheduleEventRelationProgramIdStable := _Iter.toArray(scheduleEventRelationProgramIdById.entries());
+    scheduleEventKindStable := _Iter.toArray(scheduleEventKindById.entries());
+    scheduleEventImageUrlStable := _Iter.toArray(scheduleEventImageUrlById.entries());
+    scheduleEventPublicOnSiteStable := _Iter.toArray(scheduleEventPublicOnSiteById.entries());
     programTeamMembersStable := _Iter.toArray(programTeamMembersById.entries());
     programTeamOwedEntriesStable := _Iter.toArray(programTeamOwedEntriesById.entries());
     programTeamPaidEntriesStable := _Iter.toArray(programTeamPaidEntriesById.entries());
@@ -2374,6 +2429,96 @@ persistent actor {
       financePromotionsById.put(entry.0, entry.1);
     };
     financePromotionsStable := [];
+
+    scheduleEventsById := _HashMap.HashMap<Text, Types.CalendarEvent>(
+      scheduleEventsStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in scheduleEventsStable.vals()) {
+      scheduleEventsById.put(entry.0, entry.1);
+    };
+    scheduleEventsStable := [];
+
+    scheduleLocationsById := _HashMap.HashMap<Text, Types.CalendarLocation>(
+      scheduleLocationsStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in scheduleLocationsStable.vals()) {
+      scheduleLocationsById.put(entry.0, entry.1);
+    };
+    scheduleLocationsStable := [];
+
+    scheduleReminderSentById := _HashMap.HashMap<Text, Text>(
+      scheduleReminderSentStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in scheduleReminderSentStable.vals()) {
+      scheduleReminderSentById.put(entry.0, entry.1);
+    };
+    scheduleReminderSentStable := [];
+
+    programScheduleLiveById := _HashMap.HashMap<Text, Bool>(
+      programScheduleLiveStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in programScheduleLiveStable.vals()) {
+      programScheduleLiveById.put(entry.0, entry.1);
+    };
+    programScheduleLiveStable := [];
+
+    scheduleEventRelationKindById := _HashMap.HashMap<Text, Text>(
+      scheduleEventRelationKindStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in scheduleEventRelationKindStable.vals()) {
+      scheduleEventRelationKindById.put(entry.0, entry.1);
+    };
+    scheduleEventRelationKindStable := [];
+
+    scheduleEventRelationProgramIdById := _HashMap.HashMap<Text, Text>(
+      scheduleEventRelationProgramIdStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in scheduleEventRelationProgramIdStable.vals()) {
+      scheduleEventRelationProgramIdById.put(entry.0, entry.1);
+    };
+    scheduleEventRelationProgramIdStable := [];
+
+    scheduleEventKindById := _HashMap.HashMap<Text, Text>(
+      scheduleEventKindStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in scheduleEventKindStable.vals()) {
+      scheduleEventKindById.put(entry.0, entry.1);
+    };
+    scheduleEventKindStable := [];
+
+    scheduleEventImageUrlById := _HashMap.HashMap<Text, Text>(
+      scheduleEventImageUrlStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in scheduleEventImageUrlStable.vals()) {
+      scheduleEventImageUrlById.put(entry.0, entry.1);
+    };
+    scheduleEventImageUrlStable := [];
+
+    scheduleEventPublicOnSiteById := _HashMap.HashMap<Text, Bool>(
+      scheduleEventPublicOnSiteStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in scheduleEventPublicOnSiteStable.vals()) {
+      scheduleEventPublicOnSiteById.put(entry.0, entry.1);
+    };
+    scheduleEventPublicOnSiteStable := [];
 
     programTeamMembersById := _HashMap.HashMap<Text, Types.ProgramTeamMember>(
       programTeamMembersStable.size(),
@@ -4898,7 +5043,11 @@ persistent actor {
   ) : Types.ProgramPaymentSummary {
     let key = programPaymentKey(p, rec.programId);
     let category = applicantCategoryFromPayloadJson(rec.payloadJson);
-    let totalDefault = memberProgramTotalDueCents(category, false);
+    let ownFlight = switch (programPaymentFlightPreferencesByKey.get(key)) {
+      case null { false };
+      case (?pref) { pref.ownFlight };
+    };
+    let totalDefault = memberProgramTotalDueCents(category, ownFlight);
     let depositDefault : Nat = 100000;
     let outstandingDefault = if (totalDefault > depositDefault) { totalDefault - depositDefault } else { 0 };
     {
@@ -5060,9 +5209,10 @@ persistent actor {
   };
 
   /// Staff Finance Programs: all program payment summaries, ledger rows, and plans.
+  /// Applicants may also read this so Own Flight / slot state can stay in sync in the applicant modal.
   public shared query (msg) func staffGetProgramPaymentsFinanceJson() : async Text {
     assertStaffOrAdmin(msg.caller);
-    assertStudioFeatureVisible(msg.caller, "financePrograms");
+    assertStudioFeatureVisibleEither(msg.caller, "financePrograms", "applicants");
     var summaries : Text = "[";
     var firstSummary = true;
     for ((_, s) in programPaymentSummariesByKey.entries()) {
@@ -5451,6 +5601,798 @@ persistent actor {
         });
       };
     };
+  };
+
+  // ——— Studio Schedule (calendar events) ———
+
+  private func normalizeScheduleRelationKind(raw : Text) : Text {
+    let t = Text.trim(raw, #char ' ');
+    if (
+      t == "global" or t == "staff" or t == "artists" or t == "collector"
+      or t == "curator" or t == "gallery" or t == "program"
+    ) { t } else { "" }
+  };
+
+  private func normalizeScheduleEventKind(raw : Text) : Text {
+    let t = Text.trim(raw, #char ' ');
+    if (t == "standard" or t == "workshop" or t == "adventure") { t } else { "standard" }
+  };
+
+  private func putScheduleEventRelationMeta(
+    eventId : Text,
+    relationKind : Text,
+    relationProgramId : Text,
+    eventKind : Text,
+  ) {
+    scheduleEventRelationKindById.put(eventId, relationKind);
+    if (relationKind == "program") {
+      scheduleEventRelationProgramIdById.put(eventId, relationProgramId);
+    } else {
+      ignore scheduleEventRelationProgramIdById.remove(eventId);
+    };
+    scheduleEventKindById.put(eventId, eventKind);
+  };
+
+  private func clearScheduleEventSidecars(eventId : Text) {
+    ignore scheduleReminderSentById.remove(eventId);
+    ignore scheduleEventRelationKindById.remove(eventId);
+    ignore scheduleEventRelationProgramIdById.remove(eventId);
+    ignore scheduleEventKindById.remove(eventId);
+    ignore scheduleEventImageUrlById.remove(eventId);
+    ignore scheduleEventPublicOnSiteById.remove(eventId);
+  };
+
+  private func truncateScheduleImageUrl(raw : Text) : Text {
+    let t = Text.trim(raw, #char ' ');
+    if (t.size() > 2000) {
+      Debug.trap("imageUrl too long");
+    };
+    t
+  };
+
+  private func putScheduleEventPublicMeta(eventId : Text, imageUrl : Text, publicOnSite : Bool) {
+    let url = truncateScheduleImageUrl(imageUrl);
+    if (url.size() > 0) {
+      scheduleEventImageUrlById.put(eventId, url);
+    } else {
+      ignore scheduleEventImageUrlById.remove(eventId);
+    };
+    if (publicOnSite) {
+      scheduleEventPublicOnSiteById.put(eventId, true);
+    } else {
+      ignore scheduleEventPublicOnSiteById.remove(eventId);
+    };
+  };
+
+  private func scheduleEventImageUrlOf(eventId : Text) : Text {
+    switch (scheduleEventImageUrlById.get(eventId)) {
+      case (?u) { u };
+      case null { "" };
+    }
+  };
+
+  private func scheduleEventPublicOnSiteOf(eventId : Text) : Bool {
+    switch (scheduleEventPublicOnSiteById.get(eventId)) {
+      case (?v) { v };
+      case null { false };
+    }
+  };
+
+  private func scheduleEventRelationKindOf(eventId : Text) : Text {
+    switch (scheduleEventRelationKindById.get(eventId)) {
+      case (?k) { k };
+      case null { "program" };
+    }
+  };
+
+  private func scheduleEventRelationProgramIdOf(eventId : Text, fallbackProgramId : Text) : Text {
+    switch (scheduleEventRelationProgramIdById.get(eventId)) {
+      case (?pid) { if (pid.size() > 0) { pid } else { fallbackProgramId } };
+      case null { fallbackProgramId };
+    }
+  };
+
+  private func scheduleEventKindOf(eventId : Text) : Text {
+    switch (scheduleEventKindById.get(eventId)) {
+      case (?k) { k };
+      case null { "standard" };
+    }
+  };
+
+  private func isProgramScheduleLive(programId : Text) : Bool {
+    switch (programScheduleLiveById.get(programId)) {
+      case (?live) { live };
+      case null { false };
+    }
+  };
+
+  private func depositStatusIsSlotSecured(status : Text) : Bool {
+    status == "paid" or status == "paid_full" or status == "waived"
+  };
+
+  private func callerHasSlotSecuredProgram(p : Principal, programId : Text) : Bool {
+    if (not hasAcceptedApplicantForProgram(p, programId)) { return false };
+    for (rec in acceptedApplicantRecordsForCaller(p).vals()) {
+      if (rec.programId == programId and applicantRecordHasManualDepositSubmitted(rec.id)) {
+        return true;
+      };
+    };
+    let key = programPaymentKey(p, programId);
+    switch (programPaymentSummariesByKey.get(key)) {
+      case (?s) {
+        let e = effectiveProgramPaymentSummary(s);
+        depositStatusIsSlotSecured(e.depositStatus)
+      };
+      case null { false };
+    }
+  };
+
+  private func callerCanSeeProgramSchedule(p : Principal, programId : Text) : Bool {
+    isProgramScheduleLive(programId) and callerHasSlotSecuredProgram(p, programId)
+  };
+
+  private func memberMaySeeScheduleEvent(p : Principal, e : Types.CalendarEvent) : Bool {
+    let relationKind = scheduleEventRelationKindOf(e.id);
+    if (relationKind != "program") { return false };
+    let relationProgramId = scheduleEventRelationProgramIdOf(e.id, e.programId);
+    if (not callerCanSeeProgramSchedule(p, relationProgramId)) { return false };
+    if (e.status == "confirmed") { return true };
+    if (e.status == "awaiting_confirmation" and e.createdBy == Principal.toText(p)) {
+      return true;
+    };
+    false
+  };
+
+  private func normalizeScheduleStatus(raw : Text) : Text {
+    let t = Text.trim(raw, #char ' ');
+    if (
+      t == "draft" or t == "awaiting_confirmation" or t == "confirmed" or t == "cancelled"
+    ) { t } else { "confirmed" }
+  };
+
+  private func normalizeScheduleColor(raw : Text) : Text {
+    let t = Text.trim(raw, #char ' ');
+    if (t == "sage" or t == "blue" or t == "sand" or t == "blush") { t } else { "sage" }
+  };
+
+  private func truncateScheduleNotes(raw : Text) : Text {
+    let t = Text.trim(raw, #char ' ');
+    if (t.size() > 8000) {
+      Debug.trap("notes too long");
+    };
+    t
+  };
+
+  private func calendarPersonJson(p : Types.CalendarPersonStored) : Text {
+    "{"
+      # "\"id\":" # jsonText(p.id)
+      # ",\"name\":" # jsonText(p.name)
+      # ",\"initials\":" # jsonText(p.initials)
+      # "}"
+  };
+
+  private func calendarActivityJson(a : Types.CalendarEventActivity) : Text {
+    "{"
+      # "\"id\":" # jsonText(a.id)
+      # ",\"at\":" # jsonText(a.at)
+      # ",\"text\":" # jsonText(a.text)
+      # "}"
+  };
+
+  private func calendarStaffArrayJson(staff : [Types.CalendarPersonStored]) : Text {
+    var out : Text = "[";
+    var first = true;
+    for (p in staff.vals()) {
+      if (not first) { out := out # "," };
+      first := false;
+      out := out # calendarPersonJson(p);
+    };
+    out # "]"
+  };
+
+  private func calendarParticipantIdsJson(ids : [Text]) : Text {
+    var out : Text = "[";
+    var first = true;
+    for (id in ids.vals()) {
+      if (not first) { out := out # "," };
+      first := false;
+      out := out # jsonText(id);
+    };
+    out # "]"
+  };
+
+  private func calendarActivityArrayJson(rows : [Types.CalendarEventActivity]) : Text {
+    var out : Text = "[";
+    var first = true;
+    for (a in rows.vals()) {
+      if (not first) { out := out # "," };
+      first := false;
+      out := out # calendarActivityJson(a);
+    };
+    out # "]"
+  };
+
+  private func calendarEventJson(e : Types.CalendarEvent) : Text {
+    let reminderSentAt = switch (scheduleReminderSentById.get(e.id)) {
+      case (?t) { t };
+      case null { "" };
+    };
+    let relationKind = scheduleEventRelationKindOf(e.id);
+    let relationProgramId = scheduleEventRelationProgramIdOf(e.id, e.programId);
+    let eventKind = scheduleEventKindOf(e.id);
+    let imageUrl = scheduleEventImageUrlOf(e.id);
+    let publicOnSite = scheduleEventPublicOnSiteOf(e.id);
+    "{"
+      # "\"id\":" # jsonText(e.id)
+      # ",\"title\":" # jsonText(e.title)
+      # ",\"date\":" # jsonText(e.date)
+      # ",\"startTime\":" # jsonText(e.startTime)
+      # ",\"endTime\":" # jsonText(e.endTime)
+      # ",\"allDay\":" # jsonBool(e.allDay)
+      # ",\"timezone\":" # jsonText(e.timezone)
+      # ",\"programId\":" # jsonText(e.programId)
+      # ",\"programName\":" # jsonText(e.programName)
+      # ",\"team\":" # jsonText(e.team)
+      # ",\"locationId\":" # jsonText(e.locationId)
+      # ",\"locationName\":" # jsonText(e.locationName)
+      # ",\"assignedStaff\":" # calendarStaffArrayJson(e.assignedStaff)
+      # ",\"participantIds\":" # calendarParticipantIdsJson(e.participantIds)
+      # ",\"participantCount\":" # Nat.toText(e.participantCount)
+      # ",\"notes\":" # jsonText(e.notes)
+      # ",\"reminderMinutes\":" # (if (e.reminderMinutes == 0) { "null" } else { Nat.toText(e.reminderMinutes) })
+      # ",\"reminderSentAt\":" # jsonText(reminderSentAt)
+      # ",\"status\":" # jsonText(e.status)
+      # ",\"color\":" # jsonText(e.color)
+      # ",\"relationKind\":" # jsonText(relationKind)
+      # ",\"relationProgramId\":" # jsonText(relationProgramId)
+      # ",\"eventKind\":" # jsonText(eventKind)
+      # ",\"imageUrl\":" # jsonText(imageUrl)
+      # ",\"publicOnSite\":" # jsonBool(publicOnSite)
+      # ",\"conflicts\":[]"
+      # ",\"createdAt\":" # jsonText(e.createdAt)
+      # ",\"updatedAt\":" # jsonText(e.updatedAt)
+      # ",\"version\":" # Nat.toText(e.version)
+      # ",\"createdBy\":" # jsonText(e.createdBy)
+      # ",\"activity\":" # calendarActivityArrayJson(e.activity)
+      # "}"
+  };
+
+  private func prependScheduleActivity(
+    prior : [Types.CalendarEventActivity],
+    at : Text,
+    text : Text,
+  ) : [Types.CalendarEventActivity] {
+    let entry : Types.CalendarEventActivity = {
+      id = "act-" # at;
+      at = at;
+      text = text;
+    };
+    Array.append([entry], prior)
+  };
+
+  private func assertScheduleTimes(allDay : Bool, startTime : Text, endTime : Text) {
+    if (allDay) { return };
+    let s = Text.trim(startTime, #char ' ');
+    let e = Text.trim(endTime, #char ' ');
+    if (s.size() == 0 or e.size() == 0) {
+      Debug.trap("start and end time required");
+    };
+    if (Text.compare(e, s) != #greater) {
+      Debug.trap("end time must be after start time");
+    };
+  };
+
+  public shared query (msg) func staffListScheduleEventsJson() : async Text {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "schedule");
+    var out : Text = "[";
+    var first = true;
+    for ((_, e) in scheduleEventsById.entries()) {
+      if (not first) { out := out # "," };
+      first := false;
+      out := out # calendarEventJson(e);
+    };
+    out # "]"
+  };
+
+  public shared query (msg) func staffGetScheduleEventJson(id : Text) : async Text {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "schedule");
+    let rowId = Text.trim(id, #char ' ');
+    switch (scheduleEventsById.get(rowId)) {
+      case null { Debug.trap("Event not found") };
+      case (?e) { calendarEventJson(e) };
+    }
+  };
+
+  public shared (msg) func staffUpsertScheduleEvent(
+    id : Text,
+    expectedVersion : Nat,
+    title : Text,
+    date : Text,
+    startTime : Text,
+    endTime : Text,
+    allDay : Bool,
+    timezone : Text,
+    programId : Text,
+    programName : Text,
+    team : Text,
+    locationId : Text,
+    locationName : Text,
+    assignedStaff : [Types.CalendarPersonStored],
+    participantIds : [Text],
+    participantCount : Nat,
+    notes : Text,
+    reminderMinutes : Nat,
+    status : Text,
+    color : Text,
+    relationKind : Text,
+    relationProgramId : Text,
+    eventKind : Text,
+    imageUrl : Text,
+    publicOnSite : Bool,
+  ) : async Text {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "schedule");
+    let trimmedTitle = Text.trim(title, #char ' ');
+    let trimmedDate = Text.trim(date, #char ' ');
+    let trimmedProgramId = Text.trim(programId, #char ' ');
+    let trimmedLocationId = Text.trim(locationId, #char ' ');
+    let trimmedTz = Text.trim(timezone, #char ' ');
+    let relKind = normalizeScheduleRelationKind(relationKind);
+    let relProgramIdRaw = Text.trim(relationProgramId, #char ' ');
+    let kindNorm = normalizeScheduleEventKind(eventKind);
+    if (trimmedTitle.size() == 0) { Debug.trap("title required") };
+    if (trimmedDate.size() == 0) { Debug.trap("date required") };
+    if (trimmedLocationId.size() == 0) { Debug.trap("locationId required") };
+    if (trimmedTz.size() == 0) { Debug.trap("timezone required") };
+    if (relKind.size() == 0) { Debug.trap("relation required") };
+    let effectiveProgramId =
+      if (relKind == "program") {
+        let pid = if (relProgramIdRaw.size() > 0) { relProgramIdRaw } else { trimmedProgramId };
+        if (pid.size() == 0) { Debug.trap("relationProgramId required") };
+        pid
+      } else {
+        if (trimmedProgramId.size() == 0) { Debug.trap("programId required") };
+        trimmedProgramId
+      };
+    let effectiveRelationProgramId = if (relKind == "program") { effectiveProgramId } else { "" };
+    assertScheduleTimes(allDay, startTime, endTime);
+    let notesSafe = truncateScheduleNotes(notes);
+    let statusNorm = normalizeScheduleStatus(status);
+    let colorNorm = normalizeScheduleColor(color);
+    let now = Int.toText(Time.now());
+    let existingId = Text.trim(id, #char ' ');
+    let isCreate = existingId.size() == 0;
+    let rowId =
+      if (isCreate) { "evt-" # Principal.toText(msg.caller) # "-" # now }
+      else { existingId };
+    let prior = scheduleEventsById.get(rowId);
+    switch (prior) {
+      case null {
+        if (not isCreate) { Debug.trap("Event not found") };
+      };
+      case (?p) {
+        if (isCreate) { /* id collision unlikely */ };
+        if (p.version != expectedVersion) {
+          Debug.trap("version conflict");
+        };
+      };
+    };
+    let createdAt = switch (prior) {
+      case (?p) { p.createdAt };
+      case null { now };
+    };
+    let createdBy = switch (prior) {
+      case (?p) { p.createdBy };
+      case null { Principal.toText(msg.caller) };
+    };
+    let nextVersion = switch (prior) {
+      case (?p) { p.version + 1 };
+      case null { 1 };
+    };
+    let priorActivity = switch (prior) {
+      case (?p) { p.activity };
+      case null { [] };
+    };
+    let activityText = switch (prior) {
+      case null { "Event created" };
+      case (?_) { "Event updated" };
+    };
+    let activity = prependScheduleActivity(priorActivity, now, activityText);
+    let row : Types.CalendarEvent = {
+      id = rowId;
+      title = trimmedTitle;
+      date = trimmedDate;
+      startTime = Text.trim(startTime, #char ' ');
+      endTime = Text.trim(endTime, #char ' ');
+      allDay = allDay;
+      timezone = trimmedTz;
+      programId = effectiveProgramId;
+      programName = Text.trim(programName, #char ' ');
+      team = Text.trim(team, #char ' ');
+      locationId = trimmedLocationId;
+      locationName = Text.trim(locationName, #char ' ');
+      assignedStaff = assignedStaff;
+      participantIds = participantIds;
+      participantCount = participantCount;
+      notes = notesSafe;
+      reminderMinutes = reminderMinutes;
+      status = statusNorm;
+      color = colorNorm;
+      createdAt = createdAt;
+      updatedAt = now;
+      version = nextVersion;
+      createdBy = createdBy;
+      activity = activity;
+    };
+    scheduleEventsById.put(rowId, row);
+    putScheduleEventRelationMeta(rowId, relKind, effectiveRelationProgramId, kindNorm);
+    let publicOnSiteEffective = if (relKind == "staff") { false } else { publicOnSite };
+    putScheduleEventPublicMeta(rowId, imageUrl, publicOnSiteEffective);
+    rowId
+  };
+
+  public shared (msg) func staffDeleteScheduleEvent(id : Text) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "schedule");
+    let rowId = Text.trim(id, #char ' ');
+    if (rowId.size() == 0) { Debug.trap("id required") };
+    switch (scheduleEventsById.get(rowId)) {
+      case null { Debug.trap("Event not found") };
+      case (?_) {
+        ignore scheduleEventsById.remove(rowId);
+        clearScheduleEventSidecars(rowId);
+      };
+    };
+  };
+
+  /// Mark reminder email as sent (appends activity). Returns ISO-ish timestamp text.
+  public shared (msg) func staffMarkScheduleReminderSent(id : Text, recipientSummary : Text) : async Text {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "schedule");
+    let rowId = Text.trim(id, #char ' ');
+    if (rowId.size() == 0) { Debug.trap("id required") };
+    switch (scheduleEventsById.get(rowId)) {
+      case null { Debug.trap("Event not found") };
+      case (?e) {
+        let now = Int.toText(Time.now());
+        scheduleReminderSentById.put(rowId, now);
+        let summary = Text.trim(recipientSummary, #char ' ');
+        let text =
+          if (summary.size() > 0) { "Reminder email sent (" # summary # ")" }
+          else { "Reminder email sent" };
+        let activity = prependScheduleActivity(e.activity, now, text);
+        scheduleEventsById.put(rowId, {
+          e with
+          activity = activity;
+          updatedAt = now;
+        });
+        now
+      };
+    }
+  };
+
+  public shared (msg) func staffDuplicateScheduleEvent(id : Text) : async Text {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "schedule");
+    let rowId = Text.trim(id, #char ' ');
+    switch (scheduleEventsById.get(rowId)) {
+      case null { Debug.trap("Event not found") };
+      case (?src) {
+        let now = Int.toText(Time.now());
+        let newId = "evt-" # Principal.toText(msg.caller) # "-" # now;
+        let activity = prependScheduleActivity([], now, "Event duplicated");
+        let row : Types.CalendarEvent = {
+          id = newId;
+          title = src.title # " (copy)";
+          date = src.date;
+          startTime = src.startTime;
+          endTime = src.endTime;
+          allDay = src.allDay;
+          timezone = src.timezone;
+          programId = src.programId;
+          programName = src.programName;
+          team = src.team;
+          locationId = src.locationId;
+          locationName = src.locationName;
+          assignedStaff = src.assignedStaff;
+          participantIds = src.participantIds;
+          participantCount = src.participantCount;
+          notes = src.notes;
+          reminderMinutes = src.reminderMinutes;
+          status = "draft";
+          color = src.color;
+          createdAt = now;
+          updatedAt = now;
+          version = 1;
+          createdBy = Principal.toText(msg.caller);
+          activity = activity;
+        };
+        scheduleEventsById.put(newId, row);
+        putScheduleEventRelationMeta(
+          newId,
+          scheduleEventRelationKindOf(src.id),
+          scheduleEventRelationProgramIdOf(src.id, src.programId),
+          scheduleEventKindOf(src.id),
+        );
+        // Copy flier; do not auto-publish the duplicate.
+        putScheduleEventPublicMeta(newId, scheduleEventImageUrlOf(src.id), false);
+        newId
+      };
+    }
+  };
+
+  public shared (msg) func staffSetScheduleEventStatus(id : Text, status : Text) : async Text {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "schedule");
+    let rowId = Text.trim(id, #char ' ');
+    if (rowId.size() == 0) { Debug.trap("id required") };
+    let statusNorm = normalizeScheduleStatus(status);
+    switch (scheduleEventsById.get(rowId)) {
+      case null { Debug.trap("Event not found") };
+      case (?e) {
+        let now = Int.toText(Time.now());
+        let activity = prependScheduleActivity(e.activity, now, "Status set to " # statusNorm);
+        scheduleEventsById.put(rowId, {
+          e with
+          status = statusNorm;
+          updatedAt = now;
+          version = e.version + 1;
+          activity = activity;
+        });
+        rowId
+      };
+    }
+  };
+
+  public shared (msg) func staffSetProgramScheduleLive(programId : Text, live : Bool) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "programs");
+    let pid = Text.trim(programId, #char ' ');
+    if (pid.size() == 0) { Debug.trap("programId required") };
+    switch (programsById.get(pid)) {
+      case null { Debug.trap("Program not found") };
+      case (?_) {
+        programScheduleLiveById.put(pid, live);
+      };
+    };
+  };
+
+  public shared query (msg) func getProgramScheduleLive(programId : Text) : async Bool {
+    let pid = Text.trim(programId, #char ' ');
+    isProgramScheduleLive(pid)
+  };
+
+  public shared query (msg) func listProgramScheduleLiveJson() : async Text {
+    var out : Text = "{";
+    var first = true;
+    for ((pid, live) in programScheduleLiveById.entries()) {
+      if (not first) { out := out # "," };
+      first := false;
+      out := out # jsonText(pid) # ":" # jsonBool(live);
+    };
+    out # "}"
+  };
+
+  /// Member: events for slot-secured + schedule-live programs (confirmed, or own awaiting).
+  public shared query (msg) func listMyScheduleEventsJson() : async Text {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      return "[]";
+    };
+    var out : Text = "[";
+    var first = true;
+    for ((_, e) in scheduleEventsById.entries()) {
+      if (memberMaySeeScheduleEvent(msg.caller, e)) {
+        if (not first) { out := out # "," };
+        first := false;
+        out := out # calendarEventJson(e);
+      };
+    };
+    out # "]"
+  };
+
+  private func normalizeMemberAssignedStaff(staff : [Types.CalendarPersonStored]) : [Types.CalendarPersonStored] {
+    var out : [Types.CalendarPersonStored] = [];
+    var n : Nat = 0;
+    for (p in staff.vals()) {
+      if (n >= 12) { return out };
+      let id = Text.trim(p.id, #char ' ');
+      let name = Text.trim(p.name, #char ' ');
+      if (id.size() > 0 and name.size() > 0) {
+        let initialsRaw = Text.trim(p.initials, #char ' ');
+        let initials = if (initialsRaw.size() > 0) { initialsRaw } else { "?" };
+        out := Array.append(out, [{ id = id; name = name; initials = initials }]);
+        n += 1;
+      };
+    };
+    out
+  };
+
+  /// Member: workshop/adventure create, locked to a slot-secured live program; awaiting confirmation.
+  public shared (msg) func memberCreateProgramEvent(
+    programId : Text,
+    eventKind : Text,
+    title : Text,
+    date : Text,
+    startTime : Text,
+    endTime : Text,
+    allDay : Bool,
+    timezone : Text,
+    locationId : Text,
+    locationName : Text,
+    notes : Text,
+    assignedStaff : [Types.CalendarPersonStored],
+  ) : async Text {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      Debug.trap("authentication required");
+    };
+    let pid = Text.trim(programId, #char ' ');
+    if (pid.size() == 0) { Debug.trap("programId required") };
+    if (not callerCanSeeProgramSchedule(msg.caller, pid)) {
+      Debug.trap("program calendar not available");
+    };
+    let kindNorm = normalizeScheduleEventKind(eventKind);
+    if (kindNorm != "workshop" and kindNorm != "adventure") {
+      Debug.trap("eventKind must be workshop or adventure");
+    };
+    let trimmedTitle = Text.trim(title, #char ' ');
+    let trimmedDate = Text.trim(date, #char ' ');
+    let trimmedLocationId = Text.trim(locationId, #char ' ');
+    let trimmedTz = Text.trim(timezone, #char ' ');
+    if (trimmedTitle.size() == 0) { Debug.trap("title required") };
+    if (trimmedDate.size() == 0) { Debug.trap("date required") };
+    if (trimmedLocationId.size() == 0) { Debug.trap("locationId required") };
+    if (trimmedTz.size() == 0) { Debug.trap("timezone required") };
+    assertScheduleTimes(allDay, startTime, endTime);
+    let notesSafe = truncateScheduleNotes(notes);
+    switch (programsById.get(pid)) {
+      case null { Debug.trap("Program not found") };
+      case (?_) {};
+    };
+    let staffNorm = normalizeMemberAssignedStaff(assignedStaff);
+    let programName = "";
+    let now = Int.toText(Time.now());
+    let rowId = "evt-" # Principal.toText(msg.caller) # "-" # now;
+    let activity = prependScheduleActivity([], now, "Member submitted " # kindNorm);
+    let row : Types.CalendarEvent = {
+      id = rowId;
+      title = trimmedTitle;
+      date = trimmedDate;
+      startTime = Text.trim(startTime, #char ' ');
+      endTime = Text.trim(endTime, #char ' ');
+      allDay = allDay;
+      timezone = trimmedTz;
+      programId = pid;
+      programName = programName;
+      team = "";
+      locationId = trimmedLocationId;
+      locationName = Text.trim(locationName, #char ' ');
+      assignedStaff = staffNorm;
+      participantIds = [];
+      participantCount = 0;
+      notes = notesSafe;
+      reminderMinutes = 0;
+      status = "awaiting_confirmation";
+      color = "sage";
+      createdAt = now;
+      updatedAt = now;
+      version = 1;
+      createdBy = Principal.toText(msg.caller);
+      activity = activity;
+    };
+    scheduleEventsById.put(rowId, row);
+    putScheduleEventRelationMeta(rowId, "program", pid, kindNorm);
+    rowId
+  };
+
+  /// Authenticated members: active schedule locations (no staff gate).
+  public shared query (msg) func memberListScheduleLocationsJson() : async Text {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      Debug.trap("authentication required");
+    };
+    var out : Text = "[";
+    var first = true;
+    for ((_, loc) in scheduleLocationsById.entries()) {
+      if (loc.status != "archived") {
+        if (not first) { out := out # "," };
+        first := false;
+        out := out # calendarLocationJson(loc);
+      };
+    };
+    out # "]"
+  };
+
+  private func calendarLocationJson(loc : Types.CalendarLocation) : Text {
+    "{"
+      # "\"id\":" # jsonText(loc.id)
+      # ",\"name\":" # jsonText(loc.name)
+      # ",\"createdAt\":" # jsonText(loc.createdAt)
+      # ",\"updatedAt\":" # jsonText(loc.updatedAt)
+      # ",\"createdBy\":" # jsonText(loc.createdBy)
+      # ",\"status\":" # jsonText(loc.status)
+      # "}"
+  };
+
+  public shared query (msg) func staffListScheduleLocationsJson() : async Text {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "schedule");
+    var out : Text = "[";
+    var first = true;
+    for ((_, loc) in scheduleLocationsById.entries()) {
+      if (loc.status != "archived") {
+        if (not first) { out := out # "," };
+        first := false;
+        out := out # calendarLocationJson(loc);
+      };
+    };
+    out # "]"
+  };
+
+  public shared (msg) func staffUpsertScheduleLocation(id : Text, name : Text) : async Text {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "schedule");
+    let trimmedName = Text.trim(name, #char ' ');
+    if (trimmedName.size() == 0) {
+      Debug.trap("name required");
+    };
+    let now = Int.toText(Time.now());
+    let existingId = Text.trim(id, #char ' ');
+    let rowId =
+      if (existingId.size() > 0) { existingId }
+      else { "loc-" # Principal.toText(msg.caller) # "-" # now };
+    let prior = scheduleLocationsById.get(rowId);
+    let createdAt = switch (prior) {
+      case (?p) { p.createdAt };
+      case null { now };
+    };
+    let createdBy = switch (prior) {
+      case (?p) { p.createdBy };
+      case null { Principal.toText(msg.caller) };
+    };
+    let row : Types.CalendarLocation = {
+      id = rowId;
+      name = trimmedName;
+      createdAt = createdAt;
+      updatedAt = now;
+      createdBy = createdBy;
+      status = "active";
+    };
+    scheduleLocationsById.put(rowId, row);
+    rowId
+  };
+
+  public shared (msg) func staffDeleteScheduleLocation(id : Text) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "schedule");
+    let rowId = Text.trim(id, #char ' ');
+    if (rowId.size() == 0) {
+      Debug.trap("id required");
+    };
+    switch (scheduleLocationsById.get(rowId)) {
+      case null { Debug.trap("Location not found") };
+      case (?loc) {
+        scheduleLocationsById.put(rowId, {
+          loc with
+          status = "archived";
+          updatedAt = Int.toText(Time.now());
+        });
+      };
+    };
+  };
+
+  /// Retired: dummy location catalog seeding disabled. Staff add locations via Manage locations.
+  public shared (msg) func staffSeedScheduleLocationsIfEmpty() : async Nat {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "schedule");
+    0
+  };
+
+  /// Retired: no longer seeds calendar events or locations.
+  /// Frontend purges leftover fixture events (prog-kaga / createdBy=seed) on schedule load.
+  public shared (msg) func staffSeedScheduleDemoIfEmpty() : async Nat {
+    assertAdmin(msg.caller);
+    0
   };
 
   private func programTeamOwedEntryJson(e : Types.ProgramTeamOwedEntry) : Text {
@@ -6226,6 +7168,59 @@ persistent actor {
     };
   };
 
+  private func artistConfirmationNameForId(artistId : Text) : Text {
+    if (artistId.size() == 0) { return "" };
+    switch (artistsById.get(artistId)) {
+      case null { "" };
+      case (?rec) {
+        switch (rec.localesJson) {
+          case (?json) {
+            let name = extractJsonStringField(json, "name");
+            if (name.size() > 0) { name } else { artistId };
+          };
+          case null { artistId };
+        };
+      };
+    };
+  };
+
+  private func jsonEscapeForArrayName(name : Text) : Text {
+    let slashEscaped = Text.replace(name, #char('\\'), "\\\\");
+    Text.replace(slashEscaped, #char('\"'), "\\\"");
+  };
+
+  private func removeNameFromConfirmedArtistsLocalesJson(localesJson : Text, name : Text) : Text {
+    if (name.size() == 0) { return localesJson };
+    let escaped = jsonEscapeForArrayName(name);
+    let quoted = "\"" # escaped # "\"";
+    var out = localesJson;
+    out := Text.replace(out, #text("," # quoted), "");
+    out := Text.replace(out, #text(quoted # ","), "");
+    out := Text.replace(out, #text("[" # quoted # "]"), "[]");
+    out;
+  };
+
+  private func removeConfirmedArtistFromProgramLocales(programId : Text, artistName : Text) {
+    if (programId.size() == 0 or artistName.size() == 0) { return };
+    switch (programsById.get(programId)) {
+      case null {};
+      case (?program) {
+        let updated = removeNameFromConfirmedArtistsLocalesJson(program.localesJson, artistName);
+        if (updated != program.localesJson) {
+          let now = Int.toText(Time.now());
+          programsById.put(programId, { program with localesJson = updated; updatedAt = now });
+        };
+      };
+    };
+  };
+
+  private func removeConfirmedArtistForApplicantId(applicantId : Text, programId : Text) {
+    let parts = _Iter.toArray(Text.split(applicantId, #char '|'));
+    let artistId = if (parts.size() >= 1) { parts[0] } else { "" };
+    let name = artistConfirmationNameForId(artistId);
+    removeConfirmedArtistFromProgramLocales(programId, name);
+  };
+
   public shared (msg) func integrationSetProgramLocalesJson(programId : Text, localesJson : Text, updatedAt : Text) : async () {
     assertIntegrationCaller(msg.caller);
     switch (programsById.get(programId)) {
@@ -6321,14 +7316,15 @@ persistent actor {
     putProgramPaymentFlightPreference(msg.caller, programId, applicationId, ownFlight, flightCreditCents, totalDueCents, updatedAt, false);
   };
 
-  /// Studio Finance: staff override for Own Flight pricing credit (unlocked even after payments).
+  /// Studio Finance / Applicants: staff override for Own Flight pricing credit (unlocked even after payments).
   public shared (msg) func staffSetProgramPaymentFlightPreference(
     applicantId : Text,
     ownFlight : Bool,
     updatedAt : Text,
   ) : async () {
     assertStaffOrAdmin(msg.caller);
-    assertStudioFeatureEdit(msg.caller, "financePrograms");
+    // Applicants popup and Finance tickets both edit the same preference.
+    assertStudioFeatureEditEither(msg.caller, "financePrograms", "applicants");
     if (applicantId.size() == 0) {
       Debug.trap("applicantId required");
     };
@@ -8006,6 +9002,7 @@ persistent actor {
           );
         };
       };
+      removeConfirmedArtistForApplicantId(appKey, programId);
     };
   };
 
@@ -8968,7 +9965,11 @@ persistent actor {
     };
     let key = programPaymentKey(principal, programId);
     let category = applicantCategoryForApplicationId(applicantId);
-    let totalDefault = memberProgramTotalDueCents(category, false);
+    let ownFlight = switch (programPaymentFlightPreferencesByKey.get(key)) {
+      case null { false };
+      case (?pref) { pref.ownFlight };
+    };
+    let totalDefault = memberProgramTotalDueCents(category, ownFlight);
     let depositDefault : Nat = 100000;
     let outstandingDefault = if (totalDefault > depositDefault) { totalDefault - depositDefault } else { 0 };
     let prior = switch (programPaymentSummariesByKey.get(key)) {
@@ -8991,7 +9992,7 @@ persistent actor {
       case (?s) {
         let paid = s.totalPaidCents;
         let deposit = if (s.depositAmountCents > 0) { s.depositAmountCents } else { depositDefault };
-        let total = memberProgramTotalDueCents(category, false);
+        let total = memberProgramTotalDueCents(category, ownFlight);
         let outstanding = if (total > paid) { total - paid } else { 0 };
         {
           s with
@@ -9087,6 +10088,7 @@ persistent actor {
             applicationByArtistProgram.put(rec.id, entry);
           };
         };
+        removeConfirmedArtistForApplicantId(rec.id, rec.programId);
       };
       case _ {
         ignore archivedApplicantsById.remove(rec.id);

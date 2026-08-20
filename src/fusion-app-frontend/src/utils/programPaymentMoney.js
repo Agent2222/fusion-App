@@ -513,6 +513,16 @@ export function isApplicantSlotSecured(applicant, index) {
 }
 
 /**
+ * Finance includes slot-secured applicants unless they withdrew or were pulled out.
+ * @param {object | null | undefined} applicant
+ */
+export function isApplicantFinanceActive(applicant) {
+    if (!applicant || typeof applicant !== 'object') return false;
+    const s = String(applicant.status || '');
+    return s !== 'withdrawn' && s !== 'pulledOut';
+}
+
+/**
  * @param {object} applicant
  * @param {ReturnType<typeof buildProgramPaymentIndex>} index
  */
@@ -677,6 +687,7 @@ export function buildStudioProgramFinanceRows(applicants, programs, index, opts 
             if (!isActive) continue;
         }
         if (getApplicantIsTester(String(applicant.payloadJson || ''))) continue;
+        if (!isApplicantFinanceActive(applicant)) continue;
         if (!isApplicantSlotSecured(applicant, index)) continue;
         rows.push(buildStudioProgramFinanceRow(applicant, programRow, index));
     }
@@ -702,7 +713,10 @@ export function computeProgramExpectedRevenueCents(programRow, applicantsForProg
     const applicants = Array.isArray(applicantsForProgram) ? applicantsForProgram : [];
     const index = paymentIndex || buildProgramPaymentIndex({});
     const depositPaid = applicants.filter(
-        (a) => !getApplicantIsTester(String(a?.payloadJson || '')) && isApplicantDepositSatisfied(a, index, programRow),
+        (a) =>
+            isApplicantFinanceActive(a) &&
+            !getApplicantIsTester(String(a?.payloadJson || '')) &&
+            isApplicantDepositSatisfied(a, index, programRow),
     );
     let expectedCents = 0;
     let veteranSlotCount = 0;
@@ -743,6 +757,7 @@ export function computeProgramCollectedPaymentsCents(programRow, applicantsForPr
     for (const applicant of applicants) {
         if (!applicant || typeof applicant !== 'object') continue;
         if (getApplicantIsTester(String(applicant.payloadJson || ''))) continue;
+        if (!isApplicantFinanceActive(applicant)) continue;
         if (!isApplicantSlotSecured(applicant, index)) continue;
         const row = buildStudioProgramFinanceRow(applicant, programRow, index);
         totalPaymentsCents += normalizeCents(row.totalPaymentsCents);
@@ -1007,6 +1022,7 @@ export function computeProgramProfitCents(
     for (const applicant of applicants) {
         if (!applicant || typeof applicant !== 'object') continue;
         if (getApplicantIsTester(String(applicant.payloadJson || ''))) continue;
+        if (!isApplicantFinanceActive(applicant)) continue;
         if (!isApplicantSlotSecured(applicant, index)) continue;
         const row = buildStudioProgramFinanceRow(applicant, programRow, index);
         applicantProfit += normalizeCents(row.profitCents);

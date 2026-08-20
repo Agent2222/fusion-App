@@ -125,6 +125,10 @@ import { formatStudioDate } from "../utils/studioDateFormat.js";
 import exploreProgramsIconUrl from "../assets/icons/fusion_dashboard_svg_icons/explore-programs.svg";
 import myProgramsIconUrl from "../assets/icons/fusion_dashboard_svg_icons/my-programs.svg";
 import paymentsIconUrl from "../assets/icons/fusion_dashboard_svg_icons/payments.svg";
+import {
+  mountMemberProgramCalendar,
+  resolveMemberCalendarGate,
+} from "./subComponents/memberProgramCalendar.js";
 import manualPaymentIconUrl from "../assets/icons/fusion_dashboard_svg_icons/manual-payment.svg";
 import paymentPlanIconUrl from "../assets/icons/fusion_dashboard_svg_icons/payment-plan.svg";
 import receiptDownloadIconUrl from "../assets/icons/fusion_dashboard_svg_icons/receipt-download.svg";
@@ -246,6 +250,8 @@ let mpdBackendRosterVisibility = "inactive";
 let mpdProgramPaymentItems = [];
 let mpdSelectedPaymentProgramId = "";
 let mpdLastProgramsForPayments = [];
+/** @type {{ id: string, name: string }[]} */
+let mpdCalendarEligiblePrograms = [];
 
 /**
  * Panel-specific shout (HTML allowed) and plain hint for `#settingsProfileHint`.
@@ -1879,17 +1885,29 @@ function mpdText(value) {
 /**
  * @param {string} tab
  */
+/**
+ * @param {Element | null} el
+ */
+function mpdProgramTabIsAvailable(el) {
+  if (!(el instanceof HTMLElement)) return false;
+  if (el.classList.contains("mpd-program-tab--force-hidden")) return false;
+  if (el.hasAttribute("hidden")) return false;
+  if (el.getAttribute("aria-hidden") === "true") return false;
+  return true;
+}
+
+/**
+ * @param {string} tab
+ */
 function setMpdProgramsTab(tab) {
   const root = document.getElementById("mpd-programs");
   if (!root) return;
-  const target = ["explore", "my-programs", "payments"].includes(tab)
+  const target = ["explore", "my-programs", "payments", "calendar"].includes(tab)
     ? tab
     : "explore";
   const targetTab = root.querySelector(`[data-mpd-program-tab="${target}"]`);
   const safeTarget =
-    target === "payments" &&
-    targetTab &&
-    (targetTab.hasAttribute("hidden") || targetTab.getAttribute("aria-hidden") === "true")
+    (target === "payments" || target === "calendar") && !mpdProgramTabIsAvailable(targetTab)
       ? "my-programs"
       : target;
   root.querySelectorAll("[data-mpd-program-tab]").forEach((el) => {
@@ -1905,6 +1923,15 @@ function setMpdProgramsTab(tab) {
   });
   if (safeTarget === "explore") {
     void hydrateExploreProgramCredits();
+  }
+  if (safeTarget === "calendar") {
+    const calRoot = document.getElementById("mpd_program_calendar_workspace");
+    if (calRoot instanceof HTMLElement) {
+      void mountMemberProgramCalendar(calRoot, {
+        eligiblePrograms: mpdCalendarEligiblePrograms,
+        canCreate: true,
+      });
+    }
   }
 }
 
@@ -2650,7 +2677,7 @@ function renderMpdFlightChoiceSection(item) {
     const copy = ownFlight
       ? "$800 credit toward your residency balance."
       : "Round-trip flight booked by Fusion—no separate flight fee.";
-    return `<button type="button" class="mpd-flight-option ${selected ? "is-selected" : ""}" data-mpd-flight-choice="${ownFlight ? "own" : "support"}" aria-pressed="${selected ? "true" : "false"}" ${locked ? "disabled" : ""}>
+    return `<button type="button" class="mpd-flight-option ${selected ? "is-selected" : ""}${locked && !selected ? " is-muted" : ""}" data-mpd-flight-choice="${ownFlight ? "own" : "support"}" aria-pressed="${selected ? "true" : "false"}" ${locked ? "disabled" : ""}>
       <span class="mpd-flight-option__icon" aria-hidden="true"><img src="${mpdEscapeAttr(flightIconUrl)}" alt="" /></span>
       <span class="mpd-flight-option__copy">
         <strong>${escapeHtmlMpd(title)}</strong>
@@ -2659,7 +2686,17 @@ function renderMpdFlightChoiceSection(item) {
       <span class="mpd-flight-option__badge">${escapeHtmlMpd(badge)}</span>
     </button>`;
   };
-  return `<section class="mpd-flight-choice-card ${locked ? "is-locked" : ""}" aria-label="Flight booking choice">
+  const noteStrong = item.ownFlight
+    ? locked
+      ? "Own flight selected"
+      : "Flight credit applied"
+    : "Fusion flight booking included";
+  const noteSpan = item.ownFlight
+    ? locked
+      ? "Own flight selected — $800 credit applied to your residency price."
+      : "The $800 credit is applied to your total residency price once you confirm your program slot."
+    : `Your residency price of ${mpdUsd(item.baseTotalDueCents)} includes Fusion booking your round-trip flight. There is no additional flight charge beyond this amount.`;
+  return `<section class="mpd-flight-choice-card ${locked ? "is-locked" : ""} ${item.ownFlight ? "is-own-flight" : "is-fusion-flight"}" aria-label="Flight booking choice">
     <div class="mpd-flight-choice-card__head">
       <div class="mpd-flight-choice-card__icon" aria-hidden="true"><img src="${mpdEscapeAttr(flightIconUrl)}" alt="" /></div>
       <div>
@@ -2673,8 +2710,8 @@ function renderMpdFlightChoiceSection(item) {
       ${option(false)}
     </div>
     <div class="mpd-flight-choice-card__note">
-      <strong>${item.ownFlight ? "Flight credit applied" : "Fusion flight booking included"}</strong>
-      <span>${item.ownFlight ? "The $800 credit is applied to your total residency price once you confirm your program slot." : `Your residency price of ${mpdUsd(item.baseTotalDueCents)} includes Fusion booking your round-trip flight. There is no additional flight charge beyond this amount.`}</span>
+      <strong>${escapeHtmlMpd(noteStrong)}</strong>
+      <span>${escapeHtmlMpd(noteSpan)}</span>
       ${locked ? `<em>Flight choice is locked after payment activity starts.</em>` : ""}
     </div>
   </section>`;
@@ -2832,6 +2869,39 @@ async function hydrateProgramPaymentsPanel(programs) {
   }
   mpdProgramPaymentItems = normalizeMpdProgramPaymentViewModels(mpdLastProgramsForPayments, payments);
   renderMpdPaymentsWorkspace();
+  await hydrateProgramCalendarPanel(payments);
+}
+
+/**
+ * @param {object} [payments]
+ */
+async function hydrateProgramCalendarPanel(payments) {
+  const tab = document.getElementById("mpd-program-tab-calendar");
+  const root = document.getElementById("mpd_program_calendar_workspace");
+  if (!tab || !root) return;
+  let pay = payments;
+  if (!pay) {
+    try {
+      pay = await getMyProgramPayments();
+    } catch {
+      pay = { approvedPrograms: [], summaries: [], ledger: [], plans: [] };
+    }
+  }
+  const gate = await resolveMemberCalendarGate(pay, mpdSlotSecuredProgramIds);
+  mpdCalendarEligiblePrograms = gate.eligible;
+  const forceHidden = tab.classList.contains("mpd-program-tab--force-hidden");
+  const showTab = gate.showTab && !forceHidden;
+  tab.toggleAttribute("hidden", !showTab);
+  tab.setAttribute("aria-hidden", showTab ? "false" : "true");
+  if (!showTab) {
+    root.innerHTML = `<div class="mpd-program-placeholder"><h3>Calendar</h3><p class="studio-muted">Your program calendar appears when a slot-secured program has its schedule live.</p></div>`;
+    if (tab.classList.contains("is-active")) setMpdProgramsTab("my-programs");
+    return;
+  }
+  await mountMemberProgramCalendar(root, {
+    eligiblePrograms: gate.eligible,
+    canCreate: true,
+  });
 }
 
 function mpdCurrentPaymentItem() {
@@ -4585,6 +4655,10 @@ export function generateSettingsProfileContent() {
                                         ${mpdInlineIconHtml(paymentsIconUrl, "mpd-program-tab__icon")}
                                         <span>Payments</span>
                                     </button>
+                                    <button type="button" class="mpd-program-tab mpd-program-tab--calendar" id="mpd-program-tab-calendar" role="tab" aria-selected="false" tabindex="-1" aria-controls="mpd-program-panel-calendar" data-mpd-program-tab="calendar" hidden aria-hidden="true">
+                                        <span class="mpd-program-tab__icon" aria-hidden="true">▣</span>
+                                        <span>Calendar</span>
+                                    </button>
                                 </div>
 
                                 <div class="mpd-program-tab-panel" id="mpd-program-panel-explore" role="tabpanel" aria-labelledby="mpd-program-tab-explore" data-mpd-program-panel="explore">
@@ -4663,6 +4737,15 @@ export function generateSettingsProfileContent() {
                                         <div class="mpd-program-placeholder">
                                             <h3>Payments</h3>
                                             <p class="studio-muted">Program payments appear after you are approved for a program.</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="mpd-program-tab-panel" id="mpd-program-panel-calendar" role="tabpanel" aria-labelledby="mpd-program-tab-calendar" data-mpd-program-panel="calendar" hidden>
+                                    <div id="mpd_program_calendar_workspace" class="mpd-program-calendar-workspace" aria-live="polite">
+                                        <div class="mpd-program-placeholder">
+                                            <h3>Calendar</h3>
+                                            <p class="studio-muted">Your program calendar appears when a slot-secured program has its schedule live.</p>
                                         </div>
                                     </div>
                                 </div>
@@ -5921,9 +6004,15 @@ export default function initSettingsProfile() {
 
     const exploreTab = document.getElementById("mpd-program-tab-explore");
     const paymentsTab = document.getElementById("mpd-program-tab-payments");
+    const calendarTab = document.getElementById("mpd-program-tab-calendar");
     const myTab = document.getElementById("mpd-program-tab-my-programs");
     if (exploreTab instanceof HTMLElement) exploreTab.hidden = applicantStudioActive || applicantLightGateActive;
     if (paymentsTab instanceof HTMLElement) paymentsTab.hidden = applicantStudioActive || applicantLightGateActive;
+    // Calendar visibility is owned by hydrateProgramCalendarPanel (slot-secured + schedule live).
+    // Do not force-hide it for applicant/tester modes — that left the tab visible-but-dead via CSS.
+    if (calendarTab instanceof HTMLElement) {
+      calendarTab.classList.remove("mpd-program-tab--force-hidden");
+    }
     if (myTab instanceof HTMLElement) myTab.hidden = applicantLightGateActive && !applicantStudioActive;
 
     const toggleWrap = document.getElementById("mpdApplicationOnlyToggleWrap");
@@ -6740,7 +6829,7 @@ export default function initSettingsProfile() {
         /** @type {Element} */ (e.target).closest?.("[data-mpd-program-tab]");
       if (programTab && rootEl.contains(programTab)) {
         e.preventDefault();
-        if (programTab.hasAttribute("hidden") || programTab.getAttribute("aria-hidden") === "true") return;
+        if (!mpdProgramTabIsAvailable(programTab)) return;
         setMpdProgramsTab(programTab.getAttribute("data-mpd-program-tab") || "explore");
         return;
       }
@@ -6913,7 +7002,7 @@ export default function initSettingsProfile() {
       const key = e.key;
       if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(key)) return;
       const tabs = Array.from(rootEl.querySelectorAll("[data-mpd-program-tab]")).filter(
-        (el) => !el.hasAttribute("hidden") && el.getAttribute("aria-hidden") !== "true",
+        (el) => mpdProgramTabIsAvailable(el),
       );
       const currentIndex = tabs.indexOf(tab);
       if (currentIndex < 0) return;

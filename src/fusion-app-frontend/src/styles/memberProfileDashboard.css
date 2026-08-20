@@ -1281,6 +1281,17 @@
   --mpd-tab-accent-soft: rgba(138, 91, 32, 0.14);
 }
 
+.settings-profile-page .mpd-program-tab--calendar {
+  --mpd-tab-accent: #5b4b8a;
+  --mpd-tab-accent-soft: rgba(91, 75, 138, 0.14);
+}
+
+/* display:inline-flex above beats the UA [hidden] rule — force hide when gated. */
+.settings-profile-page .mpd-program-tab[hidden],
+.settings-profile-page .mpd-program-tab.mpd-program-tab--force-hidden {
+  display: none !important;
+}
+
 .settings-profile-page .mpd-program-tab::after {
   content: "";
   position: absolute;
@@ -3259,6 +3270,20 @@
   border-color: #1f7a4b;
   background: rgba(239, 250, 244, 0.96);
   box-shadow: 0 0 0 2px rgba(31, 122, 75, 0.1);
+}
+
+.settings-profile-page .mpd-flight-choice-card.is-locked .mpd-flight-option.is-selected {
+  border-color: #1f7a4b;
+  background: rgba(239, 250, 244, 0.98);
+  box-shadow: 0 0 0 2px rgba(31, 122, 75, 0.14);
+  opacity: 1;
+}
+
+.settings-profile-page .mpd-flight-choice-card.is-locked .mpd-flight-option.is-muted {
+  opacity: 0.45;
+  border-color: rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.5);
+  box-shadow: none;
 }
 
 .settings-profile-page .mpd-flight-option:disabled {
@@ -5535,4 +5560,22 @@ a.mpd-section-card:hover {
   .mpd-join-unlock__plans {
     grid-template-columns: 1fr;
   }
+}
+
+.mpd-member-calendar.schedule-page {
+  padding: 0;
+}
+.mpd-member-calendar .schedule-hero {
+  margin-bottom: 0.75rem;
+}
+.mpd-member-calendar .schedule-hero__actions {
+  flex-wrap: wrap;
+}
+.mpd-member-calendar .button,
+.mpd-member-calendar .button--primary,
+.mpd-member-calendar .button--ics {
+  color: var(--fusion-ink, #111827) !important;
+}
+.mpd-program-calendar-workspace {
+  min-height: 12rem;
 }

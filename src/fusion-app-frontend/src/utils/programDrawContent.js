@@ -196,13 +196,14 @@ export function defaultProgramDrawLocaleEn() {
         },
         about: {
             title: 'About Program Draw',
-            lead: 'The Program Draw gives members a path into a fully sponsored residency placement without a formal application fee trade-off.',
+            lead: 'The Program Draw is a path into a fully sponsored residency slot, including flights to and from Japan and accommodations in Japan. The one-time entry fee (or an included award credit) is the only amount you pay to enter. If you win, there is no additional program cost: you receive a fully paid placement in the program.',
             paragraphs: [
-                'Each round fills toward an entry goal. When the round completes, one entrant is selected for a sponsored placement.',
-                'Entry is not automatic — you must submit contact details and complete entry with an included award credit or a one-time payment.',
+                'Each round fills toward an entry goal. When the round completes, one entrant is selected for a fully sponsored slot.',
+                'Entry is not automatic. You must submit contact details and complete entry with an included award credit or a one-time payment.',
             ],
             bullets: [
                 'Award credits from membership can cover entry when available',
+                'Winners receive a fully funded program slot with no further residency fees',
             ],
         },
         eligibility: {
@@ -222,7 +223,8 @@ export function defaultProgramDrawLocaleEn() {
                 'Entry fees and consumed Program Award credits are non-refundable',
                 'You may not enter the same round more than once',
                 'If you have already received a Program Draw placement within the past year, you may sponsor a FUSION member for entry instead of entering again',
-                'FUSION may update these terms; continued participation constitutes acceptance of the current terms',
+                'If a round does not reach 50% capacity, the draw is not executed. Entrants instead receive a 3-month Fusion platform membership with additional benefits.',
+                'These terms may be updated only while no Program Draw round is active. Any changes will be communicated before the next round opens.',
             ],
         },
     };
@@ -277,13 +279,14 @@ export function defaultProgramDrawLocaleJa() {
         },
         about: {
             title: 'プログラム抽選について',
-            lead: 'プログラム抽選は、正式応募の手数料トレードオフなしに、全額支援のレジデンシー枠へ進むためのメンバー向けの道です。',
+            lead: 'プログラム抽選は、全額スポンサーのレジデンシー枠（日本への往復航空券と日本国内の宿泊を含む）へ進むための道です。エントリーに必要な金額は、一度きりの参加費（または付与されたアワードクレジット）のみです。当選した場合、プログラムに関する追加費用はなく、全額負担の支援枠が付与されます。',
             paragraphs: [
-                '各ラウンドはエントリー目標に向かって埋まります。ラウンド完了後、エントリーした方の中から1名が支援枠に選ばれます。',
+                '各ラウンドはエントリー目標に向かって埋まります。ラウンド完了後、エントリーした方の中から1名が全額スポンサー枠に選ばれます。',
                 'エントリーは自動ではありません。連絡先を入力し、付与クレジットまたは一回払いで参加を完了してください。',
             ],
             bullets: [
                 'メンバーシップのアワードクレジットがある場合はエントリーに使えます',
+                '当選者には、レジデンシーに関する追加料金のない全額支援のプログラム枠が付与されます',
             ],
         },
         eligibility: {
@@ -303,7 +306,8 @@ export function defaultProgramDrawLocaleJa() {
                 'エントリー料金および消費済みのプログラムアワードクレジットは返金されません',
                 '同じラウンドに複数回エントリーすることはできません',
                 '過去1年以内にプログラム抽選の支援枠を受け取った場合は、再エントリーの代わりに FUSION メンバーのエントリーをスポンサーできます',
-                'FUSION はこれらの条件を更新する場合があります。参加の継続は最新の条件への同意とみなされます',
+                'ラウンドが定員の50%に達しない場合、抽選は実施されません。その場合、エントリーした方には追加特典付きの3か月間 Fusion プラットフォーム・メンバーシップが付与されます',
+                'これらの条件は、プログラム抽選のラウンドが実施されていない期間にのみ更新されることがあります。変更がある場合は、次のラウンド開始前にお知らせします',
             ],
         },
     };

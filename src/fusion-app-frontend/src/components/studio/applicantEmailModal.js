@@ -8,6 +8,7 @@ import { getIntegrationBaseUrl, sendEmail } from '../../utils/integrationApi.js'
 import { wrapEmailHtml } from '../../utils/emailCampaignTemplates.js';
 import { buildProgramRunSidebarDateLines } from '../../utils/programSidebarRunDates.js';
 import { formatStudioDateWithTitle } from '../../utils/studioDateFormat.js';
+import { formatUsdFromCents } from '../../utils/programPaymentMoney.js';
 import {
     buildStudioEmailCcList,
     populateStudioEmailCcSelect,
@@ -22,6 +23,7 @@ const LS_TEMPLATES = 'fusion-studio-applicant-email-templates';
 const DRAFT_PREFIX = 'fusion-studio-applicant-email-draft:';
 const APPROVED_TEMPLATE_ID = 'tpl-applicant-approved-invitation';
 const SLOT_NUDGE_TEMPLATE_ID = 'tpl-applicant-secure-slot-nudge';
+const REMAINING_BALANCE_TEMPLATE_ID = 'tpl-applicant-remaining-balance';
 
 /**
  * @param {string} displayName
@@ -196,6 +198,30 @@ Next steps:
 Once your payment is submitted, our team will follow up with confirmation and onboarding details.`,
         },
         {
+            id: REMAINING_BALANCE_TEMPLATE_ID,
+            name: 'Remaining balance reminder',
+            subject: 'Fusion {{programLocation}} Program — remaining balance',
+            signatureHtml: FUSION_TEAM_SIGNATURE_HTML,
+            signatureKey: 'fusion-team',
+            builtIn: true,
+            body: `Hi {{firstName}},
+
+This is a friendly reminder about your remaining balance for the Fusion {{programLocation}} Program ({{programStartDate}} – {{programEndDate}}).
+
+Program balance: {{programBalance}}
+Total paid to date: {{totalPaid}}
+Remaining balance: {{remainingBalance}}
+
+Please sign in and complete your payment when you are ready:
+
+1. Sign in to Fusion.
+2. Visit your Settings Profile page: {{profileProgramsUrl}}
+3. Open Programs, then select the Payments tab.
+4. Select the {{programLocation}} program and submit your remaining balance.
+
+If you have questions about your balance or payment plan, reply to this email and our team will help.`,
+        },
+        {
             id: 'tpl-default-schedule',
             name: 'Schedule meeting',
             subject: '[Fusion] Program application — {{programId}}',
@@ -314,10 +340,10 @@ function extractProgramTemplateInfo(program) {
 
 /**
  * @param {object} row — applicant row
- * @param {{ onSent?: () => void | Promise<void>, canClearCorrespondence?: boolean }} [opts]
+ * @param {{ onSent?: () => void | Promise<void>, canClearCorrespondence?: boolean, financeContext?: object, preferTemplateId?: string }} [opts]
  */
 export async function openApplicantEmailModal(row, opts = {}) {
-    const { onSent, canClearCorrespondence = false } = opts;
+    const { onSent, canClearCorrespondence = false, financeContext, preferTemplateId } = opts;
     const applicantId = String(row?.id ?? '').trim();
     const toEmail = String(row?.email ?? '').trim();
     const toValid = toEmail.toLowerCase().includes('@');
@@ -352,7 +378,16 @@ export async function openApplicantEmailModal(row, opts = {}) {
         programEndDate,
         profileProgramsUrl: profileProgramsUrl(),
         email: toEmail,
+        remainingBalance: formatUsdFromCents(financeContext?.remainingBalanceCents ?? 0),
+        totalPaid: formatUsdFromCents(financeContext?.totalPaymentsCents ?? 0),
+        programBalance: formatUsdFromCents(financeContext?.priceCategoryCents ?? 0),
     };
+
+    const financeMeta =
+        financeContext && typeof financeContext === 'object'
+            ? `<div><dt>Remaining balance</dt><dd>${escapeHtmlText(vars.remainingBalance)}</dd></div>
+          <div><dt>Total paid</dt><dd>${escapeHtmlText(vars.totalPaid)}</dd></div>`
+            : '';
 
     const title = 'Email applicant';
     const initialOutreach = Array.isArray(row?.emailOutreach) ? row.emailOutreach : [];
@@ -369,6 +404,7 @@ export async function openApplicantEmailModal(row, opts = {}) {
           <div><dt>Program</dt><dd>${escapeHtmlText(programLocation)}</dd></div>
           <div><dt>Date</dt><dd>${escapeHtmlText(programDate)}</dd></div>
           <div><dt>Status</dt><dd>${escapeHtmlText(String(row?.status || 'pending'))}</dd></div>
+          ${financeMeta}
         </dl>
       </section>
       <section class="studio-applicant-email-composer__card studio-applicant-email-composer__outreach-card">
@@ -555,7 +591,13 @@ export async function openApplicantEmailModal(row, opts = {}) {
     let customTemplates = readTemplates().filter((x) => !builtInIds.has(x.id));
     const builtInTemplates = builtInApplicantTemplates();
     let templates = [...builtInTemplates, ...customTemplates];
-    const defaultBuiltinId = isAccepted ? APPROVED_TEMPLATE_ID : builtInTemplates[0]?.id || '';
+    const preferredId = String(preferTemplateId || '').trim();
+    const defaultBuiltinId =
+        preferredId && builtInTemplates.some((t) => t.id === preferredId)
+            ? preferredId
+            : isAccepted
+              ? APPROVED_TEMPLATE_ID
+              : builtInTemplates[0]?.id || '';
 
     const refreshTemplates = (selectedBuiltinId = '', selectedCustomId = '') => {
         customTemplates = readTemplates().filter((x) => !builtInIds.has(x.id));

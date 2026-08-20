@@ -1,0 +1,170 @@
+/**
+ * Candid IDL for fusion-radar (hand-maintained until `dfx generate fusion-radar`).
+ * Not under src/declarations — those remain generate-only.
+ */
+export const idlFactory = ({ IDL }) => {
+    const RadarLeadType = IDL.Variant({
+        artist: IDL.Null,
+        gallery: IDL.Null,
+        curator: IDL.Null,
+        collector: IDL.Null,
+        organization: IDL.Null,
+    });
+    const RadarLeadStatus = IDL.Variant({
+        discovered: IDL.Null,
+        researching: IDL.Null,
+        qualified: IDL.Null,
+        contacted: IDL.Null,
+        replied: IDL.Null,
+        connected: IDL.Null,
+        rejected: IDL.Null,
+        archived: IDL.Null,
+    });
+    const RadarCareerStage = IDL.Variant({
+        emerging: IDL.Null,
+        midCareer: IDL.Null,
+        established: IDL.Null,
+        institution: IDL.Null,
+    });
+    const RadarLead = IDL.Record({
+        id: IDL.Text,
+        leadType: RadarLeadType,
+        status: RadarLeadStatus,
+        name: IDL.Text,
+        location: IDL.Text,
+        discipline: IDL.Text,
+        careerStage: RadarCareerStage,
+        website: IDL.Text,
+        publicEmail: IDL.Text,
+        instagram: IDL.Text,
+        representation: IDL.Text,
+        recentActivity: IDL.Text,
+        japanConnection: IDL.Text,
+        fusionFit: IDL.Text,
+        discoveryReason: IDL.Text,
+        warmConnection: IDL.Text,
+        aiScore: IDL.Nat,
+        aiRationale: IDL.Text,
+        aiRecommendedOpportunity: IDL.Text,
+        aiConcern: IDL.Text,
+        aiBestOpeningTopic: IDL.Text,
+        nextAction: IDL.Text,
+        sourceUrls: IDL.Vec(IDL.Text),
+        sourceId: IDL.Text,
+        tags: IDL.Vec(IDL.Text),
+        regionKey: IDL.Text,
+        notes: IDL.Text,
+        createdAt: IDL.Text,
+        updatedAt: IDL.Text,
+        scoredAt: IDL.Text,
+        contactedAt: IDL.Text,
+        repliedAt: IDL.Text,
+        createdBy: IDL.Principal,
+        payloadJson: IDL.Text,
+    });
+    const RadarRelationshipKind = IDL.Variant({
+        represents: IDL.Null,
+        exhibitedBy: IDL.Null,
+        curatedBy: IDL.Null,
+        collaboratesWith: IDL.Null,
+        referredBy: IDL.Null,
+        fusionMember: IDL.Null,
+        appliedTo: IDL.Null,
+        attendedEvent: IDL.Null,
+    });
+    const RadarRelationship = IDL.Record({
+        id: IDL.Text,
+        fromLeadId: IDL.Text,
+        toLeadId: IDL.Text,
+        kind: RadarRelationshipKind,
+        edgeLabel: IDL.Text,
+        evidence: IDL.Text,
+        createdAt: IDL.Text,
+    });
+    const RadarOutreachStatus = IDL.Variant({
+        drafted: IDL.Null,
+        approved: IDL.Null,
+        sent: IDL.Null,
+        replied: IDL.Null,
+        bounced: IDL.Null,
+    });
+    const RadarOutreachRecord = IDL.Record({
+        id: IDL.Text,
+        leadId: IDL.Text,
+        subject: IDL.Text,
+        bodyHtml: IDL.Text,
+        triggerEvent: IDL.Text,
+        templateId: IDL.Text,
+        status: RadarOutreachStatus,
+        draftedAt: IDL.Text,
+        approvedBy: IDL.Opt(IDL.Principal),
+        sentAt: IDL.Text,
+        repliedAt: IDL.Text,
+    });
+    const RadarSourceType = IDL.Variant({
+        residencyList: IDL.Null,
+        grantList: IDL.Null,
+        galleryRoster: IDL.Null,
+        exhibitionPage: IDL.Null,
+        rssFeed: IDL.Null,
+        instagramHashtag: IDL.Null,
+        manualList: IDL.Null,
+        googlePlaces: IDL.Null,
+    });
+    const RadarSourceConfig = IDL.Record({
+        id: IDL.Text,
+        sourceType: RadarSourceType,
+        sourceLabel: IDL.Text,
+        url: IDL.Text,
+        searchQuery: IDL.Text,
+        regionKey: IDL.Text,
+        enabled: IDL.Bool,
+        lastRunAt: IDL.Text,
+        runIntervalHours: IDL.Nat,
+        createdAt: IDL.Text,
+    });
+    const RadarStats = IDL.Record({
+        totalLeads: IDL.Nat,
+        byStatusJson: IDL.Text,
+        byTypeJson: IDL.Text,
+        byRegionJson: IDL.Text,
+        outreachDrafted: IDL.Nat,
+        outreachSent: IDL.Nat,
+        outreachReplied: IDL.Nat,
+        avgScore: IDL.Nat,
+    });
+
+    return IDL.Service({
+        bootstrapAdminIfEmpty: IDL.Func([], [IDL.Bool], []),
+        adminAddAdmin: IDL.Func([IDL.Principal], [], []),
+        adminAddStaff: IDL.Func([IDL.Principal], [], []),
+        adminRemoveStaff: IDL.Func([IDL.Principal], [], []),
+        adminSetIntegrationServicePrincipal: IDL.Func([IDL.Principal], [], []),
+        isCallerRadarAdmin: IDL.Func([], [IDL.Bool], ['query']),
+        isCallerRadarStaffOrAdmin: IDL.Func([], [IDL.Bool], ['query']),
+        listRadarAdmins: IDL.Func([], [IDL.Vec(IDL.Principal)], ['query']),
+        listRadarStaff: IDL.Func([], [IDL.Vec(IDL.Principal)], ['query']),
+        staffUpsertRadarLead: IDL.Func([RadarLead], [RadarLead], []),
+        staffBulkUpsertRadarLeads: IDL.Func([IDL.Vec(RadarLead)], [IDL.Nat], []),
+        integrationBulkIngestRadarLeads: IDL.Func([IDL.Vec(RadarLead)], [IDL.Nat], []),
+        staffDeleteRadarLead: IDL.Func([IDL.Text], [IDL.Bool], []),
+        staffGetRadarLead: IDL.Func([IDL.Text], [IDL.Opt(RadarLead)], ['query']),
+        staffListRadarLeads: IDL.Func([], [IDL.Vec(RadarLead)], ['query']),
+        staffUpsertRadarRelationship: IDL.Func([RadarRelationship], [RadarRelationship], []),
+        staffDeleteRadarRelationship: IDL.Func([IDL.Text], [IDL.Bool], []),
+        staffListRadarRelationships: IDL.Func([IDL.Text], [IDL.Vec(RadarRelationship)], ['query']),
+        staffUpsertRadarOutreach: IDL.Func([RadarOutreachRecord], [RadarOutreachRecord], []),
+        staffDeleteRadarOutreach: IDL.Func([IDL.Text], [IDL.Bool], []),
+        staffListRadarOutreach: IDL.Func([IDL.Text], [IDL.Vec(RadarOutreachRecord)], ['query']),
+        staffUpsertRadarSource: IDL.Func([RadarSourceConfig], [RadarSourceConfig], []),
+        staffDeleteRadarSource: IDL.Func([IDL.Text], [IDL.Bool], []),
+        staffListRadarSources: IDL.Func([], [IDL.Vec(RadarSourceConfig)], ['query']),
+        staffRadarStats: IDL.Func([], [RadarStats], ['query']),
+        staffScoreRadarLead: IDL.Func([IDL.Text, IDL.Text], [IDL.Text], []),
+        staffDraftRadarOutreach: IDL.Func([IDL.Text, IDL.Text], [IDL.Text], []),
+        staffEnrichFromText: IDL.Func([IDL.Text], [IDL.Text], []),
+        health: IDL.Func([], [IDL.Text], []),
+    });
+};
+
+export const canisterId = '';

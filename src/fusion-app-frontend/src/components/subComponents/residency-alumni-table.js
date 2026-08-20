@@ -1,5 +1,10 @@
 import { navigate } from '../../router.js';
 import { buildAlumniProgramGroups } from '../../utils/residencyAlumniEntries.js';
+import {
+    findArtistBySlug,
+    findArtistForConfirmedListLabel,
+} from '../../utils/artistSlug.js';
+import { ensureArtistPreviewModalHost } from './artistPreviewModal.js';
 
 /**
  * @param {string} s
@@ -23,8 +28,8 @@ function renderNameList(names) {
             .map((n) => {
                 const href = n.slug ? `/profile/${encodeURIComponent(n.slug)}` : '';
                 return href
-                    ? `<li><a class="rat-name" href="${escapeHtml(href)}">${escapeHtml(n.name)}</a></li>`
-                    : `<li><span class="rat-name rat-name--no-link">${escapeHtml(n.name)}</span></li>`;
+                    ? `<li><a class="rat-name" href="${escapeHtml(href)}" data-name="${escapeHtml(n.name)}">${escapeHtml(n.name)}</a></li>`
+                    : `<li><span class="rat-name rat-name--no-link" data-name="${escapeHtml(n.name)}">${escapeHtml(n.name)}</span></li>`;
             })
             .join('')}
     </ul>`;
@@ -36,24 +41,61 @@ class ResidencyAlumniTable extends HTMLElement {
         this._shadow = this.attachShadow({ mode: 'open' });
         /** @type {Array<{ program: string, name: string, slug: string }>} */
         this._entries = [];
+        /** @type {object[]} */
+        this._artistPool = [];
         /** @type {(e: Event) => void} */
         this._onShadowClick = (e) => {
-            const a = /** @type {Element | null} */ (e.target)?.closest?.('a[href^="/"]');
-            if (!a) return;
+            const link = /** @type {HTMLAnchorElement | null} */ (
+                /** @type {Element | null} */ (e.target)?.closest?.('a.rat-name[href^="/"]')
+            );
+            if (!link) return;
             e.preventDefault();
-            navigate(a.getAttribute('href'));
+            const artist = this._resolveArtistForLink(link);
+            if (artist) {
+                ensureArtistPreviewModalHost();
+                window.dispatchEvent(
+                    new CustomEvent('fusion-open-artist-preview', {
+                        detail: { artist, returnFocus: link },
+                    }),
+                );
+                return;
+            }
+            const href = link.getAttribute('href');
+            if (href) navigate(href);
         };
     }
 
     /**
-     * @param {Array<{ program: string, name: string, slug: string }>} entries
+     * @param {HTMLAnchorElement} link
+     * @returns {object | null}
      */
-    setAlumni(entries) {
+    _resolveArtistForLink(link) {
+        const pool = this._artistPool;
+        if (!Array.isArray(pool) || !pool.length) return null;
+        const href = String(link.getAttribute('href') || '');
+        const slugMatch = href.match(/^\/profile\/([^/?#]+)/);
+        const slug = slugMatch ? decodeURIComponent(slugMatch[1]) : '';
+        if (slug) {
+            const bySlug = findArtistBySlug(slug, pool);
+            if (bySlug) return bySlug;
+        }
+        const name = String(link.getAttribute('data-name') || link.textContent || '').trim();
+        if (name) return findArtistForConfirmedListLabel(name, pool);
+        return null;
+    }
+
+    /**
+     * @param {Array<{ program: string, name: string, slug: string }>} entries
+     * @param {object[]} [artistPool]
+     */
+    setAlumni(entries, artistPool = []) {
         this._entries = Array.isArray(entries) ? entries : [];
+        this._artistPool = Array.isArray(artistPool) ? artistPool : [];
         this._render();
     }
 
     connectedCallback() {
+        ensureArtistPreviewModalHost();
         this._shadow.addEventListener('click', this._onShadowClick);
         this._render();
     }

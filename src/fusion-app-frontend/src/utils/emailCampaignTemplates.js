@@ -26,7 +26,7 @@ import {
  *   requiresRosterPlaceholders?: boolean,
  *   contentSourceTypes?: EmailContentSourceType[],
  *   defaultEyebrow?: string,
- *   templateGroup?: 'updates' | 'spotlights' | 'campaigns',
+ *   templateGroup?: 'updates' | 'spotlights' | 'campaigns' | 'features',
  * }} EmailTemplateDef
  */
 
@@ -231,18 +231,18 @@ export const EMAIL_CAMPAIGN_TEMPLATES = {
         templateGroup: 'campaigns',
         defaultEyebrow: 'Join the Network',
         contentSourceTypes: ['website'],
-        defaultSubject: 'Your practice belongs in a wider context — Join FUSION',
+        defaultSubject: 'Join a curated art network — Join FUSION',
         defaultPreview:
-            'A curated network connecting artists, galleries, curators, and collectors through programs rooted in Japan.',
+            'A curated art network connecting artists, galleries, curators, and collectors through programs rooted in Japan.',
         bodyHtml: renderFusionEmailFromSlots({
             eyebrow: 'Join the Network',
             heroImageUrl: generalSlots.heroImageUrl,
-            heroAlt: 'Fusion network — Japan',
+            heroAlt: 'Fusion curated art network — Japan',
             pillLabel: 'MEMBERSHIP',
             headlineHtml: 'Your practice<br>belongs in a<br>wider context.',
             bodyHtml: [
                 fusionEmailParagraph(
-                    'Join a curated network connecting artists, galleries, curators, and collectors through programs rooted in Japan.',
+                    'Join a curated art network connecting artists, galleries, curators, and collectors through programs rooted in Japan.',
                     'lead',
                 ),
                 `<ul style="${FUSION_EMAIL_STYLES.bodyList}">
@@ -337,19 +337,199 @@ export const EMAIL_CAMPAIGN_TEMPLATES = {
         id: 'tpl_reminder',
         name: 'Reminder (last chance)',
         templateGroup: 'campaigns',
-        defaultEyebrow: 'Reminder',
-        defaultSubject: 'Last chance to apply',
-        defaultPreview: 'Final days — don’t miss the deadline.',
-        bodyHtml: fusionEmailLayout({
-            eyebrow: 'Reminder',
-            pillLabel: 'DEADLINE',
-            headlineHtml: 'Closing<br>Soon',
-            bodyHtml: fusionEmailParagraph(
-                'This is a short note to remind you that applications close soon. If you have questions, simply reply to this email.',
-                'last',
-            ),
-            cta: { label: 'VIEW DETAILS', href: 'https://www.fusionart.world' },
+        defaultEyebrow: 'Final Days',
+        contentSourceTypes: ['program'],
+        defaultSubject: 'Last chance — applications close soon',
+        defaultPreview:
+            'A few places remain. If this residency has been on your mind, now is the moment to apply.',
+        bodyHtml: renderFusionEmailFromSlots({
+            eyebrow: 'Final Days',
+            heroImageUrl: generalSlots.heroImageUrl,
+            heroAlt: 'Fusion artist residency — Japan',
+            pillLabel: 'DEADLINE APPROACHING',
+            headlineHtml: 'This is<br>your window.',
+            bodyHtml: [
+                fusionEmailParagraph(
+                    'Applications for the upcoming FUSION Artist Residency close soon — and a handful of places are still open.',
+                    'lead',
+                ),
+                fusionEmailParagraph(
+                    'If Japan, focused studio time, and a community of artists, curators, and collectors have been on your mind, this is the moment. The program is shaped around place, process, and exchange: time to deepen your practice in a landscape that rewards attention.',
+                ),
+                fusionEmailParagraph(
+                    'Submitting takes a short application. You do not need a finished proposal — we want to understand your practice, what you would explore, and why this chapter matters to you now.',
+                ),
+                fusionEmailParagraph(
+                    'Once the call closes, we move into review. If you have been waiting for a sign, consider this it.',
+                    'last',
+                ),
+            ].join('\n'),
+            cta: {
+                label: 'APPLY BEFORE THE DEADLINE',
+                href: 'https://www.fusionart.world/programs',
+            },
+            footnote: 'Limited places · Questions? Reply to this email',
         }),
+        notes: 'Bind a program to pull hero image and apply link only — reminder copy stays.',
+    },
+    tpl_audio_recording: {
+        id: 'tpl_audio_recording',
+        name: 'Audio recording',
+        templateGroup: 'features',
+        defaultEyebrow: 'New on Fusion',
+        defaultSubject: 'Your voice carries context no CV can',
+        defaultPreview:
+            'Leave a short voice note about your practice — rough is welcome. Context lives in the spoken word.',
+        bodyHtml: renderFusionEmailFromSlots({
+            eyebrow: 'New on Fusion',
+            heroImageUrl: generalSlots.heroImageUrl,
+            heroAlt: 'Fusion — artist voice and context',
+            pillLabel: 'AUDIO FEATURE',
+            headlineHtml: 'Your voice<br>holds the<br>context.',
+            bodyHtml: [
+                fusionEmailParagraph(
+                    'Images and bios tell part of the story. Voice does something else: it carries tone, pace, hesitation, warmth — the living context around your work.',
+                    'lead',
+                ),
+                fusionEmailParagraph(
+                    'We have added audio recording to your Fusion profile so you can leave a short voice note describing your current practice. Think of it as a spoken caption: where you are, what you are making, what you are circling.',
+                ),
+                fusionEmailParagraph(
+                    'It does not need to be polished. Rough is fine — even preferred. A minute or two of honest speech often says more than a carefully edited paragraph.',
+                ),
+                fusionEmailParagraph(
+                    'Open your profile settings, hit Record, and speak as you would to a collaborator who asked, “What are you working on right now?”',
+                    'last',
+                ),
+            ].join('\n'),
+            cta: {
+                label: 'RECORD A SHORT NOTE',
+                href: 'https://www.fusionart.world/settings/profile',
+            },
+            footnote: 'Rough is welcome · A minute or two is enough',
+        }),
+        notes: 'Platform feature announcement — edit CTA if you want a different deep link.',
+    },
+    tpl_radar_residency_invite: {
+        id: 'tpl_radar_residency_invite',
+        name: 'Radar — Residency invite',
+        templateGroup: 'campaigns',
+        defaultEyebrow: 'Fusion Radar',
+        defaultSubject: 'An invitation — programs rooted in Japan',
+        defaultPreview:
+            'A personal note about Fusion’s Japan artist residency and curated art network.',
+        bodyHtml: renderFusionEmailFromSlots({
+            eyebrow: 'From Fusion',
+            heroImageUrl: generalSlots.heroImageUrl,
+            heroAlt: 'Fusion residency — Japan',
+            pillLabel: 'RESIDENCY',
+            headlineHtml: 'A place<br>for focused<br>practice.',
+            bodyHtml: [
+                fusionEmailParagraph(
+                    'I wanted to reach out personally about Fusion’s artist residency programs rooted in Japan — and why your practice feels especially relevant to the research environment we are developing.',
+                    'lead',
+                ),
+                fusionEmailParagraph(
+                    'If you are open to a short conversation, I would be glad to share dates, structure, and how membership connects to applications.',
+                    'last',
+                ),
+            ].join('\n'),
+            cta: {
+                label: 'VIEW PROGRAMS',
+                href: 'https://fusionart.world/programs',
+            },
+        }),
+        notes: 'Radar outreach — residency candidates.',
+    },
+    tpl_radar_gallery_intro: {
+        id: 'tpl_radar_gallery_intro',
+        name: 'Radar — Gallery introduction',
+        templateGroup: 'campaigns',
+        defaultEyebrow: 'Fusion Radar',
+        defaultSubject: 'Introducing Fusion — a curated art network',
+        defaultPreview: 'Galleries, artists, and programs rooted in Japan.',
+        bodyHtml: renderFusionEmailFromSlots({
+            eyebrow: 'From Fusion',
+            heroImageUrl: generalSlots.heroImageUrl,
+            heroAlt: 'Fusion curated art network',
+            pillLabel: 'GALLERY',
+            headlineHtml: 'A network<br>built for<br>exchange.',
+            bodyHtml: [
+                fusionEmailParagraph(
+                    'Fusion is a curated art network connecting artists, galleries, curators, and collectors through programs rooted in Japan. I am writing because your gallery’s program aligns with artists and themes we are developing.',
+                    'lead',
+                ),
+                fusionEmailParagraph(
+                    'If a conversation about roster exchange, residency partnerships, or introductions would be useful, I would welcome a reply.',
+                    'last',
+                ),
+            ].join('\n'),
+            cta: {
+                label: 'JOIN THE NETWORK',
+                href: 'https://fusionart.world/join-network',
+            },
+        }),
+        notes: 'Radar outreach — galleries.',
+    },
+    tpl_radar_curator_connect: {
+        id: 'tpl_radar_curator_connect',
+        name: 'Radar — Curator connect',
+        templateGroup: 'campaigns',
+        defaultEyebrow: 'Fusion Radar',
+        defaultSubject: 'Curatorial connection — Fusion & Japan',
+        defaultPreview: 'Shared themes between your exhibitions and Fusion’s programs.',
+        bodyHtml: renderFusionEmailFromSlots({
+            eyebrow: 'From Fusion',
+            heroImageUrl: generalSlots.heroImageUrl,
+            heroAlt: 'Fusion — curatorial exchange',
+            pillLabel: 'CURATOR',
+            headlineHtml: 'Shared<br>questions<br>of place.',
+            bodyHtml: [
+                fusionEmailParagraph(
+                    'I have been following your recent curatorial work and wanted to connect it with Fusion’s programs rooted in Japan — especially where material practice, migration, and place-based research meet.',
+                    'lead',
+                ),
+                fusionEmailParagraph(
+                    'If you are open to an introduction or a short exchange, I would be glad to continue the conversation.',
+                    'last',
+                ),
+            ].join('\n'),
+            cta: {
+                label: 'EXPLORE CONTEXT',
+                href: 'https://fusionart.world/context',
+            },
+        }),
+        notes: 'Radar outreach — curators.',
+    },
+    tpl_radar_collector_intro: {
+        id: 'tpl_radar_collector_intro',
+        name: 'Radar — Collector / patron intro',
+        templateGroup: 'campaigns',
+        defaultEyebrow: 'Fusion Radar',
+        defaultSubject: 'Fusion — editions, programs, and introductions',
+        defaultPreview: 'Collector-adjacent introduction through Fusion’s curated network.',
+        bodyHtml: renderFusionEmailFromSlots({
+            eyebrow: 'From Fusion',
+            heroImageUrl: generalSlots.heroImageUrl,
+            heroAlt: 'Fusion — collectors and editions',
+            pillLabel: 'COLLECTOR',
+            headlineHtml: 'A pathway<br>into the<br>network.',
+            bodyHtml: [
+                fusionEmailParagraph(
+                    'Fusion connects artists, galleries, curators, and collectors through programs rooted in Japan. I am reaching out because your public support of contemporary practice suggests a natural pathway into our network — via editions, events, or residency patronage.',
+                    'lead',
+                ),
+                fusionEmailParagraph(
+                    'If a personal introduction or a look at current editions would be welcome, reply and we will follow up carefully.',
+                    'last',
+                ),
+            ].join('\n'),
+            cta: {
+                label: 'VIEW EDITIONS',
+                href: 'https://fusionart.world/editions',
+            },
+        }),
+        notes: 'Radar outreach — collector-adjacent organizations and patrons.',
     },
 };
 
@@ -365,6 +545,7 @@ export const EMAIL_TEMPLATE_GROUPS = [
     { key: 'updates', label: 'Updates' },
     { key: 'spotlights', label: 'Spotlights' },
     { key: 'campaigns', label: 'Campaigns' },
+    { key: 'features', label: 'Features' },
 ];
 
 /**

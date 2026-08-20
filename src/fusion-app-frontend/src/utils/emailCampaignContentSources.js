@@ -15,7 +15,14 @@ import {
     listCommunityVideosStudio,
 } from './database.js';
 import { getEmailTemplateById } from './emailCampaignTemplates.js';
-import { renderFusionEmailFromSlots, fusionEmailParagraph, FUSION_EMAIL_STYLES, normalizeFusionEmailBodyHtml, isEmailVideoUrl } from './emailFusionLayout.js';
+import {
+    renderFusionEmailFromSlots,
+    fusionEmailParagraph,
+    FUSION_EMAIL_STYLES,
+    normalizeFusionEmailBodyHtml,
+    isEmailVideoUrl,
+    extractFusionEmailSlots,
+} from './emailFusionLayout.js';
 import { toCloudFrontAssetUrl } from './assetDistribution.js';
 import { normalizeCommunityVideoRecord, parseVideoLocales } from './videoPageModel.js';
 
@@ -23,6 +30,12 @@ const META_PREFIX = 'FUSION_EC_META=';
 const JOIN_NETWORK_CTA_HREF = 'https://fusionart.world/join-network';
 const DEFAULT_WEBSITE_HERO =
     'https://fusionart-bucket.s3.us-east-2.amazonaws.com/uploads/platform-assets/program_hero-1.jpg';
+
+/**
+ * Templates that keep their own copy when a content source is applied;
+ * only hero media + CTA href (and related alts) come from the source.
+ */
+const CONTENT_SOURCE_OVERLAY_ONLY = new Set(['tpl_reminder']);
 
 /** Curated Website / Network items for onboarding templates. */
 export const WEBSITE_NETWORK_SOURCE_ITEMS = [
@@ -385,7 +398,7 @@ export function resolveWebsiteSource(id, ctx = {}) {
     if (key === 'why-join') {
         const lead =
             String(valueEn.lead ?? bandEn.description ?? '').trim() ||
-            'Join a curated network connecting artists, galleries, curators, and collectors through programs rooted in Japan.';
+            'Join a curated art network connecting artists, galleries, curators, and collectors through programs rooted in Japan.';
         const whyHero = pickEmailHeroMedia([
             ctxEn?.subImage,
             context.subImage,
@@ -410,7 +423,7 @@ export function resolveWebsiteSource(id, ctx = {}) {
             ].join('\n'),
             cta,
             footnote,
-            subject: 'Your practice belongs in a wider context — Join FUSION',
+            subject: 'Join a curated art network — Join FUSION',
             previewText: lead.slice(0, 160),
         };
     }
@@ -468,11 +481,11 @@ export function resolveWebsiteSource(id, ctx = {}) {
             heroImageUrl: contextHero,
             heroAlt: 'Fusion network',
             pillLabel: 'NETWORK',
-            headlineHtml: 'A curated<br>network.',
+            headlineHtml: 'A curated<br>art network.',
             bodyHtml: [
                 fusionEmailParagraph(
                     String(bandEn.description ?? '').trim() ||
-                        'Connect with artists, galleries, curators, and collectors through a platform built for exchange.',
+                        'Connect with artists, galleries, curators, and collectors through a curated art network built for exchange.',
                     'lead',
                 ),
                 networkList,
@@ -480,7 +493,7 @@ export function resolveWebsiteSource(id, ctx = {}) {
             ].join('\n'),
             cta,
             footnote,
-            subject: 'Join the FUSION network',
+            subject: 'Join Fusion’s curated art network',
             previewText: 'Connect with artists, galleries, curators, and collectors.',
         };
     }
@@ -497,16 +510,16 @@ export function resolveWebsiteSource(id, ctx = {}) {
         pillLabel: 'CONTEXT',
         headlineHtml: headline.replace(/\s+/g, '<br>'),
         bodyHtml: [
-            fusionEmailParagraph(sub || h2 || 'Fusion is a curated platform rooted in Japan.', 'lead'),
+            fusionEmailParagraph(sub || h2 || 'Fusion is a curated art network rooted in Japan.', 'lead'),
             h2 && h2 !== sub ? fusionEmailParagraph(h2) : '',
-            h3 ? fusionEmailParagraph(h3, 'last') : fusionEmailParagraph('Join the network and bring your practice into a wider context.', 'last'),
+            h3 ? fusionEmailParagraph(h3, 'last') : fusionEmailParagraph('Join the curated art network and bring your practice into a wider context.', 'last'),
         ]
             .filter(Boolean)
             .join('\n'),
         cta,
         footnote,
         subject: `${headline} — Join FUSION`,
-        previewText: (sub || h2 || 'Join the FUSION network.').slice(0, 160),
+        previewText: (sub || h2 || 'Join Fusion’s curated art network.').slice(0, 160),
     };
 }
 
@@ -626,16 +639,53 @@ export function listContentSourceOptions(type, rows) {
 }
 
 /**
+ * Overlay program/media facts onto a template's own layout copy.
+ * @param {string} templateId
+ * @param {EmailLayoutSlots} sourceSlots
+ * @returns {EmailLayoutSlots}
+ */
+function mergeOverlayOnlyTemplateSlots(templateId, sourceSlots) {
+    const tpl = getEmailTemplateById(templateId);
+    const base = extractFusionEmailSlots(String(tpl?.bodyHtml || ''));
+    if (!base) return sourceSlots;
+    const href = String(sourceSlots?.cta?.href || base.cta?.href || '').trim();
+    const programLabel = String(sourceSlots?.subject || sourceSlots?.heroAlt || '')
+        .replace(/\s*\(\d{4}\)\s*$/, '')
+        .trim();
+    return {
+        ...base,
+        heroImageUrl: String(sourceSlots?.heroImageUrl || base.heroImageUrl || '').trim(),
+        heroPosterUrl: String(sourceSlots?.heroPosterUrl || base.heroPosterUrl || '').trim(),
+        heroAlt: String(sourceSlots?.heroAlt || base.heroAlt || '').trim(),
+        cta: {
+            label: String(base.cta?.label || '').trim(),
+            href: href || 'https://www.fusionart.world/programs',
+        },
+        subject: programLabel
+            ? `Last chance to apply — ${programLabel}`
+            : String(tpl?.defaultSubject || '').trim(),
+        previewText: String(tpl?.defaultPreview || sourceSlots?.previewText || '')
+            .trim()
+            .slice(0, 200),
+    };
+}
+
+/**
  * @param {string} templateId
  * @param {EmailLayoutSlots} slots
  * @returns {{ subject: string, previewText: string, bodyHtml: string }}
  */
 export function buildTemplateDraftFromSlots(templateId, slots) {
     const tpl = getEmailTemplateById(templateId);
+    const merged = CONTENT_SOURCE_OVERLAY_ONLY.has(templateId)
+        ? mergeOverlayOnlyTemplateSlots(templateId, slots)
+        : slots;
     return {
-        subject: String(slots.subject ?? tpl?.defaultSubject ?? '').trim(),
-        previewText: String(slots.previewText ?? tpl?.defaultPreview ?? '').trim().slice(0, 200),
-        bodyHtml: renderFusionEmailFromSlots(slots),
+        subject: String(merged.subject ?? tpl?.defaultSubject ?? '').trim(),
+        previewText: String(merged.previewText ?? tpl?.defaultPreview ?? '')
+            .trim()
+            .slice(0, 200),
+        bodyHtml: renderFusionEmailFromSlots(merged),
     };
 }
 
@@ -903,6 +953,7 @@ export function buildQuickDesignContext(templateId, source, userPrompt, caches =
     const layoutSlots = editorDraft.layoutSlots || null;
     const bodyHtml = String(editorDraft.rawBodyHtml ?? '').trim();
     const isOnboarding = templateId === 'tpl_onboarding';
+    const isReminder = templateId === 'tpl_reminder';
     return {
         templateId,
         templateName: tpl?.name ?? '',
@@ -910,7 +961,9 @@ export function buildQuickDesignContext(templateId, source, userPrompt, caches =
         userPrompt: String(userPrompt ?? '').trim().slice(0, 2000),
         task: isOnboarding
             ? 'Write onboarding email copy inviting readers to join the FUSION membership network (Japan-rooted programs). Reformat existingDraft into layout JSON slots. CTA href must remain https://fusionart.world/join-network. Return text slots only; app applies the Fusion shell.'
-            : 'Reformat existingDraft into layout JSON slots. The app applies the Fusion email shell (logo, hero, borders, footer) using styleGuide — return text slots only. Preserve factual names, dates, and URLs from sourceFacts when present.',
+            : isReminder
+              ? 'Write a last-chance program application reminder. Keep urgency and invite readers to apply before the deadline. Use sourceFacts only for program name, hero image, dates, and apply URL — do not rewrite as a generic Program Update. Preserve reminder tone from existingDraft when present. Return text slots only; app applies the Fusion shell.'
+              : 'Reformat existingDraft into layout JSON slots. The app applies the Fusion email shell (logo, hero, borders, footer) using styleGuide — return text slots only. Preserve factual names, dates, and URLs from sourceFacts when present.',
         styleGuide: {
             canvas: FUSION_EMAIL_STYLES.canvas,
             textColor: FUSION_EMAIL_STYLES.text,
@@ -929,6 +982,12 @@ export function buildQuickDesignContext(templateId, source, userPrompt, caches =
                           'Emphasize membership value, Japan positioning, residency applications included, cancel anytime. Primary CTA label like JOIN FUSION linking to /join-network.',
                   }
                 : {}),
+            ...(isReminder
+                ? {
+                      reminderNote:
+                          'Eyebrow like Final Days / Last chance. CTA label like APPLY BEFORE THE DEADLINE. Do not use Program Update eyebrow or generic program-update headlines.',
+                  }
+                : {}),
         },
         existingDraft: {
             subject,
@@ -938,17 +997,26 @@ export function buildQuickDesignContext(templateId, source, userPrompt, caches =
             bodyHtml,
         },
         sourceFacts: sourceSlots
-            ? {
-                  eyebrow: sourceSlots.eyebrow,
-                  headlineHtml: sourceSlots.headlineHtml,
-                  heroImageUrl: sourceSlots.heroImageUrl,
-                  heroAlt: sourceSlots.heroAlt,
-                  pillLabel: sourceSlots.pillLabel,
-                  bodyHtml: sourceSlots.bodyHtml,
-                  cta: sourceSlots.cta,
-                  subject: sourceSlots.subject,
-                  previewText: sourceSlots.previewText,
-              }
+            ? isReminder
+                ? {
+                      heroImageUrl: sourceSlots.heroImageUrl,
+                      heroAlt: sourceSlots.heroAlt,
+                      programSubject: sourceSlots.subject,
+                      programPreview: sourceSlots.previewText,
+                      applyHref: sourceSlots.cta?.href,
+                      dateHints: sourceSlots.bodyHtml,
+                  }
+                : {
+                      eyebrow: sourceSlots.eyebrow,
+                      headlineHtml: sourceSlots.headlineHtml,
+                      heroImageUrl: sourceSlots.heroImageUrl,
+                      heroAlt: sourceSlots.heroAlt,
+                      pillLabel: sourceSlots.pillLabel,
+                      bodyHtml: sourceSlots.bodyHtml,
+                      cta: sourceSlots.cta,
+                      subject: sourceSlots.subject,
+                      previewText: sourceSlots.previewText,
+                  }
             : null,
     };
 }
@@ -964,57 +1032,89 @@ export function finalizeQuickDesignSlots(templateId, llmSlots, opts = {}) {
     const tpl = getEmailTemplateById(templateId);
     const sourceSlots = opts.sourceSlots || null;
     const editor = opts.editorSlots || {};
+    const overlayOnly = CONTENT_SOURCE_OVERLAY_ONLY.has(templateId);
+    const tplSlots = overlayOnly ? extractFusionEmailSlots(String(tpl?.bodyHtml || '')) : null;
 
     const str = (v) => (v != null && String(v).trim() !== '' ? String(v).trim() : '');
 
-    const rawBody =
-        str(llmSlots.bodyHtml) || str(editor.bodyHtml) || str(sourceSlots?.bodyHtml) || '';
+    const rawBody = overlayOnly
+        ? str(llmSlots.bodyHtml) ||
+          str(editor.bodyHtml) ||
+          str(tplSlots?.bodyHtml) ||
+          ''
+        : str(llmSlots.bodyHtml) || str(editor.bodyHtml) || str(sourceSlots?.bodyHtml) || '';
     const normalizedBody = normalizeFusionEmailBodyHtml(rawBody);
 
     return {
-        eyebrow:
-            str(sourceSlots?.eyebrow) ||
-            str(llmSlots.eyebrow) ||
-            str(editor.eyebrow) ||
-            tpl?.defaultEyebrow ||
-            'Program Update',
-        heroImageUrl: str(sourceSlots?.heroImageUrl) || str(editor.heroImageUrl) || '',
-        heroPosterUrl: str(sourceSlots?.heroPosterUrl) || str(editor.heroPosterUrl) || '',
-        heroAlt: str(sourceSlots?.heroAlt) || str(editor.heroAlt) || '',
-        pillLabel: str(llmSlots.pillLabel) || str(sourceSlots?.pillLabel) || str(editor.pillLabel) || '',
-        headlineHtml:
-            str(sourceSlots?.headlineHtml) ||
-            str(llmSlots.headlineHtml) ||
-            str(editor.headlineHtml) ||
-            '',
+        eyebrow: overlayOnly
+            ? str(llmSlots.eyebrow) ||
+              str(editor.eyebrow) ||
+              str(tplSlots?.eyebrow) ||
+              tpl?.defaultEyebrow ||
+              'Final Days'
+            : str(sourceSlots?.eyebrow) ||
+              str(llmSlots.eyebrow) ||
+              str(editor.eyebrow) ||
+              tpl?.defaultEyebrow ||
+              'Program Update',
+        heroImageUrl: str(sourceSlots?.heroImageUrl) || str(editor.heroImageUrl) || str(tplSlots?.heroImageUrl) || '',
+        heroPosterUrl:
+            str(sourceSlots?.heroPosterUrl) || str(editor.heroPosterUrl) || str(tplSlots?.heroPosterUrl) || '',
+        heroAlt: str(sourceSlots?.heroAlt) || str(editor.heroAlt) || str(tplSlots?.heroAlt) || '',
+        pillLabel: overlayOnly
+            ? str(llmSlots.pillLabel) || str(editor.pillLabel) || str(tplSlots?.pillLabel) || ''
+            : str(llmSlots.pillLabel) || str(sourceSlots?.pillLabel) || str(editor.pillLabel) || '',
+        headlineHtml: overlayOnly
+            ? str(llmSlots.headlineHtml) ||
+              str(editor.headlineHtml) ||
+              str(tplSlots?.headlineHtml) ||
+              ''
+            : str(sourceSlots?.headlineHtml) ||
+              str(llmSlots.headlineHtml) ||
+              str(editor.headlineHtml) ||
+              '',
         bodyHtml: normalizedBody,
-        footnote: str(llmSlots.footnote) || str(editor.footnote) || '',
+        footnote:
+            str(llmSlots.footnote) || str(editor.footnote) || str(tplSlots?.footnote) || '',
         cta: {
-            label:
-                str(sourceSlots?.cta?.label) ||
-                str(llmSlots.cta?.label) ||
-                str(editor.cta?.label) ||
-                (templateId === 'tpl_onboarding' ? 'JOIN FUSION' : ''),
+            label: overlayOnly
+                ? str(llmSlots.cta?.label) ||
+                  str(editor.cta?.label) ||
+                  str(tplSlots?.cta?.label) ||
+                  'APPLY BEFORE THE DEADLINE'
+                : str(sourceSlots?.cta?.label) ||
+                  str(llmSlots.cta?.label) ||
+                  str(editor.cta?.label) ||
+                  (templateId === 'tpl_onboarding' ? 'JOIN FUSION' : ''),
             href:
                 templateId === 'tpl_onboarding'
                     ? JOIN_NETWORK_CTA_HREF
                     : str(sourceSlots?.cta?.href) ||
                       str(llmSlots.cta?.href) ||
                       str(editor.cta?.href) ||
+                      str(tplSlots?.cta?.href) ||
                       'https://www.fusionart.world',
         },
-        subject:
-            str(llmSlots.subject) ||
-            str(sourceSlots?.subject) ||
-            str(editor.subject) ||
-            tpl?.defaultSubject ||
-            '',
-        previewText:
-            str(llmSlots.previewText) ||
-            str(sourceSlots?.previewText) ||
-            str(editor.previewText) ||
-            tpl?.defaultPreview ||
-            '',
+        subject: overlayOnly
+            ? str(llmSlots.subject) ||
+              str(editor.subject) ||
+              tpl?.defaultSubject ||
+              ''
+            : str(llmSlots.subject) ||
+              str(sourceSlots?.subject) ||
+              str(editor.subject) ||
+              tpl?.defaultSubject ||
+              '',
+        previewText: overlayOnly
+            ? str(llmSlots.previewText) ||
+              str(editor.previewText) ||
+              tpl?.defaultPreview ||
+              ''
+            : str(llmSlots.previewText) ||
+              str(sourceSlots?.previewText) ||
+              str(editor.previewText) ||
+              tpl?.defaultPreview ||
+              '',
     };
 }
 

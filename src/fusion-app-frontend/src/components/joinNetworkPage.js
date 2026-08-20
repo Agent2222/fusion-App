@@ -33,6 +33,19 @@ function sanitizePayFoot(html) {
         .replace(/&lt;(\/?(?:strong|em|b|i))&gt;/gi, '<$1>');
 }
 
+/** Allow path-only links (+ strong/em) for story proof copy. */
+function sanitizeStoryLinks(html) {
+    const raw = String(html ?? '');
+    if (!raw) return '';
+    return raw
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/&lt;(\/?(?:strong|em|b|i))&gt;/gi, '<$1>')
+        .replace(/&lt;a href="(\/[a-zA-Z0-9\-/_]*)"&gt;/g, '<a href="$1">')
+        .replace(/&lt;\/a&gt;/gi, '</a>');
+}
+
 function readLocale() {
     try {
         if (typeof window.getLocale === 'function' && window.getLocale() === 'ja') return 'ja';
@@ -139,6 +152,10 @@ function pageHtml(copy, loc) {
         copy.paymentFooterHtml
             ? sanitizePayFoot(copy.paymentFooterHtml)
             : esc(copy.paymentFooter || 'Secure payment by PayPal or card · Cancel anytime');
+    const programsProof = sanitizeStoryLinks(
+        copy.storyProgramsHtml ||
+            'Explore <a href="/programs">Japan artist residency programs</a> and the <a href="/program/kaga-ishikawa">Kaga, Ishikawa residency</a> — proof of programs rooted in Japan.',
+    );
 
     const moBadge = mo.badge
         ? `<span class="join-network-page__plan-badge">${esc(mo.badge)}</span>`
@@ -154,6 +171,7 @@ function pageHtml(copy, loc) {
           <h1 class="join-network-page__story-headline">${esc(copy.storyHeadline)}</h1>
           <p class="join-network-page__story-sub">${esc(copy.storySubheadline)}</p>
           <p class="join-network-page__story-sec">${esc(copy.storySecondary)}</p>
+          <p class="join-network-page__story-programs">${programsProof}</p>
           <div class="join-network-page__media">
             <div class="join-network-page__collage">${collage}</div>
             <div class="join-network-page__audio" id="jnpAudioMount" hidden></div>
@@ -332,10 +350,11 @@ export default async function initJoinNetworkPage() {
     const copy = pickLocale(bundle, loc);
 
     applyDocumentSeo({
-        title: copy.seoTitle || 'Join FUSION | Membership',
+        title: copy.seoTitle || 'Curated Art Network | Join FUSION',
         description:
             copy.seoDescription ||
-            'Join a curated network connecting artists, galleries, curators, and collectors through programs rooted in Japan.',
+            'Join a curated art network connecting artists, galleries, curators, and collectors through programs rooted in Japan.',
+        path: '/join-network',
         robots: '',
         homeOrganizationJsonLd: false,
     });

@@ -2314,34 +2314,36 @@ export const testData = {
             en: {
                 title: 'Join the FUSION Network',
                 description:
-                    'A global platform connecting artists, galleries and curators through programs rooted in Japan.',
+                    'A curated art network connecting artists, galleries, curators, and collectors through programs rooted in Japan.',
             },
             ja: {
                 title: 'FUSIONネットワークに参加する',
                 description:
-                    '日本を拠点としたプログラムを通じて、アーティスト、ギャラリー、キュレーターをつなぐグローバルなプラットフォーム。',
+                    '日本をルーツに持つプログラムを通じて、アーティスト、ギャラリー、キュレーター、コレクターをつなぐキュレーション型アートネットワーク。',
             },
         },
         artists: {
             en: {
-                title: 'Join the FUSION Network',
+                title: 'Join the curated art network',
                 description:
-                    'Connect with artists and discover opportunities across Fusion programs.',
+                    'Connect with artists, galleries, curators, and collectors across Fusion programs rooted in Japan.',
             },
             ja: {
-                title: 'FUSIONネットワークに参加する',
-                description: 'Fusionのプログラムを通じてアーティストとつながり、機会を見つけましょう。',
+                title: 'キュレーション型アートネットワークに参加する',
+                description:
+                    '日本をルーツに持つFusionのプログラムを通じて、アーティスト、ギャラリー、キュレーター、コレクターとつながりましょう。',
             },
         },
         'gallery-access': {
             en: {
-                title: 'Gallery access starts here',
+                title: 'Gallery access through Fusion’s curated art network',
                 description:
-                    'Request access to studio visits, artist introductions, and exhibition previews.',
+                    'Request access to studio visits, artist introductions, and exhibition previews for galleries and collectors.',
             },
             ja: {
-                title: 'ギャラリーアクセスはここから',
-                description: 'スタジオ訪問、アーティスト紹介、展示プレビューへのアクセスをリクエストできます。',
+                title: 'キュレーション型アートネットワークのギャラリーアクセス',
+                description:
+                    'ギャラリーとコレクター向けに、スタジオ訪問、アーティスト紹介、展示プレビューへのアクセスをリクエストできます。',
             },
         },
         journal: {
@@ -2358,24 +2360,26 @@ export const testData = {
         },
         community: {
             en: {
-                title: 'Join the community',
+                title: 'Join the community inside Fusion’s curated art network',
                 description:
-                    'Stay connected with announcements, events, and fellow members of the Fusion network.',
+                    'Stay connected with artists, galleries, curators, and collectors — announcements, events, and fellow members.',
             },
             ja: {
-                title: 'コミュニティに参加する',
-                description: 'お知らせ、イベント、Fusionネットワークのメンバーとのつながりを維持しましょう。',
+                title: 'キュレーション型アートネットワークのコミュニティに参加',
+                description:
+                    'アーティスト、ギャラリー、キュレーター、コレクターとつながり、お知らせやイベントを共有しましょう。',
             },
         },
         context: {
             en: {
-                title: 'Context',
+                title: 'Join Fusion’s curated art network',
                 description:
-                    'Company background, mission, and how Fusion sits in the wider art ecosystem.',
+                    'From mission to membership — artists, galleries, curators, and collectors in a network rooted in Japan.',
             },
             ja: {
-                title: 'コンテキスト',
-                description: 'Fusionの背景、ミッション、そしてより広いアートのエコシステムにおける位置づけ。',
+                title: 'キュレーション型アートネットワークに参加する',
+                description:
+                    'ミッションからメンバーシップまで — 日本をルーツに、アーティスト、ギャラリー、キュレーター、コレクターがつながるネットワーク。',
             },
         },
     },
@@ -2389,13 +2393,13 @@ export const testData = {
                 en: {
                     title: 'Join the FUSION Network',
                     description:
-                        'A global platform connecting artists, galleries and curators through programs rooted in Japan.',
+                        'A curated art network connecting artists, galleries, curators, and collectors through programs rooted in Japan.',
                     openLabel: 'Join FUSION',
                 },
                 ja: {
                     title: 'FUSIONネットワークに参加する',
                     description:
-                        '日本を拠点としたプログラムを通じて、アーティスト、ギャラリー、キュレーターをつなぐグローバルなプラットフォーム。',
+                        '日本をルーツに持つプログラムを通じて、アーティスト、ギャラリー、キュレーター、コレクターをつなぐキュレーション型アートネットワーク。',
                     openLabel: '参加する',
                 },
             },
@@ -2403,7 +2407,7 @@ export const testData = {
                 en: {
                     dialogTitle: 'Join FUSION',
                     subtitle:
-                        'Enter a curated platform connecting artists, galleries, curators, and collectors.',
+                        'Enter a curated art network connecting artists, galleries, curators, and collectors.',
                     firstNamePlaceholder: 'First name',
                     lastNamePlaceholder: 'Last name',
                     emailPlaceholder: 'Email',
@@ -2417,7 +2421,7 @@ export const testData = {
                 ja: {
                     dialogTitle: 'FUSION に参加',
                     subtitle:
-                        'アーティスト、ギャラリー、キュレーター、コレクターをつなぐキュレーション型のプラットフォームへ。',
+                        'アーティスト、ギャラリー、キュレーター、コレクターをつなぐキュレーション型アートネットワークへ。',
                     firstNamePlaceholder: '名',
                     lastNamePlaceholder: '姓',
                     emailPlaceholder: 'メール',
@@ -2432,7 +2436,7 @@ export const testData = {
             value: {
                 en: {
                     title: 'Access FUSION',
-                    lead: 'Access a curated platform connecting artists, galleries, curators, and collectors through programs rooted in Japan.',
+                    lead: 'Access a curated art network connecting artists, galleries, curators, and collectors through programs rooted in Japan.',
                     planGroupLabel: 'Choose your membership',
                     price: '$30',
                     periodLabel: 'Monthly Access',
@@ -2487,7 +2491,7 @@ export const testData = {
                 },
                 ja: {
                     title: 'FUSION にアクセス',
-                    lead: '日本をルーツに持つプログラムを通じて、アーティスト、ギャラリー、キュレーター、コレクターをつなぐキュレーション型のプラットフォームへアクセスします。',
+                    lead: '日本をルーツに持つプログラムを通じて、アーティスト、ギャラリー、キュレーター、コレクターをつなぐキュレーション型アートネットワークへアクセスします。',
                     planGroupLabel: 'メンバーシップを選択',
                     price: '$30',
                     periodLabel: '月額アクセス',
@@ -2717,7 +2721,7 @@ export const testData = {
                 en: {
                     dialogTitle: 'Access Full Collection',
                     subtitle:
-                        'Enter a curated platform connecting artists, galleries, curators, and collectors.',
+                        'Enter a curated art network connecting artists, galleries, curators, and collectors.',
                     firstNamePlaceholder: 'First name',
                     lastNamePlaceholder: 'Last name',
                     emailPlaceholder: 'Email',
@@ -2731,7 +2735,7 @@ export const testData = {
                 ja: {
                     dialogTitle: 'コレクションへアクセス',
                     subtitle:
-                        'アーティスト、ギャラリー、キュレーター、コレクターをつなぐキュレーション型のプラットフォームへ。',
+                        'アーティスト、ギャラリー、キュレーター、コレクターをつなぐキュレーション型アートネットワークへ。',
                     firstNamePlaceholder: '名',
                     lastNamePlaceholder: '姓',
                     emailPlaceholder: 'メール',
@@ -2746,7 +2750,7 @@ export const testData = {
             value: {
                 en: {
                     title: 'Access FUSION',
-                    lead: 'Access a curated platform connecting artists, galleries, curators, and collectors through programs rooted in Japan.',
+                    lead: 'Access a curated art network connecting artists, galleries, curators, and collectors through programs rooted in Japan.',
                     planGroupLabel: 'Choose your membership',
                     price: '$30',
                     periodLabel: 'Monthly Access',
@@ -2801,7 +2805,7 @@ export const testData = {
                 },
                 ja: {
                     title: 'FUSION にアクセス',
-                    lead: '日本をルーツに持つプログラムを通じて、アーティスト、ギャラリー、キュレーター、コレクターをつなぐキュレーション型のプラットフォームへアクセスします。',
+                    lead: '日本をルーツに持つプログラムを通じて、アーティスト、ギャラリー、キュレーター、コレクターをつなぐキュレーション型アートネットワークへアクセスします。',
                     planGroupLabel: 'メンバーシップを選択',
                     price: '$30',
                     periodLabel: '月額アクセス',
@@ -3031,7 +3035,7 @@ export const testData = {
                 en: {
                     dialogTitle: 'Join & Apply',
                     subtitle:
-                        'Enter a curated platform connecting artists, galleries, curators, and collectors.',
+                        'Enter a curated art network connecting artists, galleries, curators, and collectors.',
                     firstNamePlaceholder: 'First name',
                     lastNamePlaceholder: 'Last name',
                     emailPlaceholder: 'Email',
@@ -3045,7 +3049,7 @@ export const testData = {
                 ja: {
                     dialogTitle: '参加して応募',
                     subtitle:
-                        'アーティスト、ギャラリー、キュレーター、コレクターをつなぐキュレーション型のプラットフォームへ。',
+                        'アーティスト、ギャラリー、キュレーター、コレクターをつなぐキュレーション型アートネットワークへ。',
                     firstNamePlaceholder: '名',
                     lastNamePlaceholder: '姓',
                     emailPlaceholder: 'メール',
@@ -3060,7 +3064,7 @@ export const testData = {
             value: {
                 en: {
                     title: 'Access FUSION',
-                    lead: 'Access a curated platform connecting artists, galleries, curators, and collectors through programs rooted in Japan.',
+                    lead: 'Access a curated art network connecting artists, galleries, curators, and collectors through programs rooted in Japan.',
                     planGroupLabel: 'Choose your membership',
                     price: '$30',
                     periodLabel: 'Monthly Access',
@@ -3115,7 +3119,7 @@ export const testData = {
                 },
                 ja: {
                     title: 'FUSION にアクセス',
-                    lead: '日本をルーツに持つプログラムを通じて、アーティスト、ギャラリー、キュレーター、コレクターをつなぐキュレーション型のプラットフォームへアクセスします。',
+                    lead: '日本をルーツに持つプログラムを通じて、アーティスト、ギャラリー、キュレーター、コレクターをつなぐキュレーション型アートネットワークへアクセスします。',
                     planGroupLabel: 'メンバーシップを選択',
                     price: '$30',
                     periodLabel: '月額アクセス',
@@ -3334,15 +3338,17 @@ export const testData = {
      */
     joinNetworkPage: {
         en: {
-            seoTitle: 'Join FUSION | Membership',
+            seoTitle: 'Curated Art Network | Join FUSION',
             seoDescription:
-                'Join a curated network connecting artists, galleries, curators, and collectors through programs rooted in Japan.',
+                'Join a curated art network connecting artists, galleries, curators, and collectors through programs rooted in Japan.',
             headerSignInPrefix: 'Already a member?',
             headerSignInLink: 'Sign in',
-            storyHeadline: 'Your practice belongs in a wider context.',
+            storyHeadline: 'A curated art network for practice across borders.',
             storySubheadline:
-                'Join a curated network connecting artists, galleries, curators, and collectors through programs rooted in Japan.',
+                'Join artists, galleries, curators, and collectors in a curated art network built around programs rooted in Japan — membership includes residency applications.',
             storySecondary: 'Residency applications included · Cancel anytime',
+            storyProgramsHtml:
+                'Explore <a href="/programs">Japan artist residency programs</a> and the <a href="/program/kaga-ishikawa">Kaga, Ishikawa residency</a> — proof of programs rooted in Japan.',
             collage: [
                 { src: image1, alt: 'Programs rooted in Japan' },
                 { src: image2, alt: 'Gallery and studio practice' },
@@ -3413,20 +3419,22 @@ export const testData = {
             paymentFooterHtml: 'Secure payment by <strong>PayPal</strong> or card · Cancel anytime',
             proof: [
                 { title: 'Programs rooted in Japan', line: '', icon: 'japan' },
-                { title: 'A curated network for cross-border practice', line: '', icon: 'people' },
+                { title: 'A curated art network for cross-border practice', line: '', icon: 'people' },
                 { title: 'Applications included with membership', line: '', icon: 'doc' },
             ],
         },
         ja: {
-            seoTitle: 'FUSION に参加 | メンバーシップ',
+            seoTitle: 'キュレーション型アートネットワーク | FUSION に参加',
             seoDescription:
-                '日本をルーツに持つプログラムを通じて、アーティスト、ギャラリー、キュレーター、コレクターをつなぐキュレーション型ネットワーク。',
+                '日本をルーツに持つプログラムを通じて、アーティスト、ギャラリー、キュレーター、コレクターをつなぐキュレーション型アートネットワーク。',
             headerSignInPrefix: 'すでにメンバーですか？',
             headerSignInLink: 'サインイン',
-            storyHeadline: 'あなたの実践は、より広い文脈に属しています。',
+            storyHeadline: '国境を越える実践のためのキュレーション型アートネットワーク。',
             storySubheadline:
-                '日本をルーツに持つプログラムを通じて、アーティスト、ギャラリー、キュレーター、コレクターをつなぐキュレーション型ネットワークへ。',
+                '日本をルーツに持つプログラムを軸に、アーティスト、ギャラリー、キュレーター、コレクターがつながるキュレーション型アートネットワークへ。メンバーシップにはレジデンシー応募が含まれます。',
             storySecondary: 'レジデンシー応募込み · いつでも解約可能',
+            storyProgramsHtml:
+                '<a href="/programs">日本のアーティスト・レジデンシープログラム</a>と<a href="/program/kaga-ishikawa">加賀・石川のレジデンシー</a>をご覧ください — 日本をルーツにしたプログラムの実例です。',
             collage: [
                 { src: image1, alt: '日本をルーツにしたプログラム' },
                 { src: image2, alt: 'ギャラリーとスタジオ実践' },
@@ -3497,7 +3505,7 @@ export const testData = {
             paymentFooterHtml: '<strong>PayPal</strong>またはカードで安全にお支払い · いつでも解約可能',
             proof: [
                 { title: '日本をルーツにしたプログラム', line: '', icon: 'japan' },
-                { title: '国境を越える実践のためのキュレーション型ネットワーク', line: '', icon: 'people' },
+                { title: '国境を越える実践のためのキュレーション型アートネットワーク', line: '', icon: 'people' },
                 { title: '応募はメンバーシップに含まれる', line: '', icon: 'doc' },
             ],
         },

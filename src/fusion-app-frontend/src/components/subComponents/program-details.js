@@ -1028,17 +1028,17 @@ class ProgramDetailsComponent extends HTMLElement {
         }
         const pid = String(this._data.programId || '').trim();
         if (hasMain && drawCell instanceof HTMLElement && drawBtn instanceof HTMLButtonElement) {
-            // Inactive defaults immediately; config + entry update label/handler in the background.
+            // Active defaults until config loads (avoids “Get notified” flash when draw is open).
             drawCell.hidden = false;
-            drawBtn.textContent = programDrawCtaLabel(false);
+            drawBtn.textContent = programDrawCtaLabel(true);
             if (drawSubEl) {
                 drawSubEl.dataset.drawSlots = '100';
-                drawSubEl.dataset.drawActive = '0';
+                drawSubEl.dataset.drawActive = '1';
                 drawSubEl.dataset.drawEntered = '0';
-                drawSubEl.textContent = programDrawCtaSubLabel(100, false);
+                drawSubEl.textContent = programDrawCtaSubLabel(100, true);
             }
             drawBtn.onclick = () => {
-                void revealProgramDrawInactivePanel();
+                void revealProgramDrawFormOrOpenJoin();
             };
             if (pid) {
                 void Promise.all([
@@ -1058,7 +1058,7 @@ class ProgramDetailsComponent extends HTMLElement {
                     }),
                 ])
                     .then(([cfg, entered]) => {
-                        const active = Boolean(cfg?.active);
+                        const active = cfg == null ? true : Boolean(cfg.active);
                         drawCell.hidden = false;
                         const slots = Math.max(1, Number(cfg?.totalSlots) || 100);
                         const userEntered = Boolean(entered);
@@ -1076,14 +1076,14 @@ class ProgramDetailsComponent extends HTMLElement {
                     })
                     .catch(() => {
                         drawCell.hidden = false;
-                        drawBtn.textContent = programDrawCtaLabel(false);
+                        drawBtn.textContent = programDrawCtaLabel(true);
                         if (drawSubEl) {
-                            drawSubEl.dataset.drawActive = '0';
+                            drawSubEl.dataset.drawActive = '1';
                             drawSubEl.dataset.drawEntered = '0';
-                            drawSubEl.textContent = programDrawCtaSubLabel(100, false);
+                            drawSubEl.textContent = programDrawCtaSubLabel(100, true);
                         }
                         drawBtn.onclick = () => {
-                            void revealProgramDrawInactivePanel();
+                            void revealProgramDrawFormOrOpenJoin();
                         };
                     });
             }
@@ -1998,8 +1998,8 @@ class ProgramDetailsComponent extends HTMLElement {
                                 <p class="program-details-cta-sub program-details-apply-sub"></p>
                             </div>
                             <div class="program-details-cta-cell program-details-draw-cell">
-                                <button type="button" class="enter-program-draw">Program Draw</button>
-                                <p class="program-details-cta-sub program-details-draw-sub">Get notified when it opens</p>
+                                <button type="button" class="enter-program-draw">Enter Program Draw</button>
+                                <p class="program-details-cta-sub program-details-draw-sub">Submit for the program draw (1 in 100)</p>
                             </div>
                         </div>
                     </div>

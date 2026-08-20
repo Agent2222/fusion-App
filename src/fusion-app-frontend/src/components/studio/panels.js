@@ -15,6 +15,8 @@ import {
     studioTrialState,
 } from '../../utils/studioMembershipPresentation.js';
 import { renderFinance, initFinance } from './financeSection.js';
+import { renderSchedule, initSchedule } from './scheduleSection.js';
+import { renderRadar, initRadar } from './radarSection.js';
 import { renderPermissions, initPermissions } from './permissionsSection.js';
 import {
     APPLICANTS_PROGRAM_SELECT_STORAGE_KEY,
@@ -103,6 +105,7 @@ import {
     applyConfirmedApplicantMembershipSideEffectsStudio,
     resolvePrincipalForApplicantStudio,
     staffSetMembershipExemptManualStudio,
+    staffSetProgramPaymentFlightPreferenceStudio,
     getStaffProgramPaymentsFinanceStudio,
     setDataSource,
     setResendSegmentConfigOnCanister,
@@ -115,6 +118,8 @@ import {
     getProgramDrawConfigStudio,
     listProgramDrawConfigsStudio,
     upsertProgramDrawConfigStudio,
+    getProgramScheduleLiveStudio,
+    setProgramScheduleLiveStudio,
     listProgramAwardEntriesStudio,
     staffEnterProgramAwardManualStudio,
     normalizeProgramVisibility,
@@ -245,7 +250,7 @@ import {
     nextUniqueAccessCode,
     normalizeArtistImportRow,
 } from '../../utils/studioBatchImport.js';
-import { initArtistProgramsTab } from '../../utils/studioArtistPrograms.js';
+import { initArtistProgramsTab, removeApplicantFromProgramConfirmedList, resolveArtistForApplicant } from '../../utils/studioArtistPrograms.js';
 import {
     LS_APPLICATION_ADMIN_EMAILS,
     getApplicationStaffNotificationEmails,
@@ -310,6 +315,7 @@ export const STUDIO_NAV_GROUPS = [
             { id: 'schedule', label: 'Schedule' },
             { id: 'finance', label: 'Finance' },
             { id: 'travel', label: 'Travel' },
+            { id: 'radar', label: 'Radar' },
         ],
     },
     {
@@ -391,11 +397,7 @@ export function renderStudioMain(sectionId) {
         case 'applicants':
             return renderApplicants();
         case 'schedule':
-            return renderManagementPlaceholder(
-                'Schedule',
-                'Program calendars, artist timelines, and event scheduling tools will live here.',
-                'schedule',
-            );
+            return renderSchedule();
         case 'finance':
             return renderFinance();
         case 'travel':
@@ -404,6 +406,8 @@ export function renderStudioMain(sectionId) {
                 'Travel coordination, accommodation notes, and arrival details will live here.',
                 'travel',
             );
+        case 'radar':
+            return renderRadar();
         case 'artists':
             return renderArtists();
         case 'pending-approval':
@@ -2883,45 +2887,6 @@ function applicantCategoryCellHtmlLocal(payloadJson) {
     return applicantCategoryCellHtml(payloadJson, escapeHtml);
 }
 
-/**
- * @param {object} applicantRow
- * @param {object[]} artists
- * @returns {object | null}
- */
-function resolveArtistForApplicant(applicantRow, artists) {
-    const row = applicantRow && typeof applicantRow === 'object' ? applicantRow : {};
-    const id = String(row.id || '');
-    const pipe = id.indexOf('|');
-    if (pipe > 0) {
-        const artistId = id.slice(0, pipe);
-        const found = (Array.isArray(artists) ? artists : []).find((a) => String(a?.id || '') === artistId);
-        if (found) return found;
-    }
-    const em = String(row.email || '')
-        .trim()
-        .toLowerCase();
-    if (!em) return null;
-    for (const artist of Array.isArray(artists) ? artists : []) {
-        const direct = studioArtistApplicantEmail(artist).trim().toLowerCase();
-        if (direct && direct === em) return artist;
-        const locales = artist?.locales && typeof artist.locales === 'object' ? artist.locales : null;
-        if (!locales) continue;
-        for (const code of ['en', 'ja']) {
-            const block = locales[code];
-            if (!block || typeof block !== 'object') continue;
-            const localeEmail = String(
-                /** @type {Record<string, unknown>} */ (block).email ??
-                    /** @type {Record<string, unknown>} */ (block).contactEmail ??
-                    '',
-            )
-                .trim()
-                .toLowerCase();
-            if (localeEmail && localeEmail === em) return artist;
-        }
-    }
-    return null;
-}
-
 function applicantCategorySelectHtml(selectedCategory) {
     const selected = String(selectedCategory || 'general');
     const options = APPLICANT_CATEGORY_OPTIONS.map(
@@ -3001,6 +2966,7 @@ function applicantWorkflowControlHtml(
     manualDepositSubmitted = false,
     isTester = false,
     depositWaived = false,
+    ownFlight = false,
 ) {
     const state = applicantWorkflowState(status, slotSecured);
     const checked = (value) => (value ? 'checked' : '');
@@ -3012,6 +2978,9 @@ function applicantWorkflowControlHtml(
     const slotHint = depositWaived
         ? 'Secured by full sponsorship (no deposit required)'
         : 'Completed after deposit or full payment';
+    const manualOn = Boolean(manualDepositSubmitted && !depositWaived);
+    // Own flight is a shared payment preference (Settings + Finance tickets) — not gated on manual deposit.
+    const ownFlightDisabled = depositWaived;
     return `<fieldset class="studio-app-workflow" aria-label="Applicant workflow">
       <legend>Program status timeline</legend>
       <label class="studio-app-workflow__step">
@@ -3040,8 +3009,12 @@ function applicantWorkflowControlHtml(
         </select>
       </label>
       <label class="studio-app-workflow__step" id="studio-app-step-manual-deposit-wrap">
-        <input type="checkbox" id="studio-app-step-manual-deposit" ${checked(manualDepositSubmitted && !depositWaived)} ${depositWaived ? 'disabled' : ''} />
+        <input type="checkbox" id="studio-app-step-manual-deposit" ${checked(manualOn)} ${depositWaived ? 'disabled' : ''} />
         <span><strong id="studio-app-step-manual-deposit-label">${depositLabel}</strong><small id="studio-app-step-manual-deposit-hint">${depositHint}</small></span>
+      </label>
+      <label class="studio-app-workflow__step" id="studio-app-step-own-flight-wrap">
+        <input type="checkbox" id="studio-app-step-own-flight" ${checked(ownFlight && !depositWaived)} ${ownFlightDisabled ? 'disabled' : ''} />
+        <span><strong>Own flight ($800 credit)</strong><small>Same as Settings + Finance → Tickets ($800 credit)</small></span>
       </label>
       <label class="studio-app-workflow__step">
         <input type="checkbox" id="studio-app-step-is-tester" ${checked(isTester)} />
@@ -3060,7 +3033,9 @@ const STUDIO_INIT = {
     home: initHome,
     subscribers: initSubscribers,
     applicants: initApplicants,
+    schedule: initSchedule,
     finance: initFinance,
+    radar: initRadar,
     artists: initArtists,
     'pending-approval': initPendingApproval,
     'profile-images': initProfileImages,
@@ -4264,7 +4239,7 @@ async function initApplicants(mainEl) {
             <h3 class="studio-subheading">Application</h3>
             ${appBlock}
             <div class="studio-app-status-with-email">
-              <div class="studio-app-status-with-email__status">${applicantWorkflowControlHtml(r.status, initialSponsorshipMode === 'full', initialManualDeposit, initialIsTester, initialSponsorshipMode === 'full')}</div>
+              <div class="studio-app-status-with-email__status">${applicantWorkflowControlHtml(r.status, initialSponsorshipMode === 'full', initialManualDeposit, initialIsTester, initialSponsorshipMode === 'full', false)}</div>
               <div class="studio-app-status-with-email__send">
                 <span class="studio-sr-only">Send email to applicant</span>
                 <button type="button" class="studio-btn-ghost" id="studio-app-modal-send-email">Send email</button>
@@ -4406,12 +4381,15 @@ async function initApplicants(mainEl) {
                             ? Number(pctInput.value)
                             : 0;
                     sponsoredPercent = Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : 0;
+                    const ownFlightInput = root.querySelector('#studio-app-step-own-flight');
+                    const ownFlightForPrice =
+                        ownFlightInput instanceof HTMLInputElement && ownFlightInput.checked;
                     const base =
                         specialProgramTotalCents > 0
                             ? specialProgramTotalCents
                             : computeMemberProgramTotalDueCents({
                                   category: applicantCategory,
-                                  ownFlight: false,
+                                  ownFlight: ownFlightForPrice,
                               });
                     sponsoredCreditCents = Math.round((base * sponsoredPercent) / 100);
                 } else {
@@ -4475,6 +4453,14 @@ async function initApplicants(mainEl) {
             if (slotInput instanceof HTMLInputElement) {
                 slotInput.checked = paymentSecured || manual || depositWaived;
             }
+            const ownFlightInput = root.querySelector('#studio-app-step-own-flight');
+            if (ownFlightInput instanceof HTMLInputElement) {
+                // Keep preference visible/editable unless deposit is waived (full sponsorship).
+                ownFlightInput.disabled = depositWaived;
+                if (depositWaived) {
+                    ownFlightInput.checked = false;
+                }
+            }
         };
         runInitialSpecialPricingUi();
 
@@ -4495,6 +4481,25 @@ async function initApplicants(mainEl) {
             const slotInput = root.querySelector('#studio-app-step-slot-secured');
             if (slotInput instanceof HTMLInputElement) {
                 slotInput.dataset.paymentSecured = slotSecured ? 'true' : 'false';
+            }
+            try {
+                const finance = await getStaffProgramPaymentsFinanceStudio();
+                const summary = (Array.isArray(finance?.summaries) ? finance.summaries : []).find(
+                    (s) => String(s?.applicationId || '') === String(r.id || ''),
+                );
+                const ownFlight =
+                    summary?.ownFlight === true ||
+                    String(summary?.ownFlight || '').toLowerCase() === 'true';
+                const ownFlightInput = root.querySelector('#studio-app-step-own-flight');
+                const sponsorshipSel = root.querySelector('#studio-app-modal-sponsorship');
+                const depositWaived =
+                    sponsorshipSel instanceof HTMLSelectElement && sponsorshipSel.value === 'full';
+                if (ownFlightInput instanceof HTMLInputElement && !depositWaived) {
+                    ownFlightInput.checked = ownFlight;
+                    ownFlightInput.dataset.flightPrefLoaded = ownFlight ? 'true' : 'false';
+                }
+            } catch {
+                /* finance prefill optional */
             }
             syncApplicantDepositUi();
             if (!rawInvalid && !hasSavedApplicantCategory(r.payloadJson)) {
@@ -4536,11 +4541,16 @@ async function initApplicants(mainEl) {
             const sponsorshipMode =
                 sponsorshipSel instanceof HTMLSelectElement ? sponsorshipSel.value : 'none';
             const manualDepositInput = root.querySelector('#studio-app-step-manual-deposit');
+            const ownFlightInput = root.querySelector('#studio-app-step-own-flight');
             const categoryInput = root.querySelector('#studio-app-modal-category');
             const manualDepositSubmitted =
                 sponsorshipMode !== 'full' &&
                 manualDepositInput instanceof HTMLInputElement &&
                 manualDepositInput.checked;
+            const ownFlight =
+                sponsorshipMode !== 'full' &&
+                ownFlightInput instanceof HTMLInputElement &&
+                ownFlightInput.checked;
             const previousCategory = getApplicantCategory(r.payloadJson);
             const nextCategory =
                 categoryInput instanceof HTMLSelectElement ? categoryInput.value : previousCategory;
@@ -4562,8 +4572,33 @@ async function initApplicants(mainEl) {
                         );
                     }
                 }
+                // Always sync Own Flight with Finance / Settings (same canister preference).
+                // Skip overwrite only when fully sponsored (control disabled / N/A).
+                if (sponsorshipMode !== 'full') {
+                    try {
+                        await staffSetProgramPaymentFlightPreferenceStudio({
+                            applicantId: r.id,
+                            ownFlight,
+                        });
+                    } catch (flightErr) {
+                        console.warn('[applicants] own flight preference:', flightErr);
+                        alert(
+                            `Applicant saved, but Own Flight preference may not have synced: ${
+                                flightErr instanceof Error ? flightErr.message : String(flightErr)
+                            }`,
+                        );
+                    }
+                }
                 // Recompute Motoko totalDue (category + special price + sponsorship).
                 await syncApplicantCategoryPaymentStudio(r.id);
+                if (status === 'pulledOut') {
+                    try {
+                        const artist = resolveArtistForApplicant(r, applicantArtistsFull);
+                        await removeApplicantFromProgramConfirmedList(r, artist);
+                    } catch (confirmedErr) {
+                        console.warn('[applicants] remove confirmed artist:', confirmedErr);
+                    }
+                }
                 statusAtOpen = status;
                 close();
                 await reload();
@@ -4769,6 +4804,7 @@ async function initApplicants(mainEl) {
                 (r) =>
                     Boolean(r?.slotSecured) &&
                     String(r?.status || '') !== 'pulledOut' &&
+                    String(r?.status || '') !== 'withdrawn' &&
                     !getApplicantIsTester(String(r?.payloadJson || '')),
             );
             if (!confirmed.length) {
@@ -6497,6 +6533,13 @@ async function initPrograms(mainEl) {
             } catch {
                 /* defaults */
             }
+            try {
+                p.scheduleLive = await getProgramScheduleLiveStudio(String(existing.id));
+            } catch {
+                p.scheduleLive = false;
+            }
+        } else {
+            p.scheduleLive = false;
         }
         const routeLinkKind = getFieldKind('program-hero', 'routeLink');
         const cardImgKind = getFieldKind('all-programs', 'programs.en.0.imageSrc');
@@ -6671,6 +6714,15 @@ async function initPrograms(mainEl) {
                     const msg = drawErr instanceof Error ? drawErr.message : String(drawErr);
                     alert(
                         `Program saved, but draw settings failed: ${msg}\n\nDeploy fusion-app-backend and run dfx generate if the draw API is missing.`,
+                    );
+                }
+                try {
+                    const scheduleLive = fd.get('scheduleLive') === 'on' || fd.get('scheduleLive') === 'true';
+                    await setProgramScheduleLiveStudio(programId, Boolean(scheduleLive));
+                } catch (liveErr) {
+                    const msg = liveErr instanceof Error ? liveErr.message : String(liveErr);
+                    alert(
+                        `Program saved, but schedule-live flag failed: ${msg}\n\nDeploy fusion-app-backend and run dfx generate if the schedule API is missing.`,
                     );
                 }
                 chrome?.markSaved();

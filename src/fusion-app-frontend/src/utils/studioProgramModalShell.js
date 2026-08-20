@@ -155,6 +155,13 @@ export function renderProgramEditorShell(opts) {
             </div>
           </label>
         </div>
+        <label class="studio-prog-editor-field studio-prog-editor-field--checkbox studio-prog-editor-schedule-live" for="studio-prog-schedule-live">
+          <input type="checkbox" name="scheduleLive" id="studio-prog-schedule-live" value="on" ${p.scheduleLive ? 'checked' : ''} />
+          <span class="studio-prog-editor-schedule-live__copy">
+            <span class="studio-prog-editor-field__label">Program schedule is live</span>
+            <span class="studio-muted studio-prog-editor-schedule-live__hint">When checked, slot-secured artists can open the Calendar tab for this program in Settings → Programs.</span>
+          </span>
+        </label>
       </section>
       <div class="studio-prog-editor-toolbar">
         <div class="studio-prog-editor-toolbar__actions">

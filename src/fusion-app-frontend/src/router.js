@@ -31,9 +31,15 @@ function syncLoadscreenCirclesForPath(path) {
 
 /** @param {string} path */
 function robotsForPath(path) {
+    // Money pages (/ , /programs, /program/*, /artists, …) must stay indexable.
+    // Only gated product surfaces and auth flows are noindexed.
     if (path === '/studio') return 'noindex, nofollow';
     if (path === '/join-fusion') return 'noindex, nofollow';
     if (path.startsWith('/settings') || path === '/sign-in' || path === '/register') {
+        return 'noindex, nofollow';
+    }
+    // Private program URLs are access-gated; keep them out of the public index.
+    if (path.startsWith('/program/private/') || path.startsWith('/programs/private/')) {
         return 'noindex, nofollow';
     }
     return '';
@@ -94,9 +100,9 @@ const routes = {
     },
     '/artists': {
         loader: () => import('./components/artists.js'),
-        title: 'Artists on Fusion | Curated Network',
+        title: 'Artists on Fusion | Curated Art Network',
         description:
-            'Discover artists working through Fusion’s Japan-based programs and progressive art platform.',
+            'Discover artists in Fusion’s curated art network — Japan-based programs connecting artists, galleries, curators, and collectors.',
         contentGenerator: 'generateArtistsContent',
         isFullPage: false // Artists page renders full page structure
     },
@@ -104,7 +110,7 @@ const routes = {
         loader: () => import('./components/programs.js'),
         title: 'Japan Artist Residency Programs | Fusion',
         description:
-            'Curated artist residencies and programs across Japan — explore Fusion’s place-based opportunities.',
+            'Explore Japan artist residency programs with Fusion — curated residencies in Kaga, Ishikawa, Tokyo, and beyond. See dates, details, and how to apply.',
         contentGenerator: 'generateProgramsContent',
     },
     '/program-view': {
@@ -117,9 +123,9 @@ const routes = {
     },
     '/gallery-access': {
         loader: () => import('./components/gallery-access.js'),
-        title: 'Gallery access | Fusion',
+        title: 'Gallery Access | Curated Art Network | Fusion',
         description:
-            'Curated gallery access and artist introductions through Fusion’s network.',
+            'Gallery access through Fusion’s curated art network — studio visits, artist introductions, and previews for galleries and collectors.',
         contentGenerator: 'generateGalleryAccessContent'
     },
     '/editions': {
@@ -139,8 +145,9 @@ const routes = {
     },
     '/community': {
         loader: () => import('./components/community.js'),
-        title: 'Community | Fusion',
-        description: 'Fusion’s artist community and membership programs.',
+        title: 'Community | Curated Art Network | Fusion',
+        description:
+            'Community inside Fusion’s curated art network — artists, galleries, curators, and collectors connected through programs rooted in Japan.',
         contentGenerator: 'generateCommunityContent'
     },
     '/videos': {
@@ -152,9 +159,9 @@ const routes = {
     },
     '/context': {
         loader: () => import('./components/context.js'),
-        title: 'Context | Mission & Ecosystem | Fusion',
+        title: 'Context | Mission & Curated Art Network | Fusion',
         description:
-            'Why Fusion exists: mission, ecosystem, and Japan artist residency focus for our art platform.',
+            'Why Fusion exists: mission, ecosystem, and a curated art network in Japan connecting artists, galleries, curators, and collectors.',
         contentGenerator: 'generateContextContent',
         isFullPage: false,
     },
@@ -184,9 +191,9 @@ const routes = {
     },
     '/join-network': {
         loader: () => import('./components/joinNetworkPage.js'),
-        title: 'Join FUSION | Membership',
+        title: 'Curated Art Network | Join FUSION',
         description:
-            'Join a curated network connecting artists, galleries, curators, and collectors through programs rooted in Japan.',
+            'Join a curated art network connecting artists, galleries, curators, and collectors through programs rooted in Japan.',
         contentGenerator: 'generateJoinNetworkPageContent',
     },
     '/profile': {
@@ -436,6 +443,23 @@ class Router {
                 path + window.location.search + window.location.hash,
             );
         }
+
+        // Legacy directory URL still linked externally → permanent client redirect to programs hub.
+        if (path === '/residency') {
+            applyDocumentSeo({
+                title: 'Japan Artist Residency Programs | Fusion',
+                description:
+                    'Curated artist residencies and programs across Japan — explore Fusion’s place-based opportunities.',
+                path: '/programs',
+            });
+            window.history.replaceState(
+                {},
+                '',
+                '/programs' + window.location.search + window.location.hash,
+            );
+            path = '/programs';
+        }
+
         const route = matchContentRoute(path) || this.routes['/404'];
         if (path !== '/studio' && typeof document !== 'undefined') {
             document.body.style.overflow = '';

@@ -42,7 +42,21 @@ export function render() {
         <div class="page programs-page">
             <main id="programsMain" class="main-cont">
                 <div id="programsMainContent" class="feed-container">
-                    <h1 class="seo-primary-h1">Japan artist residency programs</h1>
+                    <header class="programs-page-intro">
+                        <h1 class="programs-page-intro__title">Japan artist residency programs</h1>
+                        <p class="programs-page-intro__lead">
+                            Fusion hosts curated Japan artist residency programs for practicing artists —
+                            place-based residencies across Japan with studio time, exchange, and a clear path to apply.
+                            Start with the
+                            <a href="/program/kaga-ishikawa">Kaga, Ishikawa Japan artist residency</a>,
+                            or browse the programs below.
+                            Residencies are part of Fusion’s
+                            <a href="/join-network">curated art network</a>
+                            for artists, galleries, curators, and collectors —
+                            <a href="/join-network">join the network</a>
+                            when you are ready for membership.
+                        </p>
+                    </header>
                     <div id="programsBlocks"></div>
                 </div>
             </main>

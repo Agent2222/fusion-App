@@ -90,10 +90,24 @@ html[data-fusion-page="join-network"] #mainContent {
 }
 
 .join-network-page__story-sec {
-  margin: 0 0 1.35rem;
+  margin: 0 0 0.85rem;
   font-size: 0.95rem;
   color: var(--jnp-muted);
   font-variation-settings: var(--fv-label);
+}
+
+.join-network-page__story-programs {
+  margin: 0 0 1.35rem;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: var(--jnp-ink);
+  font-variation-settings: var(--fv-body);
+}
+
+.join-network-page__story-programs a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
 }
 
 /* Collage + journal-style audio bite as one media stack */

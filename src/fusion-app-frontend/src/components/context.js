@@ -7,7 +7,11 @@ export function render() {
         <div class="page context-page">
             <main id="contextMain" class="main-cont">
                 <div id="contextMainContent" class="feed-container">
-                    <h1 class="seo-primary-h1">Context — Fusion mission and ecosystem</h1>
+                    <h1 class="seo-primary-h1">Context — Fusion mission and curated art network in Japan</h1>
+                    <p class="seo-support-lead">
+                        Fusion’s ecosystem connects artists, galleries, curators, and collectors through programs rooted in Japan.
+                        <a href="/join-network">Join the curated art network</a>.
+                    </p>
                     <div id="contextHeadline"></div>
                     <div id="contextSubHeadlineSection">
                         <div id="contextSubHeadlineText"></div>

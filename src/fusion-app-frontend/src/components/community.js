@@ -10,7 +10,11 @@ export function render() {
         <div class="page community-page">
             <main id="communityMain" class="main-cont">
                 <div id="communityMainContent" class="feed-container">
-                    <h1 class="seo-primary-h1">Community — Fusion members and programs</h1>
+                    <h1 class="seo-primary-h1">Community inside Fusion’s curated art network</h1>
+                    <p class="seo-support-lead">
+                        A community for artists, galleries, curators, and collectors inside Fusion’s
+                        <a href="/join-network">curated art network</a>.
+                    </p>
                     <app-community-hero id="communityHero" active="true"></app-community-hero>
                     <div class="page-content nav-page-content community-content">
                         <app-exclusive-content-highlight id="communityExclusive" active="true"></app-exclusive-content-highlight>

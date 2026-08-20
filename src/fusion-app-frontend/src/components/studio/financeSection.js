@@ -1873,7 +1873,7 @@ export async function initFinance(mainEl) {
                         <input type="checkbox" class="studio-checkbox" id="studio-finance-tickets-own-flight" ${ownFlightChecked} ${ownFlightDisabled} />
                         <span>Own flight ($800 credit)</span>
                     </label>
-                    <p class="studio-muted mpd-field-hint">Checked when the applicant selected Own Flight. Staff can change this to update Price category credit.</p>
+                    <p class="studio-muted mpd-field-hint">Same preference as Settings → Payments and Applicants → Own flight. Changing it updates the $800 price credit for everyone.</p>
                     <label class="studio-field"><span>Amount (USD)</span>
                         <input type="text" class="studio-input" id="studio-finance-tickets-amount" inputmode="decimal" placeholder="0.00" value="${escapeHtml(flightUsd === '0.00' ? '' : flightUsd)}" ${amountDisabled} />
                     </label>
@@ -1910,12 +1910,11 @@ export async function initFinance(mainEl) {
                         row.payloadJson,
                     );
                     await upsertApplicantStudio({ ...applicant, payloadJson });
-                    if (nextOwnFlight !== Boolean(row.ownFlight)) {
-                        await staffSetProgramPaymentFlightPreferenceStudio({
-                            applicantId: row.applicantId,
-                            ownFlight: nextOwnFlight,
-                        });
-                    }
+                    // Always persist — do not skip when row.ownFlight is stale/false.
+                    await staffSetProgramPaymentFlightPreferenceStudio({
+                        applicantId: row.applicantId,
+                        ownFlight: nextOwnFlight,
+                    });
                     close();
                     await reloadApplicantsAndFinance();
                 } catch (err) {
@@ -3183,7 +3182,14 @@ export async function initFinance(mainEl) {
             const applicantId = emailBtn.getAttribute('data-finance-email-applicant');
             const applicant = applicantId ? applicantById.get(applicantId) : null;
             if (applicant) {
-                void openApplicantEmailModal(applicant, { onSent: () => reloadAllFinanceData() });
+                const financeRow = applicantId ? financeRowByApplicantId.get(applicantId) : null;
+                const remainingCents = Number(financeRow?.remainingBalanceCents ?? 0);
+                void openApplicantEmailModal(applicant, {
+                    onSent: () => reloadAllFinanceData(),
+                    financeContext: financeRow || undefined,
+                    preferTemplateId:
+                        remainingCents > 0 ? 'tpl-applicant-remaining-balance' : undefined,
+                });
             }
             return;
         }
