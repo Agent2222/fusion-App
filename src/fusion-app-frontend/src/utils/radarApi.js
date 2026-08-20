@@ -80,15 +80,13 @@ export async function upsertRadarLead(lead) {
         return base;
     }
     const actor = await getRadarActor();
-    const principal = anonymousPrincipal();
+    let principal = anonymousPrincipal();
     try {
         const { getIdentityIfAuthenticated } = await import('./icAuth.js');
         const id = await getIdentityIfAuthenticated();
-        if (id) {
-            // use caller principal from identity when available
-        }
+        if (id) principal = id.getPrincipal();
     } catch {
-        /* keep anonymous */
+        /* keep anonymous placeholder — canister overwrites createdBy for new ids */
     }
     const saved = await actor.staffUpsertRadarLead(leadToCandid(base, principal));
     return mapLeadFromCandid(saved);
@@ -436,6 +434,53 @@ export async function bootstrapRadarAdmin() {
     const actor = await getRadarActor();
     if (typeof actor.bootstrapAdminIfEmpty !== 'function') return false;
     return Boolean(await actor.bootstrapAdminIfEmpty());
+}
+
+/**
+ * @returns {Promise<{ isAdmin: boolean, isStaffOrAdmin: boolean, bootstrapped: boolean, error?: string }>}
+ */
+export async function getRadarAccessState() {
+    if (isTest()) {
+        return { isAdmin: true, isStaffOrAdmin: true, bootstrapped: true };
+    }
+    try {
+        const actor = await getRadarActor();
+        const [isAdmin, isStaffOrAdmin] = await Promise.all([
+            typeof actor.isCallerRadarAdmin === 'function'
+                ? actor.isCallerRadarAdmin()
+                : Promise.resolve(false),
+            typeof actor.isCallerRadarStaffOrAdmin === 'function'
+                ? actor.isCallerRadarStaffOrAdmin()
+                : Promise.resolve(false),
+        ]);
+        return {
+            isAdmin: Boolean(isAdmin),
+            isStaffOrAdmin: Boolean(isStaffOrAdmin),
+            bootstrapped: Boolean(isAdmin || isStaffOrAdmin),
+        };
+    } catch (err) {
+        return {
+            isAdmin: false,
+            isStaffOrAdmin: false,
+            bootstrapped: false,
+            error: err instanceof Error ? err.message : String(err),
+        };
+    }
+}
+
+/**
+ * @param {string} principalText
+ */
+export async function addRadarStaffPrincipal(principalText) {
+    const text = String(principalText || '').trim();
+    if (!text) throw new Error('Principal required');
+    if (isTest()) return true;
+    const actor = await getRadarActor();
+    if (typeof actor.adminAddStaff !== 'function') {
+        throw new Error('adminAddStaff is not available on this Radar actor');
+    }
+    await actor.adminAddStaff(Principal.fromText(text));
+    return true;
 }
 
 // silence unused Principal import warning if tree-shaken differently

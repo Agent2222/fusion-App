@@ -37,6 +37,33 @@ function readInternetIdentityFrontendCanisterFromDfxLocal(root) {
     }
 }
 
+/**
+ * @param {string} root
+ * @param {'local' | 'ic'} network
+ * @returns {string}
+ */
+function readFusionRadarCanisterId(root, network) {
+    const files =
+        network === 'local'
+            ? [path.join(root, '.dfx/local/canister_ids.json')]
+            : [path.join(root, 'canister_ids.json'), path.join(root, '.dfx/ic/canister_ids.json')];
+    for (const p of files) {
+        if (!existsSync(p)) continue;
+        try {
+            const j = JSON.parse(readFileSync(p, 'utf8'));
+            const entry = j['fusion-radar'] || j.fusion_radar;
+            const pick =
+                network === 'local'
+                    ? entry?.local ?? entry?.ic
+                    : entry?.ic ?? entry?.local;
+            if (typeof pick === 'string' && pick.trim()) return pick.trim();
+        } catch {
+            /* try next */
+        }
+    }
+    return '';
+}
+
 export default defineConfig(({ mode }) => {
     const env = {
         ...loadEnv(mode, repoRoot, ''),
@@ -51,6 +78,16 @@ export default defineConfig(({ mode }) => {
         env.CANISTER_ID_internet_identity ||
         iiFromFile ||
         '';
+    const radarLocalFromFile = readFusionRadarCanisterId(repoRoot, 'local');
+    const radarIcFromFile = readFusionRadarCanisterId(repoRoot, 'ic');
+    const radarLocalMerged =
+        env.VITE_FUSION_RADAR_LOCAL_CANISTER_ID || radarLocalFromFile || '';
+    const radarMainnetMerged =
+        env.VITE_FUSION_RADAR_MAINNET_CANISTER_ID ||
+        radarIcFromFile ||
+        'yp25q-maaaa-aaaab-agz4a-cai';
+    /** Explicit override only (staging). Empty = resolve local vs mainnet at runtime. */
+    const radarOverride = env.VITE_FUSION_RADAR_CANISTER_ID || '';
     /** Only when set in `.env` — do not default to 127.0.0.1 here (would break `config.js` hostname matching on `*.localhost:4943`). */
     const replicaMerged = (env.VITE_IC_REPLICA_ORIGIN || '').replace(/\/$/, '');
     const replicaProxyTarget = replicaMerged || 'http://127.0.0.1:4943';
@@ -145,6 +182,11 @@ export default defineConfig(({ mode }) => {
         },
         define: {
             'import.meta.env.VITE_II_CANISTER_ID': JSON.stringify(iiMerged),
+            'import.meta.env.VITE_FUSION_RADAR_CANISTER_ID': JSON.stringify(radarOverride),
+            'import.meta.env.VITE_FUSION_RADAR_LOCAL_CANISTER_ID': JSON.stringify(radarLocalMerged),
+            'import.meta.env.VITE_FUSION_RADAR_MAINNET_CANISTER_ID': JSON.stringify(
+                radarMainnetMerged,
+            ),
             ...(replicaMerged
                 ? { 'import.meta.env.VITE_IC_REPLICA_ORIGIN': JSON.stringify(replicaMerged) }
                 : {}),

@@ -75,12 +75,63 @@ export async function radarDiscoverRss(opts) {
 }
 
 /**
+ * Preflight checks before Run discovery.
+ * @returns {Promise<{ ok: boolean, message?: string, warnings?: string[], sources?: any[], health?: any }>}
+ */
+export async function preflightRadarDiscovery() {
+    const base = getIntegrationBaseUrl();
+    if (!base) {
+        return {
+            ok: false,
+            message:
+                'Integration API URL not configured. Set the Integration base URL in Studio → Services (or VITE_INTEGRATION_API_URL), then retry.',
+        };
+    }
+    const sources = (await listRadarSources()).filter((s) => s.enabled);
+    if (!sources.length) {
+        return {
+            ok: false,
+            message:
+                'No enabled discovery sources. Open the Sources tab, add an RSS feed, Places query, or list URL, enable it, then run discovery again.',
+            sources: [],
+        };
+    }
+    const health = await radarDiscoverHealth();
+    /** @type {string[]} */
+    const warnings = [];
+    if (health?.ok === false || health?.error) {
+        warnings.push(
+            `Integration health: ${health.error || 'unreachable'}. Discovery calls may fail.`,
+        );
+    }
+    const usesPlaces = sources.some((s) => s.sourceType === 'googlePlaces');
+    if (usesPlaces && health?.googlePlaces === false) {
+        warnings.push(
+            'A Google Places source is enabled, but GOOGLE_PLACES_API_KEY is missing on the Integration API.',
+        );
+    }
+    return { ok: true, sources, health, warnings };
+}
+
+/**
  * Run enabled sources (best-effort). Places/RSS/crawl → lead upserts.
+ * @returns {Promise<{ created: number, errors: { sourceId?: string, error: string }[], skipped?: string, warnings?: string[] }>}
  */
 export async function runRadarDiscoveryBatch() {
-    const sources = (await listRadarSources()).filter((s) => s.enabled);
+    const pre = await preflightRadarDiscovery();
+    if (!pre.ok) {
+        return {
+            created: 0,
+            errors: [{ error: pre.message || 'Discovery preflight failed' }],
+            skipped: pre.message,
+            warnings: pre.warnings || [],
+        };
+    }
+
+    const sources = pre.sources || [];
     /** @type {ReturnType<typeof emptyLead>[]} */
     const created = [];
+    /** @type {{ sourceId?: string, error: string }[]} */
     const errors = [];
 
     for (const src of sources) {
@@ -146,6 +197,11 @@ export async function runRadarDiscoveryBatch() {
                         notes: String(res?.text || '').slice(0, 4000),
                     }),
                 );
+            } else {
+                errors.push({
+                    sourceId: src.id,
+                    error: `Source "${src.label || src.id}" has no query/URL for type ${src.sourceType}`,
+                });
             }
             await upsertRadarSource({
                 ...src,
@@ -160,7 +216,18 @@ export async function runRadarDiscoveryBatch() {
     }
 
     if (created.length) {
-        await bulkUpsertRadarLeads(created);
+        try {
+            await bulkUpsertRadarLeads(created);
+        } catch (err) {
+            errors.push({
+                error: `Lead upsert failed: ${err instanceof Error ? err.message : String(err)}`,
+            });
+            return {
+                created: 0,
+                errors,
+                warnings: pre.warnings || [],
+            };
+        }
     }
 
     try {
@@ -176,5 +243,5 @@ export async function runRadarDiscoveryBatch() {
         /* optional logging endpoint */
     }
 
-    return { created: created.length, errors };
+    return { created: created.length, errors, warnings: pre.warnings || [] };
 }

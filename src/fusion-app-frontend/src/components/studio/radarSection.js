@@ -1,8 +1,11 @@
 /**
  * Studio → Radar: relationship intelligence (siloed fusion-radar canister).
+ * Layout/typography aligned with Finance (MPD tabs, intro, Studio buttons).
  */
+import '../../styles/memberProfileDashboard.css';
 import '../../styles/studioRadar.css';
 import { studioFeatureAccess } from '../../utils/studioShellState.js';
+import { studioIconHref } from '../../utils/studioIconRegistry.js';
 import {
     RADAR_LEAD_TYPES,
     RADAR_PIPELINE_STATUSES,
@@ -32,6 +35,8 @@ import {
     upsertRadarRelationship,
     upsertRadarSource,
     bootstrapRadarAdmin,
+    getRadarAccessState,
+    addRadarStaffPrincipal,
 } from '../../utils/radarApi.js';
 import { radarDiscoverHealth, runRadarDiscoveryBatch } from '../../utils/radarDiscovery.js';
 import { computeRadarEntityBridges, syncRadarBridgeRelationships } from '../../utils/radarBridges.js';
@@ -53,22 +58,84 @@ let activeTab = 'leads';
 let filters = { q: '', type: '', status: '', region: '' };
 /** @type {(() => void) | null} */
 let unsub = null;
+/** @type {{ isAdmin: boolean, isStaffOrAdmin: boolean, bootstrapped: boolean, error?: string, bootstrapNote?: string }} */
+let radarAccess = { isAdmin: false, isStaffOrAdmin: false, bootstrapped: false };
 
+/**
+ * @param {string} loadError
+ */
+function formatRadarLoadHint(loadError) {
+    const msg = String(loadError || '');
+    if (/canister id missing/i.test(msg)) {
+        return `${msg} Restart Vite after dfx deploy fusion-radar, or set VITE_FUSION_RADAR_CANISTER_ID.`;
+    }
+    if (/staff or admin only/i.test(msg)) {
+        return `${msg} Studio “radar” permission is separate from the Radar canister allowlist — ask a Radar admin to add your principal.`;
+    }
+    return msg;
+}
+
+/** @type {{ id: typeof activeTab, label: string, icon: string, blurb: string }[]} */
 const TABS = [
-    { id: 'discover', label: 'Discover' },
-    { id: 'leads', label: 'Leads' },
-    { id: 'relationships', label: 'Relationships' },
-    { id: 'outreach', label: 'Outreach' },
-    { id: 'sources', label: 'Sources' },
-    { id: 'analytics', label: 'Analytics' },
+    {
+        id: 'discover',
+        label: 'Discover',
+        icon: 'nav-ai',
+        blurb: 'Scan your pipeline board. Add leads manually or run discovery, then open a card to qualify and score.',
+    },
+    {
+        id: 'leads',
+        label: 'Leads',
+        icon: 'nav-subscribers',
+        blurb: 'Search and filter your roster of prospects. Export CSV, open a row to edit, or bulk-delete selected leads.',
+    },
+    {
+        id: 'relationships',
+        label: 'Relationships',
+        icon: 'nav-community',
+        blurb: 'Map how leads connect to each other and to Fusion. Compute roster bridges, then sync edges onto Radar.',
+    },
+    {
+        id: 'outreach',
+        label: 'Outreach',
+        icon: 'nav-email',
+        blurb: 'Configure event triggers, queue drafts for approval, and track what has been sent or replied.',
+    },
+    {
+        id: 'sources',
+        label: 'Sources',
+        icon: 'nav-content',
+        blurb: 'Manage discovery feeds (RSS, lists, Places queries). Enable or disable sources before running Discover.',
+    },
+    {
+        id: 'analytics',
+        label: 'Analytics',
+        icon: 'group-overview',
+        blurb: 'Glance at funnel volume, average fit score, outreach response rate, and lead-type mix.',
+    },
 ];
+
+/**
+ * @param {string} iconKey
+ */
+function tabIconStyle(iconKey) {
+    const href = studioIconHref(iconKey);
+    return href ? ` style="--mpd-icon-url: url('${esc(href)}')"` : '';
+}
+
+/**
+ * @param {typeof activeTab} id
+ */
+function tabMeta(id) {
+    return TABS.find((t) => t.id === id) || TABS[1];
+}
 
 export function renderRadar() {
     const access = studioFeatureAccess('radar');
     if (!access.visible) {
         return `<div class="studio-section"><p class="studio-muted">You do not have access to Radar.</p></div>`;
     }
-    return `<div class="studio-radar-page" id="studio-radar-root" data-can-edit="${access.canEdit ? '1' : '0'}"></div>`;
+    return `<div class="studio-section-stack studio-category-page studio-radar-page" id="studio-radar-root" data-can-edit="${access.canEdit ? '1' : '0'}"></div>`;
 }
 
 /**
@@ -91,23 +158,57 @@ export async function initRadar(mainEl) {
         const outreach = getRadarOutreachCached();
         const relationships = getRadarRelationshipsCached();
         const filtered = filterLeads(leads, filters);
+        const meta = tabMeta(activeTab);
+
+        const tabsHtml = TABS.map((t) => {
+            const active = t.id === activeTab;
+            return `<button type="button" class="mpd-program-tab mpd-program-tab--${esc(t.id)}${active ? ' is-active' : ''}" role="tab" id="studio-radar-tab-${esc(t.id)}" aria-selected="${active ? 'true' : 'false'}" tabindex="${active ? '0' : '-1'}" aria-controls="studio-radar-panel" data-radar-tab="${esc(t.id)}">
+                <span class="mpd-program-tab__icon"${tabIconStyle(t.icon)} aria-hidden="true"></span>
+                <span>${esc(t.label)}</span>
+            </button>`;
+        }).join('');
+
+        let body = '';
+        if (activeTab === 'discover') body = renderDiscover(leads, canEdit);
+        else if (activeTab === 'leads') body = renderLeads(filtered, canEdit);
+        else if (activeTab === 'relationships') body = renderRelationships(relationships, leads, canEdit);
+        else if (activeTab === 'outreach') body = renderOutreach(outreach, leads, canEdit);
+        else if (activeTab === 'sources') body = renderSources(sources, canEdit);
+        else body = renderAnalytics(leads, outreach, sources);
+
+        const accessBanner = renderAccessBanner(loadState, loadError);
 
         root.innerHTML = `
-      <div class="studio-radar-tabs" role="tablist">
-        ${TABS.map(
-            (t) =>
-                `<button type="button" role="tab" data-radar-tab="${t.id}" class="${activeTab === t.id ? 'is-active' : ''}">${esc(t.label)}</button>`,
-        ).join('')}
+      <div class="studio-radar-intro">
+        <h2 class="studio-radar-intro__title">Radar</h2>
+        <p class="studio-muted studio-radar-intro__hint">Relationship intelligence for Fusion outreach — find fit, map warm paths, and draft messages with human approval before send.</p>
       </div>
-      <div class="studio-radar-panel" data-radar-panel>
-        ${loadState === 'loading' ? `<p class="studio-radar-muted">Loading Radar…</p>` : ''}
-        ${loadState === 'error' ? `<p class="studio-radar-muted">${esc(loadError)}</p>` : ''}
-        ${activeTab === 'discover' ? renderDiscover(leads, canEdit) : ''}
-        ${activeTab === 'leads' ? renderLeads(filtered, canEdit) : ''}
-        ${activeTab === 'relationships' ? renderRelationships(relationships, leads) : ''}
-        ${activeTab === 'outreach' ? renderOutreach(outreach, leads, canEdit) : ''}
-        ${activeTab === 'sources' ? renderSources(sources, canEdit) : ''}
-        ${activeTab === 'analytics' ? renderAnalytics(leads, outreach, sources) : ''}
+      ${accessBanner}
+      <p class="member-profile-dashboard__status-line" role="status" aria-live="polite" id="studio-radar-status-line">${
+          loadState === 'loading'
+              ? 'Loading Radar…'
+              : loadState === 'error'
+                ? esc(formatRadarLoadHint(loadError) || 'Failed to load Radar')
+                : `${leads.length} lead${leads.length === 1 ? '' : 's'} · ${outreach.length} outreach · ${sources.length} source${sources.length === 1 ? '' : 's'}`
+      }</p>
+      ${
+          loadState === 'loading'
+              ? `<div class="mpd-initial-loading" role="status"><div class="mpd-initial-loading__spinner" aria-hidden="true"></div><p>Loading Radar workspace…</p></div>`
+              : ''
+      }
+      <div class="studio-radar-workspace" ${loadState === 'loading' ? 'hidden' : ''}>
+        <div class="studio-radar-domain-tabs">
+          <div class="mpd-program-tabs" role="tablist" aria-label="Radar sections">${tabsHtml}</div>
+        </div>
+        <div class="mpd-program-tab-panel" id="studio-radar-panel" role="tabpanel" aria-labelledby="studio-radar-tab-${esc(activeTab)}" data-radar-panel>
+          <section class="member-profile-dashboard__card">
+            <div class="studio-radar-panel-head">
+              <h2>${esc(meta.label)}</h2>
+              <p>${esc(meta.blurb)}</p>
+            </div>
+            ${body}
+          </section>
+        </div>
       </div>
     `;
         bind(root, canEdit, paint);
@@ -116,11 +217,67 @@ export async function initRadar(mainEl) {
     unsub = subscribeRadar(paint);
     paint();
     try {
-        await bootstrapRadarAdmin().catch(() => false);
-        await loadRadarWorkspace();
+        let bootstrapNote = '';
+        try {
+            const bootstrapped = await bootstrapRadarAdmin();
+            if (bootstrapped) {
+                bootstrapNote = 'You are now the first Radar admin on this canister.';
+            }
+        } catch (bootErr) {
+            bootstrapNote =
+                bootErr instanceof Error
+                    ? `Bootstrap: ${bootErr.message}`
+                    : `Bootstrap: ${String(bootErr)}`;
+        }
+        radarAccess = await getRadarAccessState();
+        if (bootstrapNote) radarAccess = { ...radarAccess, bootstrapNote };
+        try {
+            await loadRadarWorkspace();
+        } catch {
+            /* loadError already in store; paint via subscribe */
+        }
+        paint();
     } catch {
         paint();
     }
+}
+
+/**
+ * @param {'idle'|'loading'|'ready'|'error'} loadState
+ * @param {string} loadError
+ */
+function renderAccessBanner(loadState, loadError) {
+    const parts = [];
+    if (radarAccess.bootstrapNote) {
+        parts.push(`<p>${esc(radarAccess.bootstrapNote)}</p>`);
+    }
+    if (radarAccess.error && loadState === 'error') {
+        parts.push(`<p>${esc(formatRadarLoadHint(radarAccess.error))}</p>`);
+    } else if (loadState === 'error' && loadError) {
+        parts.push(`<p>${esc(formatRadarLoadHint(loadError))}</p>`);
+    } else if (!radarAccess.isStaffOrAdmin && loadState !== 'loading') {
+        parts.push(
+            `<p><strong>Radar canister access:</strong> Studio “radar” permission is separate from the Radar staff/admin allowlist. Ask a Radar admin to add your Internet Identity principal, or bootstrap as the first admin if the canister is empty.</p>`,
+        );
+    } else if (radarAccess.isStaffOrAdmin) {
+        const role = radarAccess.isAdmin ? 'admin' : 'staff';
+        parts.push(
+            `<p class="studio-radar-access-ok">Radar access: <strong>${esc(role)}</strong>. Studio permission gates the nav; canister allowlist gates reads/writes.</p>`,
+        );
+    }
+    if (radarAccess.isAdmin) {
+        parts.push(`
+      <div class="studio-radar-staff-add">
+        <label class="studio-field studio-field--grow">
+          <span>Add Radar staff principal</span>
+          <input type="text" class="studio-input" id="radarAddStaffPrincipal" placeholder="aaaaa-aa…" autocomplete="off" />
+        </label>
+        <button type="button" class="studio-btn-secondary" data-radar-act="add-staff">Add staff</button>
+        <span class="studio-radar-status" id="radarStaffStatus" role="status"></span>
+      </div>`);
+    }
+    if (!parts.length) return '';
+    return `<div class="studio-radar-banner ${loadState === 'error' || (!radarAccess.isStaffOrAdmin && loadState !== 'loading') ? 'studio-radar-banner--warn' : ''}" role="status">${parts.join('')}</div>`;
 }
 
 /**
@@ -141,16 +298,18 @@ function renderDiscover(leads, canEdit) {
         </div>`,
             )
             .join('');
-        return `<div class="studio-radar-col"><h3>${esc(status)}</h3>${cards || '<p class="studio-radar-muted">Empty</p>'}</div>`;
+        return `<div class="studio-radar-col"><h3>${esc(status)}</h3>${cards || '<p class="studio-radar-empty">No cards</p>'}</div>`;
     }).join('');
 
     return `
     <div class="studio-radar-toolbar">
-      ${canEdit ? `<button type="button" class="studio-radar-btn studio-radar-btn--primary" data-radar-act="add-lead">Add lead</button>` : ''}
-      ${canEdit ? `<button type="button" class="studio-radar-btn" data-radar-act="run-discovery">Run discovery</button>` : ''}
-      <button type="button" class="studio-radar-btn" data-radar-act="health">API health</button>
-      <span class="studio-radar-muted" id="radarDiscoverStatus"></span>
+      <div class="studio-radar-toolbar-actions">
+        ${canEdit ? `<button type="button" class="studio-btn-primary" data-radar-act="add-lead">Add lead</button>` : ''}
+        ${canEdit ? `<button type="button" class="studio-btn-ghost" data-radar-act="run-discovery">Run discovery</button>` : ''}
+        <button type="button" class="studio-btn-ghost" data-radar-act="health">API health</button>
+      </div>
     </div>
+    <p class="studio-radar-status" id="radarDiscoverStatus" role="status"></p>
     <div class="studio-radar-kanban">${cols}</div>
   `;
 }
@@ -179,18 +338,32 @@ function renderLeads(filtered, canEdit) {
 
     return `
     <div class="studio-radar-toolbar">
-      <input type="search" placeholder="Search…" data-filter="q" value="${esc(filters.q)}" />
-      <select data-filter="type"><option value="">All types</option>${RADAR_LEAD_TYPES.map((t) => `<option value="${t}" ${filters.type === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
-      <select data-filter="status"><option value="">All statuses</option>${RADAR_STATUSES.map((t) => `<option value="${t}" ${filters.status === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
-      <input type="text" placeholder="Region" data-filter="region" value="${esc(filters.region)}" />
-      ${canEdit ? `<button type="button" class="studio-radar-btn studio-radar-btn--primary" data-radar-act="add-lead">Add lead</button>` : ''}
-      <button type="button" class="studio-radar-btn" data-radar-act="export-csv">Export CSV</button>
-      ${canEdit ? `<button type="button" class="studio-radar-btn" data-radar-act="bulk-delete">Delete selected</button>` : ''}
+      <label class="studio-field studio-field--grow">
+        <span>Search</span>
+        <input type="search" class="studio-input" placeholder="Name, email, notes…" data-filter="q" value="${esc(filters.q)}" autocomplete="off" />
+      </label>
+      <label class="studio-field">
+        <span>Type</span>
+        <select class="studio-select" data-filter="type"><option value="">All types</option>${RADAR_LEAD_TYPES.map((t) => `<option value="${t}" ${filters.type === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
+      </label>
+      <label class="studio-field">
+        <span>Status</span>
+        <select class="studio-select" data-filter="status"><option value="">All statuses</option>${RADAR_STATUSES.map((t) => `<option value="${t}" ${filters.status === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
+      </label>
+      <label class="studio-field">
+        <span>Region</span>
+        <input type="text" class="studio-input" placeholder="Region" data-filter="region" value="${esc(filters.region)}" />
+      </label>
+      <div class="studio-radar-toolbar-actions">
+        ${canEdit ? `<button type="button" class="studio-btn-primary" data-radar-act="add-lead">Add lead</button>` : ''}
+        <button type="button" class="studio-btn-ghost" data-radar-act="export-csv">Export CSV</button>
+        ${canEdit ? `<button type="button" class="studio-btn-secondary" data-radar-act="bulk-delete">Delete selected</button>` : ''}
+      </div>
     </div>
-    <div class="studio-radar-table-wrap">
-      <table class="studio-radar-table">
+    <div class="studio-table-wrap studio-table-wrap--sticky-head">
+      <table class="studio-table studio-table--dense">
         <thead><tr><th></th><th>Name</th><th>Type</th><th>Location</th><th>Score</th><th>Status</th><th>Fit</th><th>Japan</th><th>Next</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="9" class="studio-radar-muted">No leads yet</td></tr>`}</tbody>
+        <tbody>${rows || `<tr><td colspan="9"><p class="studio-radar-empty">No leads match these filters. Add a lead or clear filters.</p></td></tr>`}</tbody>
       </table>
     </div>
   `;
@@ -199,8 +372,9 @@ function renderLeads(filtered, canEdit) {
 /**
  * @param {any[]} relationships
  * @param {ReturnType<typeof emptyLead>[]} leads
+ * @param {boolean} canEdit
  */
-function renderRelationships(relationships, leads) {
+function renderRelationships(relationships, leads, canEdit) {
     const byLead = new Map();
     for (const r of relationships) {
         const key = r.fromLeadId || 'unknown';
@@ -216,19 +390,22 @@ function renderRelationships(relationships, leads) {
                         `<li><span class="studio-radar-chip">${esc(r.kind)}</span> ${esc(r.label || nameOf(r.toLeadId))} <span class="studio-radar-muted">${esc(r.evidence)}</span></li>`,
                 )
                 .join('');
-            return `<div class="studio-radar-card"><strong>${esc(nameOf(id))}</strong><ul>${items}</ul></div>`;
+            return `<div class="studio-radar-card" style="cursor:default"><strong>${esc(nameOf(id))}</strong><ul class="studio-radar-rel-list">${items}</ul></div>`;
         })
         .join('');
 
     return `
     <div class="studio-radar-toolbar">
-      <button type="button" class="studio-radar-btn" data-radar-act="compute-bridges">Compute Fusion bridges</button>
-      <button type="button" class="studio-radar-btn studio-radar-btn--primary" data-radar-act="sync-bridges">Sync bridges to Radar</button>
-      <button type="button" class="studio-radar-btn" data-radar-act="add-rel">Add relationship</button>
-      <span class="studio-radar-muted" id="radarRelStatus"></span>
+      <div class="studio-radar-toolbar-actions" style="margin-left:0">
+        <button type="button" class="studio-btn-ghost" data-radar-act="compute-bridges">Compute Fusion bridges</button>
+        ${canEdit ? `<button type="button" class="studio-btn-primary" data-radar-act="sync-bridges">Sync bridges to Radar</button>` : ''}
+        ${canEdit ? `<button type="button" class="studio-btn-secondary" data-radar-act="add-rel">Add relationship</button>` : ''}
+      </div>
     </div>
-    <p class="studio-radar-muted">Lead↔lead edges live on the Radar canister. Fusion roster/applicant matches are joined in the Studio UI, then optionally persisted as relationships.</p>
-    ${blocks || '<p class="studio-radar-muted">No relationships yet</p>'}
+    <p class="studio-radar-status" id="radarRelStatus" role="status"></p>
+    <div class="studio-radar-stats-grid" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))">
+      ${blocks || '<p class="studio-radar-empty">No relationships yet. Compute bridges or add an edge manually.</p>'}
+    </div>
   `;
 }
 
@@ -243,7 +420,7 @@ function renderOutreach(outreach, leads, canEdit) {
     const cfg = getRadarTriggerConfig();
     const triggers = RADAR_TRIGGER_TYPES.map(
         (t) =>
-            `<label style="display:inline-flex;gap:0.35rem;align-items:center;margin-right:0.75rem"><input type="checkbox" data-trigger="${esc(t.id)}" ${cfg.enabled?.includes(t.id) ? 'checked' : ''}/> ${esc(t.label)}</label>`,
+            `<label><input type="checkbox" data-trigger="${esc(t.id)}" ${cfg.enabled?.includes(t.id) ? 'checked' : ''}/> ${esc(t.label)}</label>`,
     ).join('');
 
     const draftRows = drafts
@@ -254,7 +431,7 @@ function renderOutreach(outreach, leads, canEdit) {
         <td>${esc(o.subject)}</td>
         <td>${esc(o.triggerEvent)}</td>
         <td>${esc(o.status)}</td>
-        <td>${canEdit ? `<button type="button" class="studio-radar-btn" data-open-outreach="${esc(o.leadId)}">Open</button>` : ''}</td>
+        <td>${canEdit ? `<button type="button" class="studio-btn-ghost" data-open-outreach="${esc(o.leadId)}">Open</button>` : ''}</td>
       </tr>`;
         })
         .join('');
@@ -269,16 +446,20 @@ function renderOutreach(outreach, leads, canEdit) {
     return `
     <div class="studio-radar-why-block">
       <h4>Event triggers</h4>
-      <p class="studio-radar-muted">When enabled triggers fire (RSS / discovery / manual), Radar can auto-queue drafts for human approval.</p>
-      <div>${triggers}</div>
-      <label style="display:inline-flex;gap:0.35rem;margin-top:0.5rem"><input type="checkbox" id="radarAutoDraft" ${cfg.autoDraft ? 'checked' : ''}/> Auto-create drafts</label>
-      <button type="button" class="studio-radar-btn" data-radar-act="save-triggers" style="margin-left:0.5rem">Save triggers</button>
-      ${canEdit ? `<button type="button" class="studio-radar-btn" data-radar-act="queue-manual-drafts">Queue drafts for qualified leads</button>` : ''}
+      <p>When enabled triggers fire (RSS / discovery / manual), Radar can auto-queue drafts for human approval before anything is sent.</p>
+      <div class="studio-radar-trigger-grid">${triggers}</div>
+      <label class="studio-radar-check"><input type="checkbox" id="radarAutoDraft" ${cfg.autoDraft ? 'checked' : ''}/> Auto-create drafts</label>
+      <div class="studio-radar-toolbar" style="margin:0.75rem 0 0">
+        <div class="studio-radar-toolbar-actions" style="margin-left:0">
+          <button type="button" class="studio-btn-primary" data-radar-act="save-triggers">Save triggers</button>
+          ${canEdit ? `<button type="button" class="studio-btn-ghost" data-radar-act="queue-manual-drafts">Queue drafts for qualified leads</button>` : ''}
+        </div>
+      </div>
     </div>
-    <h3>Draft queue</h3>
-    <div class="studio-radar-table-wrap"><table class="studio-radar-table"><thead><tr><th>Lead</th><th>Subject</th><th>Trigger</th><th>Status</th><th></th></tr></thead><tbody>${draftRows || '<tr><td colspan="5" class="studio-radar-muted">No drafts</td></tr>'}</tbody></table></div>
-    <h3>Sent</h3>
-    <div class="studio-radar-table-wrap"><table class="studio-radar-table"><thead><tr><th>Lead</th><th>Subject</th><th>Status</th><th>Sent</th></tr></thead><tbody>${sentRows || '<tr><td colspan="4" class="studio-radar-muted">None sent</td></tr>'}</tbody></table></div>
+    <h3 class="studio-radar-section-title">Draft queue</h3>
+    <div class="studio-table-wrap studio-table-wrap--sticky-head"><table class="studio-table studio-table--dense"><thead><tr><th>Lead</th><th>Subject</th><th>Trigger</th><th>Status</th><th></th></tr></thead><tbody>${draftRows || '<tr><td colspan="5"><p class="studio-radar-empty">No drafts waiting for approval.</p></td></tr>'}</tbody></table></div>
+    <h3 class="studio-radar-section-title">Sent</h3>
+    <div class="studio-table-wrap studio-table-wrap--sticky-head"><table class="studio-table studio-table--dense"><thead><tr><th>Lead</th><th>Subject</th><th>Status</th><th>Sent</th></tr></thead><tbody>${sentRows || '<tr><td colspan="4"><p class="studio-radar-empty">Nothing sent yet.</p></td></tr>'}</tbody></table></div>
   `;
 }
 
@@ -298,8 +479,8 @@ function renderSources(sources, canEdit) {
         <td>${s.enabled ? 'On' : 'Off'}</td>
         <td>${esc(s.lastRunAt || '—')}</td>
         <td>
-          ${canEdit ? `<button type="button" class="studio-radar-btn" data-toggle-source="${esc(s.id)}">${s.enabled ? 'Disable' : 'Enable'}</button>` : ''}
-          ${canEdit ? `<button type="button" class="studio-radar-btn" data-del-source="${esc(s.id)}">Delete</button>` : ''}
+          ${canEdit ? `<button type="button" class="studio-btn-ghost" data-toggle-source="${esc(s.id)}">${s.enabled ? 'Disable' : 'Enable'}</button>` : ''}
+          ${canEdit ? `<button type="button" class="studio-btn-secondary" data-del-source="${esc(s.id)}">Delete</button>` : ''}
         </td>
       </tr>`,
         )
@@ -307,14 +488,16 @@ function renderSources(sources, canEdit) {
 
     return `
     <div class="studio-radar-toolbar">
-      ${canEdit ? `<button type="button" class="studio-radar-btn studio-radar-btn--primary" data-radar-act="add-source">Add source</button>` : ''}
-      <button type="button" class="studio-radar-btn" data-radar-act="health">API status</button>
-      <span class="studio-radar-muted" id="radarSourceStatus"></span>
+      <div class="studio-radar-toolbar-actions" style="margin-left:0">
+        ${canEdit ? `<button type="button" class="studio-btn-primary" data-radar-act="add-source">Add source</button>` : ''}
+        <button type="button" class="studio-btn-ghost" data-radar-act="health">API status</button>
+      </div>
     </div>
-    <div class="studio-radar-table-wrap">
-      <table class="studio-radar-table">
+    <p class="studio-radar-status" id="radarSourceStatus" role="status"></p>
+    <div class="studio-table-wrap studio-table-wrap--sticky-head">
+      <table class="studio-table studio-table--dense">
         <thead><tr><th>Label</th><th>Type</th><th>URL / query</th><th>Region</th><th>Enabled</th><th>Last run</th><th></th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="7" class="studio-radar-muted">No sources configured</td></tr>'}</tbody>
+        <tbody>${rows || `<tr><td colspan="7"><p class="studio-radar-empty">No sources configured. Add an RSS feed or list to power Discover.</p></td></tr>`}</tbody>
       </table>
     </div>
   `;
@@ -367,7 +550,7 @@ function renderAnalytics(leads, outreach, sources) {
       <div class="studio-radar-stat"><div class="l">Response rate</div><div class="n">${responseRate}%</div></div>
       <div class="studio-radar-stat"><div class="l">Sources</div><div class="n">${sources.length}</div></div>
     </div>
-    <h3>Type mix</h3>
+    <h3 class="studio-radar-section-title">Type mix</h3>
     <div class="studio-radar-stats-grid">${typeBars}</div>
   `;
 }
@@ -400,7 +583,15 @@ function bind(root, canEdit, paint) {
         el.addEventListener('click', () => {
             const id = el.getAttribute('data-open-lead');
             const lead = getRadarLeadsCached().find((l) => l.id === id);
-            if (lead) openRadarLeadModal(lead, { canEdit, onSaved: () => loadRadarWorkspace() });
+            if (!lead) return;
+            void openRadarLeadModal(lead, { canEdit, onSaved: () => loadRadarWorkspace() }).catch(
+                (err) => {
+                    openStudioModal(
+                        `<p class="studio-radar-error">${esc(err instanceof Error ? err.message : String(err))}</p>`,
+                        { title: 'Radar lead' },
+                    );
+                },
+            );
         });
     });
 
@@ -419,10 +610,17 @@ function bind(root, canEdit, paint) {
             const act = actBtn.getAttribute('data-radar-act');
             try {
                 if (act === 'add-lead') {
-                    openRadarLeadModal(emptyLead({ status: 'discovered' }), {
-                        canEdit,
-                        onSaved: () => loadRadarWorkspace(),
-                    });
+                    try {
+                        await openRadarLeadModal(emptyLead({ status: 'discovered' }), {
+                            canEdit,
+                            onSaved: () => loadRadarWorkspace(),
+                        });
+                    } catch (err) {
+                        openStudioModal(
+                            `<p class="studio-radar-error">${esc(err instanceof Error ? err.message : String(err))}</p>`,
+                            { title: 'Add lead' },
+                        );
+                    }
                 } else if (act === 'run-discovery') {
                     const st = root.querySelector('#radarDiscoverStatus');
                     if (st) st.textContent = 'Running…';
@@ -432,8 +630,48 @@ function bind(root, canEdit, paint) {
                     } catch {
                         /* ignore */
                     }
-                    await loadRadarWorkspace();
-                    if (st) st.textContent = `Ingested ${res.created} · errors ${res.errors.length}`;
+                    await loadRadarWorkspace().catch(() => {});
+                    const errParts = (res.errors || []).map((e) => e.error).filter(Boolean);
+                    const warnParts = res.warnings || [];
+                    if (st) {
+                        st.textContent = res.skipped
+                            ? res.skipped
+                            : `Ingested ${res.created} · errors ${errParts.length}${warnParts.length ? ` · warnings ${warnParts.length}` : ''}`;
+                    }
+                    if (res.skipped || errParts.length || warnParts.length) {
+                        openStudioModal(
+                            `<div class="studio-radar-discovery-report">
+                ${res.skipped ? `<p><strong>${esc(res.skipped)}</strong></p>` : `<p>Created <strong>${res.created}</strong> lead(s).</p>`}
+                ${
+                    warnParts.length
+                        ? `<h4>Warnings</h4><ul>${warnParts.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>`
+                        : ''
+                }
+                ${
+                    errParts.length
+                        ? `<h4>Errors</h4><ul>${errParts.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>`
+                        : ''
+                }
+              </div>`,
+                            { title: 'Discovery result', wide: true },
+                        );
+                    }
+                } else if (act === 'add-staff') {
+                    const input = /** @type {HTMLInputElement|null} */ (
+                        root.querySelector('#radarAddStaffPrincipal')
+                    );
+                    const st = root.querySelector('#radarStaffStatus');
+                    try {
+                        await addRadarStaffPrincipal(input?.value || '');
+                        if (st) st.textContent = 'Staff added.';
+                        if (input) input.value = '';
+                        radarAccess = await getRadarAccessState();
+                        paint();
+                    } catch (err) {
+                        if (st) {
+                            st.textContent = err instanceof Error ? err.message : String(err);
+                        }
+                    }
                 } else if (act === 'health') {
                     const h = await radarDiscoverHealth();
                     openStudioModal(
@@ -470,11 +708,13 @@ function bind(root, canEdit, paint) {
                         { title: 'Fusion bridges', wide: true },
                     );
                 } else if (act === 'sync-bridges') {
+                    if (!canEdit) return;
                     const st = root.querySelector('#radarRelStatus');
                     const res = await syncRadarBridgeRelationships();
                     if (st) st.textContent = `Synced ${res.created} new edges (${res.matchCount} matches)`;
                     await loadRadarWorkspace();
                 } else if (act === 'add-rel') {
+                    if (!canEdit) return;
                     openAddRelationshipModal(() => loadRadarWorkspace());
                 } else if (act === 'add-source') {
                     openAddSourceModal(() => loadRadarWorkspace());
@@ -486,12 +726,28 @@ function bind(root, canEdit, paint) {
                         /** @type {HTMLInputElement} */ (root.querySelector('#radarAutoDraft'))?.checked,
                     );
                     setRadarTriggerConfig({ enabled, autoDraft });
+                    openStudioModal(`<p>Triggers saved (stored in this browser — not on the Radar canister yet).</p>`, {
+                        title: 'Triggers',
+                    });
                 } else if (act === 'queue-manual-drafts') {
                     const cfg = getRadarTriggerConfig();
-                    if (!cfg.autoDraft) return;
+                    if (!cfg.autoDraft) {
+                        openStudioModal(
+                            `<p>Auto-create drafts is off. Enable <strong>Auto-create drafts</strong> and save triggers, then try again.</p>`,
+                            { title: 'Queue drafts' },
+                        );
+                        return;
+                    }
                     const leads = getRadarLeadsCached().filter(
                         (l) => l.status === 'qualified' && l.publicEmail,
                     );
+                    if (!leads.length) {
+                        openStudioModal(
+                            `<p>No qualified leads with a public email to queue.</p>`,
+                            { title: 'Queue drafts' },
+                        );
+                        return;
+                    }
                     for (const lead of leads.slice(0, 20)) {
                         await upsertRadarOutreach({
                             id: '',
@@ -504,6 +760,10 @@ function bind(root, canEdit, paint) {
                         });
                     }
                     await loadRadarWorkspace();
+                    openStudioModal(
+                        `<p>Queued drafts for ${Math.min(leads.length, 20)} qualified lead(s).</p>`,
+                        { title: 'Queue drafts' },
+                    );
                 }
             } catch (err) {
                 openStudioModal(
@@ -540,16 +800,16 @@ function openAddSourceModal(onDone) {
     const typeOpts = RADAR_SOURCE_TYPES.map((t) => `<option value="${t}">${t}</option>`).join('');
     const { root, close } = openStudioModal(
         `<div class="studio-radar-form-grid">
-      <label>Label<input id="rsLabel" /></label>
-      <label>Type<select id="rsType">${typeOpts}</select></label>
-      <label class="full">URL<input id="rsUrl" /></label>
-      <label class="full">Query (Places)<input id="rsQuery" placeholder="contemporary art gallery in Brooklyn" /></label>
-      <label>Region<input id="rsRegion" /></label>
-      <label>Interval hours<input id="rsInterval" type="number" value="24" /></label>
+      <label>Label<input id="rsLabel" class="studio-input" /></label>
+      <label>Type<select id="rsType" class="studio-select">${typeOpts}</select></label>
+      <label class="full">URL<input id="rsUrl" class="studio-input" /></label>
+      <label class="full">Query (Places)<input id="rsQuery" class="studio-input" placeholder="contemporary art gallery in Brooklyn" /></label>
+      <label>Region<input id="rsRegion" class="studio-input" /></label>
+      <label>Interval hours<input id="rsInterval" class="studio-input" type="number" value="24" /></label>
     </div>`,
         {
             title: 'Add discovery source',
-            footerHtml: `<button type="button" class="studio-radar-btn studio-radar-btn--primary" id="rsSave">Save</button>`,
+            footerHtml: `<button type="button" class="studio-btn-primary" id="rsSave">Save</button>`,
         },
     );
     root.querySelector('#rsSave')?.addEventListener('click', async () => {
@@ -582,15 +842,15 @@ function openAddRelationshipModal(onDone) {
         .join('');
     const { root, close } = openStudioModal(
         `<div class="studio-radar-form-grid">
-      <label>From<select id="rrFrom">${opts}</select></label>
-      <label>To<select id="rrTo">${opts}</select></label>
-      <label>Kind<select id="rrKind"><option>collaboratesWith</option><option>represents</option><option>exhibitedBy</option><option>curatedBy</option><option>referredBy</option><option>fusionMember</option><option>appliedTo</option></select></label>
-      <label class="full">Label<input id="rrLabel" /></label>
-      <label class="full">Evidence<input id="rrEvidence" /></label>
+      <label>From<select id="rrFrom" class="studio-select">${opts}</select></label>
+      <label>To<select id="rrTo" class="studio-select">${opts}</select></label>
+      <label>Kind<select id="rrKind" class="studio-select"><option>collaboratesWith</option><option>represents</option><option>exhibitedBy</option><option>curatedBy</option><option>referredBy</option><option>fusionMember</option><option>appliedTo</option></select></label>
+      <label class="full">Label<input id="rrLabel" class="studio-input" /></label>
+      <label class="full">Evidence<input id="rrEvidence" class="studio-input" /></label>
     </div>`,
         {
             title: 'Add relationship',
-            footerHtml: `<button type="button" class="studio-radar-btn studio-radar-btn--primary" id="rrSave">Save</button>`,
+            footerHtml: `<button type="button" class="studio-btn-primary" id="rrSave">Save</button>`,
         },
     );
     root.querySelector('#rrSave')?.addEventListener('click', async () => {

@@ -882,6 +882,9 @@ class HeaderComponent extends HTMLElement {
 
     /**
      * Slim banner: linked artist visibility is not public (member accounts).
+     * Inactive is only alarming when membership is lost (`needsSubscription`). Entitled members
+     * (`ok` / `exempt`) often still have draft `inactive` skeletons or cancel-forced inactive —
+     * do not show the red inactive banner for them.
      */
     async _syncRosterVisibilityBanner() {
         const host = this.shadowRoot && this.shadowRoot.querySelector('#headerRosterVisBanner');
@@ -900,8 +903,15 @@ class HeaderComponent extends HTMLElement {
             return;
         }
         try {
-            const { getMyArtistRecord, normalizeArtistRosterVisibility } = await import('../../utils/database.js');
-            const rec = await getMyArtistRecord();
+            const {
+                getMyArtistRecord,
+                getMembershipAccessForCaller,
+                normalizeArtistRosterVisibility,
+            } = await import('../../utils/database.js');
+            const [rec, membershipGate] = await Promise.all([
+                getMyArtistRecord(),
+                getMembershipAccessForCaller(),
+            ]);
             const p = rec && rec.profile;
             if (!p || typeof p !== 'object') {
                 host.hidden = true;
@@ -910,6 +920,12 @@ class HeaderComponent extends HTMLElement {
             }
             const vis = normalizeArtistRosterVisibility(/** @type {Record<string, unknown>} */(p).visibility);
             if (vis === 'public') {
+                host.hidden = true;
+                host.innerHTML = '';
+                return;
+            }
+            const entitled = membershipGate === 'ok' || membershipGate === 'exempt';
+            if (vis === 'inactive' && entitled) {
                 host.hidden = true;
                 host.innerHTML = '';
                 return;

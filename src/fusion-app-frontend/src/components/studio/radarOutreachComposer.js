@@ -79,10 +79,10 @@ export function openRadarOutreachComposer(lead, opts = {}) {
         subtitle: 'AI drafts — you approve before send',
         wide: true,
         footerHtml: `
-      <button type="button" class="studio-radar-btn" data-out="draft">AI draft</button>
-      <button type="button" class="studio-radar-btn" data-out="regen">Regenerate</button>
-      <button type="button" class="studio-radar-btn" data-out="save-draft">Save draft</button>
-      <button type="button" class="studio-radar-btn studio-radar-btn--primary" data-out="send">Approve &amp; send</button>
+      <button type="button" class="studio-btn-ghost" data-out="draft">AI draft</button>
+      <button type="button" class="studio-btn-ghost" data-out="regen">Regenerate</button>
+      <button type="button" class="studio-btn-secondary" data-out="save-draft">Save draft</button>
+      <button type="button" class="studio-btn-primary" data-out="send">Approve &amp; send</button>
     `,
     });
 

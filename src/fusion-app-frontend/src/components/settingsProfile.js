@@ -89,6 +89,9 @@ import {
   parseUsdDisplayToCents,
   applicantCategoryDiscountCents,
   computeMemberProgramTotalDueCents,
+  computeApplicantEffectiveTotalDueCents,
+  resolveMemberProgramTotalDueCents,
+  resolveMemberChargeableDepositCents,
   PROGRAM_OWN_FLIGHT_CREDIT_CENTS,
   PROGRAM_RESIDENCY_BASE_TOTAL_CENTS,
   resolveProgramDepositCents,
@@ -2571,24 +2574,58 @@ function normalizeMpdProgramPaymentViewModels(programs, payments) {
       const imageAlt = firstNonEmptyString(en.imageAlt, focus, title);
       const startText = firstNonEmptyString(en.startDate, en.start, en.programStart, en.programPage?.startDate);
       const programYear = firstNonEmptyString(en.year, en.programYear, en.programPage?.year);
-      const depositCents = resolveProgramDepositCents(program);
+      const programDepositCents = resolveProgramDepositCents(program);
       const summary = mpdPaymentSummaryFor(programId, payments);
       const applicantCategory = normalizeApplicantCategory(
         approval.applicantCategory ?? summary?.applicantCategory,
       );
-      const ownFlight = summary?.ownFlight === true || String(summary?.ownFlight || "").toLowerCase() === "true";
+      const ownFlight =
+        summary?.ownFlight === true ||
+        String(summary?.ownFlight || "").toLowerCase() === "true" ||
+        approval?.ownFlight === true ||
+        String(approval?.ownFlight || "").toLowerCase() === "true";
+      const sponsorshipMode = String(
+        approval.sponsorshipMode || summary?.sponsorshipMode || "none",
+      ).toLowerCase();
+      const specialProgramTotalCents = mpdCents(
+        approval.specialProgramTotalCents ?? summary?.specialProgramTotalCents,
+      );
+      let sponsoredCreditCents = mpdCents(
+        approval.sponsoredCreditCents ?? summary?.sponsoredCreditCents,
+      );
+      const sponsoredCreditCentsRaw = sponsoredCreditCents;
+      const sponsoredPercent = Math.max(
+        0,
+        Math.min(100, Math.round(Number(approval.sponsoredPercent ?? summary?.sponsoredPercent ?? 0))),
+      );
       const categoryDiscountCents = applicantCategoryDiscountCents(applicantCategory);
       const baseTotalDueCents = computeMemberProgramTotalDueCents({
         category: applicantCategory,
         ownFlight: false,
       });
       const flightCreditCents = ownFlight ? MPD_PROGRAM_OWN_FLIGHT_CREDIT_CENTS : 0;
-      const totalDueCents = computeMemberProgramTotalDueCents({
+      if (sponsorshipMode === "partial" && sponsoredPercent > 0 && sponsoredCreditCents <= 0) {
+        const listOrSpecial =
+          specialProgramTotalCents > 0
+            ? specialProgramTotalCents
+            : computeMemberProgramTotalDueCents({ category: applicantCategory, ownFlight });
+        sponsoredCreditCents = Math.round((listOrSpecial * sponsoredPercent) / 100);
+      }
+      const totalDueCents = resolveMemberProgramTotalDueCents({
+        summaryTotalDueCents: summary ? summary.totalDueCents : null,
+        approvalTotalDueCents: approval.totalDueCents,
         category: applicantCategory,
         ownFlight,
+        specialProgramTotalCents,
+        sponsorshipMode,
+        sponsoredCreditCents: sponsoredCreditCentsRaw,
+        sponsoredPercent,
       });
+      const depositCents = resolveMemberChargeableDepositCents(programDepositCents, totalDueCents);
       const totalPaidCents = mpdCents(summary?.totalPaidCents);
-      const outstandingCents = summary ? mpdCents(summary.outstandingCents) : Math.max(0, totalDueCents - totalPaidCents);
+      const outstandingCents = summary
+        ? mpdCents(summary.outstandingCents)
+        : Math.max(0, totalDueCents - totalPaidCents);
       const activePlan = mpdPaymentPlanFor(summary?.activePlanId, payments);
       const ledger = (payments.ledger || [])
         .filter((x) => String(x.programId || "") === programId)
@@ -2607,12 +2644,18 @@ function normalizeMpdProgramPaymentViewModels(programs, payments) {
         programYear,
         email: String(approval.email || ""),
         fullName: String(approval.fullName || ""),
+        programDepositCents,
         depositCents,
         applicantCategory,
         categoryDiscountCents,
         baseTotalDueCents,
         ownFlight,
         flightCreditCents,
+        sponsorshipMode,
+        specialProgramTotalCents,
+        sponsoredCreditCents,
+        sponsoredCreditCentsRaw,
+        sponsoredPercent,
         totalDueCents,
         totalPaidCents,
         outstandingCents,
@@ -2912,10 +2955,30 @@ function applyMpdFlightChoiceToItem(item, ownFlight) {
   if (!item) return;
   item.ownFlight = Boolean(ownFlight);
   item.flightCreditCents = item.ownFlight ? MPD_PROGRAM_OWN_FLIGHT_CREDIT_CENTS : 0;
-  item.totalDueCents = computeMemberProgramTotalDueCents({
+  const sponsoredPercent = Math.max(0, Math.min(100, Math.round(Number(item.sponsoredPercent || 0))));
+  const sponsorshipMode = String(item.sponsorshipMode || "none").toLowerCase();
+  const specialProgramTotalCents = mpdCents(item.specialProgramTotalCents);
+  let sponsoredCreditCents = mpdCents(item.sponsoredCreditCentsRaw);
+  if (sponsorshipMode === "partial" && sponsoredCreditCents <= 0 && sponsoredPercent > 0) {
+    const listOrSpecial =
+      specialProgramTotalCents > 0
+        ? specialProgramTotalCents
+        : computeMemberProgramTotalDueCents({
+            category: item.applicantCategory || "general",
+            ownFlight: item.ownFlight,
+          });
+    sponsoredCreditCents = Math.round((listOrSpecial * sponsoredPercent) / 100);
+  }
+  item.sponsoredCreditCents = sponsoredCreditCents;
+  item.totalDueCents = computeApplicantEffectiveTotalDueCents({
     category: item.applicantCategory || "general",
     ownFlight: item.ownFlight,
+    specialProgramTotalCents,
+    sponsorshipMode,
+    sponsoredCreditCents,
   });
+  const programDepositCents = mpdCents(item.programDepositCents) || 100000;
+  item.depositCents = resolveMemberChargeableDepositCents(programDepositCents, item.totalDueCents);
   item.outstandingCents = Math.max(0, item.totalDueCents - mpdCents(item.totalPaidCents));
   item.paidInFull = item.outstandingCents <= 0 && item.totalDueCents > 0;
 }

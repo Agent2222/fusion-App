@@ -8307,11 +8307,9 @@ export async function applyConfirmedApplicantMembershipSideEffectsStudio(applica
     if (!principal) {
         return { principal: '', skipped: 'no_principal' };
     }
-    try {
-        await staffSetMembershipExemptManualStudio(principal, true);
-    } catch (e) {
-        console.warn('[applicants] set exempt failed:', e);
-    }
+    // Exempt must land before Stripe/PayPal cancel sync, or Motoko may force the linked
+    // roster profile to `inactive` when it records the canceled subscription.
+    await staffSetMembershipExemptManualStudio(principal, true);
     const { cancelPlatformSubscriptionForProgramConfirm } = await import('./integrationApi.js');
     const canceled = await cancelPlatformSubscriptionForProgramConfirm(principal);
     return { principal, canceled };

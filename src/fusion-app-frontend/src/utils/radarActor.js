@@ -13,46 +13,74 @@ import {
 } from '../config.js';
 import { idlFactory as radarIdlFactory } from './radar.idl.js';
 
+/** Mainnet fusion-radar — keep in sync with repo-root `canister_ids.json`. */
+export const MAINNET_FUSION_RADAR_CANISTER_ID = 'yp25q-maaaa-aaaab-agz4a-cai';
+
 /** @type {import('@dfinity/agent').ActorSubclass | null} */
 let _radarActor = null;
 /** @type {string | null} */
 let _radarActorPrincipal = null;
 
 /**
+ * @param {unknown} v
  * @returns {string}
  */
-export function resolveFusionRadarCanisterId() {
+function trimEnv(v) {
+    if (typeof v !== 'string') return '';
+    return v.trim();
+}
+
+/**
+ * Resolve fusion-radar canister id (mirrors {@link import('../config.js').resolveFusionBackendCanisterId}).
+ *
+ * - Optional **`VITE_FUSION_RADAR_CANISTER_ID`** wins (staging / custom).
+ * - **Authenticated + `DEV_MODE`:** local id from Vite / `.dfx/local`.
+ * - **Mainnet data preference:** {@link MAINNET_FUSION_RADAR_CANISTER_ID}.
+ * - **`DEV_MODE`:** local id, else mainnet fallback.
+ *
+ * @param {{ authenticated?: boolean }} [options]
+ * @returns {string}
+ */
+export function resolveFusionRadarCanisterId(options = {}) {
     try {
-        const v = String(import.meta.env?.VITE_FUSION_RADAR_CANISTER_ID || '').trim();
-        if (v) return v;
+        const override = trimEnv(import.meta.env?.VITE_FUSION_RADAR_CANISTER_ID);
+        if (override) return override;
     } catch {
         /* ignore */
     }
-    try {
-        const v = String(import.meta.env?.CANISTER_ID_FUSION_RADAR || '').trim();
-        if (v) return v;
-    } catch {
-        /* ignore */
+
+    const authenticated = options.authenticated === true;
+    // Local id only from Vite local merge / .dfx — do not use CANISTER_ID_FUSION_RADAR from
+    // root .env (often mainnet after `dfx deploy --network ic`).
+    const localId = trimEnv(import.meta.env?.VITE_FUSION_RADAR_LOCAL_CANISTER_ID);
+    const mainnetId =
+        trimEnv(import.meta.env?.VITE_FUSION_RADAR_MAINNET_CANISTER_ID) ||
+        MAINNET_FUSION_RADAR_CANISTER_ID;
+
+    if (authenticated && DEV_MODE) {
+        return localId;
     }
-    try {
-        // eslint-disable-next-line no-undef
-        if (typeof process !== 'undefined' && process.env?.CANISTER_ID_FUSION_RADAR) {
-            return String(process.env.CANISTER_ID_FUSION_RADAR).trim();
-        }
-    } catch {
-        /* ignore */
+    if (shouldQueryMainnetBackend()) {
+        return mainnetId;
     }
-    return '';
+    if (DEV_MODE) {
+        return localId || mainnetId;
+    }
+    return mainnetId;
 }
 
 /**
  * @param {import('@dfinity/agent').Identity | null | undefined} identity
  */
 async function createRadarActorWithIdentity(identity) {
-    const canisterId = resolveFusionRadarCanisterId();
+    const canisterId = resolveFusionRadarCanisterId({
+        authenticated: Boolean(identity),
+    });
     if (!canisterId) {
         throw new Error(
-            'fusion-radar canister id missing. Deploy fusion-radar (dfx sets CANISTER_ID_FUSION_RADAR) or set VITE_FUSION_RADAR_CANISTER_ID.',
+            DEV_MODE && identity
+                ? 'fusion-radar local canister id missing. Run `dfx deploy fusion-radar`, restart Vite (loads `.dfx/local`), or set VITE_FUSION_RADAR_LOCAL_CANISTER_ID.'
+                : 'fusion-radar canister id missing. Deploy fusion-radar, restart Vite, or set VITE_FUSION_RADAR_CANISTER_ID.',
         );
     }
     const networkConfig =

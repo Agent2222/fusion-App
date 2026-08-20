@@ -85,6 +85,63 @@ export function resolveProgramDepositCents(programRow) {
 }
 
 /**
+ * Member My Payments: never charge a deposit larger than the effective total due
+ * (e.g. heavy partial sponsorship).
+ * @param {number} programDepositCents
+ * @param {number} totalDueCents
+ * @returns {number}
+ */
+export function resolveMemberChargeableDepositCents(programDepositCents, totalDueCents) {
+    const deposit = normalizeCents(programDepositCents);
+    const total = normalizeCents(totalDueCents);
+    if (total > 0) return Math.min(deposit, total);
+    return deposit;
+}
+
+/**
+ * Member My Payments total due: prefer summary, then approval, else compute from category/sponsorship.
+ * @param {{
+ *   summaryTotalDueCents?: number | null,
+ *   approvalTotalDueCents?: number | null,
+ *   category?: string,
+ *   ownFlight?: boolean,
+ *   specialProgramTotalCents?: number,
+ *   sponsorshipMode?: string,
+ *   sponsoredCreditCents?: number,
+ *   sponsoredPercent?: number,
+ * }} args
+ * @returns {number}
+ */
+export function resolveMemberProgramTotalDueCents(args = {}) {
+    if (args.summaryTotalDueCents != null && args.summaryTotalDueCents !== '') {
+        return normalizeCents(args.summaryTotalDueCents);
+    }
+    if (args.approvalTotalDueCents != null && args.approvalTotalDueCents !== '') {
+        return normalizeCents(args.approvalTotalDueCents);
+    }
+    const category = String(args.category || 'general');
+    const ownFlight = Boolean(args.ownFlight);
+    const specialProgramTotalCents = normalizeCents(args.specialProgramTotalCents);
+    const sponsorshipMode = String(args.sponsorshipMode || 'none').toLowerCase();
+    let sponsoredCreditCents = normalizeCents(args.sponsoredCreditCents);
+    const sponsoredPercent = Math.max(0, Math.min(100, Math.round(Number(args.sponsoredPercent || 0))));
+    if (sponsorshipMode === 'partial' && sponsoredPercent > 0 && sponsoredCreditCents <= 0) {
+        const base =
+            specialProgramTotalCents > 0
+                ? specialProgramTotalCents
+                : computeMemberProgramTotalDueCents({ category, ownFlight });
+        sponsoredCreditCents = Math.round((base * sponsoredPercent) / 100);
+    }
+    return computeApplicantEffectiveTotalDueCents({
+        category,
+        ownFlight,
+        specialProgramTotalCents,
+        sponsorshipMode,
+        sponsoredCreditCents,
+    });
+}
+
+/**
  * Total expected residency revenue per filled slot (deposit is part of this total).
  * @param {object | null | undefined} programRow
  * @returns {{ depositCents: number, totalPerSlotCents: number }}

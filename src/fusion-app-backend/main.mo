@@ -3989,8 +3989,8 @@ persistent actor {
   /// A canceled membership must not keep a public presence: when billing access is lost, take the
   /// linked artist's roster row off public feeds by setting `visibility` to `inactive`. Only touches
   /// rows that are currently `public` or `pending` (submitted for review); `private`/`inactive` and
-  /// unlinked accounts are left as-is. The profile data is preserved, so a returning member can
-  /// re-enable visibility in Studio. Does not auto-restore on resubscribe.
+  /// unlinked accounts are left as-is. The profile data is preserved. Granting manual exempt via
+  /// `setProgramMemberExempt` restores `inactive` → `public`. Paid resubscribe does not auto-restore.
   private func hideLinkedArtistProfileOnCancel(p : Principal) {
     switch (accountsByPrincipal.get(p)) {
       case null {};
@@ -4998,6 +4998,17 @@ persistent actor {
     for (rec in recs.vals()) {
       if (not first) { out := out # "," };
       first := false;
+      let category = applicantCategoryFromPayloadJson(rec.payloadJson);
+      let key = programPaymentKey(p, rec.programId);
+      let ownFlight = switch (programPaymentFlightPreferencesByKey.get(key)) {
+        case null { false };
+        case (?pref) { pref.ownFlight };
+      };
+      let sponsorshipMode = extractJsonStringField(rec.payloadJson, "sponsorshipMode");
+      let specialProgramTotalCents = extractJsonNatField(rec.payloadJson, "specialProgramTotalCents");
+      let sponsoredCreditCents = extractJsonNatField(rec.payloadJson, "sponsoredCreditCents");
+      let sponsoredPercent = extractJsonNatField(rec.payloadJson, "sponsoredPercent");
+      let totalDueCents = applicantEffectiveTotalDueFromPayload(rec.payloadJson, category, ownFlight);
       out := out
         # "{\"applicationId\":" # jsonText(rec.id)
         # ",\"programId\":" # jsonText(rec.programId)
@@ -5005,8 +5016,14 @@ persistent actor {
         # ",\"email\":" # jsonText(rec.email)
         # ",\"fullName\":" # jsonText(rec.fullName)
         # ",\"createdAt\":" # jsonText(rec.createdAt)
-        # ",\"applicantCategory\":" # jsonText(applicantCategoryFromPayloadJson(rec.payloadJson))
+        # ",\"applicantCategory\":" # jsonText(category)
         # ",\"manualDepositSubmitted\":" # jsonBool(applicantRecordHasManualDepositSubmitted(rec.id))
+        # ",\"ownFlight\":" # jsonBool(ownFlight)
+        # ",\"sponsorshipMode\":" # jsonText(sponsorshipMode)
+        # ",\"specialProgramTotalCents\":" # Nat.toText(specialProgramTotalCents)
+        # ",\"sponsoredCreditCents\":" # Nat.toText(sponsoredCreditCents)
+        # ",\"sponsoredPercent\":" # Nat.toText(sponsoredPercent)
+        # ",\"totalDueCents\":" # Nat.toText(totalDueCents)
         # "}";
     };
     out # "]";
@@ -7059,22 +7076,46 @@ persistent actor {
   private func setProgramMemberExempt(memberPrincipal : Principal, exempt : Bool) {
     switch (accountsByPrincipal.get(memberPrincipal)) {
       case null { Debug.trap("No account for principal") };
-      case (?_) {};
+      case (?acc) {
+        let m0 = switch (membershipByPrincipal.get(memberPrincipal)) {
+          case null { defaultMembership() };
+          case (?x) { x };
+        };
+        let m1 : Types.MembershipFields = {
+          stripeCustomerId = m0.stripeCustomerId;
+          stripeSubscriptionId = m0.stripeSubscriptionId;
+          stripeSubscriptionStatus = m0.stripeSubscriptionStatus;
+          paypalSubscriptionId = m0.paypalSubscriptionId;
+          paypalSubscriptionStatus = m0.paypalSubscriptionStatus;
+          paymentProvider = m0.paymentProvider;
+          membershipExemptManual = exempt;
+        };
+        membershipByPrincipal.put(memberPrincipal, m1);
+        // Cancel-forced `inactive` should not stick after complimentary access is granted.
+        // Restore to `public` so entitled members are not stuck behind the inactive banner /
+        // off the directory until staff manually re-publishes.
+        if (exempt) {
+          switch (acc.linkedArtistId) {
+            case null {};
+            case (?aid) {
+              switch (artistsById.get(aid)) {
+                case null {};
+                case (?rec) {
+                  if (rec.profile.visibility == "inactive") {
+                    let newProfile : Types.ArtistCore = {
+                      rec.profile with
+                      visibility = "public";
+                      updatedAt = nowText();
+                    };
+                    putArtistRecord({ rec with profile = newProfile });
+                  };
+                };
+              };
+            };
+          };
+        };
+      };
     };
-    let m0 = switch (membershipByPrincipal.get(memberPrincipal)) {
-      case null { defaultMembership() };
-      case (?x) { x };
-    };
-    let m1 : Types.MembershipFields = {
-      stripeCustomerId = m0.stripeCustomerId;
-      stripeSubscriptionId = m0.stripeSubscriptionId;
-      stripeSubscriptionStatus = m0.stripeSubscriptionStatus;
-      paypalSubscriptionId = m0.paypalSubscriptionId;
-      paypalSubscriptionStatus = m0.paypalSubscriptionStatus;
-      paymentProvider = m0.paymentProvider;
-      membershipExemptManual = exempt;
-    };
-    membershipByPrincipal.put(memberPrincipal, m1);
   };
 
   private func addUniqueNat(xs : [Nat], value : Nat) : [Nat] {
@@ -7468,8 +7509,20 @@ persistent actor {
     if (row.paymentType == "program_award_entry") {
       return;
     };
-    putProgramPaymentFlightPreference(row.principal, row.programId, row.applicationId, ownFlight, flightCreditCents, totalDueCents, row.createdAt, true);
-    putProgramPaymentSummaryFromLedger(row, totalDueCents, depositAmountCents, refundedCents);
+    // Prefer server-computed effective total (special price + sponsorship) over client metadata.
+    let effectiveTotalDue = effectiveTotalDueForStaffLedger(row.principal, row.programId, row.applicationId);
+    let effectiveFlightCredit = if (ownFlight) { PROGRAM_OWN_FLIGHT_CREDIT_CENTS } else { flightCreditCents };
+    putProgramPaymentFlightPreference(
+      row.principal,
+      row.programId,
+      row.applicationId,
+      ownFlight,
+      effectiveFlightCredit,
+      effectiveTotalDue,
+      row.createdAt,
+      true,
+    );
+    putProgramPaymentSummaryFromLedger(row, effectiveTotalDue, depositAmountCents, refundedCents);
   };
 
   public shared (msg) func integrationMarkProgramDepositAccepted(

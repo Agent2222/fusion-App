@@ -22,13 +22,16 @@ import {
     programPromotionExpenseCents,
     sumTeamMemberOwedCents,
     sumTeamMemberPaidCents,
-    teamMemberOutstandingOwedCents,
     teamMemberDisbursementRemainingCents,
     teamMemberDisbursementRemainingWithProgramCents,
+    teamMemberOutstandingOwedCents,
     isApplicantDepositPaid,
     isApplicantDepositSatisfied,
     isApplicantDepositWaived,
     isApplicantSlotSecured,
+    resolveMemberChargeableDepositCents,
+    resolveMemberProgramTotalDueCents,
+    PROGRAM_DEFAULT_DEPOSIT_CENTS,
     PROGRAM_RESIDENCY_BASE_TOTAL_CENTS,
     PROGRAM_VETERAN_DISCOUNT_CENTS,
 } from './programPaymentMoney.js';
@@ -91,6 +94,60 @@ describe('computeApplicantEffectiveTotalDueCents', () => {
                 sponsoredCreditCents: 9_000_000,
             }),
         ).toBe(0);
+    });
+});
+
+describe('resolveMemberProgramTotalDueCents', () => {
+    it('prefers summary total over list price', () => {
+        expect(
+            resolveMemberProgramTotalDueCents({
+                summaryTotalDueCents: 250000,
+                category: 'general',
+            }),
+        ).toBe(250000);
+    });
+
+    it('uses approval total when no summary', () => {
+        expect(
+            resolveMemberProgramTotalDueCents({
+                approvalTotalDueCents: 320000,
+                category: 'general',
+            }),
+        ).toBe(320000);
+    });
+
+    it('computes partial sponsorship off list price for My Payments', () => {
+        expect(
+            resolveMemberProgramTotalDueCents({
+                category: 'general',
+                ownFlight: false,
+                sponsorshipMode: 'partial',
+                sponsoredCreditCents: 150000,
+            }),
+        ).toBe(PROGRAM_RESIDENCY_BASE_TOTAL_CENTS - 150000);
+    });
+
+    it('computes percent sponsorship when credit missing', () => {
+        expect(
+            resolveMemberProgramTotalDueCents({
+                category: 'general',
+                ownFlight: false,
+                sponsorshipMode: 'partial',
+                sponsoredPercent: 20,
+            }),
+        ).toBe(PROGRAM_RESIDENCY_BASE_TOTAL_CENTS - Math.round((PROGRAM_RESIDENCY_BASE_TOTAL_CENTS * 20) / 100));
+    });
+});
+
+describe('resolveMemberChargeableDepositCents', () => {
+    it('caps deposit at effective total', () => {
+        expect(resolveMemberChargeableDepositCents(PROGRAM_DEFAULT_DEPOSIT_CENTS, 50000)).toBe(50000);
+    });
+
+    it('keeps full deposit when total is higher', () => {
+        expect(resolveMemberChargeableDepositCents(PROGRAM_DEFAULT_DEPOSIT_CENTS, 500000)).toBe(
+            PROGRAM_DEFAULT_DEPOSIT_CENTS,
+        );
     });
 });
 

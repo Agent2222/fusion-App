@@ -25,10 +25,16 @@ function esc(s) {
 export async function openRadarLeadModal(lead, opts = {}) {
     const canEdit = opts.canEdit !== false;
     let current = emptyLead(lead);
-    const [outreach, rels] = await Promise.all([
-        listRadarOutreach(current.id || '__none__'),
-        listRadarRelationships(current.id || ''),
-    ]);
+    let outreach = [];
+    let rels = [];
+    if (current.id) {
+        const settled = await Promise.allSettled([
+            listRadarOutreach(current.id),
+            listRadarRelationships(current.id),
+        ]);
+        outreach = settled[0].status === 'fulfilled' ? settled[0].value : [];
+        rels = settled[1].status === 'fulfilled' ? settled[1].value : [];
+    }
 
     const scoreClass = `studio-radar-score--${scoreTier(current.aiScore)}`;
     const field = (key, label, type = 'text') => {
@@ -106,11 +112,11 @@ export async function openRadarLeadModal(lead, opts = {}) {
         wide: true,
         footerHtml: canEdit
             ? `
-      <button type="button" class="studio-radar-btn" data-radar-act="enrich">Enrich</button>
-      <button type="button" class="studio-radar-btn" data-radar-act="score">AI score</button>
-      <button type="button" class="studio-radar-btn" data-radar-act="accept">Accept score</button>
-      <button type="button" class="studio-radar-btn" data-radar-act="outreach">Draft outreach</button>
-      <button type="button" class="studio-radar-btn studio-radar-btn--primary" data-radar-act="save">Save</button>
+      <button type="button" class="studio-btn-ghost" data-radar-act="enrich">Enrich</button>
+      <button type="button" class="studio-btn-ghost" data-radar-act="score">AI score</button>
+      <button type="button" class="studio-btn-secondary" data-radar-act="accept">Accept score</button>
+      <button type="button" class="studio-btn-ghost" data-radar-act="outreach">Draft outreach</button>
+      <button type="button" class="studio-btn-primary" data-radar-act="save">Save</button>
     `
             : '',
     });
@@ -133,8 +139,12 @@ export async function openRadarLeadModal(lead, opts = {}) {
         const status = msg();
         try {
             if (act === 'save') {
+                if (status) status.textContent = 'Saving…';
                 current = await saveRadarLead(readFields());
-                if (status) status.textContent = 'Saved.';
+                if (status) {
+                    status.textContent = 'Saved.';
+                    status.classList.remove('studio-radar-error');
+                }
                 opts.onSaved?.(current);
             } else if (act === 'score') {
                 if (status) status.textContent = 'Scoring…';
@@ -172,7 +182,10 @@ export async function openRadarLeadModal(lead, opts = {}) {
                 openRadarOutreachComposer(current, { onSent: () => opts.onSaved?.(current) });
             }
         } catch (err) {
-            if (status) status.textContent = err instanceof Error ? err.message : String(err);
+            if (status) {
+                status.textContent = err instanceof Error ? err.message : String(err);
+                status.classList.add('studio-radar-error');
+            }
         }
     });
 }
