@@ -42,6 +42,9 @@ import {
   getAwardCreditsForCaller,
   withdrawMyProgramApplication,
   listMyProgramAwardEntries,
+  getMyFlightBooking,
+  setMyEstimatedArrival,
+  listTravelPrepLinks,
 } from "../utils/database.js";
 import { withSeoImageAlt } from "../utils/mediaAltSeo.js";
 import {
@@ -1905,12 +1908,12 @@ function mpdProgramTabIsAvailable(el) {
 function setMpdProgramsTab(tab) {
   const root = document.getElementById("mpd-programs");
   if (!root) return;
-  const target = ["explore", "my-programs", "payments", "calendar"].includes(tab)
+  const target = ["explore", "my-programs", "payments", "calendar", "travel"].includes(tab)
     ? tab
     : "explore";
   const targetTab = root.querySelector(`[data-mpd-program-tab="${target}"]`);
   const safeTarget =
-    (target === "payments" || target === "calendar") && !mpdProgramTabIsAvailable(targetTab)
+    (target === "payments" || target === "calendar" || target === "travel") && !mpdProgramTabIsAvailable(targetTab)
       ? "my-programs"
       : target;
   root.querySelectorAll("[data-mpd-program-tab]").forEach((el) => {
@@ -1978,6 +1981,21 @@ function paintMembershipCreditsStrip(strip, model) {
   if (drawEl) drawEl.textContent = model.awardEntriesLabel ?? model.drawCreditsLabel;
   if (nextEl) nextEl.textContent = model.nextCreditsLabel;
   if (hintEl) hintEl.textContent = model.nextCreditsHint;
+}
+
+/** Paint the invite count into the 4th card of a credits strip. */
+function paintInviteCountOnStrip(strip, summary) {
+  if (!(strip instanceof HTMLElement)) return;
+  const valEl = strip.querySelector("[data-mpd-credits-invites]");
+  const hintEl = strip.querySelector("[data-mpd-credits-invites-hint]");
+  if (!summary) {
+    if (valEl) valEl.textContent = "—";
+    return;
+  }
+  const active = Number(summary.active ?? 0);
+  const max = Number(summary.maxAllowed ?? 3);
+  if (valEl) valEl.textContent = `${active}/${max}`;
+  if (hintEl) hintEl.textContent = "invites available";
 }
 
 /**
@@ -2079,9 +2097,282 @@ async function hydrateExploreProgramCredits() {
     nextAccrualHint,
     showForMonthly: tier === "monthly",
   });
+  let inviteSummary = null;
+  try {
+    const { getMyInviteCountSummaryForCaller } = await import("../utils/database.js");
+    inviteSummary = await getMyInviteCountSummaryForCaller();
+  } catch { /* invite count unavailable */ }
+
   for (const strip of strips) {
     paintMembershipCreditsStrip(/** @type {HTMLElement} */ (strip), model);
+    paintInviteCountOnStrip(/** @type {HTMLElement} */ (strip), inviteSummary);
   }
+
+  wireInvitePanelButtons();
+  void checkAndShowReferralPrompts();
+}
+
+// ——— Invite management panel ———
+
+const INVITE_SHARE_BASE = "https://fusionart.world/join-network?ref=";
+
+function getInviteCodeStatus(pc) {
+  if (pc.currentRedemptions > 0) return "redeemed";
+  if (!pc.active) {
+    if (pc.expiresAt) {
+      const now = typeof pc.expiresAt === "string" && pc.expiresAt.length > 13
+        ? Date.now() * 1_000_000
+        : Date.now();
+      if (Number(pc.expiresAt) < now) return "expired";
+    }
+    return "inactive";
+  }
+  return "active";
+}
+
+function buildInviteRowHtml(pc) {
+  const status = getInviteCodeStatus(pc);
+  const code = String(pc.code || "");
+  const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
+  const isActive = status === "active";
+  return `
+    <div class="mpd-invite-code-row" data-invite-code="${code}">
+      <span class="mpd-invite-code">${code}</span>
+      <span class="mpd-invite-status mpd-invite-status--${status}">${statusLabel}</span>
+      <div class="mpd-invite-actions">
+        ${isActive ? `
+          <button type="button" class="mpd-invite-copy-btn" data-copy-code="${code}">Copy code</button>
+          <button type="button" class="mpd-invite-copy-btn" data-copy-link="${code}">Copy link</button>
+          <button type="button" class="mpd-invite-deactivate-btn" data-deactivate-code="${code}" title="Deactivate">&times;</button>
+        ` : ""}
+      </div>
+    </div>`;
+}
+
+async function renderInvitePanel() {
+  const panel = document.getElementById("mpd_invite_panel");
+  if (!panel) return;
+
+  const { getMyInviteCodesForCaller, getMyInviteCountSummaryForCaller } = await import("../utils/database.js");
+  let codes = [];
+  let summary = { active: 0, maxAllowed: 3, totalRedeemed: 0 };
+  try {
+    [codes, summary] = await Promise.all([
+      getMyInviteCodesForCaller(),
+      getMyInviteCountSummaryForCaller(),
+    ]);
+  } catch { /* fallback to empty */ }
+
+  const activeCount = Number(summary.active ?? 0);
+  const maxAllowed = Number(summary.maxAllowed ?? 3);
+  const canGenerate = activeCount < maxAllowed;
+
+  const sorted = [...codes].sort((a, b) => {
+    const sa = getInviteCodeStatus(a) === "active" ? 0 : 1;
+    const sb = getInviteCodeStatus(b) === "active" ? 0 : 1;
+    return sa - sb;
+  });
+
+  panel.innerHTML = `
+    <div class="mpd-invite-panel__header">
+      <span class="mpd-invite-panel__title">Your invite codes</span>
+      <button type="button" class="mpd-invite-generate-btn" id="mpd_invite_generate_btn"
+        ${canGenerate ? "" : "disabled"}
+      >+ Generate new</button>
+    </div>
+    <div id="mpd_invite_codes_list">
+      ${sorted.length === 0
+        ? '<p style="font-size:0.75rem;color:rgba(15,23,42,0.5);margin:0.5rem 0">No invite codes yet. Generate one to share with a peer.</p>'
+        : sorted.map(buildInviteRowHtml).join("")}
+    </div>
+    <div class="mpd-invite-panel__footer">
+      Share your invite link to give a peer 50% off their first month. You earn 1 month free when they renew.
+    </div>
+  `;
+
+  const genBtn = document.getElementById("mpd_invite_generate_btn");
+  if (genBtn) {
+    genBtn.addEventListener("click", async () => {
+      genBtn.disabled = true;
+      genBtn.textContent = "Generating...";
+      try {
+        const { generateMyInviteCodeForCaller } = await import("../utils/database.js");
+        await generateMyInviteCodeForCaller(1);
+        await renderInvitePanel();
+        await refreshInviteCountOnStrips();
+      } catch (err) {
+        genBtn.textContent = String(err?.message || "Error");
+        setTimeout(() => { genBtn.textContent = "+ Generate new"; genBtn.disabled = false; }, 2500);
+      }
+    });
+  }
+
+  panel.addEventListener("click", async (e) => {
+    const target = /** @type {HTMLElement} */ (e.target);
+
+    const copyCode = target.dataset?.copyCode;
+    if (copyCode) {
+      try {
+        await navigator.clipboard.writeText(copyCode);
+        target.textContent = "Copied!";
+        setTimeout(() => { target.textContent = "Copy code"; }, 1500);
+      } catch {}
+      return;
+    }
+
+    const copyLink = target.dataset?.copyLink;
+    if (copyLink) {
+      try {
+        await navigator.clipboard.writeText(INVITE_SHARE_BASE + copyLink);
+        target.textContent = "Copied!";
+        setTimeout(() => { target.textContent = "Copy link"; }, 1500);
+      } catch {}
+      return;
+    }
+
+    const deactivateCode = target.dataset?.deactivateCode;
+    if (deactivateCode) {
+      target.disabled = true;
+      try {
+        const { deactivateMyInviteCodeForCaller } = await import("../utils/database.js");
+        await deactivateMyInviteCodeForCaller(deactivateCode);
+        await renderInvitePanel();
+        await refreshInviteCountOnStrips();
+      } catch {
+        target.disabled = false;
+      }
+    }
+  });
+}
+
+async function refreshInviteCountOnStrips() {
+  const strips = Array.from(
+    document.querySelectorAll("[data-mpd-credits-strip], #mpd_program_credits, #mpd_overview_credits"),
+  ).filter((el, i, arr) => el instanceof HTMLElement && arr.indexOf(el) === i);
+  if (!strips.length) return;
+  try {
+    const { getMyInviteCountSummaryForCaller } = await import("../utils/database.js");
+    const summary = await getMyInviteCountSummaryForCaller();
+    for (const strip of strips) {
+      paintInviteCountOnStrip(/** @type {HTMLElement} */ (strip), summary);
+    }
+  } catch { /* silent */ }
+}
+
+function wireInvitePanelButtons() {
+  const inviteBtns = document.querySelectorAll("[data-mpd-invite-member]");
+  for (const btn of inviteBtns) {
+    btn.addEventListener("click", async () => {
+      const panel = document.getElementById("mpd_invite_panel");
+      if (!panel) return;
+      if (panel.hidden) {
+        panel.hidden = false;
+        await renderInvitePanel();
+      } else {
+        panel.hidden = true;
+      }
+    });
+  }
+}
+
+// ——— Referral prompt cards (milestones) ———
+
+const REFERRAL_PROMPT_LS_PREFIX = "fusion_referral_prompt_dismissed_";
+
+function isReferralPromptDismissed(key) {
+  return localStorage.getItem(REFERRAL_PROMPT_LS_PREFIX + key) === "1";
+}
+
+function dismissReferralPrompt(key) {
+  localStorage.setItem(REFERRAL_PROMPT_LS_PREFIX + key, "1");
+}
+
+function buildReferralPromptCard(key, message) {
+  return `
+    <div class="mpd-referral-prompt-card" data-referral-prompt="${key}">
+      <p class="mpd-referral-prompt-card__text">${message}</p>
+      <div class="mpd-referral-prompt-card__actions">
+        <button type="button" class="mpd-referral-prompt-card__cta" data-referral-open-invites>Share your invite</button>
+        <button type="button" class="mpd-referral-prompt-card__dismiss" data-referral-dismiss="${key}">Dismiss</button>
+      </div>
+    </div>`;
+}
+
+async function checkAndShowReferralPrompts() {
+  const container = document.getElementById("mpd_referral_prompts");
+  if (!container) return;
+
+  const prompts = [];
+
+  // 1. Profile 100% complete
+  if (!isReferralPromptDismissed("profile-complete")) {
+    const fill = document.getElementById("mpd_completion_fill");
+    if (fill && fill.style.width === "100%") {
+      prompts.push(buildReferralPromptCard(
+        "profile-complete",
+        "Your profile is 100% complete! Know an artist who should be here? Share your invite and earn a free month when they renew.",
+      ));
+    }
+  }
+
+  // 2. 30-day membership — use first-login timestamp stored in localStorage
+  if (!isReferralPromptDismissed("30-day-member")) {
+    const firstLogin = localStorage.getItem("fusion_first_login_ts");
+    if (firstLogin) {
+      const ts = Number(firstLogin);
+      if (!Number.isNaN(ts) && Date.now() - ts > 30 * 86400000) {
+        prompts.push(buildReferralPromptCard(
+          "30-day-member",
+          "You've been a member for 30+ days. Invite a peer to Fusion and earn 1 month free when they renew.",
+        ));
+      }
+    } else if (mpdMembershipBillingContext?.tier) {
+      localStorage.setItem("fusion_first_login_ts", String(Date.now()));
+    }
+  }
+
+  // 3. Post-application — checked via sessionStorage flag set on submission
+  if (!isReferralPromptDismissed("post-application")) {
+    const submitted = sessionStorage.getItem("fusion_app_submitted_recently");
+    if (submitted === "1") {
+      prompts.push(buildReferralPromptCard(
+        "post-application",
+        "Application submitted! While you wait, share your invite with a peer who should be on Fusion.",
+      ));
+      sessionStorage.removeItem("fusion_app_submitted_recently");
+    }
+  }
+
+  if (!prompts.length) {
+    container.hidden = true;
+    return;
+  }
+
+  container.hidden = false;
+  container.innerHTML = prompts.join("");
+
+  container.addEventListener("click", (e) => {
+    const target = /** @type {HTMLElement} */ (e.target);
+
+    if (target.hasAttribute("data-referral-open-invites")) {
+      const panel = document.getElementById("mpd_invite_panel");
+      if (panel) {
+        panel.hidden = false;
+        void renderInvitePanel();
+        panel.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      return;
+    }
+
+    const dismissKey = target.dataset?.referralDismiss;
+    if (dismissKey) {
+      dismissReferralPrompt(dismissKey);
+      const card = target.closest("[data-referral-prompt]");
+      if (card) card.remove();
+      const remaining = container.querySelectorAll("[data-referral-prompt]");
+      if (!remaining.length) container.hidden = true;
+    }
+  });
 }
 
 function applyMpdPublicProgramFilters() {
@@ -2913,6 +3204,7 @@ async function hydrateProgramPaymentsPanel(programs) {
   mpdProgramPaymentItems = normalizeMpdProgramPaymentViewModels(mpdLastProgramsForPayments, payments);
   renderMpdPaymentsWorkspace();
   await hydrateProgramCalendarPanel(payments);
+  await hydrateProgramTravelPanel(payments);
 }
 
 /**
@@ -2944,6 +3236,137 @@ async function hydrateProgramCalendarPanel(payments) {
   await mountMemberProgramCalendar(root, {
     eligiblePrograms: gate.eligible,
     canCreate: true,
+  });
+}
+
+async function hydrateProgramTravelPanel(payments) {
+  const tab = document.getElementById("mpd-program-tab-travel");
+  const root = document.getElementById("mpd_program_travel_workspace");
+  if (!tab || !root) return;
+
+  let pay = payments;
+  if (!pay) {
+    try {
+      pay = await getMyProgramPayments();
+    } catch {
+      pay = { approvedPrograms: [], summaries: [], ledger: [], plans: [] };
+    }
+  }
+
+  const securedIds = mpdSlotSecuredProgramIds(pay);
+  if (securedIds.size === 0) {
+    tab.toggleAttribute("hidden", true);
+    tab.setAttribute("aria-hidden", "true");
+    return;
+  }
+
+  tab.toggleAttribute("hidden", false);
+  tab.setAttribute("aria-hidden", "false");
+
+  const programs = mpdLastProgramsForPayments || [];
+  const securedPrograms = programs.filter((p) => securedIds.has(String(p.id || "")));
+
+  const parts = [];
+  for (const program of securedPrograms) {
+    const programId = String(program.id || "");
+    const programTitle = program.enCard?.focus || program.jaCard?.focus || programId;
+
+    const approved = (pay.approvedPrograms || []).find(
+      (a) => String(a.programId || "") === programId
+    );
+    const applicationId = String(approved?.applicationId || approved?.applicantId || "");
+
+    let booking = null;
+    try {
+      booking = await getMyFlightBooking(programId, applicationId);
+    } catch { /* expected if no booking */ }
+
+    let prepLinks = [];
+    try {
+      prepLinks = await listTravelPrepLinks(programId);
+    } catch { /* expected if none configured */ }
+
+    const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+    const flightCard = booking && (booking.airline || booking.confirmationNumber)
+      ? `<div class="mpd-travel-flight-card">
+            <h4>Flight Details</h4>
+            <div class="mpd-travel-flight-card__grid">
+              <div class="mpd-travel-flight-card__item"><span>Airline</span><strong>${esc(booking.airline || "—")}</strong></div>
+              <div class="mpd-travel-flight-card__item"><span>Confirmation #</span><strong>${esc(booking.confirmationNumber || "—")}</strong></div>
+            </div>
+            ${booking.airlineWebsite
+              ? `<button type="button" class="mpd-travel-view-flight-btn" data-mpd-travel-view-url="${esc(booking.airlineWebsite)}" data-mpd-travel-copy="${esc(booking.confirmationNumber)}">View Flight</button>`
+              : ""}
+          </div>`
+      : `<div class="mpd-travel-flight-card mpd-travel-flight-card--empty"><p class="studio-muted">Your flight details will appear here once booked.</p></div>`;
+
+    const arrivalDate = booking?.estArrivalDate || "";
+    const arrivalTime = booking?.estArrivalTime || "";
+    const arrivalForm = `<div class="mpd-travel-arrival-form" data-mpd-travel-arrival-program="${esc(programId)}" data-mpd-travel-arrival-app="${esc(applicationId)}">
+        <h4>Estimated Arrival</h4>
+        <div class="mpd-travel-arrival-form__inputs">
+          <label class="studio-field"><span>Date</span><input type="date" class="studio-input" value="${esc(arrivalDate)}" data-mpd-travel-arrival-date /></label>
+          <label class="studio-field"><span>Time</span><input type="time" class="studio-input" value="${esc(arrivalTime)}" data-mpd-travel-arrival-time /></label>
+          <button type="button" class="studio-btn-primary mpd-travel-arrival-save" data-mpd-travel-arrival-save>Save</button>
+        </div>
+      </div>`;
+
+    const prepLinksHtml = prepLinks.length
+      ? `<div class="mpd-travel-prep-links"><h4>Travel Preparation</h4><div class="mpd-travel-prep-links__grid">${prepLinks.map((l) =>
+          `<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer" class="mpd-travel-prep-link-card">
+              <strong>${esc(l.title)}</strong>
+              <span>${esc(l.description)}</span>
+              <span class="mpd-travel-prep-link-card__arrow">→</span>
+            </a>`
+        ).join("")}</div></div>`
+      : "";
+
+    parts.push(`
+      <div class="mpd-travel-program-block" data-mpd-travel-program="${esc(programId)}">
+        <h3 class="mpd-travel-program-title">${esc(programTitle)}</h3>
+        ${flightCard}
+        ${arrivalForm}
+        ${prepLinksHtml}
+      </div>
+    `);
+  }
+
+  root.innerHTML = parts.join("");
+
+  root.addEventListener("click", async (e) => {
+    const t = e.target instanceof Element ? e.target : null;
+    if (!t) return;
+
+    const viewBtn = t.closest("[data-mpd-travel-view-url]");
+    if (viewBtn) {
+      const confirmation = viewBtn.getAttribute("data-mpd-travel-copy") || "";
+      if (confirmation) {
+        try { await navigator.clipboard.writeText(confirmation); } catch {}
+      }
+      const url = viewBtn.getAttribute("data-mpd-travel-view-url") || "";
+      if (url) window.open(url, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    const saveBtn = t.closest("[data-mpd-travel-arrival-save]");
+    if (saveBtn) {
+      const form = saveBtn.closest("[data-mpd-travel-arrival-program]");
+      if (!form) return;
+      const pid = form.getAttribute("data-mpd-travel-arrival-program") || "";
+      const aid = form.getAttribute("data-mpd-travel-arrival-app") || "";
+      const dateInput = form.querySelector("[data-mpd-travel-arrival-date]");
+      const timeInput = form.querySelector("[data-mpd-travel-arrival-time]");
+      const date = dateInput instanceof HTMLInputElement ? dateInput.value : "";
+      const time = timeInput instanceof HTMLInputElement ? timeInput.value : "";
+      try {
+        await setMyEstimatedArrival(pid, aid, date, time);
+        saveBtn.textContent = "Saved!";
+        setTimeout(() => { saveBtn.textContent = "Save"; }, 1500);
+      } catch (err) {
+        alert("Failed to save arrival: " + (err?.message || err));
+      }
+    }
   });
 }
 
@@ -4432,7 +4855,20 @@ export function generateSettingsProfileContent() {
                                             <span class="mpd-program-credits__hint" data-mpd-credits-next-hint></span>
                                         </div>
                                     </div>
+                                    <div class="mpd-program-credits__item mpd-program-credits__item--invites">
+                                        <span class="mpd-program-credits__icon mpd-program-credits__icon--invites" aria-hidden="true"></span>
+                                        <div class="mpd-program-credits__copy">
+                                            <span class="mpd-program-credits__label">Member invites</span>
+                                            <strong class="mpd-program-credits__value" data-mpd-credits-invites>—</strong>
+                                            <span class="mpd-program-credits__hint" data-mpd-credits-invites-hint>invites available</span>
+                                            <button type="button" class="mpd-program-credits__invite-btn" data-mpd-invite-member>Invite member &#8594;</button>
+                                        </div>
+                                    </div>
                                 </div>
+
+                                <div id="mpd_invite_panel" class="mpd-invite-panel" hidden></div>
+
+                                <div id="mpd_referral_prompts" class="mpd-referral-prompts" hidden></div>
 
                                 <div class="mpd-blindspots" id="mpd_blindspots">
                                     <span class="mpd-section-label">BLINDSPOTS</span>
@@ -4722,6 +5158,10 @@ export function generateSettingsProfileContent() {
                                         <span class="mpd-program-tab__icon" aria-hidden="true">▣</span>
                                         <span>Calendar</span>
                                     </button>
+                                    <button type="button" class="mpd-program-tab mpd-program-tab--travel" id="mpd-program-tab-travel" role="tab" aria-selected="false" tabindex="-1" aria-controls="mpd-program-panel-travel" data-mpd-program-tab="travel" hidden aria-hidden="true">
+                                        <span class="mpd-program-tab__icon" aria-hidden="true">✈</span>
+                                        <span>Travel</span>
+                                    </button>
                                 </div>
 
                                 <div class="mpd-program-tab-panel" id="mpd-program-panel-explore" role="tabpanel" aria-labelledby="mpd-program-tab-explore" data-mpd-program-panel="explore">
@@ -4747,6 +5187,15 @@ export function generateSettingsProfileContent() {
                                                     <span class="mpd-program-credits__label">Next credits</span>
                                                     <strong class="mpd-program-credits__value" id="mpd_credits_next_date" data-mpd-credits-next>—</strong>
                                                     <span class="mpd-program-credits__hint" id="mpd_credits_next_hint" data-mpd-credits-next-hint></span>
+                                                </div>
+                                            </div>
+                                            <div class="mpd-program-credits__item mpd-program-credits__item--invites">
+                                                <span class="mpd-program-credits__icon mpd-program-credits__icon--invites" aria-hidden="true"></span>
+                                                <div class="mpd-program-credits__copy">
+                                                    <span class="mpd-program-credits__label">Member invites</span>
+                                                    <strong class="mpd-program-credits__value" data-mpd-credits-invites>—</strong>
+                                                    <span class="mpd-program-credits__hint" data-mpd-credits-invites-hint>invites available</span>
+                                                    <button type="button" class="mpd-program-credits__invite-btn" data-mpd-invite-member>Invite member &#8594;</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -4809,6 +5258,15 @@ export function generateSettingsProfileContent() {
                                         <div class="mpd-program-placeholder">
                                             <h3>Calendar</h3>
                                             <p class="studio-muted">Your program calendar appears when a slot-secured program has its schedule live.</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="mpd-program-tab-panel" id="mpd-program-panel-travel" role="tabpanel" aria-labelledby="mpd-program-tab-travel" data-mpd-program-panel="travel" hidden>
+                                    <div id="mpd_program_travel_workspace" aria-live="polite">
+                                        <div class="mpd-program-placeholder">
+                                            <h3>Travel</h3>
+                                            <p class="studio-muted">Flight details and travel preparation will appear here once your slot is confirmed.</p>
                                         </div>
                                     </div>
                                 </div>

@@ -42,10 +42,11 @@ const FINANCE_CATEGORY_FEATURE_IDS = {
     Users: 'financeUsers',
     Products: 'financeProducts',
     Promotions: 'financePromotions',
+    Invites: 'financeInvites',
 };
 
 /** Finance domain tabs / overview chips (requires parent `finance` visible). */
-export const STUDIO_FINANCE_CATEGORIES = ['Programs', 'Users', 'Products', 'Promotions'];
+export const STUDIO_FINANCE_CATEGORIES = ['Programs', 'Users', 'Products', 'Promotions', 'Invites'];
 
 /**
  * @param {'Programs' | 'Users' | 'Products' | 'Promotions'} subKey

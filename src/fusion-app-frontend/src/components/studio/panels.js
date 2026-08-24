@@ -18,6 +18,7 @@ import { renderFinance, initFinance } from './financeSection.js';
 import { renderSchedule, initSchedule } from './scheduleSection.js';
 import { renderRadar, initRadar } from './radarSection.js';
 import { renderPermissions, initPermissions } from './permissionsSection.js';
+import { renderTravel, initTravel } from './travelSection.js';
 import {
     APPLICANTS_PROGRAM_SELECT_STORAGE_KEY,
     aggregateApplicantsByProgram,
@@ -401,11 +402,7 @@ export function renderStudioMain(sectionId) {
         case 'finance':
             return renderFinance();
         case 'travel':
-            return renderManagementPlaceholder(
-                'Travel',
-                'Travel coordination, accommodation notes, and arrival details will live here.',
-                'travel',
-            );
+            return renderTravel();
         case 'radar':
             return renderRadar();
         case 'artists':
@@ -3035,6 +3032,7 @@ const STUDIO_INIT = {
     applicants: initApplicants,
     schedule: initSchedule,
     finance: initFinance,
+    travel: initTravel,
     radar: initRadar,
     artists: initArtists,
     'pending-approval': initPendingApproval,

@@ -32,6 +32,7 @@ import {
 } from './pendingPaymentStore.js';
 import { recordVerifiedPayPalOrder, pushPayPalSubscriptionToCanister } from './recordPayment.js';
 import { maybeSendProgramAwardPaymentConfirmationAfterCapture } from './programAwardEmail.js';
+import { getIntegrationActor } from '../canisterActor.js';
 
 /** Re-enable when PayPal supports per-user installment plan creation. */
 const PROGRAM_PAYMENT_PLAN_START_ENABLED = false;
@@ -71,7 +72,108 @@ export function registerPaymentRoutes(app, opts) {
             planBimonthlyLegacy: process.env.PAYPAL_PLAN_BIMONTHLY_ID || '',
             /** @deprecated use planBimonthlyLegacy / planMonthly */
             planBimonthly: process.env.PAYPAL_PLAN_BIMONTHLY_ID || '',
+            discountPlans: {
+                monthly50off1mo: process.env.PAYPAL_PLAN_MONTHLY_50OFF_1MO_ID || '',
+                monthly50off2mo: process.env.PAYPAL_PLAN_MONTHLY_50OFF_2MO_ID || '',
+                monthly50off3mo: process.env.PAYPAL_PLAN_MONTHLY_50OFF_3MO_ID || '',
+            },
         });
+    });
+
+    // ——— Promo code validation ———
+
+    /**
+     * Decode Candid PromoDiscountType variant → plain object.
+     */
+    function decodeDiscountType(dt) {
+        if (!dt || typeof dt !== 'object') return { type: 'unknown', value: 0 };
+        if ('percentOff' in dt) return { type: 'percentOff', value: Number(dt.percentOff) };
+        if ('fixedCentsOff' in dt) return { type: 'fixedCentsOff', value: Number(dt.fixedCentsOff) };
+        if ('freeMonths' in dt) return { type: 'freeMonths', value: Number(dt.freeMonths) };
+        return { type: 'unknown', value: 0 };
+    }
+
+    function buildDiscountDisplayText(promo) {
+        const dt = decodeDiscountType(promo.discountType);
+        const months = Number(promo.discountDurationMonths || 1);
+        const span = months === 1 ? 'first month' : `first ${months} months`;
+        if (dt.type === 'percentOff') return `${dt.value}% off ${span}`;
+        if (dt.type === 'fixedCentsOff') return `$${(dt.value / 100).toFixed(2)} off ${span}`;
+        if (dt.type === 'freeMonths') return `${dt.value} month${dt.value > 1 ? 's' : ''} free`;
+        return 'Discount applied';
+    }
+
+    /**
+     * Resolve the PayPal plan ID when a promo code discount applies.
+     *
+     * Env vars for discounted monthly plans (50% off):
+     *   PAYPAL_PLAN_MONTHLY_50OFF_1MO_ID  — first month 50% off
+     *   PAYPAL_PLAN_MONTHLY_50OFF_2MO_ID  — first 2 months 50% off
+     *   PAYPAL_PLAN_MONTHLY_50OFF_3MO_ID  — first 3 months 50% off
+     *
+     * Falls back to standard plan if no discounted plan is configured.
+     */
+    function resolveDiscountedPayPalPlanId(tier, discountType, durationMonths) {
+        const dt = decodeDiscountType(discountType);
+        const dur = Number(durationMonths) || 1;
+
+        if (tier === 'monthly' && dt.type === 'percentOff') {
+            const key = `PAYPAL_PLAN_MONTHLY_${dt.value}OFF_${dur}MO_ID`;
+            const id = process.env[key] || '';
+            if (id) return id;
+        }
+
+        const genericKey = `PAYPAL_PLAN_${tier.toUpperCase()}_${dt.type === 'percentOff' ? dt.value + 'OFF' : 'DISCOUNT'}_${dur}MO_ID`;
+        const genericId = process.env[genericKey] || '';
+        if (genericId) return genericId;
+
+        const fallbacks = {
+            monthly: process.env.PAYPAL_SUBSCRIPTION_MONTHLY_ID || '',
+            quarterly: process.env.PAYPAL_SUBSCRIPTION_QUARTERLY_ID || '',
+            annual: process.env.PAYPAL_SUBSCRIPTION_ANNUAL_ID || process.env.PAYPAL_PLAN_ANNUAL_ID || '',
+        };
+        return fallbacks[tier] || '';
+    }
+
+    app.post('/payments/validate-promo-code', requireApiKey, async (req, res) => {
+        try {
+            const code = (req.body?.code || '').trim().toUpperCase();
+            if (!code) {
+                return res.status(400).json({ valid: false, reason: 'missing code' });
+            }
+            const actor = await getIntegrationActor();
+            if (!actor || typeof actor.validatePromoCode !== 'function') {
+                return res.status(503).json({ valid: false, reason: 'canister unavailable' });
+            }
+            const result = await actor.validatePromoCode(code);
+            if (result && typeof result === 'object' && 'ok' in result) {
+                const promo = result.ok;
+                const dt = decodeDiscountType(promo.discountType);
+                return res.json({
+                    valid: true,
+                    code: String(promo.code || ''),
+                    codeType: promo.codeType && typeof promo.codeType === 'object'
+                        ? Object.keys(promo.codeType)[0] || 'promo'
+                        : 'promo',
+                    discountType: dt,
+                    discountDurationMonths: Number(promo.discountDurationMonths || 1),
+                    displayText: buildDiscountDisplayText(promo),
+                    discountedPlanIds: {
+                        monthly: resolveDiscountedPayPalPlanId('monthly', promo.discountType, promo.discountDurationMonths),
+                        quarterly: resolveDiscountedPayPalPlanId('quarterly', promo.discountType, promo.discountDurationMonths),
+                        annual: resolveDiscountedPayPalPlanId('annual', promo.discountType, promo.discountDurationMonths),
+                    },
+                });
+            }
+            const reason = result && typeof result === 'object'
+                ? Object.keys(result)[0] || 'unknown'
+                : 'unknown';
+            return res.json({ valid: false, reason });
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            console.error('[promo] validate-promo-code error:', msg);
+            return res.status(500).json({ valid: false, reason: 'server error' });
+        }
     });
 
     app.post('/payments/one-time', requireApiKey, async (req, res) => {
@@ -361,7 +463,32 @@ export function registerPaymentRoutes(app, opts) {
             if (!isPayPalConfigured()) {
                 return res.status(503).json({ error: 'PayPal not configured' });
             }
-            const result = await createPayPalSubscription(req.body);
+
+            // Resolve discounted plan ID if a promo code is provided
+            const promoCodeRaw = typeof req.body?.promoCode === 'string' ? req.body.promoCode.trim().toUpperCase() : '';
+            let discountedPlanId = '';
+            if (promoCodeRaw) {
+                try {
+                    const actor = await getIntegrationActor();
+                    if (actor && typeof actor.validatePromoCode === 'function') {
+                        const pcResult = await actor.validatePromoCode(promoCodeRaw);
+                        if (pcResult && typeof pcResult === 'object' && 'ok' in pcResult) {
+                            const pc = pcResult.ok;
+                            const tierRaw = req.body?.subscriptionTier;
+                            let tier = typeof tierRaw === 'string' ? tierRaw.trim().toLowerCase() : 'monthly';
+                            if (!tier || tier === 'bimonthly') tier = 'monthly';
+                            discountedPlanId = resolveDiscountedPayPalPlanId(tier, pc.discountType, pc.discountDurationMonths);
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[paypal] promo code plan resolution failed:', e instanceof Error ? e.message : e);
+                }
+            }
+
+            const body = discountedPlanId
+                ? { ...req.body, overridePlanId: discountedPlanId, promoCode: promoCodeRaw }
+                : req.body;
+            const result = await createPayPalSubscription(body);
             if (!result.payFirstPending && result.principal) {
                 try {
                     await pushPayPalSubscriptionToCanister(result.subscription);

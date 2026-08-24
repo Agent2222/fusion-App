@@ -211,9 +211,11 @@ export async function initRadar(mainEl) {
         </div>
       </div>
     `;
-        bind(root, canEdit, paint);
+        bindChildListeners(root, canEdit, paint);
     };
 
+    rootActionsBound = false;
+    bindRootActions(root, canEdit, paint);
     unsub = subscribeRadar(paint);
     paint();
     try {
@@ -286,24 +288,37 @@ function renderAccessBanner(loadState, loadError) {
  */
 function renderDiscover(leads, canEdit) {
     const cols = RADAR_PIPELINE_STATUSES.map((status) => {
+        const count = leads.filter((l) => l.status === status).length;
         const cards = leads
             .filter((l) => l.status === status)
             .map(
                 (l) => `
         <div class="studio-radar-card" data-open-lead="${esc(l.id)}">
-          <strong>${esc(l.name || 'Untitled')}</strong>
+          <div class="studio-radar-card__head">
+            <strong>${esc(l.name || 'Untitled')}</strong>
+            <span class="studio-radar-score studio-radar-score--${scoreTier(l.aiScore)}" style="width:1.6rem;height:1.6rem;font-size:0.65rem">${esc(String(l.aiScore || 0))}</span>
+          </div>
           <span class="studio-radar-chip">${esc(l.leadType)}</span>
-          <span class="studio-radar-score studio-radar-score--${scoreTier(l.aiScore)}" style="width:1.6rem;height:1.6rem;font-size:0.65rem;margin-left:0.35rem">${esc(String(l.aiScore || 0))}</span>
           <p class="studio-radar-why">${esc(l.aiRationale || l.discoveryReason || 'Awaiting qualification')}</p>
         </div>`,
             )
             .join('');
-        return `<div class="studio-radar-col"><h3>${esc(status)}</h3>${cards || '<p class="studio-radar-empty">No cards</p>'}</div>`;
+        return `<div class="studio-radar-col">
+          <div class="studio-radar-col__header"><h3>${esc(status)}</h3><span class="studio-radar-col__count">${count}</span></div>
+          ${cards || '<p class="studio-radar-empty">No cards in this stage</p>'}
+        </div>`;
     }).join('');
 
     return `
+    <div class="studio-radar-section-intro">
+      <div class="studio-radar-section-intro__steps">
+        <div class="studio-radar-step"><span class="studio-radar-step__num">1</span><span>Add leads manually or import from discovery sources</span></div>
+        <div class="studio-radar-step"><span class="studio-radar-step__num">2</span><span>Open a card to qualify, score, and add context</span></div>
+        <div class="studio-radar-step"><span class="studio-radar-step__num">3</span><span>Move qualified leads to Outreach for drafting</span></div>
+      </div>
+    </div>
     <div class="studio-radar-toolbar">
-      <div class="studio-radar-toolbar-actions">
+      <div class="studio-radar-toolbar-actions" style="margin-left:0">
         ${canEdit ? `<button type="button" class="studio-btn-primary" data-radar-act="add-lead">Add lead</button>` : ''}
         ${canEdit ? `<button type="button" class="studio-btn-ghost" data-radar-act="run-discovery">Run discovery</button>` : ''}
         <button type="button" class="studio-btn-ghost" data-radar-act="health">API health</button>
@@ -336,8 +351,12 @@ function renderLeads(filtered, canEdit) {
         )
         .join('');
 
+    const summary = filtered.length
+        ? `Showing ${filtered.length} lead${filtered.length === 1 ? '' : 's'}${filters.q || filters.type || filters.status || filters.region ? ' (filtered)' : ''}`
+        : '';
+
     return `
-    <div class="studio-radar-toolbar">
+    <div class="studio-radar-toolbar studio-radar-toolbar--filters">
       <label class="studio-field studio-field--grow">
         <span>Search</span>
         <input type="search" class="studio-input" placeholder="Name, email, notes…" data-filter="q" value="${esc(filters.q)}" autocomplete="off" />
@@ -352,8 +371,11 @@ function renderLeads(filtered, canEdit) {
       </label>
       <label class="studio-field">
         <span>Region</span>
-        <input type="text" class="studio-input" placeholder="Region" data-filter="region" value="${esc(filters.region)}" />
+        <input type="text" class="studio-input" placeholder="e.g. Tokyo, NYC…" data-filter="region" value="${esc(filters.region)}" />
       </label>
+    </div>
+    <div class="studio-radar-toolbar">
+      <p class="studio-radar-filter-summary">${esc(summary)}</p>
       <div class="studio-radar-toolbar-actions">
         ${canEdit ? `<button type="button" class="studio-btn-primary" data-radar-act="add-lead">Add lead</button>` : ''}
         <button type="button" class="studio-btn-ghost" data-radar-act="export-csv">Export CSV</button>
@@ -395,6 +417,9 @@ function renderRelationships(relationships, leads, canEdit) {
         .join('');
 
     return `
+    <div class="studio-radar-section-intro">
+      <p>Relationships map how leads connect to each other, to Fusion members, and to the broader network. Use <strong>Compute bridges</strong> to auto-detect connections from your roster, then sync them onto Radar.</p>
+    </div>
     <div class="studio-radar-toolbar">
       <div class="studio-radar-toolbar-actions" style="margin-left:0">
         <button type="button" class="studio-btn-ghost" data-radar-act="compute-bridges">Compute Fusion bridges</button>
@@ -404,7 +429,7 @@ function renderRelationships(relationships, leads, canEdit) {
     </div>
     <p class="studio-radar-status" id="radarRelStatus" role="status"></p>
     <div class="studio-radar-stats-grid" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))">
-      ${blocks || '<p class="studio-radar-empty">No relationships yet. Compute bridges or add an edge manually.</p>'}
+      ${blocks || '<p class="studio-radar-empty">No relationships mapped yet. Run <strong>Compute bridges</strong> to detect connections from your Fusion roster, or add a relationship manually.</p>'}
     </div>
   `;
 }
@@ -444,9 +469,12 @@ function renderOutreach(outreach, leads, canEdit) {
         .join('');
 
     return `
+    <div class="studio-radar-section-intro">
+      <p>Outreach manages the full cycle from draft to send. Configure triggers, let AI draft messages, then review and approve before anything goes out. Nothing is sent without explicit human approval.</p>
+    </div>
     <div class="studio-radar-why-block">
       <h4>Event triggers</h4>
-      <p>When enabled triggers fire (RSS / discovery / manual), Radar can auto-queue drafts for human approval before anything is sent.</p>
+      <p>Select which events should auto-queue outreach drafts. When a trigger fires, Radar creates a draft for you to review — it won't send on its own.</p>
       <div class="studio-radar-trigger-grid">${triggers}</div>
       <label class="studio-radar-check"><input type="checkbox" id="radarAutoDraft" ${cfg.autoDraft ? 'checked' : ''}/> Auto-create drafts</label>
       <div class="studio-radar-toolbar" style="margin:0.75rem 0 0">
@@ -468,16 +496,17 @@ function renderOutreach(outreach, leads, canEdit) {
  * @param {boolean} canEdit
  */
 function renderSources(sources, canEdit) {
+    const enabledCount = sources.filter((s) => s.enabled).length;
     const rows = sources
         .map(
             (s) => `
       <tr>
         <td>${esc(s.label || s.id)}</td>
         <td><span class="studio-radar-chip">${esc(s.sourceType)}</span></td>
-        <td>${esc(s.query || s.url)}</td>
+        <td class="studio-radar-cell-url">${esc(s.query || s.url)}</td>
         <td>${esc(s.regionKey)}</td>
-        <td>${s.enabled ? 'On' : 'Off'}</td>
-        <td>${esc(s.lastRunAt || '—')}</td>
+        <td><span class="studio-radar-chip studio-radar-chip--${s.enabled ? 'on' : 'off'}">${s.enabled ? 'Active' : 'Off'}</span></td>
+        <td>${esc(s.lastRunAt || 'Never')}</td>
         <td>
           ${canEdit ? `<button type="button" class="studio-btn-ghost" data-toggle-source="${esc(s.id)}">${s.enabled ? 'Disable' : 'Enable'}</button>` : ''}
           ${canEdit ? `<button type="button" class="studio-btn-secondary" data-del-source="${esc(s.id)}">Delete</button>` : ''}
@@ -487,6 +516,14 @@ function renderSources(sources, canEdit) {
         .join('');
 
     return `
+    <div class="studio-radar-section-intro">
+      <p>Sources feed discovery with leads from external data — RSS artist feeds, curated lists, or Google Places queries. Enable a source, then run <strong>Discover</strong> to pull in new prospects.</p>
+      <div class="studio-radar-stats-row">
+        <span>${sources.length} source${sources.length === 1 ? '' : 's'} configured</span>
+        <span class="studio-radar-stats-sep">·</span>
+        <span>${enabledCount} active</span>
+      </div>
+    </div>
     <div class="studio-radar-toolbar">
       <div class="studio-radar-toolbar-actions" style="margin-left:0">
         ${canEdit ? `<button type="button" class="studio-btn-primary" data-radar-act="add-source">Add source</button>` : ''}
@@ -496,8 +533,8 @@ function renderSources(sources, canEdit) {
     <p class="studio-radar-status" id="radarSourceStatus" role="status"></p>
     <div class="studio-table-wrap studio-table-wrap--sticky-head">
       <table class="studio-table studio-table--dense">
-        <thead><tr><th>Label</th><th>Type</th><th>URL / query</th><th>Region</th><th>Enabled</th><th>Last run</th><th></th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="7"><p class="studio-radar-empty">No sources configured. Add an RSS feed or list to power Discover.</p></td></tr>`}</tbody>
+        <thead><tr><th>Label</th><th>Type</th><th>URL / query</th><th>Region</th><th>Status</th><th>Last run</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="7"><p class="studio-radar-empty">No sources configured yet. Add an RSS feed, curated list, or Places query to start pulling in leads.</p></td></tr>`}</tbody>
       </table>
     </div>
   `;
@@ -539,28 +576,37 @@ function renderAnalytics(leads, outreach, sources) {
         .join('');
 
     return `
+    <div class="studio-radar-section-intro">
+      <p>A snapshot of your pipeline health — funnel progression, scoring averages, and outreach performance at a glance.</p>
+    </div>
+    <h3 class="studio-radar-section-title">Pipeline funnel</h3>
     <div class="studio-radar-stats-grid">
       <div class="studio-radar-stat"><div class="l">Total leads</div><div class="n">${leads.length}</div></div>
-      <div class="studio-radar-stat"><div class="l">Avg score</div><div class="n">${avg}</div></div>
+      <div class="studio-radar-stat"><div class="l">Avg fit score</div><div class="n">${avg}</div></div>
       <div class="studio-radar-stat"><div class="l">Discovered</div><div class="n">${funnel.discovered}</div></div>
-      <div class="studio-radar-stat"><div class="l">Qualified+</div><div class="n">${funnel.qualified}</div></div>
+      <div class="studio-radar-stat"><div class="l">Qualified</div><div class="n">${funnel.qualified}</div></div>
       <div class="studio-radar-stat"><div class="l">Contacted</div><div class="n">${funnel.contacted}</div></div>
-      <div class="studio-radar-stat"><div class="l">Replied/connected</div><div class="n">${funnel.replied}</div></div>
-      <div class="studio-radar-stat"><div class="l">Outreach sent</div><div class="n">${sent}</div></div>
-      <div class="studio-radar-stat"><div class="l">Response rate</div><div class="n">${responseRate}%</div></div>
-      <div class="studio-radar-stat"><div class="l">Sources</div><div class="n">${sources.length}</div></div>
+      <div class="studio-radar-stat"><div class="l">Replied / connected</div><div class="n">${funnel.replied}</div></div>
     </div>
-    <h3 class="studio-radar-section-title">Type mix</h3>
+    <h3 class="studio-radar-section-title">Outreach performance</h3>
+    <div class="studio-radar-stats-grid">
+      <div class="studio-radar-stat"><div class="l">Emails sent</div><div class="n">${sent}</div></div>
+      <div class="studio-radar-stat"><div class="l">Response rate</div><div class="n">${responseRate}%</div></div>
+      <div class="studio-radar-stat"><div class="l">Active sources</div><div class="n">${sources.length}</div></div>
+    </div>
+    <h3 class="studio-radar-section-title">Lead type mix</h3>
     <div class="studio-radar-stats-grid">${typeBars}</div>
   `;
 }
 
 /**
+ * Attach child-element listeners that are recreated on every paint().
+ * Delegated root-level handler is attached once via bindRootActions().
  * @param {HTMLElement} root
  * @param {boolean} canEdit
  * @param {() => void} paint
  */
-function bind(root, canEdit, paint) {
+function bindChildListeners(root, canEdit, paint) {
     root.querySelectorAll('[data-radar-tab]').forEach((btn) => {
         btn.addEventListener('click', () => {
             activeTab = /** @type {any} */ (btn.getAttribute('data-radar-tab') || 'leads');
@@ -602,6 +648,20 @@ function bind(root, canEdit, paint) {
             if (lead) openRadarOutreachComposer(lead, { onSent: () => loadRadarWorkspace() });
         });
     });
+}
+
+/** @type {boolean} */
+let rootActionsBound = false;
+
+/**
+ * Attach the single delegated click handler on root — called once per initRadar().
+ * @param {HTMLElement} root
+ * @param {boolean} canEdit
+ * @param {() => void} paint
+ */
+function bindRootActions(root, canEdit, paint) {
+    if (rootActionsBound) return;
+    rootActionsBound = true;
 
     root.addEventListener('click', async (ev) => {
         const t = /** @type {HTMLElement} */ (ev.target);
@@ -799,17 +859,46 @@ function bind(root, canEdit, paint) {
 function openAddSourceModal(onDone) {
     const typeOpts = RADAR_SOURCE_TYPES.map((t) => `<option value="${t}">${t}</option>`).join('');
     const { root, close } = openStudioModal(
-        `<div class="studio-radar-form-grid">
-      <label>Label<input id="rsLabel" class="studio-input" /></label>
-      <label>Type<select id="rsType" class="studio-select">${typeOpts}</select></label>
-      <label class="full">URL<input id="rsUrl" class="studio-input" /></label>
-      <label class="full">Query (Places)<input id="rsQuery" class="studio-input" placeholder="contemporary art gallery in Brooklyn" /></label>
-      <label>Region<input id="rsRegion" class="studio-input" /></label>
-      <label>Interval hours<input id="rsInterval" class="studio-input" type="number" value="24" /></label>
+        `<div class="studio-radar-modal-intro">
+      <p>A source tells Radar where to look for potential leads. Choose a type, provide the URL or search terms, and set how often Radar should check for new entries.</p>
+    </div>
+    <div class="studio-radar-form-grid studio-radar-form-grid--descriptive">
+      <label>
+        <span class="studio-radar-field-label">Source name</span>
+        <span class="studio-radar-field-hint">A short name to identify this source in your list (e.g. "Brooklyn galleries RSS" or "Tokyo residency programs")</span>
+        <input id="rsLabel" class="studio-input" placeholder="e.g. Brooklyn galleries RSS" />
+      </label>
+      <label>
+        <span class="studio-radar-field-label">Source type</span>
+        <span class="studio-radar-field-hint">How Radar fetches data: RSS pulls from a feed URL, List is a curated set, Places queries Google Maps</span>
+        <select id="rsType" class="studio-select">${typeOpts}</select>
+      </label>
+      <label class="full">
+        <span class="studio-radar-field-label">Feed URL</span>
+        <span class="studio-radar-field-hint">The RSS feed URL, webpage, or API endpoint Radar should pull leads from. Leave blank for Places queries.</span>
+        <input id="rsUrl" class="studio-input" placeholder="https://example.com/feed.xml" />
+      </label>
+      <label class="full">
+        <span class="studio-radar-field-label">Search query (for Places type)</span>
+        <span class="studio-radar-field-hint">A natural-language search term for Google Places lookups — ignored for RSS and List types</span>
+        <input id="rsQuery" class="studio-input" placeholder="e.g. contemporary art gallery in Brooklyn" />
+      </label>
+      <label>
+        <span class="studio-radar-field-label">Region tag</span>
+        <span class="studio-radar-field-hint">An optional geographic tag to group and filter leads from this source (e.g. "NYC", "Tokyo", "EU")</span>
+        <input id="rsRegion" class="studio-input" placeholder="e.g. NYC" />
+      </label>
+      <label>
+        <span class="studio-radar-field-label">Check interval (hours)</span>
+        <span class="studio-radar-field-hint">How often Radar should re-scan this source for new entries when discovery runs</span>
+        <input id="rsInterval" class="studio-input" type="number" value="24" min="1" />
+      </label>
     </div>`,
         {
             title: 'Add discovery source',
-            footerHtml: `<button type="button" class="studio-btn-primary" id="rsSave">Save</button>`,
+            subtitle: 'Configure where Radar looks for new leads',
+            wide: true,
+            footerHtml: `<button type="button" class="studio-btn-primary" id="rsSave">Save source</button>`,
         },
     );
     root.querySelector('#rsSave')?.addEventListener('click', async () => {
@@ -837,20 +926,53 @@ function openAddSourceModal(onDone) {
  */
 function openAddRelationshipModal(onDone) {
     const leads = getRadarLeadsCached();
-    const opts = leads
+    const leadOpts = leads
         .map((l) => `<option value="${esc(l.id)}">${esc(l.name || l.id)}</option>`)
         .join('');
     const { root, close } = openStudioModal(
-        `<div class="studio-radar-form-grid">
-      <label>From<select id="rrFrom" class="studio-select">${opts}</select></label>
-      <label>To<select id="rrTo" class="studio-select">${opts}</select></label>
-      <label>Kind<select id="rrKind" class="studio-select"><option>collaboratesWith</option><option>represents</option><option>exhibitedBy</option><option>curatedBy</option><option>referredBy</option><option>fusionMember</option><option>appliedTo</option></select></label>
-      <label class="full">Label<input id="rrLabel" class="studio-input" /></label>
-      <label class="full">Evidence<input id="rrEvidence" class="studio-input" /></label>
+        `<div class="studio-radar-modal-intro">
+      <p>Map a connection between two leads, or between a lead and a Fusion entity. Relationships help surface warm paths for outreach and track how the network connects.</p>
+    </div>
+    <div class="studio-radar-form-grid studio-radar-form-grid--descriptive">
+      <label>
+        <span class="studio-radar-field-label">From (source lead)</span>
+        <span class="studio-radar-field-hint">The lead this relationship originates from — e.g. the person who knows the other party</span>
+        <select id="rrFrom" class="studio-select">${leadOpts}</select>
+      </label>
+      <label>
+        <span class="studio-radar-field-label">To (connected lead)</span>
+        <span class="studio-radar-field-hint">The lead on the other end of this connection</span>
+        <select id="rrTo" class="studio-select">${leadOpts}</select>
+      </label>
+      <label>
+        <span class="studio-radar-field-label">Relationship type</span>
+        <span class="studio-radar-field-hint">How these two leads relate — collaboration, representation, curation, referral, etc.</span>
+        <select id="rrKind" class="studio-select">
+          <option value="collaboratesWith">Collaborates with</option>
+          <option value="represents">Represents</option>
+          <option value="exhibitedBy">Exhibited by</option>
+          <option value="curatedBy">Curated by</option>
+          <option value="referredBy">Referred by</option>
+          <option value="fusionMember">Fusion member</option>
+          <option value="appliedTo">Applied to</option>
+        </select>
+      </label>
+      <label class="full">
+        <span class="studio-radar-field-label">Label</span>
+        <span class="studio-radar-field-hint">A short description of this specific connection (e.g. "Gallery representation since 2022")</span>
+        <input id="rrLabel" class="studio-input" placeholder="e.g. Gallery representation since 2022" />
+      </label>
+      <label class="full">
+        <span class="studio-radar-field-label">Evidence</span>
+        <span class="studio-radar-field-hint">How you know this connection exists — a URL, exhibition listing, mutual contact, or other proof</span>
+        <input id="rrEvidence" class="studio-input" placeholder="e.g. Listed on gallery roster page" />
+      </label>
     </div>`,
         {
             title: 'Add relationship',
-            footerHtml: `<button type="button" class="studio-btn-primary" id="rrSave">Save</button>`,
+            subtitle: 'Map a connection between leads',
+            wide: true,
+            footerHtml: `<button type="button" class="studio-btn-primary" id="rrSave">Save relationship</button>`,
         },
     );
     root.querySelector('#rrSave')?.addEventListener('click', async () => {

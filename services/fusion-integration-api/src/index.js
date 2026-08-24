@@ -294,6 +294,24 @@ async function handleStripeWebhookEvent(event) {
             if (typeof subId === 'string' && stripe) {
                 const sub = await stripe.subscriptions.retrieve(subId);
                 await pushSubscriptionToCanisterIfLinked(sub);
+                // Referrer credit on renewal (invoice.paid only, skip first invoice)
+                if (event.type === 'invoice.paid' && inv.billing_reason === 'subscription_cycle') {
+                    const principalText = String(sub.metadata?.principal || '').trim();
+                    if (principalText) {
+                        try {
+                            const { getIntegrationActor } = await import('./canisterActor.js');
+                            const { Principal } = await import('@dfinity/principal');
+                            const actor = await getIntegrationActor();
+                            const p = Principal.fromText(principalText);
+                            const credited = await actor.creditReferrerForRenewal(p);
+                            if (credited) {
+                                console.log('[stripe webhook] referral credit granted for', principalText);
+                            }
+                        } catch (err) {
+                            console.warn('[stripe webhook] referrer credit attempt failed:', err?.message || err);
+                        }
+                    }
+                }
             }
             break;
         }
@@ -1278,14 +1296,85 @@ app.post('/stripe/create-subscription', requireApiKey, async (req, res) => {
                   tier,
                   price_id: priceId,
               };
-        const subscription = await stripe.subscriptions.create({
+
+        // Promo code → Stripe coupon
+        const promoCodeRaw = typeof req.body?.promoCode === 'string' ? req.body.promoCode.trim().toUpperCase() : '';
+        let stripeCouponId = '';
+        if (promoCodeRaw) {
+            try {
+                const actor = await getIntegrationActor();
+                if (actor && typeof actor.validatePromoCode === 'function') {
+                    const pcResult = await actor.validatePromoCode(promoCodeRaw);
+                    if (pcResult && typeof pcResult === 'object' && 'ok' in pcResult) {
+                        const pc = pcResult.ok;
+                        const dt = pc.discountType;
+                        if (dt && typeof dt === 'object') {
+                            if ('percentOff' in dt) {
+                                const pct = Number(dt.percentOff);
+                                const couponId = `fusion-pct-${pct}-${Number(pc.discountDurationMonths || 1)}mo`;
+                                try {
+                                    await stripe.coupons.retrieve(couponId);
+                                } catch {
+                                    await stripe.coupons.create({
+                                        id: couponId,
+                                        percent_off: pct,
+                                        duration: 'repeating',
+                                        duration_in_months: Number(pc.discountDurationMonths || 1),
+                                    });
+                                }
+                                stripeCouponId = couponId;
+                            } else if ('fixedCentsOff' in dt) {
+                                const cents = Number(dt.fixedCentsOff);
+                                const couponId = `fusion-fixed-${cents}-${Number(pc.discountDurationMonths || 1)}mo`;
+                                try {
+                                    await stripe.coupons.retrieve(couponId);
+                                } catch {
+                                    await stripe.coupons.create({
+                                        id: couponId,
+                                        amount_off: cents,
+                                        currency: 'usd',
+                                        duration: 'repeating',
+                                        duration_in_months: Number(pc.discountDurationMonths || 1),
+                                    });
+                                }
+                                stripeCouponId = couponId;
+                            } else if ('freeMonths' in dt) {
+                                const freeMo = Number(dt.freeMonths);
+                                const couponId = `fusion-free-${freeMo}mo`;
+                                try {
+                                    await stripe.coupons.retrieve(couponId);
+                                } catch {
+                                    await stripe.coupons.create({
+                                        id: couponId,
+                                        percent_off: 100,
+                                        duration: 'repeating',
+                                        duration_in_months: freeMo,
+                                    });
+                                }
+                                stripeCouponId = couponId;
+                            }
+                        }
+                        subMeta.promo_code = promoCodeRaw;
+                    }
+                }
+            } catch (e) {
+                console.warn('[stripe] promo code coupon resolution failed:', e instanceof Error ? e.message : e);
+            }
+        }
+
+        /** @type {Record<string, unknown>} */
+        const subCreateOpts = {
             customer: customer.id,
             items: [{ price: priceId }],
             payment_behavior: 'default_incomplete',
             payment_settings: { save_default_payment_method: 'on_subscription' },
             expand: ['latest_invoice.payment_intent'],
             metadata: mergeStripeMetadata(rawMeta, subMeta),
-        });
+        };
+        if (stripeCouponId) {
+            subCreateOpts.coupon = stripeCouponId;
+        }
+        const subscription = await stripe.subscriptions.create(subCreateOpts);
 
         const invoice = subscription.latest_invoice;
         let clientSecret = null;

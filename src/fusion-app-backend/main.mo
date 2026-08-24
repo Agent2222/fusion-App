@@ -139,6 +139,15 @@ persistent actor {
   /// Account recovery codes (8-digit) — admin-generated; single-use; 7-day expiry.
   stable var accountRecoveryCodesStable : [(Text, Types.AccountRecoveryCodeRecord)] = [];
 
+  /// Promo / invite / partner codes — checkout discount layer.
+  stable var promoCodesStable : [(Text, Types.PromoCode)] = [];
+  stable var promoRedemptionsStable : [(Text, Types.PromoRedemption)] = [];
+
+  /// Invite lineage — who invited whom, with join season/year.
+  stable var inviteLineageStable : [(Principal, Types.InviteLineage)] = [];
+  /// Billing credits (referral rewards) — months of free membership earned.
+  stable var billingCreditsStable : [(Principal, Types.BillingCreditRecord)] = [];
+
   /// Composite key: `artistId|programId` → JSON `{"submittedAt":...,"payload":...}` (one entry per program).
   stable var applicationByArtistProgramStable : [(Text, Text)] = [];
 
@@ -234,6 +243,11 @@ persistent actor {
   /// Staff review notes for audio entries (keyed by "artistId|audioUrl").
   stable var audioEntryReviewNotesStable : [(Text, Types.AssetReviewNote)] = [];
 
+  /// Studio Travel: flight bookings keyed by applicant id.
+  stable var applicantFlightBookingsStable : [(Text, Types.ApplicantFlightBooking)] = [];
+  /// Studio Travel: per-program travel prep links keyed by program id.
+  stable var programTravelPrepLinksStable : [(Text, [Types.TravelPrepLink])] = [];
+
   // In-memory hashmap for fast lookups/updates.
   transient var subscribersByEmail : _HashMap.HashMap<Text, Types.Subscriber> =
     _HashMap.HashMap<Text, Types.Subscriber>(
@@ -328,6 +342,12 @@ persistent actor {
 
   transient var audioEntryReviewNotesByKey : _HashMap.HashMap<Text, Types.AssetReviewNote> =
     _HashMap.HashMap<Text, Types.AssetReviewNote>(0, Text.equal, Text.hash);
+
+  transient var applicantFlightBookingsById : _HashMap.HashMap<Text, Types.ApplicantFlightBooking> =
+    _HashMap.HashMap<Text, Types.ApplicantFlightBooking>(0, Text.equal, Text.hash);
+
+  transient var programTravelPrepLinksById : _HashMap.HashMap<Text, [Types.TravelPrepLink]> =
+    _HashMap.HashMap<Text, [Types.TravelPrepLink]>(0, Text.equal, Text.hash);
 
   /// slug -> artist id
   transient var artistSlugToId : _HashMap.HashMap<Text, Text> =
@@ -481,6 +501,16 @@ persistent actor {
     _HashMap.HashMap<Text, Types.AccountRecoveryCodeRecord>(0, Text.equal, Text.hash);
   transient var activeRecoveryCodeByFromPrincipal : _HashMap.HashMap<Principal, Text> =
     _HashMap.HashMap<Principal, Text>(0, Principal.equal, Principal.hash);
+
+  transient var promoCodesByCode : _HashMap.HashMap<Text, Types.PromoCode> =
+    _HashMap.HashMap<Text, Types.PromoCode>(0, Text.equal, Text.hash);
+  transient var promoRedemptionsByKey : _HashMap.HashMap<Text, Types.PromoRedemption> =
+    _HashMap.HashMap<Text, Types.PromoRedemption>(0, Text.equal, Text.hash);
+
+  transient var inviteLineageByPrincipal : _HashMap.HashMap<Principal, Types.InviteLineage> =
+    _HashMap.HashMap<Principal, Types.InviteLineage>(0, Principal.equal, Principal.hash);
+  transient var billingCreditsByPrincipal : _HashMap.HashMap<Principal, Types.BillingCreditRecord> =
+    _HashMap.HashMap<Principal, Types.BillingCreditRecord>(0, Principal.equal, Principal.hash);
 
   transient var studioPermissionDefaultsByCategory : _HashMap.HashMap<Text, Types.StudioPermissionMatrix> =
     _HashMap.HashMap<Text, Types.StudioPermissionMatrix>(0, Text.equal, Text.hash);
@@ -784,6 +814,18 @@ persistent actor {
     if (entry.1.active) {
       activeRecoveryCodeByFromPrincipal.put(entry.1.fromPrincipal, entry.0);
     };
+  };
+  for (entry in promoCodesStable.vals()) {
+    promoCodesByCode.put(entry.0, entry.1);
+  };
+  for (entry in promoRedemptionsStable.vals()) {
+    promoRedemptionsByKey.put(entry.0, entry.1);
+  };
+  for (entry in inviteLineageStable.vals()) {
+    inviteLineageByPrincipal.put(entry.0, entry.1);
+  };
+  for (entry in billingCreditsStable.vals()) {
+    billingCreditsByPrincipal.put(entry.0, entry.1);
   };
   for (entry in artistMediaStable.vals()) {
     artistMediaByArtistId.put(entry.0, entry.1);
@@ -2099,6 +2141,10 @@ persistent actor {
     joinInvitesStable := _Iter.toArray(joinInvitesByCode.entries());
     joinInviteTrialMonthsStable := _Iter.toArray(joinInviteTrialMonthsByCode.entries());
     accountRecoveryCodesStable := _Iter.toArray(accountRecoveryCodesByCode.entries());
+    promoCodesStable := _Iter.toArray(promoCodesByCode.entries());
+    promoRedemptionsStable := _Iter.toArray(promoRedemptionsByKey.entries());
+    inviteLineageStable := _Iter.toArray(inviteLineageByPrincipal.entries());
+    billingCreditsStable := _Iter.toArray(billingCreditsByPrincipal.entries());
     artistMediaStable := _Iter.toArray(artistMediaByArtistId.entries());
     studioPermissionDefaultsStable := _Iter.toArray(studioPermissionDefaultsByCategory.entries());
     studioPermissionOverridesStable := _Iter.toArray(studioPermissionOverridesByPrincipal.entries());
@@ -2118,6 +2164,8 @@ persistent actor {
     emailCampaignsStable := _Iter.toArray(emailCampaignsById.entries());
     emailOutboundRecordsStable := _Iter.toArray(emailOutboundRecordsById.entries());
     applicantEmailOutreachStable := _Iter.toArray(applicantEmailOutreachById.entries());
+    applicantFlightBookingsStable := _Iter.toArray(applicantFlightBookingsById.entries());
+    programTravelPrepLinksStable := _Iter.toArray(programTravelPrepLinksById.entries());
   };
 
   system func postupgrade() {
@@ -2245,6 +2293,46 @@ persistent actor {
     };
     accountRecoveryCodesStable := [];
     rebuildActiveRecoveryCodeIndex();
+
+    promoCodesByCode := _HashMap.HashMap<Text, Types.PromoCode>(
+      promoCodesStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in promoCodesStable.vals()) {
+      promoCodesByCode.put(entry.0, entry.1);
+    };
+    promoCodesStable := [];
+
+    promoRedemptionsByKey := _HashMap.HashMap<Text, Types.PromoRedemption>(
+      promoRedemptionsStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in promoRedemptionsStable.vals()) {
+      promoRedemptionsByKey.put(entry.0, entry.1);
+    };
+    promoRedemptionsStable := [];
+
+    inviteLineageByPrincipal := _HashMap.HashMap<Principal, Types.InviteLineage>(
+      inviteLineageStable.size(),
+      Principal.equal,
+      Principal.hash,
+    );
+    for (entry in inviteLineageStable.vals()) {
+      inviteLineageByPrincipal.put(entry.0, entry.1);
+    };
+    inviteLineageStable := [];
+
+    billingCreditsByPrincipal := _HashMap.HashMap<Principal, Types.BillingCreditRecord>(
+      billingCreditsStable.size(),
+      Principal.equal,
+      Principal.hash,
+    );
+    for (entry in billingCreditsStable.vals()) {
+      billingCreditsByPrincipal.put(entry.0, entry.1);
+    };
+    billingCreditsStable := [];
 
     artistMediaByArtistId := _HashMap.HashMap<Text, Types.ArtistMedia>(
       artistMediaStable.size(),
@@ -2407,6 +2495,26 @@ persistent actor {
       applicantEmailOutreachById.put(entry.0, entry.1);
     };
     applicantEmailOutreachStable := [];
+
+    applicantFlightBookingsById := _HashMap.HashMap<Text, Types.ApplicantFlightBooking>(
+      applicantFlightBookingsStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in applicantFlightBookingsStable.vals()) {
+      applicantFlightBookingsById.put(entry.0, entry.1);
+    };
+    applicantFlightBookingsStable := [];
+
+    programTravelPrepLinksById := _HashMap.HashMap<Text, [Types.TravelPrepLink]>(
+      programTravelPrepLinksStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in programTravelPrepLinksStable.vals()) {
+      programTravelPrepLinksById.put(entry.0, entry.1);
+    };
+    programTravelPrepLinksStable := [];
 
     programPaymentSummariesByKey := _HashMap.HashMap<Text, Types.ProgramPaymentSummary>(0, Text.equal, Text.hash);
     for (entry in programPaymentSummariesStable.vals()) {
@@ -2949,6 +3057,20 @@ persistent actor {
       applicantEmailOutreachById.put(entry.0, entry.1);
     };
 
+    applicantFlightBookingsById := _HashMap.HashMap<Text, Types.ApplicantFlightBooking>(
+      applicantFlightBookingsStable.size(), Text.equal, Text.hash
+    );
+    for (entry in applicantFlightBookingsStable.vals()) {
+      applicantFlightBookingsById.put(entry.0, entry.1);
+    };
+
+    programTravelPrepLinksById := _HashMap.HashMap<Text, [Types.TravelPrepLink]>(
+      programTravelPrepLinksStable.size(), Text.equal, Text.hash
+    );
+    for (entry in programTravelPrepLinksStable.vals()) {
+      programTravelPrepLinksById.put(entry.0, entry.1);
+    };
+
     programPaymentSummariesByKey := _HashMap.HashMap<Text, Types.ProgramPaymentSummary>(0, Text.equal, Text.hash);
     for (entry in programPaymentSummariesStable.vals()) {
       programPaymentSummariesByKey.put(entry.0, entry.1);
@@ -3031,6 +3153,40 @@ persistent actor {
     };
     rebuildActiveRecoveryCodeIndex();
 
+    promoCodesByCode := _HashMap.HashMap<Text, Types.PromoCode>(
+      promoCodesStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in promoCodesStable.vals()) {
+      promoCodesByCode.put(entry.0, entry.1);
+    };
+    promoRedemptionsByKey := _HashMap.HashMap<Text, Types.PromoRedemption>(
+      promoRedemptionsStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in promoRedemptionsStable.vals()) {
+      promoRedemptionsByKey.put(entry.0, entry.1);
+    };
+
+    inviteLineageByPrincipal := _HashMap.HashMap<Principal, Types.InviteLineage>(
+      inviteLineageStable.size(),
+      Principal.equal,
+      Principal.hash,
+    );
+    for (entry in inviteLineageStable.vals()) {
+      inviteLineageByPrincipal.put(entry.0, entry.1);
+    };
+    billingCreditsByPrincipal := _HashMap.HashMap<Principal, Types.BillingCreditRecord>(
+      billingCreditsStable.size(),
+      Principal.equal,
+      Principal.hash,
+    );
+    for (entry in billingCreditsStable.vals()) {
+      billingCreditsByPrincipal.put(entry.0, entry.1);
+    };
+
     reloadStudioPermissionTransientFromStable();
     ensureStudioFeatureKeysMergedWithDefaults();
     seedStudioPermissionDefaultsIfEmpty();
@@ -3078,6 +3234,8 @@ persistent actor {
       artistFeaturedManualIdsStable = Buffer.toArray(manualFeaturedArtistIds);
       artistDrawRecipientsStable = ?(_Iter.toArray(artistDrawRecipientById.entries()));
       artistDrawStoryVideoStable = ?(_Iter.toArray(artistDrawStoryVideoById.entries()));
+      applicantFlightBookingsStable = ?(_Iter.toArray(applicantFlightBookingsById.entries()));
+      programTravelPrepLinksStable = ?(_Iter.toArray(programTravelPrepLinksById.entries()));
       joinInvitesStable = _Iter.toArray(joinInvitesByCode.entries());
       joinInviteTrialMonthsStable = ?(_Iter.toArray(joinInviteTrialMonthsByCode.entries()));
       accountRecoveryCodesStable = ?(_Iter.toArray(accountRecoveryCodesByCode.entries()));
@@ -3092,6 +3250,10 @@ persistent actor {
       artistAudioFullSiteApprovedUrlsStable = ?(_Iter.toArray(artistAudioFullSiteApprovedUrlsById.entries()));
       heroProfileImageReviewNotesStable = ?(_Iter.toArray(heroProfileImageReviewNotesById.entries()));
       audioEntryReviewNotesStable = ?(_Iter.toArray(audioEntryReviewNotesByKey.entries()));
+      promoCodesStable = ?(_Iter.toArray(promoCodesByCode.entries()));
+      promoRedemptionsStable = ?(_Iter.toArray(promoRedemptionsByKey.entries()));
+      inviteLineageStable = ?(_Iter.toArray(inviteLineageByPrincipal.entries()));
+      billingCreditsStable = ?(_Iter.toArray(billingCreditsByPrincipal.entries()));
     };
   };
 
@@ -3219,6 +3381,30 @@ persistent actor {
       case (?rows) { rows };
     };
     artistDrawStoryVideoStable := switch (snapshot.artistDrawStoryVideoStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    applicantFlightBookingsStable := switch (snapshot.applicantFlightBookingsStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    programTravelPrepLinksStable := switch (snapshot.programTravelPrepLinksStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    promoCodesStable := switch (snapshot.promoCodesStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    promoRedemptionsStable := switch (snapshot.promoRedemptionsStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    inviteLineageStable := switch (snapshot.inviteLineageStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    billingCreditsStable := switch (snapshot.billingCreditsStable) {
       case null { [] };
       case (?rows) { rows };
     };
@@ -5618,6 +5804,557 @@ persistent actor {
         });
       };
     };
+  };
+
+  // ——— Season / Year helpers (invite lineage) ———
+
+  private func seasonFromMonth(month : Nat) : Types.JoinSeason {
+    if (month >= 3 and month <= 5) { #spring }
+    else if (month >= 6 and month <= 8) { #summer }
+    else if (month >= 9 and month <= 11) { #autumn }
+    else { #winter };
+  };
+
+  private func yearAndSeasonNow() : (Nat, Types.JoinSeason) {
+    let nanosSinceEpoch : Nat = Int.abs(Time.now());
+    let secondsSinceEpoch = nanosSinceEpoch / 1_000_000_000;
+    let daysSinceEpoch = secondsSinceEpoch / 86400;
+
+    // Approximate year: 365.25 days/year from 1970
+    var year : Nat = 1970 + (daysSinceEpoch / 365);
+    // Clamp to reasonable range
+    if (year < 2024) { year := 2024 };
+    if (year > 2100) { year := 2100 };
+
+    // Approximate month: day-of-year / 30.44
+    let daysInYear = daysSinceEpoch % 365;
+    var month : Nat = (daysInYear / 30) + 1;
+    if (month > 12) { month := 12 };
+    if (month < 1) { month := 1 };
+
+    (year, seasonFromMonth(month));
+  };
+
+  // ——— FUSN invite code generation ———
+
+  private let fusnAlphabet : [Char] = [
+    'A','B','C','D','E','F','G','H','J','K',
+    'M','N','P','Q','R','S','T','U','V','W',
+    'X','Y','Z','2','3','4','5','6','7','8','9',
+  ];
+
+  private func generateFusnCode(salt : Nat) : Text {
+    let base : Nat = Int.abs(Time.now());
+    let seed = base + (salt * 104_729) + (promoCodesByCode.size() * 7_919);
+    let len = fusnAlphabet.size();
+    var code = "FUSN-";
+    var rem = seed;
+    var i = 0;
+    while (i < 4) {
+      code := code # Char.toText(fusnAlphabet[rem % len]);
+      rem := rem / len + i * 31 + salt * 17;
+      i += 1;
+    };
+    code;
+  };
+
+  private let maxActiveInvitesPerMember : Nat = 3;
+  private let inviteExpiryNanos : Int = 90 * 24 * 60 * 60 * 1_000_000_000;
+
+  private func countActiveInvitesForPrincipal(p : Principal) : Nat {
+    var count : Nat = 0;
+    for ((_, pc) in promoCodesByCode.entries()) {
+      switch (pc.codeType) {
+        case (#invite) {
+          switch (pc.referrerPrincipal) {
+            case (?rp) {
+              if (Principal.equal(rp, p) and pc.active) {
+                count += 1;
+              };
+            };
+            case null {};
+          };
+        };
+        case _ {};
+      };
+    };
+    count;
+  };
+
+  // ——— Promo / Invite / Partner Codes (checkout discount layer) ———
+
+  private func normalizePromoCode(raw : Text) : Text {
+    var out = "";
+    for (c in Text.trim(raw, #char ' ').chars()) {
+      let n = Char.toNat32(c);
+      if (n >= 0x61 and n <= 0x7a) {
+        out := out # Text.fromChar(Char.fromNat32(n - 32));
+      } else {
+        out := out # Text.fromChar(c);
+      };
+    };
+    out;
+  };
+
+  private func isPromoCodeTaken(code : Text) : Bool {
+    switch (promoCodesByCode.get(code)) {
+      case (?_) { true };
+      case null { isJoinInviteCodeTaken(code) };
+    };
+  };
+
+  private func validatePromoCodeInternal(code : Text) : Types.ValidatePromoCodeResult {
+    let norm = normalizePromoCode(code);
+    switch (promoCodesByCode.get(norm)) {
+      case null { #invalidCode };
+      case (?pc) {
+        if (not pc.active) { return #inactive };
+        switch (pc.expiresAt) {
+          case (?exp) {
+            let nowNanos = Int.toText(Time.now());
+            if (nowNanos > exp) { return #expired };
+          };
+          case null {};
+        };
+        switch (pc.maxRedemptions) {
+          case (?max) {
+            if (pc.currentRedemptions >= max) { return #maxRedemptionsReached };
+          };
+          case null {};
+        };
+        #ok(pc);
+      };
+    };
+  };
+
+  public shared (msg) func adminCreatePromoCode(
+    code : Text,
+    codeType : Types.PromoCodeType,
+    discountType : Types.PromoDiscountType,
+    discountDurationMonths : Nat,
+    maxRedemptions : ?Nat,
+    expiresAt : ?Text,
+    partnerLabel : ?Text,
+    campaignTag : ?Text,
+  ) : async Text {
+    assertStaffOrAdmin(msg.caller);
+    let norm = normalizePromoCode(code);
+    if (norm.size() == 0) { Debug.trap("code required") };
+    if (discountDurationMonths == 0) { Debug.trap("discountDurationMonths must be >= 1") };
+    switch (discountType) {
+      case (#percentOff(pct)) { if (pct == 0 or pct > 100) { Debug.trap("percentOff must be 1..100") } };
+      case (#fixedCentsOff(c)) { if (c == 0) { Debug.trap("fixedCentsOff must be > 0") } };
+      case (#freeMonths(m)) { if (m == 0) { Debug.trap("freeMonths must be >= 1") } };
+    };
+    if (isPromoCodeTaken(norm)) { Debug.trap("Code already exists") };
+
+    let now = nowText();
+    let rec : Types.PromoCode = {
+      code = norm;
+      codeType = codeType;
+      createdBy = msg.caller;
+      createdAt = now;
+      discountType = discountType;
+      discountDurationMonths = discountDurationMonths;
+      maxRedemptions = maxRedemptions;
+      currentRedemptions = 0;
+      expiresAt = expiresAt;
+      active = true;
+      referrerPrincipal = null;
+      referrerArtistId = null;
+      partnerLabel = partnerLabel;
+      campaignTag = campaignTag;
+    };
+    promoCodesByCode.put(norm, rec);
+    norm;
+  };
+
+  /// Authenticated member: generate a single-use FUSN-XXXX invite code (max 3 active).
+  public shared (msg) func generateMyInviteCode(
+    discountDurationMonths : Nat,
+  ) : async Text {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      Debug.trap("Authentication required");
+    };
+    let access = membershipAccessForPrincipal(msg.caller);
+    switch (access) {
+      case (#ok) {};
+      case (#exempt) {};
+      case _ { Debug.trap("Active membership required to generate invite codes") };
+    };
+    let activeCount = countActiveInvitesForPrincipal(msg.caller);
+    if (activeCount >= maxActiveInvitesPerMember) {
+      Debug.trap("Maximum " # Nat.toText(maxActiveInvitesPerMember) # " active invite codes allowed");
+    };
+    let dur = if (discountDurationMonths < 1) { 1 }
+              else if (discountDurationMonths > 3) { 3 }
+              else { discountDurationMonths };
+
+    let referrerArtistId : ?Text = switch (accountsByPrincipal.get(msg.caller)) {
+      case (?acc) { acc.linkedArtistId };
+      case null { null };
+    };
+
+    let now = nowText();
+    let expiryNanos = Time.now() + inviteExpiryNanos;
+    let expiresAtText = Int.toText(expiryNanos);
+
+    var attempts : Nat = 0;
+    while (attempts < 50) {
+      let cand = generateFusnCode(attempts);
+      if (not isPromoCodeTaken(cand)) {
+        let rec : Types.PromoCode = {
+          code = cand;
+          codeType = #invite;
+          createdBy = msg.caller;
+          createdAt = now;
+          discountType = #percentOff(50);
+          discountDurationMonths = dur;
+          maxRedemptions = ?1;
+          currentRedemptions = 0;
+          expiresAt = ?expiresAtText;
+          active = true;
+          referrerPrincipal = ?msg.caller;
+          referrerArtistId = referrerArtistId;
+          partnerLabel = null;
+          campaignTag = ?"member-invite";
+        };
+        promoCodesByCode.put(cand, rec);
+        return cand;
+      };
+      attempts += 1;
+    };
+    Debug.trap("Could not allocate invite code");
+  };
+
+  public shared query func validatePromoCode(code : Text) : async Types.ValidatePromoCodeResult {
+    validatePromoCodeInternal(code);
+  };
+
+  public shared (msg) func redeemPromoCode(
+    code : Text,
+    subscriptionId : ?Text,
+    discountApplied : Text,
+  ) : async Types.RedeemPromoCodeResult {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      Debug.trap("Authentication required");
+    };
+    let norm = normalizePromoCode(code);
+    let redemptionKey = norm # "-" # Principal.toText(msg.caller);
+    switch (promoRedemptionsByKey.get(redemptionKey)) {
+      case (?_) { return #alreadyRedeemed };
+      case null {};
+    };
+    switch (validatePromoCodeInternal(norm)) {
+      case (#ok(pc)) {
+        let updated : Types.PromoCode = {
+          pc with
+          currentRedemptions = pc.currentRedemptions + 1;
+          active = switch (pc.maxRedemptions) {
+            case (?max) { if (pc.currentRedemptions + 1 >= max) { false } else { true } };
+            case null { pc.active };
+          };
+        };
+        promoCodesByCode.put(norm, updated);
+
+        let redemption : Types.PromoRedemption = {
+          code = norm;
+          redeemerPrincipal = msg.caller;
+          redeemedAt = nowText();
+          discountApplied = discountApplied;
+          subscriptionId = subscriptionId;
+        };
+        promoRedemptionsByKey.put(redemptionKey, redemption);
+
+        // Record invite lineage when an #invite code is redeemed
+        switch (pc.codeType) {
+          case (#invite) {
+            switch (pc.referrerPrincipal) {
+              case (?inviter) {
+                let ts = redemption.redeemedAt;
+                let (yr, ssn) = yearAndSeasonNow();
+                let lineage : Types.InviteLineage = {
+                  memberPrincipal = msg.caller;
+                  invitedByPrincipal = inviter;
+                  invitedByArtistId = pc.referrerArtistId;
+                  inviteCode = norm;
+                  joinedAt = ts;
+                  joinYear = yr;
+                  joinSeason = ssn;
+                };
+                inviteLineageByPrincipal.put(msg.caller, lineage);
+              };
+              case null {};
+            };
+          };
+          case _ {};
+        };
+
+        #ok;
+      };
+      case (#invalidCode) { #invalidCode };
+      case (#expired) { #expired };
+      case (#maxRedemptionsReached) { #maxRedemptionsReached };
+      case (#inactive) { #inactive };
+    };
+  };
+
+  private func promoDiscountTypeJson(d : Types.PromoDiscountType) : Text {
+    switch (d) {
+      case (#percentOff(n)) { "{\"percentOff\":" # Nat.toText(n) # "}" };
+      case (#fixedCentsOff(n)) { "{\"fixedCentsOff\":" # Nat.toText(n) # "}" };
+      case (#freeMonths(n)) { "{\"freeMonths\":" # Nat.toText(n) # "}" };
+    };
+  };
+
+  private func promoCodeTypeJson(t : Types.PromoCodeType) : Text {
+    switch (t) {
+      case (#invite) { "\"invite\"" };
+      case (#promo) { "\"promo\"" };
+      case (#partner) { "\"partner\"" };
+    };
+  };
+
+  private func promoCodeJson(pc : Types.PromoCode) : Text {
+    "{"
+      # "\"code\":" # jsonText(pc.code)
+      # ",\"codeType\":" # promoCodeTypeJson(pc.codeType)
+      # ",\"createdBy\":" # jsonText(Principal.toText(pc.createdBy))
+      # ",\"createdAt\":" # jsonText(pc.createdAt)
+      # ",\"discountType\":" # promoDiscountTypeJson(pc.discountType)
+      # ",\"discountDurationMonths\":" # Nat.toText(pc.discountDurationMonths)
+      # ",\"maxRedemptions\":" # (switch (pc.maxRedemptions) { case null { "null" }; case (?n) { Nat.toText(n) } })
+      # ",\"currentRedemptions\":" # Nat.toText(pc.currentRedemptions)
+      # ",\"expiresAt\":" # optJsonText(pc.expiresAt)
+      # ",\"active\":" # jsonBool(pc.active)
+      # ",\"referrerPrincipal\":" # (switch (pc.referrerPrincipal) { case null { "null" }; case (?p) { jsonText(Principal.toText(p)) } })
+      # ",\"referrerArtistId\":" # optJsonText(pc.referrerArtistId)
+      # ",\"partnerLabel\":" # optJsonText(pc.partnerLabel)
+      # ",\"campaignTag\":" # optJsonText(pc.campaignTag)
+      # "}"
+  };
+
+  public shared query (msg) func staffListPromoCodesJson() : async Text {
+    assertStaffOrAdmin(msg.caller);
+    var out : Text = "[";
+    var first = true;
+    for ((_, pc) in promoCodesByCode.entries()) {
+      if (not first) { out := out # "," };
+      first := false;
+      out := out # promoCodeJson(pc);
+    };
+    out # "]"
+  };
+
+  // ——— Member invite management ———
+
+  public shared query (msg) func getMyInviteCodes() : async [Types.PromoCode] {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      Debug.trap("Authentication required");
+    };
+    let buf = Buffer.Buffer<Types.PromoCode>(4);
+    for ((_, pc) in promoCodesByCode.entries()) {
+      switch (pc.codeType) {
+        case (#invite) {
+          switch (pc.referrerPrincipal) {
+            case (?rp) {
+              if (Principal.equal(rp, msg.caller)) {
+                buf.add(pc);
+              };
+            };
+            case null {};
+          };
+        };
+        case _ {};
+      };
+    };
+    Buffer.toArray(buf);
+  };
+
+  public shared (msg) func deactivateMyInviteCode(code : Text) : async Bool {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      Debug.trap("Authentication required");
+    };
+    let norm = normalizePromoCode(code);
+    switch (promoCodesByCode.get(norm)) {
+      case null { false };
+      case (?pc) {
+        switch (pc.codeType) {
+          case (#invite) {
+            switch (pc.referrerPrincipal) {
+              case (?rp) {
+                if (Principal.equal(rp, msg.caller)) {
+                  let updated : Types.PromoCode = { pc with active = false };
+                  promoCodesByCode.put(norm, updated);
+                  true;
+                } else { false };
+              };
+              case null { false };
+            };
+          };
+          case _ { false };
+        };
+      };
+    };
+  };
+
+  public shared query (msg) func getMyInviteCountSummary() : async {
+    active : Nat;
+    maxAllowed : Nat;
+    totalRedeemed : Nat;
+  } {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      Debug.trap("Authentication required");
+    };
+    var active : Nat = 0;
+    var redeemed : Nat = 0;
+    for ((_, pc) in promoCodesByCode.entries()) {
+      switch (pc.codeType) {
+        case (#invite) {
+          switch (pc.referrerPrincipal) {
+            case (?rp) {
+              if (Principal.equal(rp, msg.caller)) {
+                if (pc.active) { active += 1 };
+                redeemed += pc.currentRedemptions;
+              };
+            };
+            case null {};
+          };
+        };
+        case _ {};
+      };
+    };
+    { active = active; maxAllowed = maxActiveInvitesPerMember; totalRedeemed = redeemed };
+  };
+
+  // ——— Invite lineage queries ———
+
+  public shared query (msg) func getMyInviteLineage() : async ?Types.InviteLineage {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      Debug.trap("Authentication required");
+    };
+    inviteLineageByPrincipal.get(msg.caller);
+  };
+
+  public shared query (msg) func getMyInvitees() : async [Types.InviteLineage] {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      Debug.trap("Authentication required");
+    };
+    let buf = Buffer.Buffer<Types.InviteLineage>(4);
+    for ((_, lin) in inviteLineageByPrincipal.entries()) {
+      if (Principal.equal(lin.invitedByPrincipal, msg.caller)) {
+        buf.add(lin);
+      };
+    };
+    Buffer.toArray(buf);
+  };
+
+  public shared query (msg) func getInviteLineageBatch(principals : [Principal]) : async [(Principal, ?Types.InviteLineage)] {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      Debug.trap("Authentication required");
+    };
+    if (principals.size() > 100) {
+      Debug.trap("Batch limit is 100 principals");
+    };
+    Array.map<Principal, (Principal, ?Types.InviteLineage)>(
+      principals,
+      func(p : Principal) : (Principal, ?Types.InviteLineage) {
+        (p, inviteLineageByPrincipal.get(p));
+      },
+    );
+  };
+
+  public shared query (msg) func staffListInviteLineage() : async [Types.InviteLineage] {
+    assertStaffOrAdmin(msg.caller);
+    let buf = Buffer.Buffer<Types.InviteLineage>(inviteLineageByPrincipal.size());
+    for ((_, lin) in inviteLineageByPrincipal.entries()) {
+      buf.add(lin);
+    };
+    Buffer.toArray(buf);
+  };
+
+  // ——— Billing credits (referral rewards) ———
+
+  private let maxReferralCreditsPerYear : Nat = 6;
+
+  private func getBillingCreditRecord(p : Principal) : Types.BillingCreditRecord {
+    switch (billingCreditsByPrincipal.get(p)) {
+      case (?rec) { rec };
+      case null { { balance = 0; grantedThisYear = 0; lastGrantYear = 0 } };
+    };
+  };
+
+  private func currentCalendarYear() : Nat {
+    let (yr, _) = yearAndSeasonNow();
+    yr;
+  };
+
+  /// Integration API: credit the referrer after a referred member's first renewal.
+  public shared (msg) func creditReferrerForRenewal(redeemerPrincipal : Principal) : async Bool {
+    assertIntegrationCaller(msg.caller);
+    var referrerOpt : ?Principal = null;
+    for ((_, redemption) in promoRedemptionsByKey.entries()) {
+      if (Principal.equal(redemption.redeemerPrincipal, redeemerPrincipal)) {
+        switch (promoCodesByCode.get(redemption.code)) {
+          case (?pc) {
+            switch (pc.codeType) {
+              case (#invite) { referrerOpt := pc.referrerPrincipal };
+              case _ {};
+            };
+          };
+          case null {};
+        };
+      };
+    };
+    switch (referrerOpt) {
+      case null { false };
+      case (?referrer) {
+        let yr = currentCalendarYear();
+        let rec = getBillingCreditRecord(referrer);
+        let effectiveGranted = if (rec.lastGrantYear == yr) { rec.grantedThisYear } else { 0 };
+        if (effectiveGranted >= maxReferralCreditsPerYear) { return false };
+        let updated : Types.BillingCreditRecord = {
+          balance = rec.balance + 1;
+          grantedThisYear = effectiveGranted + 1;
+          lastGrantYear = yr;
+        };
+        billingCreditsByPrincipal.put(referrer, updated);
+        appendCreditLedger(
+          Principal.toText(referrer),
+          "referral-credit",
+          1,
+          "credit",
+          "Referral reward: invited member " # Principal.toText(redeemerPrincipal) # " completed first renewal",
+        );
+        true;
+      };
+    };
+  };
+
+  public shared query (msg) func getMyBillingCredits() : async Nat {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      Debug.trap("Authentication required");
+    };
+    getBillingCreditRecord(msg.caller).balance;
+  };
+
+  /// Integration API: consume one billing credit during renewal (applies free month).
+  public shared (msg) func consumeBillingCredit(principal : Principal) : async Bool {
+    assertIntegrationCaller(msg.caller);
+    let rec = getBillingCreditRecord(principal);
+    if (rec.balance == 0) { return false };
+    let updated : Types.BillingCreditRecord = {
+      rec with balance = rec.balance - 1;
+    };
+    billingCreditsByPrincipal.put(principal, updated);
+    appendCreditLedger(
+      Principal.toText(principal),
+      "referral-credit-consumed",
+      1,
+      "debit",
+      "Billing credit consumed — free month applied",
+    );
+    true;
   };
 
   // ——— Studio Schedule (calendar events) ———
@@ -10423,6 +11160,111 @@ persistent actor {
         };
         let next = Array.append(sub.audiences, [segmentId]);
         subscribersByEmail.put(email, { sub with audiences = next });
+      };
+    };
+  };
+
+  // ===== Studio Travel (flight bookings + prep links) =====
+
+  public shared (msg) func staffUpsertApplicantFlightBooking(booking : Types.ApplicantFlightBooking) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "travel");
+    if (Text.size(booking.applicantId) == 0) { Debug.trap("applicantId required") };
+    if (Text.size(booking.programId) == 0) { Debug.trap("programId required") };
+    let now = Int.toText(Time.now());
+    let toSave : Types.ApplicantFlightBooking = {
+      booking with
+      updatedAt = now;
+      updatedBy = Principal.toText(msg.caller);
+    };
+    applicantFlightBookingsById.put(booking.applicantId, toSave);
+  };
+
+  public shared query (msg) func staffListApplicantFlightBookings(programId : Text) : async [Types.ApplicantFlightBooking] {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "travel");
+    let buf = Buffer.Buffer<Types.ApplicantFlightBooking>(0);
+    for (b in applicantFlightBookingsById.vals()) {
+      if (b.programId == programId) {
+        buf.add(b);
+      };
+    };
+    Buffer.toArray(buf);
+  };
+
+  public shared query (msg) func staffGetApplicantFlightBooking(applicantId : Text) : async ?Types.ApplicantFlightBooking {
+    assertStaffOrAdmin(msg.caller);
+    applicantFlightBookingsById.get(applicantId);
+  };
+
+  public shared query (msg) func getMyFlightBooking(programId : Text, applicationId : Text) : async ?Types.ApplicantFlightBooking {
+    if (Principal.equal(msg.caller, anonPrincipal)) { Debug.trap("Authentication required") };
+    ignore programId;
+    applicantFlightBookingsById.get(applicationId);
+  };
+
+  public shared (msg) func setMyEstimatedArrival(programId : Text, applicationId : Text, estDate : Text, estTime : Text) : async () {
+    if (Principal.equal(msg.caller, anonPrincipal)) { Debug.trap("Authentication required") };
+    ignore programId;
+    switch (applicantFlightBookingsById.get(applicationId)) {
+      case null {
+        let now = Int.toText(Time.now());
+        let newBooking : Types.ApplicantFlightBooking = {
+          applicantId = applicationId;
+          programId = programId;
+          airline = "";
+          airlineWebsite = "";
+          confirmationNumber = "";
+          flightCostCents = 0;
+          ownFlight = false;
+          estArrivalDate = estDate;
+          estArrivalTime = estTime;
+          updatedAt = now;
+          updatedBy = Principal.toText(msg.caller);
+        };
+        applicantFlightBookingsById.put(applicationId, newBooking);
+      };
+      case (?existing) {
+        let now = Int.toText(Time.now());
+        applicantFlightBookingsById.put(applicationId, {
+          existing with
+          estArrivalDate = estDate;
+          estArrivalTime = estTime;
+          updatedAt = now;
+          updatedBy = Principal.toText(msg.caller);
+        });
+      };
+    };
+  };
+
+  public shared (msg) func staffUpsertTravelPrepLinks(programId : Text, links : [Types.TravelPrepLink]) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "travel");
+    if (Text.size(programId) == 0) { Debug.trap("programId required") };
+    let stamped = Array.map<Types.TravelPrepLink, Types.TravelPrepLink>(links, func(l : Types.TravelPrepLink) : Types.TravelPrepLink {
+      { l with programId = programId; updatedAt = Int.toText(Time.now()) };
+    });
+    programTravelPrepLinksById.put(programId, stamped);
+  };
+
+  public shared query (msg) func listTravelPrepLinks(programId : Text) : async [Types.TravelPrepLink] {
+    if (Principal.equal(msg.caller, anonPrincipal)) { Debug.trap("Authentication required") };
+    switch (programTravelPrepLinksById.get(programId)) {
+      case null { [] };
+      case (?links) { links };
+    };
+  };
+
+  public shared (msg) func staffDeleteTravelPrepLink(programId : Text, linkId : Text) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "travel");
+    switch (programTravelPrepLinksById.get(programId)) {
+      case null {};
+      case (?links) {
+        let filtered = Array.filter<Types.TravelPrepLink>(links, func(l : Types.TravelPrepLink) : Bool {
+          l.id != linkId;
+        });
+        programTravelPrepLinksById.put(programId, filtered);
       };
     };
   };

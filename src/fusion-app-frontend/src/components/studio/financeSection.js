@@ -25,6 +25,8 @@ import {
     voidProgramTeamOwedEntryStudio,
     voidProgramTeamPaidEntryStudio,
     staffSetProgramPaymentFlightPreferenceStudio,
+    staffUpsertApplicantFlightBooking,
+    staffGetApplicantFlightBooking,
     updateStaffManualProgramLedgerStudio,
     upsertApplicantStudio,
     upsertFinancePromotionStudio,
@@ -180,6 +182,15 @@ const FINANCE_DOMAINS = [
         icon: 'nav-email',
         modifier: 'promotions',
         category: 'Promotions',
+    },
+    {
+        id: 'invites',
+        label: 'Invites',
+        tab: 'invites',
+        chip: 'invites',
+        icon: 'nav-subscribers',
+        modifier: 'invites',
+        category: 'Invites',
     },
     {
         id: 'diagnostics',
@@ -377,6 +388,35 @@ export function renderFinance() {
                                     </tr>
                                 </thead>
                                 <tbody id="studio-finance-promotions-tbody"><tr><td colspan="6">Loading…</td></tr></tbody>
+                            </table>
+                        </div>
+                    </section>
+                </div>
+                <div class="mpd-program-tab-panel" id="studio-finance-panel-invites" role="tabpanel" aria-labelledby="studio-finance-tab-invites" data-finance-panel="invites" hidden>
+                    <div id="studio-finance-invites-summary" class="mpd-payments-overview-grid" style="margin-bottom:1rem"></div>
+                    <section class="member-profile-dashboard__card">
+                        <div class="mpd-payments-section-head">
+                            <h2>Invite codes</h2>
+                        </div>
+                        <div class="member-profile-dashboard__table-wrap">
+                            <table class="mpd-payments-table" aria-label="Invite codes">
+                                <thead><tr>
+                                    <th>Code</th><th>Creator</th><th>Created</th><th>Status</th><th>Redeemed by</th><th>Duration</th>
+                                </tr></thead>
+                                <tbody id="studio-finance-invites-tbody"><tr><td colspan="6">Loading…</td></tr></tbody>
+                            </table>
+                        </div>
+                    </section>
+                    <section class="member-profile-dashboard__card" style="margin-top:1rem">
+                        <div class="mpd-payments-section-head">
+                            <h2>Invite lineage</h2>
+                        </div>
+                        <div class="member-profile-dashboard__table-wrap">
+                            <table class="mpd-payments-table" aria-label="Invite lineage">
+                                <thead><tr>
+                                    <th>Member</th><th>Invited by</th><th>Code</th><th>Season</th><th>Year</th><th>Joined</th>
+                                </tr></thead>
+                                <tbody id="studio-finance-lineage-tbody"><tr><td colspan="6">Loading…</td></tr></tbody>
                             </table>
                         </div>
                     </section>
@@ -1803,6 +1843,94 @@ export async function initFinance(mainEl) {
         });
     };
 
+    const renderInvitesTab = async () => {
+        const summaryEl = mainEl.querySelector('#studio-finance-invites-summary');
+        const invitesTbody = mainEl.querySelector('#studio-finance-invites-tbody');
+        const lineageTbody = mainEl.querySelector('#studio-finance-lineage-tbody');
+
+        let inviteCodes = [];
+        let lineageData = [];
+        try {
+            const { staffListPromoCodesStudio, staffListInviteLineageStudio } = await import('../../utils/database.js');
+            const [rawPromos, rawLineage] = await Promise.all([
+                staffListPromoCodesStudio(),
+                staffListInviteLineageStudio(),
+            ]);
+            const allPromos = typeof rawPromos === 'string' ? JSON.parse(rawPromos) : rawPromos;
+            inviteCodes = (Array.isArray(allPromos) ? allPromos : []).filter(
+                (p) => String(p?.codeType || '') === 'invite' || (typeof p?.codeType === 'object' && p?.codeType?.invite !== undefined),
+            );
+            lineageData = Array.isArray(rawLineage) ? rawLineage : [];
+        } catch { /* fallback empty */ }
+
+        if (summaryEl) {
+            const totalCodes = inviteCodes.length;
+            const redeemed = inviteCodes.reduce((sum, c) => sum + (Number(c?.currentRedemptions) || 0), 0);
+            summaryEl.innerHTML = [
+                metricCard('Total codes', String(totalCodes), 'invite codes generated'),
+                metricCard('Redeemed', String(redeemed), 'codes used'),
+                metricCard('Lineage records', String(lineageData.length), 'tracked invitations'),
+            ].join('');
+        }
+
+        if (invitesTbody) {
+            if (!inviteCodes.length) {
+                invitesTbody.innerHTML = '<tr><td colspan="6">No invite codes found.</td></tr>';
+            } else {
+                invitesTbody.innerHTML = inviteCodes.map((pc) => {
+                    const code = escapeHtml(String(pc?.code || ''));
+                    const creator = escapeHtml(String(pc?.referrerArtistId || pc?.createdBy || '—').slice(0, 16));
+                    const created = escapeHtml(String(pc?.createdAt || '').slice(0, 10));
+                    const active = pc?.active !== false;
+                    const redemptions = Number(pc?.currentRedemptions) || 0;
+                    const status = redemptions > 0 ? 'Redeemed' : active ? 'Active' : 'Inactive';
+                    const dur = Number(pc?.discountDurationMonths) || 1;
+                    return `<tr>
+                        <td><code>${code}</code></td>
+                        <td>${creator}</td>
+                        <td>${created}</td>
+                        <td>${escapeHtml(status)}</td>
+                        <td>${redemptions > 0 ? escapeHtml(String(redemptions)) : '—'}</td>
+                        <td>${dur} mo</td>
+                    </tr>`;
+                }).join('');
+            }
+        }
+
+        if (lineageTbody) {
+            if (!lineageData.length) {
+                lineageTbody.innerHTML = '<tr><td colspan="6">No lineage records found.</td></tr>';
+            } else {
+                const seasonLabel = (s) => {
+                    if (typeof s === 'string') return s;
+                    if (typeof s === 'object' && s !== null) {
+                        if (s.spring !== undefined) return 'Spring';
+                        if (s.summer !== undefined) return 'Summer';
+                        if (s.autumn !== undefined) return 'Autumn';
+                        if (s.winter !== undefined) return 'Winter';
+                    }
+                    return '—';
+                };
+                lineageTbody.innerHTML = lineageData.map((lin) => {
+                    const member = escapeHtml(String(lin?.memberPrincipal?.toText?.() || lin?.memberPrincipal || '').slice(0, 12));
+                    const inviter = escapeHtml(String(lin?.invitedByArtistId?.[0] || lin?.invitedByPrincipal?.toText?.() || lin?.invitedByPrincipal || '').slice(0, 12));
+                    const code = escapeHtml(String(lin?.inviteCode || ''));
+                    const season = escapeHtml(seasonLabel(lin?.joinSeason));
+                    const year = escapeHtml(String(Number(lin?.joinYear) || '—'));
+                    const joined = escapeHtml(String(lin?.joinedAt || '').slice(0, 10));
+                    return `<tr>
+                        <td>${member}</td>
+                        <td>${inviter}</td>
+                        <td><code>${code}</code></td>
+                        <td>${season}</td>
+                        <td>${year}</td>
+                        <td>${joined}</td>
+                    </tr>`;
+                }).join('');
+            }
+        }
+    };
+
     const reloadAllFinanceData = async () => {
         const [applicants, bundle, promos] = await Promise.all([
             getApplicants(),
@@ -1877,6 +2005,15 @@ export async function initFinance(mainEl) {
                     <label class="studio-field"><span>Amount (USD)</span>
                         <input type="text" class="studio-input" id="studio-finance-tickets-amount" inputmode="decimal" placeholder="0.00" value="${escapeHtml(flightUsd === '0.00' ? '' : flightUsd)}" ${amountDisabled} />
                     </label>
+                    <label class="studio-field"><span>Airline name</span>
+                        <input type="text" class="studio-input" id="studio-finance-tickets-airline" placeholder="e.g. ANA, JAL, Delta" value="" ${amountDisabled} />
+                    </label>
+                    <label class="studio-field"><span>Confirmation number</span>
+                        <input type="text" class="studio-input" id="studio-finance-tickets-confirmation" placeholder="PNR / booking reference" value="" ${amountDisabled} />
+                    </label>
+                    <label class="studio-field"><span>Airline website</span>
+                        <input type="url" class="studio-input" id="studio-finance-tickets-airline-url" placeholder="https://…" value="" ${amountDisabled} />
+                    </label>
                     <div class="studio-modal-actions">
                         ${
                             programsCanEdit
@@ -1890,17 +2027,35 @@ export async function initFinance(mainEl) {
             const inner = `<div class="studio-finance-ledger-modal">${editForm}</div>`;
             const { close, root } = openStudioModal(inner, { title, wide: true });
             const form = root.querySelector('#studio-finance-tickets-form');
+
+            // Pre-fill airline/confirmation/website from existing booking record
+            staffGetApplicantFlightBooking(row.applicantId).then((booking) => {
+                if (!booking) return;
+                const airlineInput = root.querySelector('#studio-finance-tickets-airline');
+                const confirmInput = root.querySelector('#studio-finance-tickets-confirmation');
+                const urlInput = root.querySelector('#studio-finance-tickets-airline-url');
+                if (airlineInput instanceof HTMLInputElement && booking.airline) airlineInput.value = booking.airline;
+                if (confirmInput instanceof HTMLInputElement && booking.confirmationNumber) confirmInput.value = booking.confirmationNumber;
+                if (urlInput instanceof HTMLInputElement && booking.airlineWebsite) urlInput.value = booking.airlineWebsite;
+            }).catch(() => {});
+
             if (!(form instanceof HTMLFormElement) || !applicant || !programsCanEdit) return;
             form.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 const statusEl = root.querySelector('#studio-finance-ledger-status');
                 const amountInput = root.querySelector('#studio-finance-tickets-amount');
                 const ownFlightInput = root.querySelector('#studio-finance-tickets-own-flight');
+                const airlineInput = root.querySelector('#studio-finance-tickets-airline');
+                const confirmInput = root.querySelector('#studio-finance-tickets-confirmation');
+                const urlInput = root.querySelector('#studio-finance-tickets-airline-url');
                 const flightCostCents = parseUsdInputToCents(
                     amountInput instanceof HTMLInputElement ? amountInput.value : '',
                 );
                 const nextOwnFlight =
                     ownFlightInput instanceof HTMLInputElement ? ownFlightInput.checked : false;
+                const airline = airlineInput instanceof HTMLInputElement ? airlineInput.value.trim() : '';
+                const confirmationNumber = confirmInput instanceof HTMLInputElement ? confirmInput.value.trim() : '';
+                const airlineWebsite = urlInput instanceof HTMLInputElement ? urlInput.value.trim() : '';
                 const submitBtn = form.querySelector('button[type="submit"]');
                 if (submitBtn instanceof HTMLButtonElement) submitBtn.disabled = true;
                 if (statusEl) statusEl.textContent = 'Saving…';
@@ -1910,11 +2065,23 @@ export async function initFinance(mainEl) {
                         row.payloadJson,
                     );
                     await upsertApplicantStudio({ ...applicant, payloadJson });
-                    // Always persist — do not skip when row.ownFlight is stale/false.
                     await staffSetProgramPaymentFlightPreferenceStudio({
                         applicantId: row.applicantId,
                         ownFlight: nextOwnFlight,
                     });
+                    if (airline || confirmationNumber || airlineWebsite) {
+                        await staffUpsertApplicantFlightBooking({
+                            applicantId: row.applicantId,
+                            programId: row.programId || applicant.programId || '',
+                            airline,
+                            airlineWebsite,
+                            confirmationNumber,
+                            flightCostCents,
+                            ownFlight: nextOwnFlight,
+                            estArrivalDate: '',
+                            estArrivalTime: '',
+                        });
+                    }
                     close();
                     await reloadApplicantsAndFinance();
                 } catch (err) {
@@ -3638,6 +3805,7 @@ export async function initFinance(mainEl) {
     }
     renderPromotions();
     renderDiagnostics();
+    void renderInvitesTab();
     setFinanceTab(defaultTab());
 
     if (!visibleCategories.length) {

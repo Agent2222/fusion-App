@@ -13,7 +13,7 @@ import {
 } from '../payments/pendingPaymentStore.js';
 import { recordVerifiedPayPalOrder } from '../payments/recordPayment.js';
 import { maybeSendProgramAwardPaymentConfirmationAfterCapture } from '../payments/programAwardEmail.js';
-import { pushPayPalSubscriptionToCanister } from '../canisterActor.js';
+import { getIntegrationActor, pushPayPalSubscriptionToCanister } from '../canisterActor.js';
 
 /**
  * @param {object} event
@@ -139,6 +139,36 @@ export async function handlePayPalWebhookEvent(event, programPaymentDeps = {}) {
         const meta = parsePayPalCustomId(resource.custom_id || '');
         if (meta.principal) {
             await pushPayPalSubscriptionToCanister(resource);
+        }
+    }
+
+    // Referrer credit: on subscription payment (renewal), credit the referrer.
+    // PAYMENT.SALE.COMPLETED fires for each billing cycle of a subscription.
+    if (eventType === 'PAYMENT.SALE.COMPLETED') {
+        const billingAgreementId = resource.billing_agreement_id;
+        if (billingAgreementId) {
+            const customId = resource.custom || '';
+            const meta = customId ? parsePayPalCustomId(customId) : {};
+            const subscriberPrincipal = meta.principal || '';
+            if (subscriberPrincipal) {
+                try {
+                    const actor = await getIntegrationActor();
+                    const { Principal } = await import('@dfinity/principal');
+                    const p = Principal.fromText(subscriberPrincipal);
+                    const credited = await actor.creditReferrerForRenewal(p);
+                    if (credited) {
+                        console.log(
+                            '[paypal webhook] referral credit granted for renewal of',
+                            subscriberPrincipal,
+                        );
+                    }
+                } catch (err) {
+                    console.warn(
+                        '[paypal webhook] referrer credit attempt failed:',
+                        err instanceof Error ? err.message : err,
+                    );
+                }
+            }
         }
     }
 }

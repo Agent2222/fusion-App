@@ -265,6 +265,10 @@ class JoinNetworkComponent extends HTMLElement {
     this._studioPreviewState = null;
     /** @type {'en'|'ja'|null} */
     this._studioPreviewLocale = null;
+    /** Applied promo code validation result (null if none). */
+    this._appliedPromo = /** @type {{ valid: boolean, code?: string, codeType?: string, discountType?: { type: string, value: number }, discountDurationMonths?: number, displayText?: string, discountedPlanIds?: Record<string, string> } | null} */ (null);
+    /** Raw promo code string entered by user. */
+    this._promoCode = "";
     }
 
     get active() {
@@ -1755,6 +1759,18 @@ class JoinNetworkComponent extends HTMLElement {
         if (DEV_MODE)
           console.warn("[JoinNetwork] ensureMyLinkedArtistProfile", ensErr);
       }
+      if (this._appliedPromo && this._promoCode) {
+        try {
+          const { redeemPromoCodeForCaller } = await import("../../utils/database.js");
+          await redeemPromoCodeForCaller(
+            this._promoCode,
+            this._fusionSubscriptionId,
+            this._appliedPromo.displayText || "",
+          );
+        } catch (promoErr) {
+          if (DEV_MODE) console.warn("[JoinNetwork] redeemPromoCode", promoErr);
+        }
+      }
       this._fusionPendingId = null;
       this._fusionSubscriptionId = null;
       this._preStripeCanisterSyncDone = true;
@@ -2237,7 +2253,10 @@ class JoinNetworkComponent extends HTMLElement {
       const payConfig = await fetchPaymentConfig();
       if (myGen !== this._stripePrepareGen || this._stage !== "payment") return;
 
-      const planId = planIdForTier(subscriptionTier, payConfig);
+      let planId = planIdForTier(subscriptionTier, payConfig);
+      if (this._appliedPromo?.discountedPlanIds?.[subscriptionTier]) {
+        planId = this._appliedPromo.discountedPlanIds[subscriptionTier];
+      }
       if (!planId) {
         const envHint =
           subscriptionTier === "annual"
@@ -2277,6 +2296,9 @@ class JoinNetworkComponent extends HTMLElement {
         customData.fusion_pending_id = fusionPendingId;
       } else if (principalOpt) {
         customData.principal = principalOpt;
+      }
+      if (this._promoCode) {
+        customData.promo_code = this._promoCode;
       }
 
       if (hint) {
@@ -2459,6 +2481,7 @@ class JoinNetworkComponent extends HTMLElement {
             ? { principal: principalOpt }
             : {}),
           subscriptionTier,
+          ...(this._promoCode ? { promoCode: this._promoCode } : {}),
           metadata: {
             category: cat || "",
             intent: this._modalType,
@@ -3246,6 +3269,83 @@ class JoinNetworkComponent extends HTMLElement {
                         align-items: stretch;
                     }
                 }
+
+                /* Promo code input */
+                .jn-promo-row {
+                    display: flex;
+                    gap: 0.5rem;
+                    margin-top: 1rem;
+                    margin-bottom: 0.25rem;
+                }
+                .jn-promo-row input {
+                    flex: 1;
+                    font-family: inherit;
+                    font-size: 0.88rem;
+                    padding: 0.5rem 0.75rem;
+                    border: 1px solid color-mix(in srgb, var(--jn-c2, #333) 30%, var(--jn-bg, #fff));
+                    border-radius: 6px;
+                    background: var(--jn-bg, #fff);
+                    color: var(--jn-c2, #333);
+                    text-transform: uppercase;
+                    letter-spacing: 0.08em;
+                    transition: border-color 0.2s;
+                }
+                .jn-promo-row input:focus {
+                    outline: none;
+                    border-color: color-mix(in srgb, var(--jn-c2, #333) 60%, var(--jn-bg, #fff));
+                }
+                .jn-promo-row input:disabled {
+                    opacity: 0.6;
+                    cursor: default;
+                }
+                .jn-promo-apply {
+                    font-family: inherit;
+                    font-size: 0.85rem;
+                    font-variation-settings: var(--fv-subtitle, normal);
+                    padding: 0.5rem 1rem;
+                    border: 1px solid color-mix(in srgb, var(--jn-c2, #333) 30%, var(--jn-bg, #fff));
+                    border-radius: 6px;
+                    background: transparent;
+                    color: var(--jn-c2, #333);
+                    cursor: pointer;
+                    letter-spacing: 0.05em;
+                    transition: background 0.2s, border-color 0.2s;
+                }
+                .jn-promo-apply:hover {
+                    background: color-mix(in srgb, var(--jn-c2, #333) 8%, var(--jn-bg, #fff));
+                    border-color: color-mix(in srgb, var(--jn-c2, #333) 50%, var(--jn-bg, #fff));
+                }
+                .jn-promo-result {
+                    font-size: 0.82rem;
+                    padding: 0.4rem 0;
+                    line-height: 1.4;
+                    display: flex;
+                    align-items: center;
+                    gap: 0.3rem;
+                }
+                .jn-promo-result--success {
+                    color: #2a7d3f;
+                }
+                .jn-promo-result--error {
+                    color: #b53a3a;
+                }
+                .jn-promo-check {
+                    font-weight: 700;
+                }
+                .jn-promo-clear {
+                    background: none;
+                    border: none;
+                    color: inherit;
+                    cursor: pointer;
+                    font-size: 0.9rem;
+                    padding: 0 0.25rem;
+                    margin-left: 0.3rem;
+                    opacity: 0.7;
+                    transition: opacity 0.15s;
+                }
+                .jn-promo-clear:hover {
+                    opacity: 1;
+                }
             </style>
             <div class="join-network-host">
                 <div class="join-network-band">
@@ -3361,6 +3461,11 @@ class JoinNetworkComponent extends HTMLElement {
                             <p id="jnValueEvolving" class="jn-value-evolving"></p>
                             <p id="jnValueDisclaimer"></p>
                             <p id="jnValueDisclaimerFee"></p>
+                            <div class="jn-promo-row">
+                                <input type="text" id="jnPromoInput" placeholder="Invite or promo code" maxlength="20" autocomplete="off" spellcheck="false" />
+                                <button type="button" id="jnPromoApply" class="jn-promo-apply">Apply</button>
+                            </div>
+                            <div id="jnPromoResult" class="jn-promo-result" hidden></div>
                             <button type="button" class="jn-btn-primary" id="jnValueContinue" disabled>Continue</button>
                             <button type="button" class="jn-btn-back" id="jnValueBack">← Back</button>
                         </div>
@@ -3828,6 +3933,62 @@ class JoinNetworkComponent extends HTMLElement {
       this._joinSubscriptionTier = t;
       this._syncJoinPlanSelectionUi();
     });
+
+    root.querySelector("#jnPromoApply")?.addEventListener("click", async () => {
+      const input = root.querySelector("#jnPromoInput");
+      const resultEl = root.querySelector("#jnPromoResult");
+      if (!(input instanceof HTMLInputElement) || !resultEl) return;
+      const code = input.value.trim().toUpperCase();
+      if (!code) return;
+      const applyBtn = root.querySelector("#jnPromoApply");
+      if (applyBtn) applyBtn.textContent = "…";
+      try {
+        const { validatePromoCode } = await import("../../utils/integrationApi.js");
+        const result = await validatePromoCode(code);
+        if (result.valid) {
+          this._appliedPromo = result;
+          this._promoCode = code;
+          resultEl.className = "jn-promo-result jn-promo-result--success";
+          resultEl.innerHTML = `<span class="jn-promo-check">✓</span> ${result.code || code} applied — ${result.displayText} <button type="button" class="jn-promo-clear" aria-label="Remove promo code">✕</button>`;
+          resultEl.hidden = false;
+          input.disabled = true;
+          resultEl.querySelector(".jn-promo-clear")?.addEventListener("click", () => {
+            this._appliedPromo = null;
+            this._promoCode = "";
+            input.value = "";
+            input.disabled = false;
+            resultEl.hidden = true;
+            this._syncJoinPlanSelectionUi();
+          });
+          this._syncJoinPlanSelectionUi();
+        } else {
+          this._appliedPromo = null;
+          this._promoCode = "";
+          const reasons = { invalidCode: "Invalid code", expired: "Code expired", maxRedemptionsReached: "Code already fully redeemed", inactive: "Code is no longer active" };
+          resultEl.className = "jn-promo-result jn-promo-result--error";
+          resultEl.textContent = reasons[result.reason] || "Invalid code";
+          resultEl.hidden = false;
+        }
+      } catch {
+        resultEl.className = "jn-promo-result jn-promo-result--error";
+        resultEl.textContent = "Could not validate code";
+        resultEl.hidden = false;
+      }
+      if (applyBtn) applyBtn.textContent = "Apply";
+    });
+
+    // Pre-fill promo code from referral link
+    try {
+      const refCode = sessionStorage.getItem("fusion-referral-code");
+      if (refCode) {
+        const input = root.querySelector("#jnPromoInput");
+        if (input instanceof HTMLInputElement) {
+          input.value = refCode;
+          sessionStorage.removeItem("fusion-referral-code");
+          root.querySelector("#jnPromoApply")?.click();
+        }
+      }
+    } catch { /* sessionStorage may throw in restricted contexts */ }
 
     root.querySelector("#jnValueContinue")?.addEventListener("click", () => {
       if (!this._joinSubscriptionTier) return;

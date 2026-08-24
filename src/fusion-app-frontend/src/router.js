@@ -444,6 +444,14 @@ class Router {
             );
         }
 
+        try {
+            const params = new URLSearchParams(window.location.search);
+            const ref = params.get('ref');
+            if (ref && typeof ref === 'string' && ref.trim()) {
+                sessionStorage.setItem('fusion-referral-code', ref.trim());
+            }
+        } catch { /* sessionStorage may be unavailable */ }
+
         // Legacy directory URL still linked externally → permanent client redirect to programs hub.
         if (path === '/residency') {
             applyDocumentSeo({

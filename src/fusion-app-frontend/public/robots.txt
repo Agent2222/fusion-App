@@ -1,4 +1,4 @@
-# Production host: https://fusionart.world — update Sitemap if the canonical domain changes.
+# Production host: https://fusionart.world
 User-agent: *
 Allow: /
 
@@ -6,5 +6,8 @@ Disallow: /studio
 Disallow: /settings
 Disallow: /register
 Disallow: /sign-in
+Disallow: /join-fusion
+Disallow: /program/private/
+Disallow: /programs/private/
 
 Sitemap: https://fusionart.world/sitemap.xml

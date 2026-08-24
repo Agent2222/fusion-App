@@ -282,6 +282,84 @@ module {
         #inviteInactive;
     };
 
+    /// ---------- Promo / invite / partner code system ----------
+
+    public type PromoCodeType = {
+        #invite;
+        #promo;
+        #partner;
+    };
+
+    public type PromoDiscountType = {
+        #percentOff : Nat;
+        #fixedCentsOff : Nat;
+        #freeMonths : Nat;
+    };
+
+    public type PromoCode = {
+        code : Text;
+        codeType : PromoCodeType;
+        createdBy : Principal;
+        createdAt : Text;
+        discountType : PromoDiscountType;
+        discountDurationMonths : Nat;
+        maxRedemptions : ?Nat;
+        currentRedemptions : Nat;
+        expiresAt : ?Text;
+        active : Bool;
+        referrerPrincipal : ?Principal;
+        referrerArtistId : ?Text;
+        partnerLabel : ?Text;
+        campaignTag : ?Text;
+    };
+
+    public type PromoRedemption = {
+        code : Text;
+        redeemerPrincipal : Principal;
+        redeemedAt : Text;
+        discountApplied : Text;
+        subscriptionId : ?Text;
+    };
+
+    public type ValidatePromoCodeResult = {
+        #ok : PromoCode;
+        #invalidCode;
+        #expired;
+        #maxRedemptionsReached;
+        #inactive;
+    };
+
+    public type RedeemPromoCodeResult = {
+        #ok;
+        #invalidCode;
+        #expired;
+        #maxRedemptionsReached;
+        #inactive;
+        #alreadyRedeemed;
+    };
+
+    /// ---------- Invite lineage ----------
+
+    public type JoinSeason = { #spring; #summer; #autumn; #winter };
+
+    public type InviteLineage = {
+        memberPrincipal : Principal;
+        invitedByPrincipal : Principal;
+        invitedByArtistId : ?Text;
+        inviteCode : Text;
+        joinedAt : Text;
+        joinYear : Nat;
+        joinSeason : JoinSeason;
+    };
+
+    /// ---------- Billing credits (referral rewards) ----------
+
+    public type BillingCreditRecord = {
+        balance : Nat;
+        grantedThisYear : Nat;
+        lastGrantYear : Nat;
+    };
+
     /// Admin-generated single-use account recovery code (8-digit) — migrates `fromPrincipal` to redeemer.
     public type AccountRecoveryCodeRecord = {
         fromPrincipal : Principal;
@@ -917,6 +995,32 @@ module {
         localesJson : ?Text;
     };
 
+    /// Staff-managed flight booking record for an applicant (Studio Travel + Finance Tickets).
+    public type ApplicantFlightBooking = {
+        applicantId : Text;
+        programId : Text;
+        airline : Text;
+        airlineWebsite : Text;
+        confirmationNumber : Text;
+        flightCostCents : Nat;
+        ownFlight : Bool;
+        estArrivalDate : Text;
+        estArrivalTime : Text;
+        updatedAt : Text;
+        updatedBy : Text;
+    };
+
+    /// Per-program travel preparation link (Studio Travel → staff-curated, member-visible).
+    public type TravelPrepLink = {
+        id : Text;
+        programId : Text;
+        title : Text;
+        url : Text;
+        description : Text;
+        sortOrder : Nat;
+        updatedAt : Text;
+    };
+
     /// One Studio sidebar / workspace feature (id aligns with frontend section ids, e.g. `artists`, `settings`).
     public type StudioFeatureAccess = {
         visible : Bool;
@@ -1054,5 +1158,17 @@ module {
         artistDrawRecipientsStable : ?[(Text, ArtistDrawRecipient)];
         /// Artist id → past-recipient story video URL / YouTube embed src; optional for older backups.
         artistDrawStoryVideoStable : ?[(Text, Text)];
+        /// Applicant flight bookings (Studio Travel / Finance Tickets); optional for older backups.
+        applicantFlightBookingsStable : ?[(Text, ApplicantFlightBooking)];
+        /// Per-program travel prep links; optional for older backups.
+        programTravelPrepLinksStable : ?[(Text, [TravelPrepLink])];
+        /// Promo / invite / partner codes; optional for older backups.
+        promoCodesStable : ?[(Text, PromoCode)];
+        /// Promo code redemptions; optional for older backups.
+        promoRedemptionsStable : ?[(Text, PromoRedemption)];
+        /// Invite lineage records; optional for older backups.
+        inviteLineageStable : ?[(Principal, InviteLineage)];
+        /// Billing credits (referral rewards); optional for older backups.
+        billingCreditsStable : ?[(Principal, BillingCreditRecord)];
     };
 };

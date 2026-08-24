@@ -1,8 +1,8 @@
 /**
  * After Vite build, write SPA shells for money-page paths with route-specific
  * <title>/meta/canonical and crawlable <noscript> content.
- * Asset canister can then serve these files at /programs, /program/kaga-ishikawa,
- * and /join-network instead of only the homepage shell.
+ * Asset canister serves these files at their path instead of the generic homepage shell,
+ * giving Google route-accurate metadata on first byte.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -16,7 +16,7 @@ const MONEY_PAGES = [
         outDir: 'programs',
         title: 'Japan Artist Residency Programs | Fusion',
         description:
-            'Explore Japan artist residency programs with Fusion — curated residencies in Kaga, Ishikawa, Tokyo, and beyond. See dates, details, and how to apply.',
+            'Explore Japan artist residency programs with Fusion \u2014 curated residencies in Kaga, Ishikawa, Tokyo, and beyond. See dates, details, and how to apply.',
         canonicalPath: '/programs',
         h1: 'Japan artist residency programs',
         bodyHtml: `
@@ -26,15 +26,15 @@ const MONEY_PAGES = [
     },
     {
         outDir: 'program/kaga-ishikawa',
-        title: 'Kaga, Ishikawa Japan Artist Residency · Fusion',
+        title: 'Kaga, Ishikawa Japan Artist Residency \u00b7 Fusion',
         description:
-            'Japan artist residency in Kaga City, Ishikawa — studio time, place-based exchange, and how to apply on Fusion. Flights and accommodations details on the program page.',
+            'Japan artist residency in Kaga City, Ishikawa \u2014 studio time, place-based exchange, and how to apply on Fusion. Flights and accommodations details on the program page.',
         canonicalPath: '/program/kaga-ishikawa',
         h1: 'Japan artist residency in Kaga, Ishikawa',
         bodyHtml: `
-<p>Fusion’s Japan artist residency in Kaga City, Ishikawa brings artists together for focused studio practice, collaboration, and exchange in Japan.</p>
-<p>See schedule, costs, eligibility, and application options on this page after it loads — or browse all <a href="${ORIGIN}/programs">Japan artist residency programs</a>.</p>
-<p>Galleries, curators, and collectors: <a href="${ORIGIN}/join-network">join Fusion’s curated art network</a>.</p>
+<p>Fusion\u2019s Japan artist residency in Kaga City, Ishikawa brings artists together for focused studio practice, collaboration, and exchange in Japan.</p>
+<p>See schedule, costs, eligibility, and application options on this page after it loads \u2014 or browse all <a href="${ORIGIN}/programs">Japan artist residency programs</a>.</p>
+<p>Galleries, curators, and collectors: <a href="${ORIGIN}/join-network">join Fusion\u2019s curated art network</a>.</p>
 `.trim(),
     },
     {
@@ -47,6 +47,102 @@ const MONEY_PAGES = [
         bodyHtml: `
 <p>Join artists, galleries, curators, and collectors in a curated art network built around programs rooted in Japan. Membership includes residency applications.</p>
 <p><a href="${ORIGIN}/programs">Japan artist residency programs</a> · <a href="${ORIGIN}/program/kaga-ishikawa">Kaga, Ishikawa residency</a> · <a href="${ORIGIN}/context">Mission and context</a></p>
+`.trim(),
+    },
+    {
+        outDir: 'artists',
+        title: 'Artists on Fusion | Curated Art Network',
+        description:
+            'Discover artists in Fusion\u2019s curated art network \u2014 Japan-based programs connecting artists, galleries, curators, and collectors.',
+        canonicalPath: '/artists',
+        h1: 'Artists on Fusion',
+        bodyHtml: `
+<p>Discover artists in Fusion\u2019s curated art network. Browse profiles of practicing artists connected through Japan-based residency programs.</p>
+<p><a href="${ORIGIN}/programs">Japan artist residency programs</a> · <a href="${ORIGIN}/gallery-access">Gallery access</a> · <a href="${ORIGIN}/community">Community</a></p>
+`.trim(),
+    },
+    {
+        outDir: 'journal',
+        title: 'Journal | Editorial & Field Notes | Fusion',
+        description:
+            'Editorial writing, documentation, and perspectives from Fusion\u2019s art platform.',
+        canonicalPath: '/journal',
+        h1: 'Journal \u2014 editorial and field notes',
+        bodyHtml: `
+<p>Editorial writing, studio documentation, and perspectives from Fusion\u2019s curated art network and Japan artist residency programs.</p>
+<p><a href="${ORIGIN}/programs">Programs</a> · <a href="${ORIGIN}/artists">Artists</a> · <a href="${ORIGIN}/context">Context</a></p>
+`.trim(),
+    },
+    {
+        outDir: 'editions',
+        title: 'Editions & objects | Fusion',
+        description:
+            'Prints, objects, and works released through Fusion artists and partners.',
+        canonicalPath: '/editions',
+        h1: 'Editions and objects',
+        bodyHtml: `
+<p>Prints, limited editions, and objects released through Fusion artists and partners. Browse available works and past releases.</p>
+<p><a href="${ORIGIN}/artists">Artists</a> · <a href="${ORIGIN}/programs">Programs</a> · <a href="${ORIGIN}/gallery-access">Gallery access</a></p>
+`.trim(),
+    },
+    {
+        outDir: 'gallery-access',
+        title: 'Gallery Access | Curated Art Network | Fusion',
+        description:
+            'Gallery access through Fusion\u2019s curated art network \u2014 studio visits, artist introductions, and previews for galleries and collectors.',
+        canonicalPath: '/gallery-access',
+        h1: 'Gallery access',
+        bodyHtml: `
+<p>Gallery access through Fusion\u2019s curated art network \u2014 studio visits, artist introductions, and previews for galleries and collectors.</p>
+<p><a href="${ORIGIN}/artists">Artists</a> · <a href="${ORIGIN}/programs">Programs</a> · <a href="${ORIGIN}/join-network">Join the network</a></p>
+`.trim(),
+    },
+    {
+        outDir: 'community',
+        title: 'Community | Curated Art Network | Fusion',
+        description:
+            'Community inside Fusion\u2019s curated art network \u2014 artists, galleries, curators, and collectors connected through programs rooted in Japan.',
+        canonicalPath: '/community',
+        h1: 'Community',
+        bodyHtml: `
+<p>Artists, galleries, curators, and collectors connected through Fusion\u2019s programs rooted in Japan. Events, sessions, and network features.</p>
+<p><a href="${ORIGIN}/programs">Programs</a> · <a href="${ORIGIN}/artists">Artists</a> · <a href="${ORIGIN}/join-network">Join the network</a></p>
+`.trim(),
+    },
+    {
+        outDir: 'videos',
+        title: 'Videos | Fusion',
+        description:
+            'Studio visits, conversations, and member-only full videos from Fusion artists.',
+        canonicalPath: '/videos',
+        h1: 'Videos',
+        bodyHtml: `
+<p>Studio visits, conversations, and member-only full videos from Fusion artists in Japan and beyond.</p>
+<p><a href="${ORIGIN}/artists">Artists</a> · <a href="${ORIGIN}/journal">Journal</a> · <a href="${ORIGIN}/programs">Programs</a></p>
+`.trim(),
+    },
+    {
+        outDir: 'context',
+        title: 'Context | Mission & Curated Art Network | Fusion',
+        description:
+            'Why Fusion exists: mission, ecosystem, and a curated art network in Japan connecting artists, galleries, curators, and collectors.',
+        canonicalPath: '/context',
+        h1: 'Context \u2014 mission and curated art network',
+        bodyHtml: `
+<p>Why Fusion exists: building a curated art network in Japan connecting artists, galleries, curators, and collectors through place-based programs.</p>
+<p><a href="${ORIGIN}/programs">Programs</a> · <a href="${ORIGIN}/artists">Artists</a> · <a href="${ORIGIN}/join-network">Join the network</a></p>
+`.trim(),
+    },
+    {
+        outDir: 'contact',
+        title: 'Contact | Fusion',
+        description:
+            'Contact the Fusion team \u2014 partnerships, programs, and general inquiries.',
+        canonicalPath: '/contact',
+        h1: 'Contact',
+        bodyHtml: `
+<p>Contact the Fusion team for partnerships, program inquiries, and general questions.</p>
+<p><a href="${ORIGIN}/programs">Programs</a> · <a href="${ORIGIN}/context">Context</a> · <a href="${ORIGIN}/">Home</a></p>
 `.trim(),
     },
 ];
@@ -146,9 +242,9 @@ export function seoMoneyPagePrerenderPlugin(opts = {}) {
                 const homeNoscript = `
   <noscript>
     <main id="seo-prerender-home">
-      <h1>Fusion — Japan artist residency &amp; art platform</h1>
+      <h1>Fusion \u2014 Japan artist residency &amp; art platform</h1>
       <p>Fusion runs curated artist residency programs in Japan, from Kaga and Ishikawa to Tokyo and beyond, for artists, gallerists, and art enthusiasts worldwide.</p>
-      <p><a href="${ORIGIN}/programs">Japan artist residency programs</a> · <a href="${ORIGIN}/program/kaga-ishikawa">Kaga, Ishikawa residency</a> · <a href="${ORIGIN}/join-network">Curated art network</a> · <a href="${ORIGIN}/context">Context</a></p>
+      <p><a href="${ORIGIN}/programs">Japan artist residency programs</a> \u00b7 <a href="${ORIGIN}/program/kaga-ishikawa">Kaga, Ishikawa residency</a> \u00b7 <a href="${ORIGIN}/join-network">Curated art network</a> \u00b7 <a href="${ORIGIN}/context">Context</a></p>
     </main>
   </noscript>
 `;
@@ -166,6 +262,30 @@ export function seoMoneyPagePrerenderPlugin(opts = {}) {
                 writeFileSync(path.join(dir, 'index.html'), out, 'utf8');
                 console.log(`[seo-prerender] wrote ${page.outDir}/index.html`);
             }
+
+            // /residency → /programs: emit a lightweight redirect shell so crawlers
+            // see a <link rel="canonical"> + <meta http-equiv="refresh"> instead of
+            // relying on client-side replaceState (which Google treats as a soft redirect).
+            const residencyDir = path.join(dist, 'residency');
+            mkdirSync(residencyDir, { recursive: true });
+            writeFileSync(
+                path.join(residencyDir, 'index.html'),
+                `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Redirecting to Programs | Fusion</title>
+  <link rel="canonical" href="${ORIGIN}/programs" />
+  <meta http-equiv="refresh" content="0;url=${ORIGIN}/programs" />
+  <meta name="robots" content="noindex, follow" />
+</head>
+<body>
+  <p>This page has moved. <a href="${ORIGIN}/programs">Go to Japan artist residency programs</a>.</p>
+</body>
+</html>`,
+                'utf8',
+            );
+            console.log('[seo-prerender] wrote residency/index.html (redirect)');
         },
     };
 }

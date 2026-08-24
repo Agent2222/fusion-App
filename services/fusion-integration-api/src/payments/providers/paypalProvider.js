@@ -314,7 +314,8 @@ export async function createPayPalSubscription(reqBody) {
             'Invalid subscriptionTier (use monthly, monthly_application, quarterly, or annual)',
         );
     }
-    const planId = paypalPlanIdForTier(tier);
+    const overridePlanId = typeof reqBody?.overridePlanId === 'string' ? reqBody.overridePlanId.trim() : '';
+    const planId = overridePlanId || paypalPlanIdForTier(tier);
     if (!planId) {
         const envName =
             tier === 'annual'
@@ -354,6 +355,10 @@ export async function createPayPalSubscription(reqBody) {
         customData.fusion_pending_id = fusionPendingId;
     } else {
         customData.principal = principal;
+    }
+    const promoCodeMeta = typeof reqBody?.promoCode === 'string' ? reqBody.promoCode.trim() : '';
+    if (promoCodeMeta) {
+        customData.promo_code = promoCodeMeta.slice(0, 20);
     }
     for (const [k, v] of Object.entries(rawMeta)) {
         if (typeof k === 'string' && k.length) {

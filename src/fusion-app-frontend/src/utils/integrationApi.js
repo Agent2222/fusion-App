@@ -372,6 +372,10 @@ export async function createSubscription(opts) {
     } else if (typeof principal === 'string' && principal.trim()) {
         body.principal = principal.trim();
     }
+    const promoCode = typeof opts?.promoCode === 'string' ? opts.promoCode.trim() : '';
+    if (promoCode) {
+        body.promoCode = promoCode;
+    }
     const res = await fetch(`${base}/stripe/create-subscription`, {
         method: 'POST',
         headers: integrationHeadersJson(),
@@ -1155,7 +1159,27 @@ export async function repairPayPalProgramPayment(body) {
 }
 
 /**
- * @param {{ principal?: string, email: string, metadata?: Record<string, string>, payFirst?: boolean, subscriptionTier?: 'monthly' | 'monthly_application' | 'quarterly' | 'annual' | 'bimonthly' }} opts
+ * Validate a promo / invite / partner code via the Integration API.
+ * @param {string} code
+ * @returns {Promise<{ valid: boolean, reason?: string, code?: string, codeType?: string, discountType?: { type: string, value: number }, discountDurationMonths?: number, displayText?: string, discountedPlanIds?: Record<string, string> }>}
+ */
+export async function validatePromoCode(code) {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Integration API URL not configured.');
+    const res = await fetch(`${base}/payments/validate-promo-code`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify({ code: (code || '').trim() }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        return { valid: false, reason: err.reason || `HTTP ${res.status}` };
+    }
+    return res.json();
+}
+
+/**
+ * @param {{ principal?: string, email: string, metadata?: Record<string, string>, payFirst?: boolean, subscriptionTier?: 'monthly' | 'monthly_application' | 'quarterly' | 'annual' | 'bimonthly', promoCode?: string }} opts
  */
 export async function createPayPalSubscription(opts) {
     const base = getIntegrationBaseUrl();
@@ -1167,6 +1191,10 @@ export async function createPayPalSubscription(opts) {
         subscriptionTier: opts.subscriptionTier,
         principal: opts.principal,
     };
+    const promoCode = typeof opts?.promoCode === 'string' ? opts.promoCode.trim() : '';
+    if (promoCode) {
+        body.promoCode = promoCode;
+    }
     const res = await fetch(`${base}/payments/subscription`, {
         method: 'POST',
         headers: integrationHeadersJson(),

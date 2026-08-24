@@ -3917,6 +3917,348 @@ export async function registerWithJoinAccessCodeForCaller(role, codeRaw, firstNa
     return interpretRegisterWithJoinAccessCodeResult(raw);
 }
 
+// ——— Promo / Invite / Partner Code wrappers ———
+
+const LS_PROMO_CODES = 'fusion_test_promo_codes';
+const LS_PROMO_REDEMPTIONS = 'fusion_test_promo_redemptions';
+
+/**
+ * Decode a Candid `ValidatePromoCodeResult` variant into a plain object.
+ * @param {unknown} raw
+ * @returns {{ valid: true, code: string, codeType: string, discountType: { type: string, value: number }, discountDurationMonths: number, displayText: string } | { valid: false, reason: string }}
+ */
+function interpretValidatePromoCodeResult(raw) {
+    if (!raw || typeof raw !== 'object') return { valid: false, reason: 'unknown' };
+    const o = /** @type {Record<string, unknown>} */ (raw);
+    if ('invalidCode' in o) return { valid: false, reason: 'invalidCode' };
+    if ('expired' in o) return { valid: false, reason: 'expired' };
+    if ('maxRedemptionsReached' in o) return { valid: false, reason: 'maxRedemptionsReached' };
+    if ('inactive' in o) return { valid: false, reason: 'inactive' };
+    if ('ok' in o) {
+        const pc = /** @type {Record<string, unknown>} */ (o.ok);
+        const code = String(pc.code || '');
+        const codeType = pc.codeType && typeof pc.codeType === 'object'
+            ? Object.keys(pc.codeType)[0] || 'promo'
+            : 'promo';
+        const dt = /** @type {Record<string, unknown>} */ (pc.discountType || {});
+        let discountType = { type: 'percentOff', value: 0 };
+        if ('percentOff' in dt) discountType = { type: 'percentOff', value: Number(dt.percentOff) };
+        else if ('fixedCentsOff' in dt) discountType = { type: 'fixedCentsOff', value: Number(dt.fixedCentsOff) };
+        else if ('freeMonths' in dt) discountType = { type: 'freeMonths', value: Number(dt.freeMonths) };
+
+        const months = Number(pc.discountDurationMonths || 1);
+        let displayText = '';
+        if (discountType.type === 'percentOff') {
+            displayText = `${discountType.value}% off${months === 1 ? ' first month' : ` first ${months} months`}`;
+        } else if (discountType.type === 'fixedCentsOff') {
+            const dollars = (discountType.value / 100).toFixed(2);
+            displayText = `$${dollars} off${months === 1 ? ' first month' : ` first ${months} months`}`;
+        } else if (discountType.type === 'freeMonths') {
+            displayText = `${discountType.value} month${discountType.value > 1 ? 's' : ''} free`;
+        }
+        return { valid: true, code, codeType, discountType, discountDurationMonths: months, displayText };
+    }
+    return { valid: false, reason: 'unknown' };
+}
+
+/**
+ * Decode a Candid `RedeemPromoCodeResult` variant.
+ * @param {unknown} raw
+ * @returns {string}
+ */
+function interpretRedeemPromoCodeResult(raw) {
+    if (!raw || typeof raw !== 'object') return 'unknown';
+    const o = /** @type {Record<string, unknown>} */ (raw);
+    if ('ok' in o) return 'ok';
+    if ('invalidCode' in o) return 'invalidCode';
+    if ('expired' in o) return 'expired';
+    if ('maxRedemptionsReached' in o) return 'maxRedemptionsReached';
+    if ('inactive' in o) return 'inactive';
+    if ('alreadyRedeemed' in o) return 'alreadyRedeemed';
+    return 'unknown';
+}
+
+/**
+ * Staff/admin: create a promo, invite, or partner code.
+ * @param {{ code: string, codeType: Record<string, null>, discountType: Record<string, number>, discountDurationMonths: number, maxRedemptions?: number | null, expiresAt?: string | null, partnerLabel?: string | null, campaignTag?: string | null }} opts
+ * @returns {Promise<string>}
+ */
+export async function adminCreatePromoCodeStudio(opts) {
+    if (getDataSource() === 'test') {
+        const code = String(opts.code || '').trim().toUpperCase();
+        const codes = JSON.parse(localStorage.getItem(LS_PROMO_CODES) || '[]');
+        codes.push({ ...opts, code, active: true, currentRedemptions: 0, createdAt: new Date().toISOString() });
+        localStorage.setItem(LS_PROMO_CODES, JSON.stringify(codes));
+        return code;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.adminCreatePromoCode !== 'function') {
+        throw new Error('adminCreatePromoCode unavailable — run dfx generate fusion-app-backend from the project root.');
+    }
+    return String(await actor.adminCreatePromoCode(
+        opts.code,
+        opts.codeType,
+        opts.discountType,
+        opts.discountDurationMonths,
+        opts.maxRedemptions != null ? [opts.maxRedemptions] : [],
+        opts.expiresAt != null ? [opts.expiresAt] : [],
+        opts.partnerLabel != null ? [opts.partnerLabel] : [],
+        opts.campaignTag != null ? [opts.campaignTag] : [],
+    ));
+}
+
+/**
+ * Validate a promo code for checkout — public query, no auth required.
+ * @param {string} code
+ * @returns {Promise<ReturnType<typeof interpretValidatePromoCodeResult>>}
+ */
+export async function validatePromoCodeForCheckout(code) {
+    const norm = String(code || '').trim().toUpperCase();
+    if (getDataSource() === 'test') {
+        const codes = JSON.parse(localStorage.getItem(LS_PROMO_CODES) || '[]');
+        const match = codes.find((c) => c.code === norm && c.active);
+        if (!match) return { valid: false, reason: 'invalidCode' };
+        return interpretValidatePromoCodeResult({ ok: match });
+    }
+    const actor = await getFusionBackendActor();
+    if (typeof actor.validatePromoCode !== 'function') {
+        return { valid: false, reason: 'unavailable' };
+    }
+    const raw = await actor.validatePromoCode(norm);
+    return interpretValidatePromoCodeResult(raw);
+}
+
+/**
+ * Authenticated caller: redeem a promo code after payment.
+ * @param {string} code
+ * @param {string | null} subscriptionId
+ * @param {string} discountApplied
+ * @returns {Promise<string>}
+ */
+export async function redeemPromoCodeForCaller(code, subscriptionId, discountApplied) {
+    const norm = String(code || '').trim().toUpperCase();
+    if (getDataSource() === 'test') {
+        const redemptions = JSON.parse(localStorage.getItem(LS_PROMO_REDEMPTIONS) || '[]');
+        redemptions.push({ code: norm, subscriptionId, discountApplied, redeemedAt: new Date().toISOString() });
+        localStorage.setItem(LS_PROMO_REDEMPTIONS, JSON.stringify(redemptions));
+        return 'ok';
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.redeemPromoCode !== 'function') {
+        throw new Error('redeemPromoCode unavailable — sign in and run dfx generate fusion-app-backend.');
+    }
+    const raw = await actor.redeemPromoCode(
+        norm,
+        subscriptionId != null ? [subscriptionId] : [],
+        String(discountApplied || ''),
+    );
+    return interpretRedeemPromoCodeResult(raw);
+}
+
+/**
+ * Staff/admin: list all promo codes with redemption counts.
+ * @returns {Promise<Array<object>>}
+ */
+export async function staffListPromoCodesStudio() {
+    if (getDataSource() === 'test') {
+        return JSON.parse(localStorage.getItem(LS_PROMO_CODES) || '[]');
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffListPromoCodesJson !== 'function') {
+        return [];
+    }
+    try {
+        const raw = await actor.staffListPromoCodesJson();
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+// ——— Member invite code wrappers ———
+
+const LS_MEMBER_INVITES = 'fusion_test_member_invites';
+const LS_INVITE_LINEAGE = 'fusion_test_invite_lineage';
+
+/**
+ * Generate a new FUSN-XXXX invite code for the authenticated member.
+ * @param {number} [durationMonths=1]
+ * @returns {Promise<string>}
+ */
+export async function generateMyInviteCodeForCaller(durationMonths = 1) {
+    const dur = Math.max(1, Math.min(3, Math.round(durationMonths) || 1));
+    if (getDataSource() === 'test') {
+        const codes = JSON.parse(localStorage.getItem(LS_MEMBER_INVITES) || '[]');
+        const active = codes.filter((c) => c.active);
+        if (active.length >= 3) throw new Error('Maximum 3 active invite codes allowed');
+        const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+        let suffix = '';
+        for (let i = 0; i < 4; i++) suffix += chars[Math.floor(Math.random() * chars.length)];
+        const code = `FUSN-${suffix}`;
+        codes.push({
+            code,
+            codeType: 'invite',
+            active: true,
+            currentRedemptions: 0,
+            discountDurationMonths: dur,
+            createdAt: new Date().toISOString(),
+            expiresAt: new Date(Date.now() + 90 * 86400000).toISOString(),
+        });
+        localStorage.setItem(LS_MEMBER_INVITES, JSON.stringify(codes));
+        return code;
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.generateMyInviteCode !== 'function') {
+        throw new Error('generateMyInviteCode unavailable — sign in and run dfx generate fusion-app-backend.');
+    }
+    return String(await actor.generateMyInviteCode(dur));
+}
+
+/**
+ * Get all invite codes for the authenticated member (active + inactive).
+ * @returns {Promise<Array<object>>}
+ */
+export async function getMyInviteCodesForCaller() {
+    if (getDataSource() === 'test') {
+        return JSON.parse(localStorage.getItem(LS_MEMBER_INVITES) || '[]');
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.getMyInviteCodes !== 'function') return [];
+    try {
+        const raw = await actor.getMyInviteCodes();
+        return Array.isArray(raw) ? raw : [];
+    } catch { return []; }
+}
+
+/**
+ * Deactivate one of the caller's invite codes.
+ * @param {string} code
+ * @returns {Promise<boolean>}
+ */
+export async function deactivateMyInviteCodeForCaller(code) {
+    const norm = String(code || '').trim().toUpperCase();
+    if (getDataSource() === 'test') {
+        const codes = JSON.parse(localStorage.getItem(LS_MEMBER_INVITES) || '[]');
+        const idx = codes.findIndex((c) => c.code === norm);
+        if (idx < 0) return false;
+        codes[idx].active = false;
+        localStorage.setItem(LS_MEMBER_INVITES, JSON.stringify(codes));
+        return true;
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.deactivateMyInviteCode !== 'function') return false;
+    return Boolean(await actor.deactivateMyInviteCode(norm));
+}
+
+/**
+ * Lightweight invite count summary for the credits strip.
+ * @returns {Promise<{ active: number, maxAllowed: number, totalRedeemed: number }>}
+ */
+export async function getMyInviteCountSummaryForCaller() {
+    if (getDataSource() === 'test') {
+        const codes = JSON.parse(localStorage.getItem(LS_MEMBER_INVITES) || '[]');
+        return {
+            active: codes.filter((c) => c.active).length,
+            maxAllowed: 3,
+            totalRedeemed: codes.reduce((sum, c) => sum + (c.currentRedemptions || 0), 0),
+        };
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.getMyInviteCountSummary !== 'function') {
+        return { active: 0, maxAllowed: 3, totalRedeemed: 0 };
+    }
+    try {
+        const raw = await actor.getMyInviteCountSummary();
+        return {
+            active: Number(raw?.active ?? 0),
+            maxAllowed: Number(raw?.maxAllowed ?? 3),
+            totalRedeemed: Number(raw?.totalRedeemed ?? 0),
+        };
+    } catch {
+        return { active: 0, maxAllowed: 3, totalRedeemed: 0 };
+    }
+}
+
+/**
+ * Get the caller's available billing credits (referral rewards).
+ * @returns {Promise<number>}
+ */
+export async function getMyBillingCreditsForCaller() {
+    if (getDataSource() === 'test') return 0;
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.getMyBillingCredits !== 'function') return 0;
+    try { return Number(await actor.getMyBillingCredits()); }
+    catch { return 0; }
+}
+
+/**
+ * Get the caller's invite lineage — who invited them.
+ * @returns {Promise<object | null>}
+ */
+export async function getMyInviteLineageForCaller() {
+    if (getDataSource() === 'test') {
+        const lineage = JSON.parse(localStorage.getItem(LS_INVITE_LINEAGE) || '[]');
+        return lineage[0] || null;
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.getMyInviteLineage !== 'function') return null;
+    try {
+        const raw = await actor.getMyInviteLineage();
+        if (Array.isArray(raw) && raw.length > 0) return raw[0];
+        if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw;
+        return null;
+    } catch { return null; }
+}
+
+/**
+ * Batch lookup invite lineage for multiple principals.
+ * @param {Array<import('@dfinity/principal').Principal>} principals
+ * @returns {Promise<Map<string, object | null>>}
+ */
+export async function getInviteLineageBatchForCallers(principals) {
+    const result = new Map();
+    if (!Array.isArray(principals) || principals.length === 0) return result;
+    if (getDataSource() === 'test') return result;
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.getInviteLineageBatch !== 'function') return result;
+    try {
+        const raw = await actor.getInviteLineageBatch(principals.slice(0, 100));
+        if (Array.isArray(raw)) {
+            for (const entry of raw) {
+                if (Array.isArray(entry) && entry.length >= 2) {
+                    const principalStr = entry[0]?.toText?.() || String(entry[0]);
+                    const lineage = Array.isArray(entry[1]) && entry[1].length > 0 ? entry[1][0] : null;
+                    result.set(principalStr, lineage);
+                }
+            }
+        }
+    } catch { /* batch lookup failed */ }
+    return result;
+}
+
+/**
+ * Staff: list all invite lineage records.
+ * @returns {Promise<Array<object>>}
+ */
+export async function staffListInviteLineageStudio() {
+    if (getDataSource() === 'test') return [];
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffListInviteLineage !== 'function') return [];
+    try {
+        const raw = await actor.staffListInviteLineage();
+        return Array.isArray(raw) ? raw : [];
+    } catch { return []; }
+}
+
 /**
  * @returns {Promise<import('@dfinity/principal').Principal[]>}
  */
@@ -10557,4 +10899,217 @@ export async function memberCreateProgramEvent(opts) {
             assignedStaff,
         ),
     );
+}
+
+// ===== Studio Travel (flight bookings + prep links) =====
+
+const LS_TRAVEL_BOOKINGS = 'studioTravelBookings';
+const LS_TRAVEL_PREP_LINKS = 'studioTravelPrepLinks';
+
+/**
+ * @param {object} booking
+ * @returns {Promise<void>}
+ */
+export async function staffUpsertApplicantFlightBooking(booking) {
+    const id = String(booking?.applicantId || '').trim();
+    if (!id) throw new Error('applicantId required');
+    if (getDataSource() === 'test') {
+        const all = readStudioLs(LS_TRAVEL_BOOKINGS) || {};
+        all[id] = { ...booking, applicantId: id, updatedAt: new Date().toISOString() };
+        writeStudioLs(LS_TRAVEL_BOOKINGS, all);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffUpsertApplicantFlightBooking !== 'function') {
+        throw new Error('staffUpsertApplicantFlightBooking missing — run dfx generate after backend deploy.');
+    }
+    await actor.staffUpsertApplicantFlightBooking({
+        applicantId: id,
+        programId: String(booking.programId || ''),
+        airline: String(booking.airline || ''),
+        airlineWebsite: String(booking.airlineWebsite || ''),
+        confirmationNumber: String(booking.confirmationNumber || ''),
+        flightCostCents: Math.max(0, Math.round(Number(booking.flightCostCents) || 0)),
+        ownFlight: Boolean(booking.ownFlight),
+        estArrivalDate: String(booking.estArrivalDate || ''),
+        estArrivalTime: String(booking.estArrivalTime || ''),
+        updatedAt: new Date().toISOString(),
+        updatedBy: '',
+    });
+}
+
+/**
+ * @param {string} programId
+ * @returns {Promise<Array>}
+ */
+export async function staffListFlightBookingsForProgram(programId) {
+    if (getDataSource() === 'test') {
+        const all = readStudioLs(LS_TRAVEL_BOOKINGS) || {};
+        return Object.values(all).filter((b) => String(b?.programId || '') === programId);
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffListApplicantFlightBookings !== 'function') {
+        throw new Error('staffListApplicantFlightBookings missing — run dfx generate after backend deploy.');
+    }
+    const rows = await actor.staffListApplicantFlightBookings(programId);
+    return (Array.isArray(rows) ? rows : []).map(mapFlightBookingToJs);
+}
+
+/**
+ * @param {string} applicantId
+ * @returns {Promise<object|null>}
+ */
+export async function staffGetApplicantFlightBooking(applicantId) {
+    if (getDataSource() === 'test') {
+        const all = readStudioLs(LS_TRAVEL_BOOKINGS) || {};
+        return all[applicantId] || null;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffGetApplicantFlightBooking !== 'function') {
+        throw new Error('staffGetApplicantFlightBooking missing — run dfx generate after backend deploy.');
+    }
+    const opt = await actor.staffGetApplicantFlightBooking(applicantId);
+    if (!opt || (Array.isArray(opt) && opt.length === 0)) return null;
+    const raw = Array.isArray(opt) ? opt[0] : opt;
+    return mapFlightBookingToJs(raw);
+}
+
+/**
+ * @param {string} programId
+ * @param {string} applicationId
+ * @returns {Promise<object|null>}
+ */
+export async function getMyFlightBooking(programId, applicationId) {
+    if (getDataSource() === 'test') {
+        const all = readStudioLs(LS_TRAVEL_BOOKINGS) || {};
+        return all[applicationId] || null;
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.getMyFlightBooking !== 'function') return null;
+    const opt = await actor.getMyFlightBooking(programId, applicationId);
+    if (!opt || (Array.isArray(opt) && opt.length === 0)) return null;
+    const raw = Array.isArray(opt) ? opt[0] : opt;
+    return mapFlightBookingToJs(raw);
+}
+
+/**
+ * @param {string} programId
+ * @param {string} applicationId
+ * @param {string} estDate
+ * @param {string} estTime
+ * @returns {Promise<void>}
+ */
+export async function setMyEstimatedArrival(programId, applicationId, estDate, estTime) {
+    if (getDataSource() === 'test') {
+        const all = readStudioLs(LS_TRAVEL_BOOKINGS) || {};
+        const existing = all[applicationId] || { applicantId: applicationId, programId };
+        existing.estArrivalDate = estDate;
+        existing.estArrivalTime = estTime;
+        existing.updatedAt = new Date().toISOString();
+        all[applicationId] = existing;
+        writeStudioLs(LS_TRAVEL_BOOKINGS, all);
+        return;
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.setMyEstimatedArrival !== 'function') {
+        throw new Error('setMyEstimatedArrival missing — run dfx generate after backend deploy.');
+    }
+    await actor.setMyEstimatedArrival(programId, applicationId, estDate, estTime);
+}
+
+/**
+ * @param {string} programId
+ * @param {Array} links
+ * @returns {Promise<void>}
+ */
+export async function staffUpsertTravelPrepLinks(programId, links) {
+    if (getDataSource() === 'test') {
+        const all = readStudioLs(LS_TRAVEL_PREP_LINKS) || {};
+        all[programId] = Array.isArray(links)
+            ? links.map((l) => ({ ...l, programId, updatedAt: new Date().toISOString() }))
+            : [];
+        writeStudioLs(LS_TRAVEL_PREP_LINKS, all);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffUpsertTravelPrepLinks !== 'function') {
+        throw new Error('staffUpsertTravelPrepLinks missing — run dfx generate after backend deploy.');
+    }
+    const mapped = (Array.isArray(links) ? links : []).map((l) => ({
+        id: String(l.id || ''),
+        programId: String(programId),
+        title: String(l.title || ''),
+        url: String(l.url || ''),
+        description: String(l.description || ''),
+        sortOrder: Math.max(0, Math.round(Number(l.sortOrder) || 0)),
+        updatedAt: new Date().toISOString(),
+    }));
+    await actor.staffUpsertTravelPrepLinks(programId, mapped);
+}
+
+/**
+ * @param {string} programId
+ * @returns {Promise<Array>}
+ */
+export async function listTravelPrepLinks(programId) {
+    if (getDataSource() === 'test') {
+        const all = readStudioLs(LS_TRAVEL_PREP_LINKS) || {};
+        return all[programId] || [];
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.listTravelPrepLinks !== 'function') return [];
+    const rows = await actor.listTravelPrepLinks(programId);
+    return Array.isArray(rows) ? rows.map(mapTravelPrepLinkToJs) : [];
+}
+
+/**
+ * @param {string} programId
+ * @param {string} linkId
+ * @returns {Promise<void>}
+ */
+export async function staffDeleteTravelPrepLink(programId, linkId) {
+    if (getDataSource() === 'test') {
+        const all = readStudioLs(LS_TRAVEL_PREP_LINKS) || {};
+        if (Array.isArray(all[programId])) {
+            all[programId] = all[programId].filter((l) => l.id !== linkId);
+            writeStudioLs(LS_TRAVEL_PREP_LINKS, all);
+        }
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffDeleteTravelPrepLink !== 'function') {
+        throw new Error('staffDeleteTravelPrepLink missing — run dfx generate after backend deploy.');
+    }
+    await actor.staffDeleteTravelPrepLink(programId, linkId);
+}
+
+function mapFlightBookingToJs(raw) {
+    return {
+        applicantId: String(raw.applicantId ?? ''),
+        programId: String(raw.programId ?? ''),
+        airline: String(raw.airline ?? ''),
+        airlineWebsite: String(raw.airlineWebsite ?? ''),
+        confirmationNumber: String(raw.confirmationNumber ?? ''),
+        flightCostCents: Number(raw.flightCostCents ?? 0),
+        ownFlight: Boolean(raw.ownFlight),
+        estArrivalDate: String(raw.estArrivalDate ?? ''),
+        estArrivalTime: String(raw.estArrivalTime ?? ''),
+        updatedAt: String(raw.updatedAt ?? ''),
+        updatedBy: String(raw.updatedBy ?? ''),
+    };
+}
+
+function mapTravelPrepLinkToJs(raw) {
+    return {
+        id: String(raw.id ?? ''),
+        programId: String(raw.programId ?? ''),
+        title: String(raw.title ?? ''),
+        url: String(raw.url ?? ''),
+        description: String(raw.description ?? ''),
+        sortOrder: Number(raw.sortOrder ?? 0),
+        updatedAt: String(raw.updatedAt ?? ''),
+    };
 }
