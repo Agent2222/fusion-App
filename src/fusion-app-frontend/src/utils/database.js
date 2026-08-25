@@ -4186,16 +4186,99 @@ export async function getMyInviteCountSummaryForCaller() {
 }
 
 /**
- * Get the caller's available billing credits (referral rewards).
+ * Get the caller's available broadcast credits (referral rewards).
  * @returns {Promise<number>}
  */
-export async function getMyBillingCreditsForCaller() {
+export async function getMyBroadcastCreditsForCaller() {
     if (getDataSource() === 'test') return 0;
     const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
     const actor = await getAuthenticatedFusionBackendActor();
-    if (!actor || typeof actor.getMyBillingCredits !== 'function') return 0;
-    try { return Number(await actor.getMyBillingCredits()); }
+    if (!actor || typeof actor.getMyBroadcastCredits !== 'function') return 0;
+    try { return Number(await actor.getMyBroadcastCredits()); }
     catch { return 0; }
+}
+
+/**
+ * Redeem one broadcast credit for a channel feature.
+ * @param {'featuredArtist'|'newsletterBlast'|'socialPost'} channel
+ * @returns {Promise<boolean>}
+ */
+export async function redeemBroadcastCreditForCaller(channel) {
+    const channelVariant = { [channel]: null };
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.redeemBroadcastCredit !== 'function') return false;
+    try { return await actor.redeemBroadcastCredit(channelVariant); }
+    catch { return false; }
+}
+
+/**
+ * Staff: list all non-zero broadcast credit balances.
+ * @returns {Promise<Array<[string, number]>>}
+ */
+export async function staffListBroadcastCreditsStudio() {
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.staffListBroadcastCredits !== 'function') return [];
+    try {
+        const rows = await actor.staffListBroadcastCredits();
+        return rows.map(([p, n]) => [p.toText(), Number(n)]);
+    } catch { return []; }
+}
+
+/**
+ * Staff: set exact broadcast credit balance for a single principal.
+ * @param {string} principalText
+ * @param {number} balance
+ * @returns {Promise<boolean>}
+ */
+export async function staffSetBroadcastCreditsForStudio(principalText, balance) {
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const { Principal } = await import('@dfinity/principal');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.staffSetBroadcastCredits !== 'function') return false;
+    try { return await actor.staffSetBroadcastCredits(Principal.fromText(principalText), BigInt(balance)); }
+    catch { return false; }
+}
+
+/**
+ * Staff: batch set broadcast credit balances.
+ * @param {Array<[string, number]>} entries - [[principalText, balance], ...]
+ * @returns {Promise<number>}
+ */
+export async function staffBatchSetBroadcastCreditsForStudio(entries) {
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const { Principal } = await import('@dfinity/principal');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.staffBatchSetBroadcastCredits !== 'function') return 0;
+    const mapped = entries.map(([p, b]) => [Principal.fromText(p), BigInt(b)]);
+    try { return Number(await actor.staffBatchSetBroadcastCredits(mapped)); }
+    catch { return 0; }
+}
+
+/**
+ * Staff: list all broadcast credit redemptions.
+ * @returns {Promise<Array<object>>}
+ */
+export async function staffListBroadcastRedemptionsStudio() {
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.staffListBroadcastRedemptions !== 'function') return [];
+    try { return await actor.staffListBroadcastRedemptions(); }
+    catch { return []; }
+}
+
+/**
+ * Staff: mark a broadcast redemption as fulfilled.
+ * @param {string} redemptionId
+ * @returns {Promise<boolean>}
+ */
+export async function staffFulfillBroadcastRedemptionForStudio(redemptionId) {
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.staffFulfillBroadcastRedemption !== 'function') return false;
+    try { return await actor.staffFulfillBroadcastRedemption(String(redemptionId)); }
+    catch { return false; }
 }
 
 /**
@@ -8831,6 +8914,41 @@ export async function updateStaffManualProgramLedgerStudio(opts) {
         staffNote,
         status,
     );
+}
+
+/**
+ * Batch-patch feeCents on existing program payment ledger rows (integration-caller).
+ * @param {[string, number][]} patches Array of [paymentId, feeCents] tuples
+ * @returns {Promise<number>} count of patched rows
+ */
+export async function integrationBatchPatchProgramPaymentFeesStudio(patches) {
+    if (!Array.isArray(patches) || patches.length === 0) return 0;
+    if (getDataSource() === 'test') {
+        const stored = readStudioLs(LS_STAFF_FINANCE_PAYMENTS) || {
+            summaries: [],
+            ledger: [],
+            plans: [],
+        };
+        stored.ledger = Array.isArray(stored.ledger) ? stored.ledger : [];
+        let count = 0;
+        for (const [paymentId, feeCents] of patches) {
+            const row = stored.ledger.find((r) => String(r?.id || '') === paymentId);
+            if (row) {
+                row.feeCents = feeCents;
+                count++;
+            }
+        }
+        writeStudioLs(LS_STAFF_FINANCE_PAYMENTS, stored);
+        return count;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.integrationBatchPatchProgramPaymentFees !== 'function') {
+        throw new Error('integrationBatchPatchProgramPaymentFees missing — run dfx generate');
+    }
+    const result = await actor.integrationBatchPatchProgramPaymentFees(
+        patches.map(([id, feeCents]) => [id, BigInt(feeCents)]),
+    );
+    return Number(result);
 }
 
 const LS_STAFF_FINANCE_PROMOTIONS = 'staffFinancePromotions';

@@ -8347,3 +8347,212 @@ a.studio-app-payload-link:hover {
         width: 100%;
     }
 }
+
+/* ——— Manage Invites Modal — pill styles ——— */
+
+.studio-manage-invites__toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.studio-manage-invites__search {
+    flex: 1 1 14rem;
+    min-width: 10rem;
+}
+
+.studio-manage-invites__filter {
+    flex: 0 0 auto;
+    min-width: 8rem;
+}
+
+.studio-manage-invites__pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    max-height: 340px;
+    overflow-y: auto;
+    padding: 0.5rem;
+    border: 1px solid rgba(15, 23, 42, 0.1);
+    border-radius: 7px;
+    background: rgba(250, 250, 250, 0.5);
+}
+
+.studio-invite-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.28rem 0.6rem;
+    border: 1.5px solid #94a3b8;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.06);
+    font-size: 0.72rem;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
+    line-height: 1.3;
+}
+
+.studio-invite-pill:hover {
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+
+.studio-invite-pill--selected {
+    box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.25);
+    background: rgba(15, 23, 42, 0.06);
+}
+
+.studio-invite-pill__name {
+    max-width: 14rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.studio-invite-pill__badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.15rem;
+    height: 1.15rem;
+    border-radius: 50%;
+    font-size: 0.6rem;
+    font-weight: 700;
+    color: #fff;
+    background: #64748b;
+    line-height: 1;
+}
+
+.studio-invite-pill--credits-0 {
+    border-color: #e11d48;
+    background: rgba(225, 29, 72, 0.08);
+}
+.studio-invite-pill--credits-0 .studio-invite-pill__badge {
+    background: #e11d48;
+}
+
+.studio-invite-pill--credits-1 {
+    border-color: #d97706;
+    background: rgba(217, 119, 6, 0.08);
+}
+.studio-invite-pill--credits-1 .studio-invite-pill__badge {
+    background: #d97706;
+}
+
+.studio-invite-pill--credits-2 {
+    border-color: #2563eb;
+    background: rgba(37, 99, 235, 0.08);
+}
+.studio-invite-pill--credits-2 .studio-invite-pill__badge {
+    background: #2563eb;
+}
+
+.studio-invite-pill--credits-3 {
+    border-color: #16a34a;
+    background: rgba(22, 163, 74, 0.08);
+}
+.studio-invite-pill--credits-3 .studio-invite-pill__badge {
+    background: #16a34a;
+}
+
+.studio-manage-invites__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 0.75rem;
+    padding-top: 0.65rem;
+    border-top: 1px solid rgba(15, 23, 42, 0.1);
+}
+
+.studio-manage-invites__summary {
+    font-size: 0.78rem;
+    color: rgba(15, 23, 42, 0.65);
+    font-variation-settings: var(--fv-body);
+}
+
+.studio-manage-invites__controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    align-items: center;
+}
+
+.studio-manage-invites__set-label {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.72rem;
+    color: rgba(15, 23, 42, 0.7);
+}
+
+.studio-manage-invites__set-input {
+    width: 3.5rem;
+    text-align: center;
+}
+
+/* ——— Broadcasts tab (Moderation) ——— */
+
+.studio-broadcasts__toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.studio-broadcasts__channel-badge {
+    display: inline-block;
+    padding: 0.2rem 0.55rem;
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    border-radius: 4px;
+    line-height: 1.4;
+    white-space: nowrap;
+}
+
+.studio-broadcasts__channel-badge--social {
+    background: rgba(63, 126, 90, 0.14);
+    color: #2e6b45;
+}
+
+.studio-broadcasts__channel-badge--newsletter {
+    background: rgba(59, 130, 246, 0.12);
+    color: #1d5bbf;
+}
+
+.studio-broadcasts__channel-badge--featured {
+    background: rgba(217, 169, 56, 0.15);
+    color: #8b6e1e;
+}
+
+.studio-broadcasts__status {
+    font-size: 0.72rem;
+    font-weight: 600;
+}
+
+.studio-broadcasts__status--pending {
+    color: #c28010;
+}
+
+.studio-broadcasts__status--fulfilled {
+    color: #2e6b45;
+}
+
+.studio-broadcasts__compose .studio-label {
+    display: block;
+    margin: 0.65rem 0 0.2rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: rgba(15, 23, 42, 0.6);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.studio-broadcasts__compose .studio-textarea {
+    min-height: 100px;
+    resize: vertical;
+}

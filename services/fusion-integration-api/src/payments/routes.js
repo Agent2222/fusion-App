@@ -14,6 +14,7 @@ import {
     centsFromBody,
     createPayPalOrder,
     createPayPalSubscription,
+    getPayPalCapture,
     getPayPalOrder,
     getPayPalSubscription,
     membershipPlanDisplay,
@@ -920,6 +921,55 @@ export function registerPaymentRoutes(app, opts) {
                 }
             }
             return res.json({ receipts });
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            return res.status(500).json({ error: msg });
+        }
+    });
+
+    /**
+     * Fetch actual transaction fees from PayPal / Stripe for a batch of ledger rows.
+     * Body: { ledgerRows: [{ id, paymentProvider, externalPaymentId, externalChargeId }] }
+     * Returns: { results: [{ id, feeCents, provider, error? }] }
+     */
+    app.post('/payments/sync-program-fees', requireApiKey, async (req, res) => {
+        try {
+            const rows = Array.isArray(req.body?.ledgerRows) ? req.body.ledgerRows.slice(0, 100) : [];
+            const results = [];
+            for (const row of rows) {
+                const id = safePayPalMetaValue(row?.id, 120);
+                const provider = String(row?.paymentProvider || '').toLowerCase();
+                const externalPaymentId = safePayPalMetaValue(row?.externalPaymentId, 120);
+                const externalChargeId = safePayPalMetaValue(row?.externalChargeId, 120);
+                if (!id) continue;
+                try {
+                    if (provider === 'paypal') {
+                        if (!externalChargeId) {
+                            results.push({ id, feeCents: 0, provider, error: 'no captureId' });
+                            continue;
+                        }
+                        const capture = await getPayPalCapture(externalChargeId);
+                        const breakdown = capture?.seller_receivable_breakdown;
+                        const feeValue = breakdown?.paypal_fee?.value;
+                        const feeCents = feeValue
+                            ? Math.round(parseFloat(feeValue) * 100)
+                            : 0;
+                        results.push({ id, feeCents, provider });
+                    } else if (provider === 'stripe') {
+                        if (!externalPaymentId) {
+                            results.push({ id, feeCents: 0, provider, error: 'no paymentIntentId' });
+                            continue;
+                        }
+                        results.push({ id, feeCents: 0, provider, error: 'stripe_deferred' });
+                    } else {
+                        results.push({ id, feeCents: 0, provider, error: 'unknown provider' });
+                    }
+                } catch (e) {
+                    const msg = e instanceof Error ? e.message : String(e);
+                    results.push({ id, feeCents: 0, provider, error: msg });
+                }
+            }
+            return res.json({ ok: true, results });
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             return res.status(500).json({ error: msg });

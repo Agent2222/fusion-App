@@ -2,7 +2,7 @@
  * Studio — email to a program applicant (Integration API + LLM + templates in localStorage).
  */
 import { getPublicSiteOrigin } from '../../config.js';
-import { getDataSource, getPrograms, studioReinterpretWithPrompt, appendApplicantEmailOutreachStudio, getApplicantEmailOutreachForStudio, applicantEmailOutreachApiAvailable, clearApplicantEmailOutreachStudio } from '../../utils/database.js';
+import { getDataSource, getPrograms, studioReinterpretWithPrompt, appendApplicantEmailOutreachStudio, getApplicantEmailOutreachForStudio, applicantEmailOutreachApiAvailable, clearApplicantEmailOutreachStudio, staffGetApplicantFlightBooking } from '../../utils/database.js';
 import { openStudioModal } from '../../utils/studioModal.js';
 import { getIntegrationBaseUrl, sendEmail } from '../../utils/integrationApi.js';
 import { wrapEmailHtml } from '../../utils/emailCampaignTemplates.js';
@@ -24,6 +24,7 @@ const DRAFT_PREFIX = 'fusion-studio-applicant-email-draft:';
 const APPROVED_TEMPLATE_ID = 'tpl-applicant-approved-invitation';
 const SLOT_NUDGE_TEMPLATE_ID = 'tpl-applicant-secure-slot-nudge';
 const REMAINING_BALANCE_TEMPLATE_ID = 'tpl-applicant-remaining-balance';
+const FLIGHT_INFO_TEMPLATE_ID = 'tpl-applicant-flight-info';
 
 /**
  * @param {string} displayName
@@ -222,6 +223,32 @@ Please sign in and complete your payment when you are ready:
 If you have questions about your balance or payment plan, reply to this email and our team will help.`,
         },
         {
+            id: FLIGHT_INFO_TEMPLATE_ID,
+            name: 'Flight information',
+            subject: 'Fusion {{programLocation}} Program — your flight information',
+            signatureHtml: FUSION_TEAM_SIGNATURE_HTML,
+            signatureKey: 'fusion-team',
+            builtIn: true,
+            body: `Hi {{firstName}},
+
+We are writing to share your flight details for the Fusion {{programLocation}} Program ({{programStartDate}} – {{programEndDate}}).
+
+Flight details:
+Airline: {{flightAirline}}
+Confirmation number: {{flightConfirmation}}
+Manage your booking: {{flightAirlineUrl}}
+
+Please review your flight details above. You can manage your booking directly through your airline's website using the confirmation number provided.
+
+You can also view your flight information anytime by signing in to Fusion, visiting your Settings Profile page, opening the Programs section, and selecting the Travel tab.
+
+One thing we need from you: please add your estimated arrival date and time in the Travel tab so that our team can coordinate and stay up to date with your arrival in case anything changes.
+
+If anything looks incorrect or you have questions about your travel, reply to this email and our team will assist you.
+
+We look forward to seeing you in {{programLocation}}.`,
+        },
+        {
             id: 'tpl-default-schedule',
             name: 'Schedule meeting',
             subject: '[Fusion] Program application — {{programId}}',
@@ -368,6 +395,18 @@ export async function openApplicantEmailModal(row, opts = {}) {
     } catch {
         /* keep fallbacks */
     }
+    let flightAirline = '';
+    let flightConfirmation = '';
+    let flightAirlineUrl = '';
+    try {
+        const booking = await staffGetApplicantFlightBooking(applicantId);
+        if (booking) {
+            flightAirline = String(booking.airline || '').trim();
+            flightConfirmation = String(booking.confirmationNumber || '').trim();
+            flightAirlineUrl = String(booking.airlineWebsite || '').trim();
+        }
+    } catch { /* keep empty defaults */ }
+
     const vars = {
         firstName,
         fullName,
@@ -381,6 +420,9 @@ export async function openApplicantEmailModal(row, opts = {}) {
         remainingBalance: formatUsdFromCents(financeContext?.remainingBalanceCents ?? 0),
         totalPaid: formatUsdFromCents(financeContext?.totalPaymentsCents ?? 0),
         programBalance: formatUsdFromCents(financeContext?.priceCategoryCents ?? 0),
+        flightAirline: flightAirline || '(not yet entered)',
+        flightConfirmation: flightConfirmation || '(not yet entered)',
+        flightAirlineUrl: flightAirlineUrl || '(not yet entered)',
     };
 
     const financeMeta =

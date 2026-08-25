@@ -1998,6 +1998,132 @@ function paintInviteCountOnStrip(strip, summary) {
   if (hintEl) hintEl.textContent = "invites available";
 }
 
+/** Paint broadcast credit balance into the broadcast column of a credits strip. */
+function paintBroadcastCreditsOnStrip(strip, balance) {
+  if (!(strip instanceof HTMLElement)) return;
+  const valEl = strip.querySelector("[data-mpd-credits-broadcast]");
+  const hintEl = strip.querySelector("[data-mpd-credits-broadcast-hint]");
+  const redeemBtn = strip.querySelector("[data-mpd-broadcast-redeem]");
+  if (valEl) valEl.textContent = String(balance);
+  if (hintEl) hintEl.textContent = balance === 1 ? "credit available" : "credits available";
+  if (redeemBtn) redeemBtn.hidden = balance < 1;
+}
+
+const BROADCAST_CHANNELS = [
+  { key: "socialPost", label: "Social", icon: "\u2728", desc: "Amplified through the FUSION Instagram social channel.", cta: "CLAIM SOCIAL" },
+  { key: "newsletterBlast", label: "Newsletter", icon: "\u2709", desc: "Featured across the full FUSION newsletter audience.", cta: "CLAIM NEWSLETTER" },
+  { key: "featuredArtist", label: "Featured", icon: "\u2606", desc: "Shown in the Featured section across FUSION.", cta: "CLAIM FEATURED" },
+];
+
+/** Open the 3-card broadcast credits modal. */
+async function openBroadcastClaimModal() {
+  const { openStudioModal } = await import("../utils/studioModal.js");
+  const cardsHtml = BROADCAST_CHANNELS.map((ch) => `
+    <div class="mpd-broadcast-modal__card">
+      <div class="mpd-broadcast-modal__card-icon">${ch.icon}</div>
+      <h3 class="mpd-broadcast-modal__card-title">${ch.label}</h3>
+      <p class="mpd-broadcast-modal__card-desc">${ch.desc}</p>
+      <p class="mpd-broadcast-modal__card-cost">1 broadcast credit</p>
+      <button type="button" class="mpd-broadcast-modal__card-cta" data-bc-claim="${ch.key}">${ch.cta} \u2192</button>
+    </div>
+  `).join("");
+  const html = `
+    <div class="mpd-broadcast-modal">
+      <p class="mpd-broadcast-modal__eyebrow">BROADCAST CREDITS</p>
+      <h2 class="mpd-broadcast-modal__heading">Choose where to be seen.</h2>
+      <p class="mpd-broadcast-modal__subhead">Use 1 credit to claim one FUSION broadcast opportunity.</p>
+      <div class="mpd-broadcast-modal__cards">${cardsHtml}</div>
+      <p class="mpd-broadcast-modal__footer">Claims are reviewed by the FUSION team before scheduling.</p>
+    </div>
+  `;
+  const { close, root } = openStudioModal(html, { title: "" });
+  root.querySelectorAll("[data-bc-claim]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const channelKey = btn.getAttribute("data-bc-claim");
+      const channelInfo = BROADCAST_CHANNELS.find((c) => c.key === channelKey);
+      if (!channelKey || !channelInfo) return;
+      const { openStudioConfirmDialog } = await import("../utils/studioModal.js");
+      const confirmed = await openStudioConfirmDialog({
+        title: "Confirm broadcast claim",
+        paragraphs: [
+          `You are about to use 1 broadcast credit for: ${channelInfo.label}.`,
+          "The FUSION team will review your claim and schedule your broadcast. You will receive a confirmation email shortly.",
+        ],
+        confirmLabel: "Claim broadcast",
+      });
+      if (!confirmed) return;
+      const { redeemBroadcastCreditForCaller } = await import("../utils/database.js");
+      const ok = await redeemBroadcastCreditForCaller(channelKey);
+      close();
+      if (ok) {
+        void sendBroadcastClaimConfirmationEmail(channelInfo.label);
+        const { openStudioNoticeDialog } = await import("../utils/studioModal.js");
+        await openStudioNoticeDialog({
+          title: "Broadcast claimed",
+          paragraphs: [
+            `Your ${channelInfo.label} broadcast has been queued.`,
+            "The FUSION team will review your claim and notify you when your broadcast is live.",
+          ],
+        });
+        void hydrateExploreProgramCredits();
+      }
+    });
+  });
+}
+
+/** Send the member a branded confirmation email after claiming a broadcast. */
+async function sendBroadcastClaimConfirmationEmail(channelLabel) {
+  try {
+    const acc = await getAccountForCaller();
+    const email = String(acc?.contactEmail || acc?.contact_email || "").trim();
+    if (!email || !email.includes("@")) return;
+    const { renderFusionEmailFromSlots, fusionEmailParagraph } = await import("../utils/emailFusionLayout.js");
+    const { sendEmail } = await import("../utils/integrationApi.js");
+    const bodyHtml = [
+      fusionEmailParagraph(`Your <strong>${channelLabel}</strong> broadcast credit has been claimed and is now queued for review.`, "lead"),
+      fusionEmailParagraph("The FUSION team will schedule your broadcast and you\u2019ll receive a notification when it goes live."),
+      fusionEmailParagraph("Thank you for being part of the FUSION network.", "last"),
+    ].join("\n");
+    const html = renderFusionEmailFromSlots({
+      eyebrow: "Broadcast Credits",
+      headlineHtml: "Your broadcast<br>is queued.",
+      bodyHtml,
+      cta: { label: "VIEW YOUR STUDIO", href: "https://fusionart.world/settings" },
+      footnote: "If you have questions, reply to this email or contact the Fusion team.",
+    });
+    await sendEmail({ to: email, subject: `Your FUSION broadcast is queued \u2014 ${channelLabel}`, html });
+  } catch { /* email send failure is non-blocking */ }
+}
+
+/** Wire broadcast info tooltip and redeem modal across all strips. */
+function wireBroadcastInfoAndRedeem() {
+  document.querySelectorAll("[data-mpd-broadcast-info]").forEach((btn) => {
+    if (btn._bcWired) return;
+    btn._bcWired = true;
+    let tooltip = null;
+    const show = () => {
+      if (tooltip) return;
+      tooltip = document.createElement("div");
+      tooltip.className = "mpd-broadcast-info-tooltip";
+      tooltip.textContent = "Broadcast credits let you choose to be featured on a Fusion channel \u2014 as a Featured Artist, in a Newsletter Blast, or in a Social Post. Earn credits by inviting new members.";
+      btn.style.position = "relative";
+      btn.appendChild(tooltip);
+    };
+    const hide = () => {
+      if (tooltip) { tooltip.remove(); tooltip = null; }
+    };
+    btn.addEventListener("mouseenter", show);
+    btn.addEventListener("mouseleave", hide);
+    btn.addEventListener("click", (e) => { e.stopPropagation(); tooltip ? hide() : show(); });
+  });
+
+  document.querySelectorAll("[data-mpd-broadcast-redeem]").forEach((btn) => {
+    if (btn._bcRedeemWired) return;
+    btn._bcRedeemWired = true;
+    btn.addEventListener("click", () => { void openBroadcastClaimModal(); });
+  });
+}
+
 /**
  * Application + Program Award credits (Studio Overview + Explore programs).
  */
@@ -2098,16 +2224,24 @@ async function hydrateExploreProgramCredits() {
     showForMonthly: tier === "monthly",
   });
   let inviteSummary = null;
+  let broadcastBalance = 0;
   try {
-    const { getMyInviteCountSummaryForCaller } = await import("../utils/database.js");
-    inviteSummary = await getMyInviteCountSummaryForCaller();
-  } catch { /* invite count unavailable */ }
+    const { getMyInviteCountSummaryForCaller, getMyBroadcastCreditsForCaller } = await import("../utils/database.js");
+    const [inv, bc] = await Promise.all([
+      getMyInviteCountSummaryForCaller(),
+      getMyBroadcastCreditsForCaller(),
+    ]);
+    inviteSummary = inv;
+    broadcastBalance = bc;
+  } catch { /* invite/broadcast count unavailable */ }
 
   for (const strip of strips) {
     paintMembershipCreditsStrip(/** @type {HTMLElement} */ (strip), model);
     paintInviteCountOnStrip(/** @type {HTMLElement} */ (strip), inviteSummary);
+    paintBroadcastCreditsOnStrip(/** @type {HTMLElement} */ (strip), broadcastBalance);
   }
 
+  wireBroadcastInfoAndRedeem();
   wireInvitePanelButtons();
   void checkAndShowReferralPrompts();
 }
@@ -2186,7 +2320,7 @@ async function renderInvitePanel() {
         : sorted.map(buildInviteRowHtml).join("")}
     </div>
     <div class="mpd-invite-panel__footer">
-      Share your invite link to give a peer 50% off their first month. You earn 1 month free when they renew.
+      Share your invite link to give a peer 50% off their first month. You earn a broadcast credit when they renew \u2014 choose to be featured as an artist, in a newsletter, or on social media.
     </div>
   `;
 
@@ -2303,6 +2437,8 @@ async function checkAndShowReferralPrompts() {
   if (!container) return;
 
   const prompts = [];
+  const isExempt = mpdMembershipGate === "exempt";
+  const rewardSuffix = "You earn a broadcast credit when they renew \u2014 use it to get featured on Fusion.";
 
   // 1. Profile 100% complete
   if (!isReferralPromptDismissed("profile-complete")) {
@@ -2310,7 +2446,7 @@ async function checkAndShowReferralPrompts() {
     if (fill && fill.style.width === "100%") {
       prompts.push(buildReferralPromptCard(
         "profile-complete",
-        "Your profile is 100% complete! Know an artist who should be here? Share your invite and earn a free month when they renew.",
+        `Your profile is 100% complete! Know an artist who should be here? Share your invite — they get 50% off their first month. ${rewardSuffix}`,
       ));
     }
   }
@@ -2323,7 +2459,7 @@ async function checkAndShowReferralPrompts() {
       if (!Number.isNaN(ts) && Date.now() - ts > 30 * 86400000) {
         prompts.push(buildReferralPromptCard(
           "30-day-member",
-          "You've been a member for 30+ days. Invite a peer to Fusion and earn 1 month free when they renew.",
+          `You've been a member for 30+ days. Invite a peer to Fusion — they get 50% off their first month. ${rewardSuffix}`,
         ));
       }
     } else if (mpdMembershipBillingContext?.tier) {
@@ -4847,12 +4983,13 @@ export function generateSettingsProfileContent() {
                                             <strong class="mpd-program-credits__value" data-mpd-credits-draw>—</strong>
                                         </div>
                                     </div>
-                                    <div class="mpd-program-credits__item mpd-program-credits__item--next">
-                                        <span class="mpd-program-credits__icon mpd-program-credits__icon--next" aria-hidden="true"></span>
+                                    <div class="mpd-program-credits__item mpd-program-credits__item--broadcast">
+                                        <span class="mpd-program-credits__icon mpd-program-credits__icon--broadcast" aria-hidden="true"></span>
                                         <div class="mpd-program-credits__copy">
-                                            <span class="mpd-program-credits__label">Next credits</span>
-                                            <strong class="mpd-program-credits__value" data-mpd-credits-next>—</strong>
-                                            <span class="mpd-program-credits__hint" data-mpd-credits-next-hint></span>
+                                            <span class="mpd-program-credits__label">Broadcast credits <button type="button" class="mpd-program-credits__info" data-mpd-broadcast-info aria-label="What are broadcast credits?">i</button></span>
+                                            <strong class="mpd-program-credits__value" data-mpd-credits-broadcast>—</strong>
+                                            <span class="mpd-program-credits__hint" data-mpd-credits-broadcast-hint></span>
+                                            <button type="button" class="mpd-program-credits__redeem-btn" data-mpd-broadcast-redeem hidden>VIEW OPTIONS &#8594;</button>
                                         </div>
                                     </div>
                                     <div class="mpd-program-credits__item mpd-program-credits__item--invites">
@@ -4863,6 +5000,12 @@ export function generateSettingsProfileContent() {
                                             <span class="mpd-program-credits__hint" data-mpd-credits-invites-hint>invites available</span>
                                             <button type="button" class="mpd-program-credits__invite-btn" data-mpd-invite-member>Invite member &#8594;</button>
                                         </div>
+                                    </div>
+                                    <div class="mpd-program-credits__footer-row" data-mpd-credits-footer>
+                                        <span class="mpd-program-credits__icon mpd-program-credits__icon--next" aria-hidden="true"></span>
+                                        <span class="mpd-program-credits__label">Next credits</span>
+                                        <strong class="mpd-program-credits__value" data-mpd-credits-next>—</strong>
+                                        <span class="mpd-program-credits__hint" data-mpd-credits-next-hint></span>
                                     </div>
                                 </div>
 
@@ -5181,12 +5324,13 @@ export function generateSettingsProfileContent() {
                                                     <strong class="mpd-program-credits__value" id="mpd_draw_credits_value" data-mpd-credits-draw>—</strong>
                                                 </div>
                                             </div>
-                                            <div class="mpd-program-credits__item mpd-program-credits__item--next">
-                                                <span class="mpd-program-credits__icon mpd-program-credits__icon--next" aria-hidden="true"></span>
+                                            <div class="mpd-program-credits__item mpd-program-credits__item--broadcast">
+                                                <span class="mpd-program-credits__icon mpd-program-credits__icon--broadcast" aria-hidden="true"></span>
                                                 <div class="mpd-program-credits__copy">
-                                                    <span class="mpd-program-credits__label">Next credits</span>
-                                                    <strong class="mpd-program-credits__value" id="mpd_credits_next_date" data-mpd-credits-next>—</strong>
-                                                    <span class="mpd-program-credits__hint" id="mpd_credits_next_hint" data-mpd-credits-next-hint></span>
+                                                    <span class="mpd-program-credits__label">Broadcast credits <button type="button" class="mpd-program-credits__info" data-mpd-broadcast-info aria-label="What are broadcast credits?">i</button></span>
+                                                    <strong class="mpd-program-credits__value" data-mpd-credits-broadcast>—</strong>
+                                                    <span class="mpd-program-credits__hint" data-mpd-credits-broadcast-hint></span>
+                                                    <button type="button" class="mpd-program-credits__redeem-btn" data-mpd-broadcast-redeem hidden>VIEW OPTIONS &#8594;</button>
                                                 </div>
                                             </div>
                                             <div class="mpd-program-credits__item mpd-program-credits__item--invites">
@@ -5197,6 +5341,12 @@ export function generateSettingsProfileContent() {
                                                     <span class="mpd-program-credits__hint" data-mpd-credits-invites-hint>invites available</span>
                                                     <button type="button" class="mpd-program-credits__invite-btn" data-mpd-invite-member>Invite member &#8594;</button>
                                                 </div>
+                                            </div>
+                                            <div class="mpd-program-credits__footer-row" data-mpd-credits-footer>
+                                                <span class="mpd-program-credits__icon mpd-program-credits__icon--next" aria-hidden="true"></span>
+                                                <span class="mpd-program-credits__label">Next credits</span>
+                                                <strong class="mpd-program-credits__value" id="mpd_credits_next_date" data-mpd-credits-next>—</strong>
+                                                <span class="mpd-program-credits__hint" id="mpd_credits_next_hint" data-mpd-credits-next-hint></span>
                                             </div>
                                         </div>
                                         <div class="mpd-public-programs-toolbar">

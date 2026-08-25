@@ -1197,6 +1197,37 @@ app.post('/stripe/program-payment-receipts', requireApiKey, async (req, res) => 
     }
 });
 
+app.post('/stripe/sync-program-fees', requireApiKey, async (req, res) => {
+    try {
+        if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
+        const rows = Array.isArray(req.body?.ledgerRows) ? req.body.ledgerRows.slice(0, 100) : [];
+        const results = [];
+        for (const row of rows) {
+            const id = safeStripeMetaValue(row?.id, 120);
+            const externalPaymentId = safeStripeMetaValue(row?.externalPaymentId, 120);
+            if (!id || !externalPaymentId) {
+                if (id) results.push({ id, feeCents: 0, provider: 'stripe', error: 'no paymentIntentId' });
+                continue;
+            }
+            try {
+                const pi = await stripe.paymentIntents.retrieve(externalPaymentId, {
+                    expand: ['latest_charge.balance_transaction'],
+                });
+                const charge = pi.latest_charge && typeof pi.latest_charge === 'object' ? pi.latest_charge : null;
+                const feeCents = await stripeChargeFeeCents(charge);
+                results.push({ id, feeCents, provider: 'stripe' });
+            } catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                results.push({ id, feeCents: 0, provider: 'stripe', error: msg });
+            }
+        }
+        return res.json({ ok: true, results });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return res.status(500).json({ error: msg });
+    }
+});
+
 /**
  * Merge request metadata into Stripe metadata object (string values only).
  * @param {Record<string, unknown>} rawMeta

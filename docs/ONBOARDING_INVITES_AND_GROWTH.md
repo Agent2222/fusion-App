@@ -506,7 +506,7 @@ The "Apply" button calls `POST /payments/validate-promo-code` and updates the di
 **Why these specific rewards:**
 
 - **50% off first month** — Reduces the entry barrier from $30 to $15 without giving away the product for free. Artists who won't pay $15 for a month of access are unlikely to retain at $30. This filters for genuine interest.
-- **Billing credit for referrer** — Not cash, not a gift card — credit against their own membership. This keeps the reward inside the Fusion ecosystem and has zero cash-out fraud risk.
+- **Broadcast credit for referrer** — Not cash, not a gift card — a broadcast credit that lets the referrer choose to be featured on a Fusion channel (Featured Artist, Newsletter Blast, or Social Post). This keeps the reward inside the Fusion ecosystem, is valuable to all members (including exempt), and has zero cash-out fraud risk.
 - **Delayed referrer reward** — Only triggers after the referee completes their first paid month (not at signup). This prevents invite-and-churn gaming and ensures the referrer is bringing in real members.
 
 ### 6.2 Why not a free trial?
@@ -770,7 +770,7 @@ Compare 30/60/90-day retention, profile completion rate, program application rat
 | Question | Options | Recommendation |
 |---|---|---|
 | Discount amount for member invites | 25% / 50% / 100% off first month | **50% ($15)** — meaningful enough to convert, but signals the product has value |
-| Referrer reward | Billing credit / cash / features | **Billing credit (1 free month)** — keeps value in-ecosystem, simple accounting |
+| Referrer reward | Billing credit / cash / features | **Broadcast credit** — referrer chooses a Fusion channel feature (Featured Artist, Newsletter Blast, or Social Post); keeps value in-ecosystem, valuable to exempt and paying members alike |
 | Should galleries/institutions get special pricing? | Same tiers / custom plans / bulk seats | **Partner codes with custom discounts** — handle case by case initially |
 | Should promo codes work on quarterly/annual? | Monthly only / all tiers | **All tiers** — but discount applies to first billing period only |
 | When should members get invite access? | Resident tier / immediately / 30 days | **Resident tier** — ensures referrer has been assessed as a serious practitioner (see section 4) |
@@ -877,7 +877,7 @@ Track implementation progress here. Check items off as they ship.
 - [x] Implement `getMyInviteCountSummary` in `main.mo`
 - [x] Add `InviteLineage` type + storage + recording in `redeemPromoCode`
 - [x] Add lineage query methods: `getMyInviteLineage`, `getMyInvitees`, `getInviteLineageBatch`, `staffListInviteLineage`
-- [x] Implement referrer billing credit logic (`creditReferrerForRenewal`, `getMyBillingCredits`, `consumeBillingCredit`)
+- [x] Implement referrer broadcast credit logic (`creditReferrerForRenewal`, `getMyBroadcastCredits`, `redeemBroadcastCredit`)
 - [x] Trigger referrer reward only after referee's first paid renewal (PayPal + Stripe webhooks)
 - [x] Add `database.js` wrappers for invite + lineage operations
 - [x] Add 4th MEMBER INVITES card to credits strips in `settingsProfile.js`
@@ -893,6 +893,67 @@ Track implementation progress here. Check items off as they ship.
 - [x] Add referral prompt after program application
 - [ ] Add referral prompt at membership anniversary (deferred — depends on anniversary tracking)
 - [ ] Test full flow: generate invite → share link → referee joins at discount → referrer credited
+
+### Phase 2b — Broadcast Credits Overhaul
+
+> **Note:** The original "billing credit" (free month) referral reward has been superseded by **broadcast credits**. Broadcast credits let members choose to be featured on a Fusion channel — Featured Artist, Newsletter Blast, or Social Post — when they earn credits through referrals. This change makes the reward equally valuable to exempt and paying members and gives artists tangible visibility instead of a billing discount.
+
+**Backend changes:**
+- [x] Replace `BillingCreditRecord` with `BroadcastCreditRecord`, add `BroadcastChannel`, `BroadcastRedemption` types (`types.mo`)
+- [x] Update `DatabaseSnapshotV1` — rename `billingCreditsStable` → `broadcastCreditsStable`, add `broadcastRedemptionsStable`
+- [x] Rename stable/transient vars and lifecycle hooks in `main.mo`
+- [x] Rename `getMyBillingCredits` → `getMyBroadcastCredits`
+- [x] Replace `consumeBillingCredit` with `redeemBroadcastCredit(channel)` — member-facing, creates a redemption record
+- [x] Add `staffFulfillBroadcastRedemption` — marks a redemption as fulfilled
+- [x] Add `staffListBroadcastRedemptions` — returns all redemption requests
+- [x] Add `staffListBroadcastCredits` — returns all non-zero balances
+- [x] Add `staffSetBroadcastCredits` — admin sets balance for one principal
+- [x] Add `staffBatchSetBroadcastCredits` — batch set (limit 100)
+- [x] Update `creditReferrerForRenewal` ledger note to say "broadcast credit"
+
+**Frontend database wrappers:**
+- [x] Rename `getMyBillingCreditsForCaller` → `getMyBroadcastCreditsForCaller`
+- [x] Add `redeemBroadcastCreditForCaller(channel)`
+- [x] Add `staffListBroadcastCreditsStudio()`
+- [x] Add `staffSetBroadcastCreditsForStudio(principal, balance)`
+- [x] Add `staffBatchSetBroadcastCreditsForStudio(entries)`
+- [x] Add `staffListBroadcastRedemptionsStudio()`
+
+**Credits strip restructure:**
+- [x] Replace "Next credits" column with "Broadcast credits" column (+ info icon) in both strips
+- [x] Move "Next credits" to a full-width footer row below the grid
+- [x] Add broadcast icon clip-path, info tooltip, and redeem button styles
+- [x] Add `paintBroadcastCreditsOnStrip()` + `wireBroadcastInfoAndRedeem()` functions
+- [x] Fetch broadcast credits in `hydrateExploreProgramCredits()`
+- [x] Add redeem flow (channel radio selector + confirm)
+
+**Prompt language:**
+- [x] Update `rewardSuffix` — unified message for all members mentioning broadcast credits
+- [x] Update invite panel footer to mention broadcast credits and channels
+- [x] Update canister ledger notes (billing → broadcast)
+
+**Studio Manage Invites modal:**
+- [x] Build `manageInvitesModal.js` — pill-based UI, color-coded by credit count
+- [x] Add "Manage invites" button to Users toolbar in `panels.js`
+- [x] Wire click handler to open the modal
+- [x] Add color-coded pill styles to `studio.css`
+
+**Broadcast Credits UX — Redemption Flow & Admin Section:**
+- [x] Update credits strip button text from "Redeem" to "VIEW OPTIONS", add "credit(s) available" hint
+- [x] Build 3-card broadcast claim modal (Social / Newsletter / Featured) with `openStudioModal`
+- [x] Add secondary confirmation dialog (`openStudioConfirmDialog`) before redemption
+- [x] Send branded confirmation email to member after successful claim (broadcast queued)
+- [x] Show success notice after claim and refresh credits strip
+- [x] Add 3-card modal CSS (`.mpd-broadcast-modal` grid, cards, CTA buttons, responsive stacking)
+- [x] Remove old inline radio redeem styles (`.mpd-broadcast-redeem-channels`)
+- [x] Add `staffFulfillBroadcastRedemptionForStudio` wrapper to `database.js`
+- [x] Register "Broadcasts" tab in Studio Moderation section sidebar (`panels.js`)
+- [x] Add `renderBroadcasts()` — table with Channel, Member, Email, Claimed, Status, Actions columns
+- [x] Add `initBroadcasts()` — fetch redemptions + accounts, render filterable table
+- [x] Wire Email action — compose modal with pre-filled to/subject and branded send
+- [x] Wire Complete action — confirm dialog, call `staffFulfillBroadcastRedemption`, auto-send "broadcast live" notification email
+- [x] Add channel badge pills (Social=olive, Newsletter=blue, Featured=amber) and status indicator styles to `studio.css`
+- [x] Register `broadcasts` in `defaultStudioFeatureKeys()` in `main.mo` and `studioPermissionFeatures.js`
 
 ### Phase 3 — Onboarding improvements
 
@@ -942,7 +1003,7 @@ Track implementation progress here. Check items off as they ship.
 - [ ] Add `promo_code_applied` PostHog event
 - [ ] Add `invite_shared` PostHog event
 - [ ] Add `invite_redeemed` PostHog event
-- [ ] Add `referral_credit_earned` PostHog event
+- [ ] Add `broadcast_credit_earned` PostHog event
 - [ ] Compare CAC across cohorts (organic vs referred vs promo vs partner)
 
 ### Post-launch validation

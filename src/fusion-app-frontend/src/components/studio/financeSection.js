@@ -12,6 +12,7 @@ import {
     getProgramDisplayNameFromRow,
     getPrograms,
     getStaffProgramPaymentsFinanceStudio,
+    integrationBatchPatchProgramPaymentFeesStudio,
     listAdminsForStudio,
     listFinancePromotionsStudio,
     listProgramTeamStudio,
@@ -34,7 +35,9 @@ import {
 import {
     fetchMembershipRevenueSummary,
     repairPayPalProgramPayment,
+    syncPayPalProgramFees,
     syncPayPalSubscription,
+    syncStripeProgramFees,
     syncSubscriptionFromStripe,
     syncSubscriptionFromStripeByEmail,
 } from '../../utils/integrationApi.js';
@@ -61,6 +64,7 @@ import {
     buildProgramPaymentIndex,
     buildStudioProgramFinanceRows,
     computeFinancePanelTotals,
+    computeProgramBaseExpenseCents,
     computeProgramExpectedRevenueCents,
     computeProgramCollectedPaymentsCents,
     activeTeamMemberOwedEntries,
@@ -541,6 +545,12 @@ function buildFinanceProgramCardModel(
     );
     const programId = String(programRow.id || '');
     const promotionExpenseCents = programPromotionExpenseCents(promotions, programId);
+    const baseExpenseCents = computeProgramBaseExpenseCents(
+        programRow,
+        applicantsForProgram,
+        paymentIndex,
+        teamMembers,
+    );
     const profitCents = computeProgramProfitCents(
         programRow,
         applicantsForProgram,
@@ -558,6 +568,7 @@ function buildFinanceProgramCardModel(
         ...lifecycle,
         ...revenue,
         ...collected,
+        baseExpenseCents,
         promotionExpenseCents,
         profitCents,
     };
@@ -610,11 +621,14 @@ function financeProgramCardHtml(item, selected) {
                 <span class="studio-finance-program-card__status studio-finance-program-card__status--${escapeHtml(item.badgeKey)}">${escapeHtml(item.badge)}</span>
             </div>
             <div class="studio-finance-program-card__metrics">
-                <p class="studio-finance-program-card__revenue"><span>Expected revenue</span><strong>${escapeHtml(formatUsdFromCents(item.expectedCents))}</strong></p>
-                <p class="studio-finance-program-card__revenue"><span>Total payments</span><strong>${escapeHtml(formatUsdFromCents(item.totalPaymentsCents))}</strong></p>
-                <p class="studio-finance-program-card__revenue"><span>Remaining</span><strong>${escapeHtml(formatUsdFromCents(item.remainingBalanceCents))}</strong></p>
-                <p class="studio-finance-program-card__revenue"><span>Promotions</span><strong>${escapeHtml(formatUsdFromCents(item.promotionExpenseCents))}</strong></p>
-                <p class="studio-finance-program-card__revenue"><span>Total profit</span><strong>${escapeHtml(formatUsdFromCents(item.profitCents))}</strong></p>
+                <p class="studio-finance-program-card__revenue"><span>Expected Revenue</span><strong>${escapeHtml(formatUsdFromCents(item.expectedCents))}</strong></p>
+                <p class="studio-finance-program-card__revenue"><span>Revenue</span><strong>${escapeHtml(formatUsdFromCents(item.totalPaymentsCents))}</strong></p>
+                <p class="studio-finance-program-card__revenue"><span>Pending Revenue</span><strong>${escapeHtml(formatUsdFromCents(item.remainingBalanceCents))}</strong></p>
+                <p class="studio-finance-program-card__divider">Expenses</p>
+                <p class="studio-finance-program-card__revenue"><span>Base Expenses</span><strong>${escapeHtml(formatUsdFromCents(item.baseExpenseCents))}</strong></p>
+                <p class="studio-finance-program-card__revenue"><span>Marketing Expenses</span><strong>${escapeHtml(formatUsdFromCents(item.promotionExpenseCents))}</strong></p>
+                <p class="studio-finance-program-card__divider">Total Profit</p>
+                <p class="studio-finance-program-card__revenue"><span>Total Profit</span><strong>${escapeHtml(formatUsdFromCents(item.profitCents))}</strong></p>
             </div>
             <p class="studio-finance-program-card__slots">${escapeHtml(slotLine)}</p>
         </div>
@@ -2219,8 +2233,32 @@ export async function initFinance(mainEl) {
                 </form>`;
             }
         }
+        const isFees = !isPayments && !isTravel;
+        let syncToolbar = '';
+        if (isFees && programsCanEdit) {
+            const hasPayPal = row.ledger.some(
+                (e) => isLedgerRowSucceeded(e) && ledgerRowSource(e) === 'paypal' && String(e.externalChargeId || '').trim(),
+            );
+            const hasStripe = row.ledger.some(
+                (e) => isLedgerRowSucceeded(e) && ledgerRowSource(e) === 'stripe' && String(e.externalPaymentId || '').trim(),
+            );
+            const btns = [];
+            if (hasPayPal) {
+                btns.push('<button type="button" class="studio-btn-primary" id="studio-sync-paypal-fees">Sync PayPal fees</button>');
+            }
+            if (hasStripe) {
+                btns.push('<button type="button" class="studio-btn-primary" id="studio-sync-stripe-fees">Sync Stripe fees</button>');
+            }
+            if (btns.length) {
+                syncToolbar = `<div class="studio-finance-ledger-sync-toolbar" style="display:flex;gap:0.5rem;margin-bottom:0.75rem;align-items:center;">
+                    ${btns.join('')}
+                    <span class="studio-muted" id="studio-sync-fees-status" style="font-size:0.75rem;"></span>
+                </div>`;
+            }
+        }
         const inner = `
             <div class="studio-finance-ledger-modal">
+                ${syncToolbar}
                 <div class="studio-table-wrap">
                     <table class="studio-table studio-table--dense">
                         <thead>
@@ -2239,6 +2277,66 @@ export async function initFinance(mainEl) {
                 ${addForm}
             </div>`;
         const { close, root } = openStudioModal(inner, { title, wide: true });
+
+        const syncPayPalBtn = root.querySelector('#studio-sync-paypal-fees');
+        const syncStripeBtn = root.querySelector('#studio-sync-stripe-fees');
+        const syncStatusEl = root.querySelector('#studio-sync-fees-status');
+
+        const runFeeSync = async (provider) => {
+            const allPaymentRows = row.ledger.filter(
+                (e) => isLedgerRowSucceeded(e) && ledgerRowSource(e) === provider,
+            );
+            const toSync = allPaymentRows
+                .filter((e) =>
+                    provider === 'paypal'
+                        ? String(e.externalChargeId || '').trim()
+                        : String(e.externalPaymentId || '').trim(),
+                )
+                .map((e) => ({
+                    id: String(e.id || ''),
+                    paymentProvider: provider,
+                    externalPaymentId: String(e.externalPaymentId || ''),
+                    externalChargeId: String(e.externalChargeId || ''),
+                }));
+            if (!toSync.length) {
+                if (syncStatusEl) syncStatusEl.textContent = `No ${provider} transactions to sync.`;
+                return;
+            }
+            if (syncPayPalBtn instanceof HTMLButtonElement) syncPayPalBtn.disabled = true;
+            if (syncStripeBtn instanceof HTMLButtonElement) syncStripeBtn.disabled = true;
+            if (syncStatusEl) syncStatusEl.textContent = `Syncing ${toSync.length} ${provider} transaction${toSync.length === 1 ? '' : 's'}…`;
+            try {
+                const resp = provider === 'paypal'
+                    ? await syncPayPalProgramFees(toSync)
+                    : await syncStripeProgramFees(toSync);
+                const results = Array.isArray(resp?.results) ? resp.results : [];
+                const patches = results
+                    .filter((r) => r.feeCents > 0 && !r.error)
+                    .map((r) => [r.id, r.feeCents]);
+                if (patches.length > 0) {
+                    await integrationBatchPatchProgramPaymentFeesStudio(patches);
+                }
+                close();
+                await reloadAllFinanceData();
+                const { openStudioNoticeDialog } = await import('../../utils/studioModal.js');
+                const errors = results.filter((r) => r.error);
+                let msg = `Synced ${patches.length} fee${patches.length === 1 ? '' : 's'} from ${provider === 'paypal' ? 'PayPal' : 'Stripe'}.`;
+                if (errors.length > 0) msg += ` ${errors.length} could not be fetched.`;
+                await openStudioNoticeDialog({ heading: 'Fee sync complete', body: msg });
+            } catch (err) {
+                if (syncStatusEl) syncStatusEl.textContent = err instanceof Error ? err.message : String(err);
+                if (syncPayPalBtn instanceof HTMLButtonElement) syncPayPalBtn.disabled = false;
+                if (syncStripeBtn instanceof HTMLButtonElement) syncStripeBtn.disabled = false;
+            }
+        };
+
+        if (syncPayPalBtn) {
+            syncPayPalBtn.addEventListener('click', () => void runFeeSync('paypal'));
+        }
+        if (syncStripeBtn) {
+            syncStripeBtn.addEventListener('click', () => void runFeeSync('stripe'));
+        }
+
         const form = root.querySelector('#studio-finance-ledger-add-form');
         if (!(form instanceof HTMLFormElement)) return;
 

@@ -19,6 +19,7 @@ export const STUDIO_PERMISSION_FEATURE_ROWS = [
     { id: 'pending-approval', label: 'Status' },
     { id: 'profile-images', label: 'Profile Images' },
     { id: 'audio-files', label: 'Audio Files' },
+    { id: 'broadcasts', label: 'Broadcasts' },
     { id: 'artists', label: 'Artists' },
     { id: 'programs', label: 'Programs' },
     { id: 'products', label: 'Products' },

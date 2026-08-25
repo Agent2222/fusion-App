@@ -352,12 +352,23 @@ module {
         joinSeason : JoinSeason;
     };
 
-    /// ---------- Billing credits (referral rewards) ----------
+    /// ---------- Broadcast credits (referral rewards) ----------
 
-    public type BillingCreditRecord = {
+    public type BroadcastCreditRecord = {
         balance : Nat;
         grantedThisYear : Nat;
         lastGrantYear : Nat;
+    };
+
+    public type BroadcastChannel = { #featuredArtist; #newsletterBlast; #socialPost };
+
+    public type BroadcastRedemption = {
+        id : Text;
+        principal : Principal;
+        channel : BroadcastChannel;
+        redeemedAt : Text;
+        fulfilledAt : ?Text;
+        fulfilledBy : ?Principal;
     };
 
     /// Admin-generated single-use account recovery code (8-digit) — migrates `fromPrincipal` to redeemer.
@@ -1168,7 +1179,9 @@ module {
         promoRedemptionsStable : ?[(Text, PromoRedemption)];
         /// Invite lineage records; optional for older backups.
         inviteLineageStable : ?[(Principal, InviteLineage)];
-        /// Billing credits (referral rewards); optional for older backups.
-        billingCreditsStable : ?[(Principal, BillingCreditRecord)];
+        /// Broadcast credits (referral rewards); optional for older backups.
+        broadcastCreditsStable : ?[(Principal, BroadcastCreditRecord)];
+        /// Broadcast credit redemptions; optional for older backups.
+        broadcastRedemptionsStable : ?[(Text, BroadcastRedemption)];
     };
 };

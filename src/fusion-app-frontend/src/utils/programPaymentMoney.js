@@ -1058,6 +1058,39 @@ export function computeAdminNetProgramPayoutCents(adminMember, programProfitCent
 }
 
 /**
+ * Base expenses = per-applicant costs (fees + tickets + travel + partners) + team member expenses + program-funded staff paid.
+ * @param {object | null | undefined} programRow
+ * @param {object[] | null | undefined} applicantsForProgram
+ * @param {ReturnType<typeof buildProgramPaymentIndex>} [paymentIndex]
+ * @param {object[] | null | undefined} [teamMembers]
+ */
+export function computeProgramBaseExpenseCents(
+    programRow,
+    applicantsForProgram,
+    paymentIndex,
+    teamMembers,
+) {
+    const applicants = Array.isArray(applicantsForProgram) ? applicantsForProgram : [];
+    const index = paymentIndex || buildProgramPaymentIndex({});
+    let applicantExpenses = 0;
+    for (const applicant of applicants) {
+        if (!applicant || typeof applicant !== 'object') continue;
+        if (getApplicantIsTester(String(applicant.payloadJson || ''))) continue;
+        if (!isApplicantFinanceActive(applicant)) continue;
+        if (!isApplicantSlotSecured(applicant, index)) continue;
+        const row = buildStudioProgramFinanceRow(applicant, programRow, index);
+        applicantExpenses += normalizeCents(row.subtotalCents);
+    }
+    let teamExpenses = 0;
+    for (const m of Array.isArray(teamMembers) ? teamMembers : []) {
+        if (!m || String(m.status || 'active') === 'removed') continue;
+        teamExpenses += teamMemberExpenseSubtotalCents(m);
+    }
+    const programFundedPaid = computeProgramFundedStaffPaidCents(teamMembers);
+    return applicantExpenses + teamExpenses + programFundedPaid;
+}
+
+/**
  * Program profit = applicant profits − team expenses − promotions − program-funded staff paid.
  * Admin-funded staff payments reduce the admin Program Payout instead.
  * @param {object | null | undefined} programRow

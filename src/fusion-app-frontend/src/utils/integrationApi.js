@@ -1671,3 +1671,19 @@ export function completePrivateVideoMultipartUpload(body) {
 export function abortPrivateVideoMultipartUpload(body) {
     return integrationPost('/storage/private-video/multipart/abort', body);
 }
+
+/**
+ * Fetch actual PayPal transaction fees for a batch of ledger rows.
+ * @param {{ id: string, paymentProvider: string, externalPaymentId: string, externalChargeId: string }[]} ledgerRows
+ */
+export function syncPayPalProgramFees(ledgerRows) {
+    return integrationPost('/payments/sync-program-fees', { ledgerRows });
+}
+
+/**
+ * Fetch actual Stripe transaction fees for a batch of ledger rows.
+ * @param {{ id: string, externalPaymentId: string }[]} ledgerRows
+ */
+export function syncStripeProgramFees(ledgerRows) {
+    return integrationPost('/stripe/sync-program-fees', { ledgerRows });
+}

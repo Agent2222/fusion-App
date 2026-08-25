@@ -145,8 +145,12 @@ persistent actor {
 
   /// Invite lineage — who invited whom, with join season/year.
   stable var inviteLineageStable : [(Principal, Types.InviteLineage)] = [];
-  /// Billing credits (referral rewards) — months of free membership earned.
-  stable var billingCreditsStable : [(Principal, Types.BillingCreditRecord)] = [];
+  /// Broadcast credits (referral rewards) — earned by inviting members.
+  stable var broadcastCreditsStable : [(Principal, Types.BroadcastCreditRecord)] = [];
+  /// DEPRECATED: kept for one upgrade cycle so IC can drop the old stable var.
+  stable var billingCreditsStable : [(Principal, Types.BroadcastCreditRecord)] = [];
+  /// Broadcast credit redemptions — channel requests pending staff fulfillment.
+  stable var broadcastRedemptionsStable : [(Text, Types.BroadcastRedemption)] = [];
 
   /// Composite key: `artistId|programId` → JSON `{"submittedAt":...,"payload":...}` (one entry per program).
   stable var applicationByArtistProgramStable : [(Text, Text)] = [];
@@ -509,8 +513,10 @@ persistent actor {
 
   transient var inviteLineageByPrincipal : _HashMap.HashMap<Principal, Types.InviteLineage> =
     _HashMap.HashMap<Principal, Types.InviteLineage>(0, Principal.equal, Principal.hash);
-  transient var billingCreditsByPrincipal : _HashMap.HashMap<Principal, Types.BillingCreditRecord> =
-    _HashMap.HashMap<Principal, Types.BillingCreditRecord>(0, Principal.equal, Principal.hash);
+  transient var broadcastCreditsByPrincipal : _HashMap.HashMap<Principal, Types.BroadcastCreditRecord> =
+    _HashMap.HashMap<Principal, Types.BroadcastCreditRecord>(0, Principal.equal, Principal.hash);
+  transient var broadcastRedemptionsById : _HashMap.HashMap<Text, Types.BroadcastRedemption> =
+    _HashMap.HashMap<Text, Types.BroadcastRedemption>(0, Text.equal, Text.hash);
 
   transient var studioPermissionDefaultsByCategory : _HashMap.HashMap<Text, Types.StudioPermissionMatrix> =
     _HashMap.HashMap<Text, Types.StudioPermissionMatrix>(0, Text.equal, Text.hash);
@@ -824,8 +830,18 @@ persistent actor {
   for (entry in inviteLineageStable.vals()) {
     inviteLineageByPrincipal.put(entry.0, entry.1);
   };
+  for (entry in broadcastCreditsStable.vals()) {
+    broadcastCreditsByPrincipal.put(entry.0, entry.1);
+  };
   for (entry in billingCreditsStable.vals()) {
-    billingCreditsByPrincipal.put(entry.0, entry.1);
+    switch (broadcastCreditsByPrincipal.get(entry.0)) {
+      case null { broadcastCreditsByPrincipal.put(entry.0, entry.1) };
+      case _ {};
+    };
+  };
+  billingCreditsStable := [];
+  for (entry in broadcastRedemptionsStable.vals()) {
+    broadcastRedemptionsById.put(entry.0, entry.1);
   };
   for (entry in artistMediaStable.vals()) {
     artistMediaByArtistId.put(entry.0, entry.1);
@@ -905,6 +921,7 @@ persistent actor {
       "travel",
       "radar",
       "pending-approval",
+      "broadcasts",
       "artists",
       "programs",
       "products",
@@ -2144,7 +2161,8 @@ persistent actor {
     promoCodesStable := _Iter.toArray(promoCodesByCode.entries());
     promoRedemptionsStable := _Iter.toArray(promoRedemptionsByKey.entries());
     inviteLineageStable := _Iter.toArray(inviteLineageByPrincipal.entries());
-    billingCreditsStable := _Iter.toArray(billingCreditsByPrincipal.entries());
+    broadcastCreditsStable := _Iter.toArray(broadcastCreditsByPrincipal.entries());
+    broadcastRedemptionsStable := _Iter.toArray(broadcastRedemptionsById.entries());
     artistMediaStable := _Iter.toArray(artistMediaByArtistId.entries());
     studioPermissionDefaultsStable := _Iter.toArray(studioPermissionDefaultsByCategory.entries());
     studioPermissionOverridesStable := _Iter.toArray(studioPermissionOverridesByPrincipal.entries());
@@ -2324,15 +2342,25 @@ persistent actor {
     };
     inviteLineageStable := [];
 
-    billingCreditsByPrincipal := _HashMap.HashMap<Principal, Types.BillingCreditRecord>(
-      billingCreditsStable.size(),
+    broadcastCreditsByPrincipal := _HashMap.HashMap<Principal, Types.BroadcastCreditRecord>(
+      broadcastCreditsStable.size(),
       Principal.equal,
       Principal.hash,
     );
-    for (entry in billingCreditsStable.vals()) {
-      billingCreditsByPrincipal.put(entry.0, entry.1);
+    for (entry in broadcastCreditsStable.vals()) {
+      broadcastCreditsByPrincipal.put(entry.0, entry.1);
     };
-    billingCreditsStable := [];
+    broadcastCreditsStable := [];
+
+    broadcastRedemptionsById := _HashMap.HashMap<Text, Types.BroadcastRedemption>(
+      broadcastRedemptionsStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in broadcastRedemptionsStable.vals()) {
+      broadcastRedemptionsById.put(entry.0, entry.1);
+    };
+    broadcastRedemptionsStable := [];
 
     artistMediaByArtistId := _HashMap.HashMap<Text, Types.ArtistMedia>(
       artistMediaStable.size(),
@@ -3178,13 +3206,21 @@ persistent actor {
     for (entry in inviteLineageStable.vals()) {
       inviteLineageByPrincipal.put(entry.0, entry.1);
     };
-    billingCreditsByPrincipal := _HashMap.HashMap<Principal, Types.BillingCreditRecord>(
-      billingCreditsStable.size(),
+    broadcastCreditsByPrincipal := _HashMap.HashMap<Principal, Types.BroadcastCreditRecord>(
+      broadcastCreditsStable.size(),
       Principal.equal,
       Principal.hash,
     );
-    for (entry in billingCreditsStable.vals()) {
-      billingCreditsByPrincipal.put(entry.0, entry.1);
+    for (entry in broadcastCreditsStable.vals()) {
+      broadcastCreditsByPrincipal.put(entry.0, entry.1);
+    };
+    broadcastRedemptionsById := _HashMap.HashMap<Text, Types.BroadcastRedemption>(
+      broadcastRedemptionsStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in broadcastRedemptionsStable.vals()) {
+      broadcastRedemptionsById.put(entry.0, entry.1);
     };
 
     reloadStudioPermissionTransientFromStable();
@@ -3253,7 +3289,8 @@ persistent actor {
       promoCodesStable = ?(_Iter.toArray(promoCodesByCode.entries()));
       promoRedemptionsStable = ?(_Iter.toArray(promoRedemptionsByKey.entries()));
       inviteLineageStable = ?(_Iter.toArray(inviteLineageByPrincipal.entries()));
-      billingCreditsStable = ?(_Iter.toArray(billingCreditsByPrincipal.entries()));
+      broadcastCreditsStable = ?(_Iter.toArray(broadcastCreditsByPrincipal.entries()));
+      broadcastRedemptionsStable = ?(_Iter.toArray(broadcastRedemptionsById.entries()));
     };
   };
 
@@ -3404,7 +3441,11 @@ persistent actor {
       case null { [] };
       case (?rows) { rows };
     };
-    billingCreditsStable := switch (snapshot.billingCreditsStable) {
+    broadcastCreditsStable := switch (snapshot.broadcastCreditsStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    broadcastRedemptionsStable := switch (snapshot.broadcastRedemptionsStable) {
       case null { [] };
       case (?rows) { rows };
     };
@@ -6273,12 +6314,12 @@ persistent actor {
     Buffer.toArray(buf);
   };
 
-  // ——— Billing credits (referral rewards) ———
+  // ——— Broadcast credits (referral rewards) ———
 
   private let maxReferralCreditsPerYear : Nat = 6;
 
-  private func getBillingCreditRecord(p : Principal) : Types.BillingCreditRecord {
-    switch (billingCreditsByPrincipal.get(p)) {
+  private func getBroadcastCreditRecord(p : Principal) : Types.BroadcastCreditRecord {
+    switch (broadcastCreditsByPrincipal.get(p)) {
       case (?rec) { rec };
       case null { { balance = 0; grantedThisYear = 0; lastGrantYear = 0 } };
     };
@@ -6289,7 +6330,7 @@ persistent actor {
     yr;
   };
 
-  /// Integration API: credit the referrer after a referred member's first renewal.
+  /// Integration API: credit the referrer with a broadcast credit after a referred member's first renewal.
   public shared (msg) func creditReferrerForRenewal(redeemerPrincipal : Principal) : async Bool {
     assertIntegrationCaller(msg.caller);
     var referrerOpt : ?Principal = null;
@@ -6310,51 +6351,147 @@ persistent actor {
       case null { false };
       case (?referrer) {
         let yr = currentCalendarYear();
-        let rec = getBillingCreditRecord(referrer);
+        let rec = getBroadcastCreditRecord(referrer);
         let effectiveGranted = if (rec.lastGrantYear == yr) { rec.grantedThisYear } else { 0 };
         if (effectiveGranted >= maxReferralCreditsPerYear) { return false };
-        let updated : Types.BillingCreditRecord = {
+        let updated : Types.BroadcastCreditRecord = {
           balance = rec.balance + 1;
           grantedThisYear = effectiveGranted + 1;
           lastGrantYear = yr;
         };
-        billingCreditsByPrincipal.put(referrer, updated);
+        broadcastCreditsByPrincipal.put(referrer, updated);
         appendCreditLedger(
           Principal.toText(referrer),
-          "referral-credit",
+          "broadcast-credit",
           1,
           "credit",
-          "Referral reward: invited member " # Principal.toText(redeemerPrincipal) # " completed first renewal",
+          "Broadcast credit earned: invited member " # Principal.toText(redeemerPrincipal) # " completed first renewal",
         );
         true;
       };
     };
   };
 
-  public shared query (msg) func getMyBillingCredits() : async Nat {
+  public shared query (msg) func getMyBroadcastCredits() : async Nat {
     if (Principal.equal(msg.caller, anonPrincipal)) {
       Debug.trap("Authentication required");
     };
-    getBillingCreditRecord(msg.caller).balance;
+    getBroadcastCreditRecord(msg.caller).balance;
   };
 
-  /// Integration API: consume one billing credit during renewal (applies free month).
-  public shared (msg) func consumeBillingCredit(principal : Principal) : async Bool {
-    assertIntegrationCaller(msg.caller);
-    let rec = getBillingCreditRecord(principal);
+  /// Authenticated member: redeem one broadcast credit for a channel feature.
+  public shared (msg) func redeemBroadcastCredit(channel : Types.BroadcastChannel) : async Bool {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      Debug.trap("Authentication required");
+    };
+    let rec = getBroadcastCreditRecord(msg.caller);
     if (rec.balance == 0) { return false };
-    let updated : Types.BillingCreditRecord = {
+    let updated : Types.BroadcastCreditRecord = {
       rec with balance = rec.balance - 1;
     };
-    billingCreditsByPrincipal.put(principal, updated);
+    broadcastCreditsByPrincipal.put(msg.caller, updated);
+    let channelLabel = switch (channel) {
+      case (#featuredArtist) { "featured-artist" };
+      case (#newsletterBlast) { "newsletter-blast" };
+      case (#socialPost) { "social-post" };
+    };
+    let redemptionId = generateFusnCode(broadcastRedemptionsById.size()) # "-BR";
+    let redemption : Types.BroadcastRedemption = {
+      id = redemptionId;
+      principal = msg.caller;
+      channel = channel;
+      redeemedAt = nowText();
+      fulfilledAt = null;
+      fulfilledBy = null;
+    };
+    broadcastRedemptionsById.put(redemptionId, redemption);
     appendCreditLedger(
-      Principal.toText(principal),
-      "referral-credit-consumed",
+      Principal.toText(msg.caller),
+      "broadcast-credit-redeemed",
       1,
       "debit",
-      "Billing credit consumed — free month applied",
+      "Broadcast credit redeemed for " # channelLabel,
     );
     true;
+  };
+
+  /// Staff: mark a broadcast redemption as fulfilled.
+  public shared (msg) func staffFulfillBroadcastRedemption(redemptionId : Text) : async Bool {
+    assertStaffOrAdmin(msg.caller);
+    switch (broadcastRedemptionsById.get(redemptionId)) {
+      case null { false };
+      case (?r) {
+        let updated : Types.BroadcastRedemption = {
+          r with fulfilledAt = ?nowText();
+          fulfilledBy = ?msg.caller;
+        };
+        broadcastRedemptionsById.put(redemptionId, updated);
+        true;
+      };
+    };
+  };
+
+  /// Staff: list all broadcast credit redemptions.
+  public shared query (msg) func staffListBroadcastRedemptions() : async [Types.BroadcastRedemption] {
+    assertStaffOrAdmin(msg.caller);
+    let buf = Buffer.Buffer<Types.BroadcastRedemption>(broadcastRedemptionsById.size());
+    for ((_, r) in broadcastRedemptionsById.entries()) {
+      buf.add(r);
+    };
+    Buffer.toArray(buf);
+  };
+
+  /// Staff: list all non-zero broadcast credit balances.
+  public shared query (msg) func staffListBroadcastCredits() : async [(Principal, Nat)] {
+    assertStaffOrAdmin(msg.caller);
+    let buf = Buffer.Buffer<(Principal, Nat)>(broadcastCreditsByPrincipal.size());
+    for ((p, rec) in broadcastCreditsByPrincipal.entries()) {
+      if (rec.balance > 0) {
+        buf.add((p, rec.balance));
+      };
+    };
+    Buffer.toArray(buf);
+  };
+
+  /// Staff: set exact broadcast credit balance for a single principal.
+  public shared (msg) func staffSetBroadcastCredits(principal : Principal, balance : Nat) : async Bool {
+    assertStaffOrAdmin(msg.caller);
+    let rec = getBroadcastCreditRecord(principal);
+    let updated : Types.BroadcastCreditRecord = {
+      rec with balance = balance;
+    };
+    broadcastCreditsByPrincipal.put(principal, updated);
+    appendCreditLedger(
+      Principal.toText(principal),
+      "broadcast-credit-staff-set",
+      balance,
+      "adjustment",
+      "Staff set broadcast credits to " # Nat.toText(balance),
+    );
+    true;
+  };
+
+  /// Staff: batch set broadcast credit balances (max 100 entries).
+  public shared (msg) func staffBatchSetBroadcastCredits(entries : [(Principal, Nat)]) : async Nat {
+    assertStaffOrAdmin(msg.caller);
+    if (entries.size() > 100) { Debug.trap("Batch limit is 100") };
+    var count : Nat = 0;
+    for ((principal, balance) in entries.vals()) {
+      let rec = getBroadcastCreditRecord(principal);
+      let updated : Types.BroadcastCreditRecord = {
+        rec with balance = balance;
+      };
+      broadcastCreditsByPrincipal.put(principal, updated);
+      appendCreditLedger(
+        Principal.toText(principal),
+        "broadcast-credit-staff-set",
+        balance,
+        "adjustment",
+        "Staff batch-set broadcast credits to " # Nat.toText(balance),
+      );
+      count += 1;
+    };
+    count;
   };
 
   // ——— Studio Schedule (calendar events) ———
@@ -8260,6 +8397,45 @@ persistent actor {
       true,
     );
     putProgramPaymentSummaryFromLedger(row, effectiveTotalDue, depositAmountCents, refundedCents);
+  };
+
+  /// Integration: batch-patch feeCents on existing program payment ledger rows.
+  public shared (msg) func integrationBatchPatchProgramPaymentFees(
+    patches : [(Text, Nat)]
+  ) : async Nat {
+    assertIntegrationCaller(msg.caller);
+    var count : Nat = 0;
+    for ((paymentId, feeCents) in patches.vals()) {
+      switch (programPaymentLedgerById.get(paymentId)) {
+        case (?existing) {
+          let updated : Types.ProgramPaymentLedgerRow = {
+            id = existing.id;
+            principal = existing.principal;
+            programId = existing.programId;
+            applicationId = existing.applicationId;
+            paymentType = existing.paymentType;
+            amountCents = existing.amountCents;
+            currency = existing.currency;
+            stripePaymentIntentId = existing.stripePaymentIntentId;
+            stripeChargeId = existing.stripeChargeId;
+            stripeReceiptUrl = existing.stripeReceiptUrl;
+            status = existing.status;
+            createdAt = existing.createdAt;
+            dueAt = existing.dueAt;
+            feeCents = feeCents;
+            staffNote = existing.staffNote;
+            paymentProvider = existing.paymentProvider;
+            externalPaymentId = existing.externalPaymentId;
+            externalChargeId = existing.externalChargeId;
+            externalReceiptUrl = existing.externalReceiptUrl;
+          };
+          programPaymentLedgerById.put(paymentId, updated);
+          count += 1;
+        };
+        case null {};
+      };
+    };
+    count;
   };
 
   public shared (msg) func integrationMarkProgramDepositAccepted(
