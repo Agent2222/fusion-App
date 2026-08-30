@@ -1286,6 +1286,11 @@
   --mpd-tab-accent-soft: rgba(91, 75, 138, 0.14);
 }
 
+.settings-profile-page .mpd-program-tab--communications {
+  --mpd-tab-accent: #06c755;
+  --mpd-tab-accent-soft: rgba(6, 199, 85, 0.14);
+}
+
 /* display:inline-flex above beats the UA [hidden] rule — force hide when gated. */
 .settings-profile-page .mpd-program-tab[hidden],
 .settings-profile-page .mpd-program-tab.mpd-program-tab--force-hidden {
@@ -5132,6 +5137,65 @@ a.mpd-section-card:hover {
   margin: 0.65rem 0 0.75rem;
 }
 
+.settings-profile-page .mpd-audio-section.is-pending-audio #mpd_audio_file_label {
+  display: none;
+}
+
+.settings-profile-page .mpd-audio-pending {
+  margin: 0.35rem 0 1rem;
+  padding: 0.9rem 1rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--c2) 16%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--c2) 4%, transparent);
+}
+
+.settings-profile-page .mpd-audio-pending__kicker {
+  margin: 0 0 0.25rem;
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  font-variation-settings: var(--fv-label);
+}
+
+.settings-profile-page .mpd-audio-pending__name {
+  margin: 0 0 0.65rem;
+  font-size: 0.88rem;
+}
+
+.settings-profile-page .mpd-audio-pending__player {
+  display: block;
+  width: 100%;
+  margin: 0 0 0.65rem;
+}
+
+.settings-profile-page .mpd-audio-pending__hint {
+  margin: 0 0 0.75rem;
+}
+
+.settings-profile-page .mpd-audio-pending__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.settings-profile-page .mpd-audio-pending-discard {
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--c2) 28%, transparent);
+  background: transparent;
+  color: var(--c2);
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.settings-profile-page .mpd-audio-pending-discard:hover {
+  border-color: #c00;
+  color: #c00;
+  background: color-mix(in srgb, #c00 8%, transparent);
+}
+
 .settings-profile-page .mpd-audio-record-btn {
   background: transparent;
   color: var(--c2);
@@ -5400,6 +5464,8 @@ a.mpd-section-card:hover {
 .settings-profile-page .mpd-audio-entry-controls {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 0.4rem;
   flex-shrink: 0;
 }
@@ -5428,6 +5494,24 @@ a.mpd-section-card:hover {
 .settings-profile-page .mpd-audio-highlight-btn.active {
   color: var(--c2);
   border-color: var(--c2);
+}
+
+.settings-profile-page .mpd-audio-replace-btn {
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--c2) 30%, transparent);
+  background: transparent;
+  color: var(--c2);
+  font: inherit;
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  padding: 0.28rem 0.55rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.settings-profile-page .mpd-audio-replace-btn:hover {
+  border-color: var(--c2);
+  background: color-mix(in srgb, var(--c2) 6%, transparent);
 }
 
 .settings-profile-page .mpd-audio-delete-btn {
@@ -6214,6 +6298,16 @@ a.mpd-section-card:hover {
   text-decoration: none;
   color: var(--fusion-ink, #111827);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  overflow: hidden;
+}
+
+.mpd-travel-prep-link-card__img {
+  display: block;
+  width: calc(100% + 2rem);
+  margin: -0.75rem -1rem 0.45rem;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  background: #f3f0ea;
 }
 
 .mpd-travel-prep-link-card:hover {
@@ -6235,4 +6329,70 @@ a.mpd-section-card:hover {
   font-size: 0.9rem;
   align-self: flex-end;
   color: #d4a574;
+}
+
+.mpd-comms-room {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  margin: 0 0 1.15rem;
+  padding: 1.1rem 1.15rem 1.2rem;
+  border: 1px solid color-mix(in srgb, var(--c2, #0f172a) 12%, transparent);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.mpd-comms-room:last-child {
+  margin-bottom: 0;
+}
+
+.mpd-comms-room__head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.mpd-comms-room__provider {
+  width: 2.75rem;
+  height: 2.75rem;
+  object-fit: contain;
+  flex: 0 0 auto;
+  padding: 0.2rem;
+  background: #fff;
+}
+
+.mpd-comms-room__title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-variation-settings: var(--fv-label-strong);
+}
+
+.mpd-comms-room__group {
+  margin: 0.15rem 0 0;
+  font-size: 0.82rem;
+  color: var(--studio-muted, #475569);
+}
+
+.mpd-comms-room__invite {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.mpd-comms-room__qr-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 0.5rem 0;
+}
+
+.mpd-comms-room__qr {
+  width: 11.5rem;
+  height: 11.5rem;
+  object-fit: contain;
+  background: #fff;
+}
+
+.mpd-comms-room__join {
+  align-self: flex-start;
+  text-decoration: none;
 }

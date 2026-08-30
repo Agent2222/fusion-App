@@ -183,8 +183,20 @@ export function scoreTier(score) {
 }
 
 /**
+ * @param {unknown} lead
+ */
+function payloadHasRedFlags(lead) {
+    try {
+        const o = JSON.parse(String(lead?.payloadJson || '{}'));
+        return Boolean(String(o?.sheet?.redFlags || '').trim());
+    } catch {
+        return false;
+    }
+}
+
+/**
  * @param {ReturnType<typeof emptyLead>[]} leads
- * @param {{ q?: string, type?: string, status?: string, region?: string, minScore?: number }} filters
+ * @param {{ q?: string, type?: string, status?: string, region?: string, minScore?: number, hasRedFlag?: boolean }} filters
  */
 export function filterLeads(leads, filters = {}) {
     const q = String(filters.q || '')
@@ -194,11 +206,18 @@ export function filterLeads(leads, filters = {}) {
     const status = String(filters.status || '').trim();
     const region = String(filters.region || '').trim();
     const minScore = Number(filters.minScore) || 0;
+    const hasRedFlag = Boolean(filters.hasRedFlag);
     return (Array.isArray(leads) ? leads : []).filter((l) => {
         if (type && l.leadType !== type) return false;
         if (status && l.status !== status) return false;
-        if (region && l.regionKey !== region) return false;
+        if (region) {
+            const needle = region.toLowerCase();
+            const loc = String(l.location || '').toLowerCase();
+            const key = String(l.regionKey || '').toLowerCase();
+            if (!key.includes(needle) && !loc.includes(needle)) return false;
+        }
         if (minScore && (Number(l.aiScore) || 0) < minScore) return false;
+        if (hasRedFlag && !payloadHasRedFlags(l)) return false;
         if (!q) return true;
         const hay = [l.name, l.location, l.discipline, l.fusionFit, l.japanConnection, l.notes]
             .join(' ')

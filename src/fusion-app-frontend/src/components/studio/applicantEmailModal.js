@@ -6,6 +6,11 @@ import { getDataSource, getPrograms, studioReinterpretWithPrompt, appendApplican
 import { openStudioModal } from '../../utils/studioModal.js';
 import { getIntegrationBaseUrl, sendEmail } from '../../utils/integrationApi.js';
 import { wrapEmailHtml } from '../../utils/emailCampaignTemplates.js';
+import {
+    fusionEmailLink,
+    fusionEmailParagraph,
+    renderFusionEmailFromSlots,
+} from '../../utils/emailFusionLayout.js';
 import { buildProgramRunSidebarDateLines } from '../../utils/programSidebarRunDates.js';
 import { formatStudioDateWithTitle } from '../../utils/studioDateFormat.js';
 import { formatUsdFromCents } from '../../utils/programPaymentMoney.js';
@@ -100,6 +105,52 @@ function plainBodyToEmailHtml(plain) {
 }
 
 /**
+ * Escape plain text and turn http(s) URLs into Fusion layout links.
+ * @param {string} text
+ */
+function linkifyPlainForFusionEmail(text) {
+    const src = String(text ?? '');
+    const urlRe = /(https?:\/\/[^\s]+)/gi;
+    /** @type {string[]} */
+    const parts = [];
+    let last = 0;
+    let match;
+    while ((match = urlRe.exec(src))) {
+        if (match.index > last) parts.push(escapeHtmlText(src.slice(last, match.index)));
+        const rawUrl = match[1];
+        const trimmed = rawUrl.replace(/[),.;:]+$/g, '');
+        const trailing = rawUrl.slice(trimmed.length);
+        parts.push(fusionEmailLink(trimmed, trimmed) + escapeHtmlText(trailing));
+        last = match.index + match[0].length;
+    }
+    if (last < src.length) parts.push(escapeHtmlText(src.slice(last)));
+    return parts.join('');
+}
+
+/**
+ * Convert composer plain text into General-template body HTML.
+ * @param {string} plain
+ */
+function plainBodyToFusionEmailHtml(plain) {
+    const blocks = String(plain || '')
+        .trim()
+        .split(/\n\s*\n/)
+        .map((block) => block.trim())
+        .filter(Boolean);
+    return blocks
+        .map((block, i, arr) => {
+            const variant = i === 0 ? 'lead' : i === arr.length - 1 ? 'last' : 'body';
+            const html = block
+                .split('\n')
+                .map((line) => linkifyPlainForFusionEmail(line.trim()))
+                .filter(Boolean)
+                .join('<br>');
+            return fusionEmailParagraph(html, variant);
+        })
+        .join('\n');
+}
+
+/**
  * @param {Record<string, string>} vars
  * @param {string} t
  */
@@ -122,6 +173,63 @@ function applicantFirstName(name) {
 
 function profileProgramsUrl() {
     return `${getPublicSiteOrigin()}/settings/profile`;
+}
+
+function profileTravelTabUrl() {
+    return `${getPublicSiteOrigin()}/settings/profile#travel`;
+}
+
+/**
+ * Prominent flight details block for the General email layout.
+ * @param {{ airline: string, confirmation: string, airlineUrl: string }} details
+ */
+function fusionEmailFlightDetailsCard(details) {
+    const airline = String(details.airline || '').trim() || '—';
+    const confirmation = String(details.confirmation || '').trim() || '—';
+    const airlineUrl = String(details.airlineUrl || '').trim();
+    const hasBookingUrl = /^https?:\/\//i.test(airlineUrl);
+    const manageHtml = hasBookingUrl
+        ? fusionEmailLink(airlineUrl, 'Open airline booking')
+        : escapeHtmlText(airlineUrl && airlineUrl !== '(not yet entered)' ? airlineUrl : '—');
+    const row = (label, valueHtml) => `<tr>
+<td style="padding:0 0 4px;font-size:11px;letter-spacing:0.1em;text-transform:uppercase;font-weight:800;color:#000000;">${escapeHtmlText(label)}</td>
+</tr>
+<tr>
+<td style="padding:0 0 18px;font-size:26px;line-height:1.1;font-weight:900;letter-spacing:-0.03em;color:#000000;">${valueHtml}</td>
+</tr>`;
+    return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 28px;border:1px solid #000000;">
+<tbody><tr>
+<td style="padding:22px 24px 8px;">
+<p style="margin:0 0 18px;font-size:11px;letter-spacing:0.14em;text-transform:uppercase;font-weight:800;color:#000000;">Flight details</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+<tbody>
+${row('Airline', escapeHtmlText(airline))}
+${row('Confirmation number', escapeHtmlText(confirmation))}
+<tr>
+<td style="padding:0 0 4px;font-size:11px;letter-spacing:0.1em;text-transform:uppercase;font-weight:800;color:#000000;">Manage booking</td>
+</tr>
+<tr>
+<td style="padding:0 0 8px;font-size:16px;line-height:1.4;font-weight:600;color:#000000;">${manageHtml}</td>
+</tr>
+</tbody></table>
+</td>
+</tr></tbody></table>`;
+}
+
+/**
+ * Remove the structured flight-details lines from composer copy so they are not duplicated
+ * next to the prominent card.
+ * @param {string} plain
+ */
+function stripFlightDetailsBlock(plain) {
+    return String(plain || '')
+        .split('\n')
+        .filter((line) => {
+            const t = line.trim();
+            if (!t) return true;
+            return !/^(flight details:?|airline:|confirmation number:|manage your booking:)/i.test(t);
+        })
+        .join('\n');
 }
 
 /**
@@ -238,11 +346,9 @@ Airline: {{flightAirline}}
 Confirmation number: {{flightConfirmation}}
 Manage your booking: {{flightAirlineUrl}}
 
-Please review your flight details above. You can manage your booking directly through your airline's website using the confirmation number provided.
+Please review the details above. You can manage your booking through your airline using the confirmation number.
 
-You can also view your flight information anytime by signing in to Fusion, visiting your Settings Profile page, opening the Programs section, and selecting the Travel tab.
-
-One thing we need from you: please add your estimated arrival date and time in the Travel tab so that our team can coordinate and stay up to date with your arrival in case anything changes.
+Please add your estimated arrival date and time so our team can coordinate if anything changes.
 
 If anything looks incorrect or you have questions about your travel, reply to this email and our team will assist you.
 
@@ -357,11 +463,14 @@ function extractProgramTemplateInfo(program) {
         programStartDate && programEndDate
             ? `${programStartDate} to ${programEndDate}`
             : nonEmptyString(programStartDate, programEndDate, pp.runDates, en.runDates, en.year);
+    const ja = program?.jaCard && typeof program.jaCard === 'object' ? program.jaCard : {};
+    const programHeroImageUrl = nonEmptyString(en.imageSrc, en.heroMediaSrc, ja.imageSrc, ja.heroMediaSrc);
     return {
         programLocation,
         programDate,
         programStartDate: programStartDate || programDate,
         programEndDate: programEndDate || programDate,
+        programHeroImageUrl,
     };
 }
 
@@ -382,6 +491,7 @@ export async function openApplicantEmailModal(row, opts = {}) {
     let programDate = 'upcoming program date';
     let programStartDate = 'upcoming program date';
     let programEndDate = 'upcoming program date';
+    let programHeroImageUrl = '';
     try {
         const programs = await getPrograms();
         const program = (programs || []).find((p) => String(p?.id || '') === programId);
@@ -391,6 +501,7 @@ export async function openApplicantEmailModal(row, opts = {}) {
             programDate = info.programDate || programDate;
             programStartDate = info.programStartDate || programStartDate;
             programEndDate = info.programEndDate || programEndDate;
+            programHeroImageUrl = info.programHeroImageUrl || '';
         }
     } catch {
         /* keep fallbacks */
@@ -747,6 +858,39 @@ export async function openApplicantEmailModal(row, opts = {}) {
 
     const fullHtml = () => {
         const bodyPlain = bodyEl instanceof HTMLTextAreaElement ? bodyEl.value : '';
+        const appliedId = String(lastAppliedTemplate?.id || '').trim();
+        if (appliedId === FLIGHT_INFO_TEMPLATE_ID) {
+            const stripped = stripFlightDetailsBlock(bodyPlain);
+            const blocks = stripped
+                .trim()
+                .split(/\n\s*\n/)
+                .map((b) => b.trim())
+                .filter(Boolean);
+            const introBlocks = blocks.slice(0, Math.min(2, blocks.length));
+            const restBlocks = blocks.slice(introBlocks.length);
+            const detailsCard = fusionEmailFlightDetailsCard({
+                airline: vars.flightAirline,
+                confirmation: vars.flightConfirmation,
+                airlineUrl: vars.flightAirlineUrl,
+            });
+            const bodyHtml = [
+                introBlocks.length ? plainBodyToFusionEmailHtml(introBlocks.join('\n\n')) : '',
+                detailsCard,
+                restBlocks.length ? plainBodyToFusionEmailHtml(restBlocks.join('\n\n')) : '',
+            ]
+                .filter(Boolean)
+                .join('\n');
+            return renderFusionEmailFromSlots({
+                eyebrow: 'Travel',
+                heroImageUrl: programHeroImageUrl,
+                heroAlt: programLocation,
+                pillLabel: 'FLIGHT INFORMATION',
+                headlineHtml: 'Your flight<br>details',
+                bodyHtml,
+                cta: { label: 'ADD ARRIVAL TIME', href: profileTravelTabUrl() },
+                footnote: 'Sign in, open Programs, then the Travel tab to add your estimated arrival date and time.',
+            });
+        }
         const bodyHtml = plainBodyToEmailHtml(bodyPlain);
         const sig = sigTextarea instanceof HTMLTextAreaElement ? sigTextarea.value : '';
         const sigTrim = sig.trim();

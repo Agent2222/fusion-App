@@ -3,6 +3,7 @@ import {
     EMAIL_CAMPAIGN_TEMPLATES,
     getEmailTemplateById,
     interpolateRosterBlastTemplate,
+    renderRadarTemplateHtml,
     ROSTER_OPEN_CALL_TEMPLATE_ID,
 } from './emailCampaignTemplates.js';
 import { isFusionEmailLayout } from './emailFusionLayout.js';
@@ -87,9 +88,56 @@ describe('EMAIL_CAMPAIGN_TEMPLATES', () => {
         expect(isFusionEmailLayout(tpl.bodyHtml)).toBe(true);
     });
 
+    it('program calendar template binds a program source and uses the Kaga hero', () => {
+        const tpl = getEmailTemplateById('tpl_program_calendar');
+        expect(tpl?.templateGroup).toBe('updates');
+        expect(tpl?.contentSourceTypes).toContain('program');
+        expect(isFusionEmailLayout(tpl?.bodyHtml || '')).toBe(true);
+        expect(tpl?.bodyHtml).toContain('/settings/profile');
+        expect(tpl?.bodyHtml).toContain('VIEW CALENDAR');
+        expect(tpl?.bodyHtml).not.toContain('OPEN SCHEDULE');
+        expect(tpl?.bodyHtml).not.toContain('DOWNLOAD CALENDAR');
+        expect(tpl?.bodyHtml).toContain('Week 1');
+        expect(tpl?.bodyHtml).toContain('Week 2');
+        expect(tpl?.bodyHtml).toContain('<hr');
+        expect(tpl?.bodyHtml).toContain('<ul');
+        expect(tpl?.bodyHtml).toContain('Calendar');
+        expect(tpl?.bodyHtml).toContain('c34ec160-kaga_2.jpg');
+        expect(tpl?.bodyHtml).not.toMatch(/your program<br>calendar/i);
+        expect(tpl?.bodyHtml.toLowerCase()).toMatch(/special experience/);
+    });
+
+    it('program comms LINE template uses Fusion layout and both CTAs', () => {
+        const tpl = getEmailTemplateById('tpl_program_comms_line');
+        expect(tpl?.templateGroup).toBe('updates');
+        expect(isFusionEmailLayout(tpl?.bodyHtml || '')).toBe(true);
+        expect(tpl?.bodyHtml).toContain('ADD FUSION ON LINE');
+        expect(tpl?.bodyHtml).toContain('JOIN THE GROUP');
+        expect(tpl?.defaultSubject).toMatch(/LINE/i);
+    });
+
     it('legacy tpl_artist_feature resolves to featured artist', () => {
         const legacy = getEmailTemplateById('tpl_artist_feature');
         const featured = getEmailTemplateById('tpl_featured_artist');
         expect(legacy?.contentSourceTypes).toEqual(featured?.contentSourceTypes);
+    });
+
+    it('Radar artist invite exists and interpolates join URL plus code', () => {
+        const tpl = getEmailTemplateById('tpl_radar_artists');
+        expect(tpl?.id).toBe('tpl_radar_artists');
+        expect(tpl?.bodyHtml).toContain('{{DISCOUNT_CODE}}');
+        expect(tpl?.bodyHtml).toContain('{{JOIN_URL}}');
+        expect(tpl?.bodyHtml).toMatch(/JOIN FUSION/i);
+        const html = renderRadarTemplateHtml({
+            templateId: 'tpl_radar_artists',
+            code: 'RADAR-A7K2',
+            durationMonths: 3,
+        });
+        expect(html).toContain('RADAR-A7K2');
+        expect(html).toContain('50% off first 3 months');
+        expect(html).toContain('/join-network?ref=RADAR-A7K2');
+        expect(html).not.toContain('{{DISCOUNT_CODE}}');
+        expect(html).not.toContain('{{JOIN_URL}}');
+        expect(isFusionEmailLayout(html)).toBe(true);
     });
 });

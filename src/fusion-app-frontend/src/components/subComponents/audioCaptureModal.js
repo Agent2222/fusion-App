@@ -3,6 +3,7 @@
  * Reuses existing `#mpd_audio_url` / `#mpd_audio_title` + S3 upload path.
  */
 import { uploadBlobToS3 } from '../../utils/studioS3Upload.js';
+import { uniqueAudioUploadFieldKey } from '../../utils/artistAudioCollection.js';
 
 const MAX_MS = 3 * 60 * 1000;
 const TICK_MS = 200;
@@ -289,7 +290,7 @@ export function openMpdAudioCaptureModal(opts = {}) {
         area: 'account/profile',
         entityType: 'artist',
         entityId: String(opts.artistId || opts.slug || 'artist'),
-        fieldKey: 'audio',
+        fieldKey: uniqueAudioUploadFieldKey(),
       });
       const urlEl = /** @type {HTMLInputElement | null} */ (document.getElementById('mpd_audio_url'));
       if (urlEl) urlEl.value = url;

@@ -6,6 +6,7 @@ import { scheduleTimezoneButtonLabel } from './scheduleTimezones.js';
 
 /** @typedef {'draft' | 'awaiting_confirmation' | 'confirmed' | 'cancelled'} CalendarEventStatus */
 /** @typedef {'sage' | 'blue' | 'sand' | 'blush'} CalendarEventColor */
+/** @typedef {'optional' | 'suggested' | 'general'} ScheduleEventImportance */
 
 /**
  * @typedef {{ id: string, name: string, avatarUrl?: string, initials?: string }} CalendarPerson
@@ -48,6 +49,12 @@ import { scheduleTimezoneButtonLabel } from './scheduleTimezones.js';
  *   eventKind?: 'standard' | 'workshop' | 'adventure',
  *   imageUrl?: string,
  *   publicOnSite?: boolean,
+ *   importance?: ScheduleEventImportance,
+ *   acceptRsvp?: boolean,
+ *   availability?: number,
+ *   rsvpIds?: string[],
+ *   rsvpCount?: number,
+ *   myRsvp?: boolean,
  *   createdBy?: string,
  *   conflicts: EventConflict[],
  *   createdAt: string,
@@ -312,6 +319,82 @@ export function statusLabel(status) {
 }
 
 /**
+ * @param {unknown} raw
+ * @returns {ScheduleEventImportance}
+ */
+export function normalizeScheduleImportance(raw) {
+    const t = String(raw || '')
+        .trim()
+        .toLowerCase();
+    if (t === 'optional' || t === 'suggested' || t === 'general') return t;
+    return 'general';
+}
+
+/**
+ * @param {ScheduleEventImportance | string} importance
+ */
+export function scheduleImportanceLabel(importance) {
+    const v = normalizeScheduleImportance(importance);
+    if (v === 'optional') return 'Optional';
+    if (v === 'suggested') return 'Suggested';
+    return 'General';
+}
+
+/**
+ * @param {unknown} raw
+ * @param {boolean} [acceptRsvp]
+ * @returns {number}
+ */
+export function clampScheduleAvailability(raw, acceptRsvp = true) {
+    if (!acceptRsvp) return 0;
+    const n = Math.round(Number(raw) || 0);
+    if (!Number.isFinite(n) || n <= 0) return 20;
+    return Math.min(200, Math.max(1, n));
+}
+
+/**
+ * @param {ScheduleEventImportance | string} importance
+ */
+export function scheduleImportancePillClass(importance) {
+    return `event-dialog__importance event-dialog__importance--${normalizeScheduleImportance(importance)}`;
+}
+
+/**
+ * View/edit people section label: RSVP events list RSVPs instead of assigned artists.
+ * @param {boolean} acceptRsvp
+ */
+export function scheduleEventPeopleLabel(acceptRsvp) {
+    return acceptRsvp ? 'RSVPs' : 'Artists';
+}
+
+/**
+ * @param {unknown} count
+ * @param {unknown} availability
+ */
+export function scheduleEventRsvpCountLabel(count, availability) {
+    const n = Math.max(0, Math.round(Number(count) || 0));
+    const cap = clampScheduleAvailability(availability, true);
+    return `${n} / ${cap} RSVP${n === 1 ? '' : 's'}`;
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {string[]}
+ */
+export function normalizeScheduleRsvpIds(raw) {
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    const seen = new Set();
+    for (const item of raw) {
+        const id = String(item || '').trim();
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        out.push(id);
+    }
+    return out;
+}
+
+/**
  * ISO week bounds (Mon–Sun) containing ymd.
  * @param {string} ymd
  */
@@ -330,4 +413,126 @@ export function weekRangeContaining(ymd) {
  */
 export function ymdInRange(ymd, start, end) {
     return ymd >= start && ymd <= end;
+}
+
+/** Fixture event ids from retired `staffSeedScheduleDemoIfEmpty`. Do not match by program id. */
+export const SEEDED_DEMO_SCHEDULE_EVENT_IDS = new Set([
+    'evt-kaga-arrival',
+    'evt-studio-orient-early',
+    'evt-open-studios-10',
+    'evt-gallery-10a',
+    'evt-mentor-10b',
+    'evt-mentor-12',
+    'evt-orient-12',
+    'evt-gallery-12',
+    'evt-open-12',
+    'evt-sync-12',
+    'evt-dinner-12',
+    'evt-tokyo-14',
+    'evt-gallery-15',
+    'evt-dinner-18',
+    'evt-install-22',
+    'evt-mentor-25',
+    'evt-open-28',
+]);
+
+/**
+ * True only for leftover demo-seed rows. Staff-created events (even if they used old
+ * demo program ids like prog-kaga) must never match.
+ * @param {any} row
+ */
+export function isSeededDemoScheduleEvent(row) {
+    const id = String(row?.id || '').trim();
+    const createdBy = String(row?.createdBy || '').trim();
+    if (createdBy === 'seed') return true;
+    return SEEDED_DEMO_SCHEDULE_EVENT_IDS.has(id);
+}
+
+/**
+ * Motoko `jsonText` historically only escaped `\\` and `"`.
+ * Event notes with real newlines then fail `JSON.parse` with
+ * "Bad control character in string literal".
+ * Escape raw control characters that appear inside JSON string literals.
+ * @param {string} raw
+ * @returns {string}
+ */
+export function escapeControlCharsInJsonStrings(raw) {
+    const s = String(raw ?? '');
+    let out = '';
+    let inString = false;
+    let escaped = false;
+    for (let i = 0; i < s.length; i += 1) {
+        const ch = s[i];
+        const code = s.charCodeAt(i);
+        if (escaped) {
+            out += ch;
+            escaped = false;
+            continue;
+        }
+        if (inString && ch === '\\') {
+            out += ch;
+            escaped = true;
+            continue;
+        }
+        if (ch === '"') {
+            inString = !inString;
+            out += ch;
+            continue;
+        }
+        if (inString && code < 0x20) {
+            if (code === 0x0a) out += '\\n';
+            else if (code === 0x0d) out += '\\r';
+            else if (code === 0x09) out += '\\t';
+            else out += `\\u${code.toString(16).padStart(4, '0')}`;
+            continue;
+        }
+        out += ch;
+    }
+    return out;
+}
+
+/**
+ * Parse canister JSON text, repairing unescaped control characters in strings.
+ * @param {unknown} raw
+ */
+export function parseCanisterJsonText(raw) {
+    if (typeof raw !== 'string') return raw;
+    try {
+        return JSON.parse(raw);
+    } catch (first) {
+        try {
+            return JSON.parse(escapeControlCharsInJsonStrings(raw));
+        } catch {
+            throw first;
+        }
+    }
+}
+
+/**
+ * Unwrap IC replica / Candid trap text so Studio can show a short save/load reason.
+ * @param {unknown} err
+ */
+export function formatScheduleCanisterError(err) {
+    const raw = String(err && typeof err === 'object' && 'message' in err ? err.message : err || '').trim();
+    if (!raw) return 'Schedule request failed';
+    const reject = raw.match(/Reject text:\s*([^\n]+)/i);
+    const trap = raw.match(/trapped explicitly:\s*([^\n]+)/i);
+    const text = String(reject?.[1] || trap?.[1] || raw)
+        .trim()
+        .split('\n')[0]
+        .trim();
+    if (/unauthorized/i.test(text)) {
+        return 'You must be signed in as staff or admin to load or change the schedule.';
+    }
+    if (/not editable/i.test(text)) {
+        return 'You do not have permission to edit Schedule. Ask an admin to enable Schedule edit under Permissions.';
+    }
+    if (/not visible/i.test(text)) {
+        return 'You do not have permission to view Schedule.';
+    }
+    if (/version conflict/i.test(text)) return 'version conflict';
+    if (/Bad control character|JSON at position/i.test(text)) {
+        return 'Schedule data could not be read because an event note contains a line break. Refresh after deploy, or edit that event’s notes.';
+    }
+    return text;
 }

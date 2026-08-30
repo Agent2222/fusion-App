@@ -121,6 +121,7 @@ export async function resolveMemberCalendarGate(payments, slotSecuredFn) {
  * @param {{
  *   eligiblePrograms: { id: string, name: string }[],
  *   canCreate: boolean,
+ *   autoDownloadIcs?: boolean,
  * }} opts
  */
 export async function mountMemberProgramCalendar(root, opts) {
@@ -250,6 +251,7 @@ export async function mountMemberProgramCalendar(root, opts) {
                 event: ev,
                 mode: 'view',
                 canEdit: false,
+                allowMemberRsvp: true,
                 returnFocus: returnFocus instanceof HTMLElement ? returnFocus : null,
                 onChanged: () => {
                     void reload();
@@ -523,6 +525,34 @@ export async function mountMemberProgramCalendar(root, opts) {
     };
 
     await reload();
+    const hash =
+        typeof window !== 'undefined' ? window.location.hash.replace(/^#/, '').toLowerCase() : '';
+    const shouldDownload =
+        Boolean(opts.autoDownloadIcs) ||
+        hash === 'calendar-download' ||
+        hash === 'programs-calendar-download';
+    if (shouldDownload) {
+        const confirmed = events.filter((e) => e.status === 'confirmed');
+        if (confirmed.length) {
+            const ics = buildMultiEventIcs(
+                confirmed,
+                getScheduleTimezonePreference(),
+                'Fusion Program Calendar',
+            );
+            downloadIcsFile(ics, 'fusion-program-calendar.ics');
+        }
+        if (typeof history !== 'undefined' && history.replaceState && typeof window !== 'undefined') {
+            try {
+                history.replaceState(
+                    null,
+                    '',
+                    `${window.location.pathname}${window.location.search}#calendar`,
+                );
+            } catch {
+                /* ignore */
+            }
+        }
+    }
 }
 
 /**

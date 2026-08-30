@@ -1,4 +1,17 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+vi.mock('./database.js', () => ({
+    getArtistsForStudio: async () => [],
+    getContentBundleForStudio: async () => ({}),
+    getJournalEntries: async () => [],
+    getProgramDisplayNameFromRow: (p) => {
+        const en = p?.enCard && typeof p.enCard === 'object' ? p.enCard : {};
+        return String(en.headline || en.location || en.focus || p?.id || '').trim();
+    },
+    getPrograms: async () => [],
+    listCommunityVideosStudio: async () => [],
+}));
+
 import {
     buildTemplateDraftFromSource,
     collectStudioEmailMedia,
@@ -188,6 +201,70 @@ describe('emailCampaignContentSources', () => {
         expect(draft).not.toBeNull();
         expect(draft?.bodyHtml).toContain('fusion-email-layout');
         expect(draft?.subject).toContain('Artist One');
+    });
+
+    it('program calendar template lists confirmed events for the selected program', () => {
+        const draft = buildTemplateDraftFromSource(
+            'tpl_program_calendar',
+            { type: 'program', id: 'kaga' },
+            {
+                programs: [
+                    {
+                        id: 'kaga',
+                        enCard: {
+                            focus: 'Kaga City Artist Residency',
+                            location: 'Kaga City, Ishikawa',
+                            headline: 'Kaga City Artist Residency',
+                        },
+                    },
+                ],
+                scheduleEvents: [
+                    {
+                        id: 'e1',
+                        title: 'Welcome breakfast',
+                        date: '2026-09-14',
+                        startTime: '09:00',
+                        endTime: '10:30',
+                        allDay: false,
+                        status: 'confirmed',
+                        relationKind: 'program',
+                        relationProgramId: 'kaga',
+                        programId: 'kaga',
+                    },
+                    {
+                        id: 'e2',
+                        title: 'Draft only',
+                        date: '2026-09-15',
+                        startTime: '09:00',
+                        endTime: '10:00',
+                        status: 'draft',
+                        relationKind: 'program',
+                        programId: 'kaga',
+                    },
+                    {
+                        id: 'e3',
+                        title: 'Other program',
+                        date: '2026-09-16',
+                        startTime: '09:00',
+                        endTime: '10:00',
+                        status: 'confirmed',
+                        relationKind: 'program',
+                        programId: 'other',
+                    },
+                ],
+            },
+        );
+        expect(draft).not.toBeNull();
+        expect(draft?.subject).toBe('Kaga City Artist Residency Calendar');
+        expect(draft?.bodyHtml).toContain('Welcome breakfast');
+        expect(draft?.bodyHtml).toContain('Sep 14');
+        expect(draft?.bodyHtml).toContain('9:00 AM');
+        expect(draft?.bodyHtml).not.toContain('Draft only');
+        expect(draft?.bodyHtml).not.toContain('Other program');
+        expect(draft?.bodyHtml).toContain('c34ec160-kaga_2.jpg');
+        expect(draft?.bodyHtml).toContain('VIEW CALENDAR');
+        expect(draft?.bodyHtml).not.toContain('DOWNLOAD CALENDAR');
+        expect(draft?.bodyHtml).toContain('Week 1');
     });
 
     it('reminder template keeps last-chance copy when program source is applied', () => {

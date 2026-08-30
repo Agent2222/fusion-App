@@ -14,6 +14,7 @@ export const STUDIO_PERMISSION_FEATURE_ROWS = [
     { id: 'financeProducts', label: 'Finance — Products', group: 'finance' },
     { id: 'financePromotions', label: 'Finance — Promotions', group: 'finance' },
     { id: 'travel', label: 'Travel' },
+    { id: 'comms', label: 'Comms' },
     { id: 'radar', label: 'Radar' },
     // Moderation group: Status, Profile Images, Audio Files
     { id: 'pending-approval', label: 'Status' },

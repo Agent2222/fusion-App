@@ -19,6 +19,7 @@ import { renderSchedule, initSchedule } from './scheduleSection.js';
 import { renderRadar, initRadar } from './radarSection.js';
 import { renderPermissions, initPermissions } from './permissionsSection.js';
 import { renderTravel, initTravel } from './travelSection.js';
+import { renderComms, initComms } from './commsSection.js';
 import {
     APPLICANTS_PROGRAM_SELECT_STORAGE_KEY,
     aggregateApplicantsByProgram,
@@ -282,6 +283,14 @@ import {
     studioPaginationBarHtml,
 } from '../../utils/studioCategoryLayout.js';
 import {
+    broadcastChannelKey,
+    formatBroadcastDate,
+    isBroadcastFulfilled,
+    principalFromBroadcast,
+    resolveBroadcastArtist,
+} from '../../utils/broadcastsIdentity.js';
+import { buildBroadcastsPreviewPayload, isBroadcastsPreviewActive } from '../../utils/broadcastsPreview.js';
+import {
     applyArtistReadinessDot,
     artistReadinessDotClass,
     artistReadinessTitle,
@@ -316,6 +325,7 @@ export const STUDIO_NAV_GROUPS = [
             { id: 'schedule', label: 'Schedule' },
             { id: 'finance', label: 'Finance' },
             { id: 'travel', label: 'Travel' },
+            { id: 'comms', label: 'Comms' },
             { id: 'radar', label: 'Radar' },
         ],
     },
@@ -404,6 +414,8 @@ export function renderStudioMain(sectionId) {
             return renderFinance();
         case 'travel':
             return renderTravel();
+        case 'comms':
+            return renderComms();
         case 'radar':
             return renderRadar();
         case 'artists':
@@ -1363,6 +1375,11 @@ function renderUsers() {
                 countId: 'studio-users-header-count',
                 countLabel: 'in view',
             })}
+            <div class="studio-radar-view-toggle" role="group" aria-label="Users view" style="margin:0 0 0.85rem">
+              <button type="button" class="studio-radar-view-toggle__btn is-active" data-users-view="roster">Roster</button>
+              <button type="button" class="studio-radar-view-toggle__btn" data-users-view="invites">Invites</button>
+            </div>
+            <div data-users-pane="roster">
             <p class="studio-muted">Internet Identity has <strong>no password</strong>. Use <strong>Manage</strong> on each row to update account status and manual membership exemption. Rich profile copy belongs in the future <strong>user profile</strong> dashboard.</p>
             <div id="studio-users-self" class="studio-users-self-card">Loading…</div>
             <div class="studio-filter-bar">
@@ -1428,6 +1445,9 @@ function renderUsers() {
                 <button type="button" class="studio-btn-secondary" id="studio-users-manage-invites">
                     Manage invites
                 </button>
+                <button type="button" class="studio-btn-ghost" id="studio-users-broadcast-credits">
+                    Broadcast credits
+                </button>
                 <span id="studio-users-sync-msg" class="studio-muted" role="status"></span>
             </div>
             <div class="studio-table-wrap studio-table-wrap--sticky-head">
@@ -1435,6 +1455,10 @@ function renderUsers() {
                     <thead><tr><th><span class="studio-sr-only">Health</span></th><th>Identity</th><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Membership</th><th>Trial</th><th>Renews</th><th>Linked artist</th><th>Org</th><th>Updated</th><th class="studio-td-actions">Actions</th></tr></thead>
                     <tbody id="studio-users-tbody"><tr><td colspan="13">Loading…</td></tr></tbody>
                 </table>
+            </div>
+            </div>
+            <div data-users-pane="invites" hidden>
+                <div id="studio-users-invites-host"></div>
             </div>
         </div>
     `;
@@ -3039,6 +3063,7 @@ const STUDIO_INIT = {
     schedule: initSchedule,
     finance: initFinance,
     travel: initTravel,
+    comms: initComms,
     radar: initRadar,
     artists: initArtists,
     'pending-approval': initPendingApproval,
@@ -6371,31 +6396,39 @@ function wireStudioEntityContentEmbed(mainEl, c) {
 
 function renderBroadcasts() {
     return `
-        <div class="studio-section-stack studio-broadcasts">
-            <h2 class="studio-section-heading">Broadcasts</h2>
-            <p class="studio-muted">Member broadcast credit claims awaiting fulfillment.</p>
-            <div class="studio-broadcasts__toolbar">
-                <select class="studio-input" id="studio-broadcasts-filter">
-                    <option value="pending">Pending</option>
-                    <option value="fulfilled">Fulfilled</option>
-                    <option value="all">All</option>
-                </select>
-                <span id="studio-broadcasts-count" class="studio-muted"></span>
-            </div>
-            <div class="studio-table-wrap studio-table-wrap--sticky-head">
+        <div class="studio-section-stack studio-category-page studio-broadcasts" data-broadcasts-root>
+            ${studioPageHeaderHtml({
+                title: 'Broadcasts',
+                subtitle: 'Member credit claims to fulfill — every row shows the artist and their email.',
+                countId: 'studio-broadcasts-header-count',
+                countLabel: 'in view',
+            })}
+            ${studioDataTabsHtml({
+                ariaLabel: 'Broadcast status',
+                tabs: [
+                    { id: 'studio-bc-tab-pending', label: 'Pending', value: 'pending', active: true },
+                    { id: 'studio-bc-tab-fulfilled', label: 'Fulfilled', value: 'fulfilled' },
+                    { id: 'studio-bc-tab-all', label: 'All', value: 'all' },
+                ],
+            })}
+            ${studioFilterBarHtml({
+                searchId: 'studio-broadcasts-search',
+                searchPlaceholder: 'Search artist or email…',
+            })}
+            <p class="studio-broadcasts__status-line" id="studio-broadcasts-status" role="status"></p>
+            <div class="studio-table-wrap studio-table-wrap--sticky-head studio-broadcasts__table">
                 <table class="studio-table studio-table--dense">
                     <thead>
                         <tr>
                             <th>Channel</th>
-                            <th>Member</th>
-                            <th>Email</th>
+                            <th>Artist</th>
                             <th>Claimed</th>
                             <th>Status</th>
                             <th class="studio-td-actions">Actions</th>
                         </tr>
                     </thead>
                     <tbody id="studio-broadcasts-tbody">
-                        <tr><td colspan="6">Loading\u2026</td></tr>
+                        <tr><td colspan="5">Loading…</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -6406,140 +6439,205 @@ function renderBroadcasts() {
 const BROADCAST_CHANNEL_META = {
     socialPost: { label: 'Social', cls: 'social' },
     newsletterBlast: { label: 'Newsletter', cls: 'newsletter' },
-    featuredArtist: { label: 'Featured', cls: 'featured' },
+    featuredArtist: { label: 'Featured artist', cls: 'featured' },
 };
 
 function broadcastChannelBadge(raw) {
-    const key = typeof raw === 'object' && raw !== null ? Object.keys(raw).find((k) => k !== 'undefined') || '' : String(raw ?? '');
-    const meta = BROADCAST_CHANNEL_META[key] || { label: key, cls: 'social' };
+    const key = broadcastChannelKey(raw);
+    const meta = BROADCAST_CHANNEL_META[key] || { label: key || 'Broadcast', cls: 'social' };
     return `<span class="studio-broadcasts__channel-badge studio-broadcasts__channel-badge--${meta.cls}">${escapeHtml(meta.label)}</span>`;
 }
 
 function broadcastChannelLabel(raw) {
-    const key = typeof raw === 'object' && raw !== null ? Object.keys(raw).find((k) => k !== 'undefined') || '' : String(raw ?? '');
-    return (BROADCAST_CHANNEL_META[key] || { label: key }).label;
+    const key = broadcastChannelKey(raw);
+    return (BROADCAST_CHANNEL_META[key] || { label: key || 'broadcast' }).label;
+}
+
+function mapBroadcastDirectories(accounts, contacts, artists) {
+    const accountMap = new Map();
+    for (const acc of accounts || []) {
+        const p = principalFromBroadcast(acc);
+        if (p) accountMap.set(p, acc);
+    }
+    const contactMap = new Map();
+    for (const row of contacts || []) {
+        if (Array.isArray(row)) {
+            const p = principalFromBroadcast({ principal: row[0] });
+            const c = row[1] || {};
+            const firstName = String(c.firstName || '').trim();
+            const lastName = String(c.lastName || '').trim();
+            const email = String(c.email || '').trim();
+            const fullName = String(c.fullName || `${firstName} ${lastName}`).trim();
+            if (p) contactMap.set(p, { firstName, lastName, fullName, email });
+        }
+    }
+    const artistMap = new Map();
+    for (const a of artists || []) {
+        const id = String(a?.id || '');
+        if (id) artistMap.set(id, a);
+    }
+    return { accounts: accountMap, contacts: contactMap, artists: artistMap };
 }
 
 async function initBroadcasts(mainEl) {
     const tbody = mainEl.querySelector('#studio-broadcasts-tbody');
-    const filterSel = mainEl.querySelector('#studio-broadcasts-filter');
-    const countEl = mainEl.querySelector('#studio-broadcasts-count');
+    const countEl = mainEl.querySelector('#studio-broadcasts-header-count');
+    const statusEl = mainEl.querySelector('#studio-broadcasts-status');
+    const searchEl = mainEl.querySelector('#studio-broadcasts-search');
+    const root = mainEl.querySelector('[data-broadcasts-root]');
 
     const perm = studioFeatureAccess('broadcasts');
     if (!perm.visible) {
-        if (tbody) tbody.innerHTML = '<tr><td colspan="6"><p class="studio-banner studio-banner--warn">You do not have access to this section.</p></td></tr>';
+        if (tbody) {
+            tbody.innerHTML =
+                '<tr><td colspan="5"><p class="studio-banner studio-banner--warn">You do not have access to this section.</p></td></tr>';
+        }
         return;
     }
 
-    const { staffListBroadcastRedemptionsStudio } = await import('../../utils/database.js');
-    const { getAccountsForStudio } = await import('../../utils/database.js');
-
     let allRedemptions = [];
-    let accountMap = new Map();
+    let dirs = { accounts: new Map(), contacts: new Map(), artists: new Map() };
+    let statusFilter = 'pending';
 
     const loadData = async () => {
-        const [redemptions, accounts] = await Promise.all([
-            staffListBroadcastRedemptionsStudio(),
-            getAccountsForStudio(),
-        ]);
-        allRedemptions = (redemptions || []).sort((a, b) => {
-            const ta = Number(a.redeemedAt ?? 0);
-            const tb = Number(b.redeemedAt ?? 0);
-            return tb - ta;
-        });
-        accountMap = new Map();
-        for (const acc of (accounts || [])) {
-            const p = String(acc.principal ?? acc.id ?? '');
-            if (p) accountMap.set(p, acc);
+        if (isBroadcastsPreviewActive()) {
+            const payload = buildBroadcastsPreviewPayload();
+            allRedemptions = payload.redemptions;
+            dirs = mapBroadcastDirectories(payload.accounts, payload.contacts, payload.artists);
+            renderRows();
+            return;
         }
+        const { staffListBroadcastRedemptionsStudio, getAccountsForStudio, adminListAccountContactsForStudio, getArtistsForStudio } =
+            await import('../../utils/database.js');
+        const [redemptions, accounts, contactRows, artists] = await Promise.all([
+            staffListBroadcastRedemptionsStudio(),
+            getAccountsForStudio().catch(() => []),
+            adminListAccountContactsForStudio().catch(() => []),
+            getArtistsForStudio().catch(() => []),
+        ]);
+        allRedemptions = (redemptions || []).slice().sort((a, b) => {
+            const ta = String(a.redeemedAt || '');
+            const tb = String(b.redeemedAt || '');
+            return tb.localeCompare(ta);
+        });
+        dirs = mapBroadcastDirectories(accounts, contactRows, artists);
         renderRows();
-    };
-
-    const formatDate = (ns) => {
-        if (!ns) return '\u2014';
-        const ms = typeof ns === 'bigint' ? Number(ns / 1000000n) : Number(ns) > 1e15 ? Number(ns) / 1e6 : Number(ns);
-        return new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
     };
 
     const renderRows = () => {
         if (!tbody) return;
-        const filter = filterSel?.value || 'pending';
-        const filtered = allRedemptions.filter((r) => {
-            if (filter === 'pending') return !r.fulfilledAt || r.fulfilledAt.length === 0;
-            if (filter === 'fulfilled') return r.fulfilledAt && r.fulfilledAt.length > 0;
-            return true;
+        const q = String(searchEl?.value || '')
+            .trim()
+            .toLowerCase();
+        const decorated = allRedemptions.map((r) => ({
+            row: r,
+            party: resolveBroadcastArtist(r, dirs),
+            fulfilled: isBroadcastFulfilled(r),
+        }));
+        const filtered = decorated.filter((item) => {
+            if (statusFilter === 'pending' && item.fulfilled) return false;
+            if (statusFilter === 'fulfilled' && !item.fulfilled) return false;
+            if (!q) return true;
+            const hay = `${item.party.artistName} ${item.party.email} ${broadcastChannelLabel(item.row.channel)}`.toLowerCase();
+            return hay.includes(q);
         });
-        if (countEl) countEl.textContent = `${filtered.length} broadcast${filtered.length === 1 ? '' : 's'}`;
+        if (countEl) countEl.textContent = String(filtered.length);
+        if (statusEl) {
+            const pending = decorated.filter((d) => !d.fulfilled).length;
+            statusEl.textContent = `${pending} pending · ${decorated.length} total`;
+        }
         if (filtered.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="6" class="studio-muted">No ${filter === 'all' ? '' : filter + ' '}broadcasts.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="5">
+                <div class="studio-broadcasts__empty">
+                    <p>${q ? 'No broadcasts match that search.' : statusFilter === 'pending' ? 'No pending broadcast claims.' : statusFilter === 'fulfilled' ? 'No fulfilled broadcasts yet.' : 'No broadcasts yet.'}</p>
+                    <p>When a member spends a credit, the artist name and email appear here to fulfill.</p>
+                </div>
+            </td></tr>`;
             return;
         }
-        tbody.innerHTML = filtered.map((r) => {
-            const principal = String(r.owner ?? '');
-            const acc = accountMap.get(principal);
-            const name = acc ? `${acc.firstName ?? ''} ${acc.lastName ?? ''}`.trim() || String(acc.slug ?? principal.slice(0, 8)) : principal.slice(0, 12);
-            const email = String(acc?.contactEmail ?? acc?.contact_email ?? '');
-            const isFulfilled = r.fulfilledAt && r.fulfilledAt.length > 0;
-            const statusHtml = isFulfilled
-                ? `<span class="studio-broadcasts__status studio-broadcasts__status--fulfilled">Fulfilled ${formatDate(r.fulfilledAt[0] ?? r.fulfilledAt)}</span>`
-                : '<span class="studio-broadcasts__status studio-broadcasts__status--pending">Pending</span>';
-            const actionsHtml = `
-                <button type="button" class="studio-btn studio-btn--xs" data-bc-email="${escapeHtml(r.id)}" title="Email member">Email</button>
-                ${!isFulfilled ? `<button type="button" class="studio-btn studio-btn--xs studio-btn--primary" data-bc-complete="${escapeHtml(r.id)}" title="Mark complete">Complete</button>` : ''}
-            `;
-            return `<tr data-bc-row="${escapeHtml(r.id)}">
+        tbody.innerHTML = filtered
+            .map((item) => {
+                const { row: r, party, fulfilled } = item;
+                const name = party.artistName || '—';
+                const emailHtml = party.email
+                    ? `<a class="studio-broadcasts__email" href="mailto:${escapeHtml(party.email)}">${escapeHtml(party.email)}</a>`
+                    : '<span class="studio-muted">No email on file</span>';
+                const statusHtml = fulfilled
+                    ? `<span class="studio-broadcasts__status studio-broadcasts__status--fulfilled">Fulfilled ${escapeHtml(formatBroadcastDate(r.fulfilledAt))}</span>`
+                    : '<span class="studio-broadcasts__status studio-broadcasts__status--pending">Pending</span>';
+                const actionsHtml = perm.canEdit
+                    ? `<div class="studio-broadcasts__actions">
+                <button type="button" class="studio-btn-ghost" data-bc-email="${escapeHtml(r.id)}" ${party.email ? '' : 'disabled'}>Email</button>
+                ${fulfilled ? '' : `<button type="button" class="studio-btn-primary" data-bc-complete="${escapeHtml(r.id)}">Complete</button>`}
+              </div>`
+                    : '';
+                return `<tr data-bc-row="${escapeHtml(r.id)}">
                 <td>${broadcastChannelBadge(r.channel)}</td>
-                <td title="${escapeHtml(principal)}">${escapeHtml(name)}</td>
-                <td>${escapeHtml(email)}</td>
-                <td>${formatDate(r.redeemedAt)}</td>
+                <td>
+                  <div class="studio-broadcasts__artist">
+                    <strong>${escapeHtml(name)}</strong>
+                    ${emailHtml}
+                  </div>
+                </td>
+                <td>${escapeHtml(formatBroadcastDate(r.redeemedAt))}</td>
                 <td>${statusHtml}</td>
                 <td class="studio-td-actions">${actionsHtml}</td>
             </tr>`;
-        }).join('');
+            })
+            .join('');
         wireActions();
     };
 
     const wireActions = () => {
-        if (!tbody) return;
+        if (!tbody || !perm.canEdit) return;
         tbody.querySelectorAll('[data-bc-email]').forEach((btn) => {
             btn.addEventListener('click', async () => {
                 const rid = btn.getAttribute('data-bc-email');
                 const r = allRedemptions.find((x) => x.id === rid);
                 if (!r) return;
-                const principal = String(r.owner ?? '');
-                const acc = accountMap.get(principal);
-                const email = String(acc?.contactEmail ?? acc?.contact_email ?? '');
+                const party = resolveBroadcastArtist(r, dirs);
                 const channelLabel = broadcastChannelLabel(r.channel);
                 const { openStudioModal } = await import('../../utils/studioModal.js');
-                const { close, root } = openStudioModal(`
-                    <div class="studio-broadcasts__compose">
-                        <h3 class="studio-section-heading">Email member</h3>
-                        <label class="studio-label">To</label>
-                        <input class="studio-input" id="bc-compose-to" value="${escapeHtml(email)}" />
-                        <label class="studio-label">Subject</label>
-                        <input class="studio-input" id="bc-compose-subject" value="Your FUSION ${escapeHtml(channelLabel)} Broadcast" />
-                        <label class="studio-label">Message</label>
-                        <textarea class="studio-input studio-textarea" id="bc-compose-body" rows="6">Hi${acc ? ' ' + escapeHtml(String(acc.firstName ?? '').trim()) : ''},\n\nWe wanted to reach out regarding your ${escapeHtml(channelLabel)} broadcast claim.\n\nBest,\nThe FUSION Team</textarea>
-                        <div style="margin-top:0.75rem;display:flex;gap:0.5rem;justify-content:flex-end">
-                            <button type="button" class="studio-btn" id="bc-compose-cancel">Cancel</button>
-                            <button type="button" class="studio-btn studio-btn--primary" id="bc-compose-send">Send</button>
-                        </div>
-                    </div>
-                `, { title: '' });
-                root.querySelector('#bc-compose-cancel')?.addEventListener('click', close);
-                root.querySelector('#bc-compose-send')?.addEventListener('click', async () => {
-                    const to = root.querySelector('#bc-compose-to')?.value?.trim();
-                    const subject = root.querySelector('#bc-compose-subject')?.value?.trim();
-                    const bodyText = root.querySelector('#bc-compose-body')?.value?.trim();
+                const { close, root: modalRoot } = openStudioModal(
+                    `<div class="studio-broadcasts__compose">
+                        <p class="studio-broadcasts__compose-lead">Write to <strong>${escapeHtml(party.artistName || 'the artist')}</strong> about their ${escapeHtml(channelLabel)} claim.</p>
+                        <label class="studio-field"><span>To</span>
+                          <input class="studio-input" id="bc-compose-to" value="${escapeHtml(party.email)}" />
+                        </label>
+                        <label class="studio-field"><span>Subject</span>
+                          <input class="studio-input" id="bc-compose-subject" value="Your FUSION ${escapeHtml(channelLabel)} broadcast" />
+                        </label>
+                        <label class="studio-field"><span>Message</span>
+                          <textarea class="studio-input studio-textarea" id="bc-compose-body" rows="7">Hi ${escapeHtml(party.artistName || '')},\n\nWe wanted to reach out regarding your ${escapeHtml(channelLabel)} broadcast claim.\n\nBest,\nThe FUSION Team</textarea>
+                        </label>
+                    </div>`,
+                    {
+                        title: 'Email artist',
+                        subtitle: party.email || 'Add an email before sending',
+                        wide: true,
+                        footerHtml: `<div class="studio-radar-modal-footer">
+                            <button type="button" class="studio-btn-ghost" data-studio-modal-close="1">Cancel</button>
+                            <button type="button" class="studio-btn-primary" id="bc-compose-send">Send</button>
+                          </div>`,
+                    },
+                );
+                modalRoot.querySelector('#bc-compose-send')?.addEventListener('click', async () => {
+                    const to = modalRoot.querySelector('#bc-compose-to')?.value?.trim();
+                    const subject = modalRoot.querySelector('#bc-compose-subject')?.value?.trim();
+                    const bodyText = modalRoot.querySelector('#bc-compose-body')?.value?.trim();
                     if (!to) return;
                     const { renderFusionEmailFromSlots, fusionEmailParagraph } = await import('../../utils/emailFusionLayout.js');
                     const { sendEmail } = await import('../../utils/integrationApi.js');
                     const bodyHtml = bodyText.split('\n').map((ln) => fusionEmailParagraph(escapeHtml(ln))).join('\n');
-                    const html = renderFusionEmailFromSlots({ eyebrow: 'Broadcast', headlineHtml: escapeHtml(subject), bodyHtml });
+                    const html = renderFusionEmailFromSlots({
+                        eyebrow: 'Broadcast',
+                        headlineHtml: escapeHtml(subject),
+                        bodyHtml,
+                    });
                     await sendEmail({ to, subject, html });
                     close();
                     const { openStudioNoticeDialog } = await import('../../utils/studioModal.js');
-                    await openStudioNoticeDialog({ title: 'Email sent', paragraphs: [`Email sent to ${to}.`] });
+                    await openStudioNoticeDialog({ title: 'Email sent', paragraphs: [`Sent to ${party.artistName || to} (${to}).`] });
                 });
             });
         });
@@ -6549,53 +6647,87 @@ async function initBroadcasts(mainEl) {
                 const rid = btn.getAttribute('data-bc-complete');
                 const r = allRedemptions.find((x) => x.id === rid);
                 if (!r) return;
+                const party = resolveBroadcastArtist(r, dirs);
                 const channelLabel = broadcastChannelLabel(r.channel);
                 const { openStudioConfirmDialog } = await import('../../utils/studioModal.js');
                 const confirmed = await openStudioConfirmDialog({
                     title: 'Complete broadcast',
                     paragraphs: [
-                        `Mark this ${channelLabel} broadcast as fulfilled?`,
-                        'A notification email will be sent to the member letting them know their broadcast is live.',
+                        `Mark ${party.artistName || 'this artist'}’s ${channelLabel} broadcast as fulfilled?`,
+                        party.email
+                            ? `A notification will go to ${party.email}.`
+                            : 'No email on file — the claim will still be marked complete.',
                     ],
                     confirmLabel: 'Mark complete',
                 });
                 if (!confirmed) return;
+                if (isBroadcastsPreviewActive()) {
+                    r.fulfilledAt = [new Date().toISOString()];
+                    renderRows();
+                    return;
+                }
                 const { staffFulfillBroadcastRedemptionForStudio } = await import('../../utils/database.js');
                 const ok = await staffFulfillBroadcastRedemptionForStudio(rid);
                 if (!ok) {
                     const { openStudioNoticeDialog } = await import('../../utils/studioModal.js');
-                    await openStudioNoticeDialog({ title: 'Error', paragraphs: ['Could not fulfill this broadcast. Please try again.'] });
+                    await openStudioNoticeDialog({
+                        title: 'Error',
+                        paragraphs: ['Could not fulfill this broadcast. Please try again.'],
+                    });
                     return;
                 }
-                const principal = String(r.owner ?? '');
-                const acc = accountMap.get(principal);
-                const email = String(acc?.contactEmail ?? acc?.contact_email ?? '');
-                if (email && email.includes('@')) {
+                if (party.email && party.email.includes('@')) {
                     try {
                         const { renderFusionEmailFromSlots, fusionEmailParagraph } = await import('../../utils/emailFusionLayout.js');
                         const { sendEmail } = await import('../../utils/integrationApi.js');
                         const bodyHtml = [
-                            fusionEmailParagraph(`Your <strong>${escapeHtml(channelLabel)}</strong> broadcast is now live!`, 'lead'),
-                            fusionEmailParagraph('Thank you for being part of the FUSION network. Your broadcast has been published and is reaching the audience.'),
-                            fusionEmailParagraph('If you have questions, reply to this email or contact the Fusion team.', 'last'),
+                            fusionEmailParagraph(
+                                `Hi ${escapeHtml(party.artistName || '')} — your <strong>${escapeHtml(channelLabel)}</strong> broadcast is now live.`,
+                                'lead',
+                            ),
+                            fusionEmailParagraph(
+                                'Thank you for being part of the FUSION network. Your broadcast has been published and is reaching the audience.',
+                            ),
+                            fusionEmailParagraph(
+                                'If you have questions, reply to this email or contact the Fusion team.',
+                                'last',
+                            ),
                         ].join('\n');
                         const html = renderFusionEmailFromSlots({
-                            eyebrow: 'Broadcast Credits',
+                            eyebrow: 'Broadcast',
                             headlineHtml: 'Your broadcast<br>is live.',
                             bodyHtml,
                             cta: { label: 'VIEW FUSION', href: 'https://fusionart.world' },
                             footnote: 'Thank you for being part of the FUSION community.',
                         });
-                        await sendEmail({ to: email, subject: `Your FUSION broadcast is live \u2014 ${channelLabel}`, html });
-                    } catch { /* non-blocking */ }
+                        await sendEmail({
+                            to: party.email,
+                            subject: `Your FUSION broadcast is live — ${channelLabel}`,
+                            html,
+                        });
+                    } catch {
+                        /* non-blocking */
+                    }
                 }
                 await loadData();
             });
         });
     };
 
-    filterSel?.addEventListener('change', renderRows);
+    mainEl.querySelectorAll('[data-tab-value]').forEach((tab) => {
+        tab.addEventListener('click', () => {
+            statusFilter = tab.getAttribute('data-tab-value') || 'pending';
+            mainEl.querySelectorAll('[data-tab-value]').forEach((btn) => {
+                const on = btn.getAttribute('data-tab-value') === statusFilter;
+                btn.classList.toggle('is-active', on);
+                btn.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
+            renderRows();
+        });
+    });
+    searchEl?.addEventListener('input', renderRows);
     await loadData();
+    if (root instanceof HTMLElement) root.dataset.broadcastsReady = '1';
 }
 
 async function initPrograms(mainEl) {
@@ -9672,10 +9804,41 @@ async function initUsers(mainEl) {
         const manageInvitesBtn = mainEl.querySelector('#studio-users-manage-invites');
         if (manageInvitesBtn instanceof HTMLButtonElement) {
             manageInvitesBtn.addEventListener('click', async () => {
-                const { openManageInvitesModal } = await import('./manageInvitesModal.js');
-                void openManageInvitesModal();
+                const { openManagePromoCodesModal } = await import('./studioPromoCodesPanel.js');
+                openManagePromoCodesModal({ radarOnly: false });
             });
         }
+        const creditsBtn = mainEl.querySelector('#studio-users-broadcast-credits');
+        if (creditsBtn instanceof HTMLButtonElement) {
+            creditsBtn.addEventListener('click', async () => {
+                const { openManageBroadcastCreditsModal } = await import('./manageInvitesModal.js');
+                void openManageBroadcastCreditsModal();
+            });
+        }
+
+        const setUsersView = (view) => {
+            const next = view === 'invites' ? 'invites' : 'roster';
+            mainEl.querySelectorAll('[data-users-view]').forEach((btn) => {
+                btn.classList.toggle('is-active', btn.getAttribute('data-users-view') === next);
+            });
+            mainEl.querySelectorAll('[data-users-pane]').forEach((pane) => {
+                const match = pane.getAttribute('data-users-pane') === next;
+                if (match) pane.removeAttribute('hidden');
+                else pane.setAttribute('hidden', '');
+            });
+            if (next === 'invites') {
+                const host = mainEl.querySelector('#studio-users-invites-host');
+                if (host instanceof HTMLElement && !host.dataset.mounted) {
+                    host.dataset.mounted = '1';
+                    void import('./studioPromoCodesPanel.js').then(({ mountStudioPromoCodesPanel }) =>
+                        mountStudioPromoCodesPanel(host, { radarOnly: false, canEdit: true }),
+                    );
+                }
+            }
+        };
+        mainEl.querySelectorAll('[data-users-view]').forEach((btn) => {
+            btn.addEventListener('click', () => setUsersView(btn.getAttribute('data-users-view') || 'roster'));
+        });
 
         const syncBtn = syncAllBtn instanceof HTMLButtonElement ? syncAllBtn : null;
         if (syncBtn) {

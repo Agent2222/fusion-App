@@ -16,6 +16,8 @@ export const FUSION_EMAIL_STYLES = {
     canvas: '#faf3f4',
     text: '#000000',
     ctaBg: '#c12525',
+    /** Sage green — `--c4` / schedule download CTA. */
+    ctaSecondaryBg: '#a2b792',
     ctaText: '#ffffff',
     pillBg: '#000000',
     pillText: '#ffffff',
@@ -171,6 +173,20 @@ export function fusionEmailParagraph(innerHtml, variant = 'body') {
 }
 
 /**
+ * Prominent checkout-code block for Radar / invite emails.
+ * @param {{ code?: string, label?: string }} [opts]
+ */
+export function fusionEmailDiscountCodeBlock(opts = {}) {
+    const code = escapeHtmlForEmailLayout(opts.code || '{{DISCOUNT_CODE}}');
+    const label = escapeHtmlForEmailLayout(opts.label || '{{DISCOUNT_LABEL}}');
+    return `<div style="margin:8px 0 28px;padding:22px 18px 20px;border:1px solid #000000;text-align:center;background:#ffffff">
+<p style="margin:0 0 10px;font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:#000000">Your invite code</p>
+<p style="margin:0 0 12px;font-size:26px;letter-spacing:0.12em;font-weight:700;font-family:ui-monospace,Menlo,Consolas,monospace;color:#000000">${code}</p>
+<p style="margin:0;font-size:14px;line-height:1.45;color:#000000">${label}</p>
+</div>`;
+}
+
+/**
  * @param {string} href
  * @param {string} label
  * @returns {string}
@@ -197,24 +213,38 @@ export function normalizeFusionEmailBodyHtml(html) {
             return `<a href="${href}" style="${FUSION_EMAIL_STYLES.link}">`;
         });
 
-    const ulMatch = raw.match(/<ul[\s\S]*?<\/ul>/i);
-    const ulBlock = ulMatch
-        ? fixLinks(ulMatch[0].replace(/<ul[^>]*>/i, `<ul style="${FUSION_EMAIL_STYLES.bodyList}">`))
-        : '';
+    const listBlocks = [];
+    const listRegex = /<(ul|ol)[^>]*>[\s\S]*?<\/\1>/gi;
+    let listMatch;
+    while ((listMatch = listRegex.exec(raw)) !== null) {
+        const tag = listMatch[1];
+        listBlocks.push(
+            fixLinks(
+                listMatch[0].replace(
+                    new RegExp(`<${tag}[^>]*>`, 'i'),
+                    `<${tag} style="${FUSION_EMAIL_STYLES.bodyList}">`,
+                ),
+            ),
+        );
+    }
 
-    const withoutUl = ulMatch ? raw.replace(ulMatch[0], '').trim() : raw;
+    const withoutLists = listBlocks.length
+        ? raw.replace(/<(ul|ol)[^>]*>[\s\S]*?<\/\1>/gi, '').trim()
+        : raw;
     const paragraphs = [];
     const pRegex = /<p[^>]*>([\s\S]*?)<\/p>/gi;
     let match;
-    while ((match = pRegex.exec(withoutUl)) !== null) {
+    while ((match = pRegex.exec(withoutLists)) !== null) {
         const inner = match[1].trim();
         if (inner) paragraphs.push(inner);
     }
 
+    const listHtml = listBlocks.join('\n');
+
     if (!paragraphs.length) {
-        const plain = withoutUl.replace(/<\/?p[^>]*>/gi, '').trim();
-        if (!plain) return ulBlock;
-        return fixLinks(fusionEmailParagraph(plain, 'last')) + (ulBlock ? `\n${ulBlock}` : '');
+        const plain = withoutLists.replace(/<\/?p[^>]*>/gi, '').trim();
+        if (!plain) return listHtml;
+        return fixLinks(fusionEmailParagraph(plain, 'last')) + (listHtml ? `\n${listHtml}` : '');
     }
 
     const body = paragraphs
@@ -225,7 +255,7 @@ export function normalizeFusionEmailBodyHtml(html) {
         })
         .join('\n');
 
-    return ulBlock ? `${body}\n${ulBlock}` : body;
+    return listHtml ? `${body}\n${listHtml}` : body;
 }
 
 /**
@@ -238,6 +268,7 @@ export function normalizeFusionEmailBodyHtml(html) {
  *   headlineHtml?: string,
  *   bodyHtml?: string,
  *   cta?: { label?: string, href?: string },
+ *   ctaSecondary?: { label?: string, href?: string },
  *   footnote?: string,
  * }} FusionEmailLayoutOpts
  */
@@ -254,9 +285,19 @@ export function fusionEmailLayout(opts = {}) {
     const pill = String(opts.pillLabel || '').trim();
     const headline = String(opts.headlineHtml || '').trim();
     const body = String(opts.bodyHtml || '').trim();
-    const ctaLabel = String(opts.cta?.label || '').trim();
-    const ctaHref = String(opts.cta?.href || 'https://www.fusionart.world').trim();
     const footnote = String(opts.footnote || '').trim();
+    const ctaButton = (cta, background) => {
+        const label = String(cta?.label || '').trim();
+        const href = String(cta?.href || 'https://www.fusionart.world').trim();
+        if (!label) return '';
+        const bg = String(background || FUSION_EMAIL_STYLES.ctaBg).trim() || FUSION_EMAIL_STYLES.ctaBg;
+        return `<a href="${escapeHtmlForEmailLayout(href)}" style="display:inline-block;background:${escapeHtmlForEmailLayout(bg)};color:${FUSION_EMAIL_STYLES.ctaText};text-decoration:none;padding:14px 20px;font-size:12px;font-weight:800;letter-spacing:0.08em;">${escapeHtmlForEmailLayout(label)}</a>`;
+    };
+    const ctaPrimary = ctaButton(opts.cta, FUSION_EMAIL_STYLES.ctaBg);
+    const ctaSecondary = ctaButton(opts.ctaSecondary, FUSION_EMAIL_STYLES.ctaSecondaryBg);
+    const ctaBlock = [ctaPrimary, ctaSecondary]
+        .filter(Boolean)
+        .join('<div style="height:12px;line-height:12px;font-size:12px;">&nbsp;</div>');
 
     const pillBlock = pill
         ? `<div style="display:inline-block;background:${FUSION_EMAIL_STYLES.pillBg};color:${FUSION_EMAIL_STYLES.pillText};padding:6px 12px;font-size:11px;font-weight:700;margin-bottom:18px;letter-spacing:0.06em;">${escapeHtmlForEmailLayout(pill)}</div>`
@@ -264,10 +305,6 @@ export function fusionEmailLayout(opts = {}) {
 
     const headlineBlock = headline
         ? `<h1 style="margin:0 0 20px;font-size:44px;line-height:0.95;font-weight:900;letter-spacing:-0.04em;color:${FUSION_EMAIL_STYLES.text};">${headline}</h1>`
-        : '';
-
-    const ctaBlock = ctaLabel
-        ? `<a href="${escapeHtmlForEmailLayout(ctaHref)}" style="display:inline-block;background:${FUSION_EMAIL_STYLES.ctaBg};color:${FUSION_EMAIL_STYLES.ctaText};text-decoration:none;padding:14px 20px;font-size:12px;font-weight:800;letter-spacing:0.08em;">${escapeHtmlForEmailLayout(ctaLabel)}</a>`
         : '';
 
     const footnoteBlock = footnote
@@ -364,16 +401,17 @@ export function extractFusionEmailSlots(html) {
     const pillLabel = raw.match(/letter-spacing:0\.06em;">([^<]+)<\/div>/i)?.[1]?.trim() || '';
     const headlineHtml = raw.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1]?.trim() || '';
 
-    const ctaMatch =
-        raw.match(
-            /<a href="([^"]+)" style="display:inline-block;background:#c12525;color:#ffffff[^"]*"[^>]*>([^<]+)</i,
-        ) ||
-        raw.match(
-            /style="display:inline-block;background:#c12525;color:#ffffff[^"]*"[^>]*href="([^"]+)"[^>]*>([^<]+)</i,
-        );
-    const cta = ctaMatch
-        ? { href: unescape(ctaMatch[1]), label: unescape(ctaMatch[2]).trim() }
-        : undefined;
+    const ctaRe =
+        /<a href="([^"]+)" style="display:inline-block;background:([^;]+);color:#ffffff[^"]*"[^>]*>([^<]+)<\/a>/gi;
+    /** @type {{ href: string, label: string }[]} */
+    const ctas = [];
+    let ctaMatch = ctaRe.exec(raw);
+    while (ctaMatch) {
+        ctas.push({ href: unescape(ctaMatch[1]), label: unescape(ctaMatch[3]).trim() });
+        ctaMatch = ctaRe.exec(raw);
+    }
+    const cta = ctas[0];
+    const ctaSecondary = ctas[1];
 
     const bordered = raw.match(
         /border-top:1px solid #000000;border-bottom:1px solid #000000;padding:32px 0;">([\s\S]*?)<\/div>\s*<div style="margin-top:30px/,
@@ -388,7 +426,11 @@ export function extractFusionEmailSlots(html) {
         );
         inner = inner.replace(/<h1[\s\S]*?<\/h1>\s*/i, '');
         inner = inner.replace(
-            /<a href="[^"]*" style="display:inline-block;background:#c12525[\s\S]*?<\/a>\s*/i,
+            /<a href="[^"]*" style="display:inline-block;background:[^;]+;color:#ffffff[\s\S]*?<\/a>\s*/gi,
+            '',
+        );
+        inner = inner.replace(
+            /<div style="height:12px;line-height:12px;font-size:12px;">&nbsp;<\/div>\s*/gi,
             '',
         );
         const footnoteMatch = inner.match(
@@ -409,6 +451,7 @@ export function extractFusionEmailSlots(html) {
         headlineHtml,
         bodyHtml: normalizeFusionEmailBodyHtml(bodyHtml) || bodyHtml,
         cta,
+        ctaSecondary,
         footnote: unescape(footnote),
     };
 }

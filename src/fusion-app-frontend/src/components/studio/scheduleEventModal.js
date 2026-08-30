@@ -3,10 +3,18 @@
  */
 import '../../styles/studioScheduleEventModal.css';
 import {
+    clampScheduleAvailability,
     formatTimeRange,
+    formatScheduleCanisterError,
+    normalizeScheduleImportance,
     parseYmd,
+    scheduleEventPeopleLabel,
+    scheduleEventRsvpCountLabel,
+    scheduleImportanceLabel,
+    scheduleImportancePillClass,
     statusLabel,
     timeToMinutes,
+    initialsFromName,
 } from '../../utils/scheduleModel.js';
 import {
     SCHEDULE_STAFF,
@@ -25,7 +33,15 @@ import {
     setScheduleProgramPreference,
     updateEvent,
 } from '../../utils/scheduleStore.js';
-import { initialsFromName } from '../../utils/scheduleModel.js';
+import { getDataSource, memberRsvpScheduleEvent, studioReinterpretWithPrompt } from '../../utils/database.js';
+import {
+    assignAllScheduleParticipantIds,
+    assignAllScheduleStaff,
+    buildScheduleEventRefinePrompt,
+    buildScheduleEventRefineSource,
+    parseScheduleEventRefineJson,
+    scheduleEventRefineHasContext,
+} from '../../utils/scheduleEventAi.js';
 import { openStudioConfirmDialog, openStudioModal, openStudioNoticeDialog } from '../../utils/studioModal.js';
 import {
     SCHEDULE_RELATION_KINDS,
@@ -187,10 +203,12 @@ function syncAllDayTimeInputs(root, allDay) {
  *   createDefaults?: { date?: string, programId?: string },
  *   onChanged?: () => void,
  *   returnFocus?: HTMLElement | null,
+ *   allowMemberRsvp?: boolean,
  * }} opts
  */
 export function openScheduleEventModal(opts) {
     const canEdit = opts.canEdit !== false;
+    const allowMemberRsvp = Boolean(opts.allowMemberRsvp);
     let mode = opts.mode || (opts.eventId || opts.event ? 'view' : 'edit');
     if (!canEdit) mode = 'view';
     let tab = /** @type {'details' | 'activity'} */ ('details');
@@ -230,6 +248,12 @@ export function openScheduleEventModal(opts) {
               conflicts: [...(event.conflicts || [])],
               imageUrl: String(event.imageUrl || '').trim(),
               publicOnSite: Boolean(event.publicOnSite),
+              importance: normalizeScheduleImportance(event.importance),
+              acceptRsvp: Boolean(event.acceptRsvp),
+              availability: clampScheduleAvailability(event.availability, Boolean(event.acceptRsvp)),
+              rsvpIds: [...(event.rsvpIds || [])],
+              rsvpCount: Number(event.rsvpCount) || (event.rsvpIds || []).length,
+              myRsvp: Boolean(event.myRsvp),
           }
         : blankEvent(opts.createDefaults?.date || scheduleTodayYmd(), opts.createDefaults?.programId);
 
@@ -267,10 +291,12 @@ export function openScheduleEventModal(opts) {
     const onKey = (e) => {
         if (e.key === 'Escape') {
             e.preventDefault();
+            if (document.querySelector('.event-refine-backdrop')) return;
             void close();
         }
         // basic focus trap
         if (e.key === 'Tab') {
+            if (document.querySelector('.event-refine-backdrop')) return;
             const focusables = root.querySelectorAll(
                 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
             );
@@ -306,10 +332,24 @@ export function openScheduleEventModal(opts) {
         }
     };
 
+    let paintSoonTimer = 0;
+    const paintSoon = () => {
+        if (paintSoonTimer) return;
+        paintSoonTimer = window.setTimeout(() => {
+            paintSoonTimer = 0;
+            paint();
+        }, 48);
+    };
+
     /**
      * @param {{ autofocus?: boolean }} [paintOpts]
      */
     const paint = (paintOpts = {}) => {
+        if (!root.isConnected) return;
+        if (paintSoonTimer) {
+            window.clearTimeout(paintSoonTimer);
+            paintSoonTimer = 0;
+        }
         const active = document.activeElement;
         /** @type {string} */
         let restoreName = '';
@@ -323,6 +363,7 @@ export function openScheduleEventModal(opts) {
                 ? [active.selectionStart, active.selectionEnd]
                 : null;
 
+        const isRepaint = paintedOnce;
         root.innerHTML = buildDialogHtml({
             draft,
             mode,
@@ -344,6 +385,7 @@ export function openScheduleEventModal(opts) {
             viewStaff,
             viewParticipants,
             attribution,
+            allowMemberRsvp,
         });
         bindDialog();
 
@@ -352,6 +394,7 @@ export function openScheduleEventModal(opts) {
             paintedOnce = true;
             return;
         }
+        if (isRepaint) dialog.classList.add('event-dialog--settled');
 
         const wantAutofocus = paintOpts.autofocus === true || !paintedOnce;
         paintedOnce = true;
@@ -389,13 +432,17 @@ export function openScheduleEventModal(opts) {
         });
     };
 
-    const refreshPeople = async () => {
+    /**
+     * @param {{ silent?: boolean }} [peopleOpts]
+     */
+    const refreshPeople = async (peopleOpts = {}) => {
         try {
             const principals = await loadFusionStaffPrincipalSet();
             attribution = resolveEventAttribution(draft, principals);
+            const peopleIds = draft.acceptRsvp ? draft.rsvpIds || [] : draft.participantIds || [];
             const enriched = await enrichSchedulePeople(
                 draft.assignedStaff || [],
-                draft.participantIds || [],
+                peopleIds,
                 { preferStudioArtists: canEdit },
             );
             viewStaff = enriched.staff;
@@ -408,23 +455,26 @@ export function openScheduleEventModal(opts) {
                 initials: s.initials || initialsFromName(s.name),
                 avatarUrl: s.avatarUrl,
             }));
-            viewParticipants = (draft.participantIds || []).map((id) => ({
+            viewParticipants = (draft.acceptRsvp ? draft.rsvpIds || [] : draft.participantIds || []).map((id) => ({
                 id,
                 name: id,
                 initials: initialsFromName(id) || '?',
             }));
         }
-        paint();
+        if (peopleOpts.silent) return;
+        const needsPaint = mode !== 'edit' || showParticipants || showStaffPicker;
+        if (needsPaint) paintSoon();
     };
 
     /**
      * Load accepted applicants for the selected program.
      * Avoid full repaints unless the artists panel is open (prevents modal blink).
      * @param {string} programId
-     * @param {{ prune?: boolean }} [rosterOpts]
+     * @param {{ prune?: boolean, silent?: boolean }} [rosterOpts]
      */
     const loadRosterForProgram = (programId, rosterOpts = {}) => {
         const prune = Boolean(rosterOpts.prune);
+        const silent = Boolean(rosterOpts.silent);
         const pid = String(programId || '').trim();
         rosterLoading = true;
         if (!pid) {
@@ -434,11 +484,13 @@ export function openScheduleEventModal(opts) {
                 draft.participantCount = 0;
             }
             rosterLoading = false;
-            if (showParticipants) paint();
-            else syncParticipantChrome();
-            return;
+            if (!silent) {
+                if (showParticipants) paintSoon();
+                else syncParticipantChrome();
+            }
+            return Promise.resolve();
         }
-        listScheduleArtistsForProgram(pid)
+        return listScheduleArtistsForProgram(pid)
             .then((rows) => {
                 const base = (Array.isArray(rows) ? rows : [])
                     .map((a) => ({ id: rosterArtistId(a), name: rosterArtistName(a) }))
@@ -465,9 +517,9 @@ export function openScheduleEventModal(opts) {
                         draft.participantCount = draft.participantIds.length;
                     }
                     rosterLoading = false;
+                    if (silent) return;
                     return refreshPeople().then(() => {
-                        if (showParticipants) paint();
-                        else syncParticipantChrome();
+                        if (!showParticipants) syncParticipantChrome();
                     });
                 });
             })
@@ -478,12 +530,207 @@ export function openScheduleEventModal(opts) {
                     draft.participantCount = 0;
                 }
                 rosterLoading = false;
-                void refreshPeople().then(() => {
-                    if (showParticipants) paint();
-                    else syncParticipantChrome();
+                if (silent) return;
+                return refreshPeople().then(() => {
+                    if (!showParticipants) syncParticipantChrome();
                 });
             });
     };
+
+    function readFields() {
+        const g = (sel) => {
+            const el = root.querySelector(sel);
+            return el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement
+                ? el.value
+                : '';
+        };
+        draft.title = g('[name="title"]') || draft.title;
+        draft.date = g('[name="date"]') || draft.date;
+        const allDayEl = root.querySelector('[name="allDay"]');
+        draft.allDay = allDayEl instanceof HTMLInputElement ? allDayEl.checked : Boolean(draft.allDay);
+        if (draft.allDay) {
+            draft.startTime = '00:00';
+            draft.endTime = '23:59';
+        } else {
+            draft.startTime = normalizeTimeInputValue(g('[name="startTime"]')) || draft.startTime;
+            draft.endTime = normalizeTimeInputValue(g('[name="endTime"]')) || draft.endTime;
+        }
+        draft.timezone = g('[name="timezone"]') || draft.timezone || getScheduleTimezonePreference();
+        draft.relationKind =
+            normalizeScheduleRelationKind(g('[name="relationKind"]') || draft.relationKind) ||
+            draft.relationKind;
+        draft.eventKind = g('[name="eventKind"]') || draft.eventKind || 'standard';
+        const programId = g('[name="programId"]');
+        if (programId) {
+            draft.programId = programId;
+            draft.programName =
+                getScheduleProgramOptions().find((p) => p.id === programId)?.name || draft.programName;
+            setScheduleProgramPreference(draft.programId, draft.programName);
+        }
+        if (draft.relationKind === 'program') {
+            draft.relationProgramId = draft.programId;
+        } else {
+            draft.relationProgramId = '';
+        }
+        const locationId = g('[name="locationId"]');
+        if (locationId) {
+            draft.locationId = locationId;
+            draft.locationName =
+                getScheduleLocations().find((l) => l.id === locationId)?.name || draft.locationName;
+        }
+        draft.notes = g('[name="notes"]');
+        const rem = g('[name="reminderMinutes"]');
+        draft.reminderMinutes = rem === '' ? null : Number(rem);
+        draft.status = /** @type {any} */ (g('[name="status"]') || draft.status);
+        draft.color = /** @type {any} */ (g('[name="color"]') || draft.color);
+        const publicEl = root.querySelector('[name="publicOnSite"]');
+        draft.publicOnSite =
+            publicEl instanceof HTMLInputElement ? publicEl.checked : Boolean(draft.publicOnSite);
+        if (isStaffRelationEvent(draft.relationKind)) {
+            draft.publicOnSite = false;
+        }
+        const imageEl = root.querySelector('[name="imageUrl"]');
+        if (imageEl instanceof HTMLInputElement) {
+            draft.imageUrl = imageEl.value.trim();
+        }
+        draft.importance = normalizeScheduleImportance(g('[name="importance"]') || draft.importance);
+        const rsvpEl = root.querySelector('[name="acceptRsvp"]');
+        draft.acceptRsvp = rsvpEl instanceof HTMLInputElement ? rsvpEl.checked : Boolean(draft.acceptRsvp);
+        const availRaw = g('[name="availability"]');
+        draft.availability = clampScheduleAvailability(
+            availRaw === '' ? draft.availability : availRaw,
+            draft.acceptRsvp,
+        );
+    }
+
+    /**
+     * @param {{ currentTitle: string, currentDescription: string, suggestedTitle: string, suggestedDescription: string }} suggestion
+     * @returns {Promise<'title' | 'description' | 'both' | null>}
+     */
+    function openEventRefineReview(suggestion) {
+        return new Promise((resolve) => {
+            const overlay = document.createElement('div');
+            overlay.className = 'event-refine-backdrop';
+            overlay.innerHTML = `
+              <section class="event-refine-dialog" role="dialog" aria-modal="true" aria-labelledby="event-refine-title">
+                <h2 class="event-refine-dialog__title" id="event-refine-title">Refine with AI</h2>
+                <p class="event-refine-dialog__hint">Adopt the suggested title, description, or both. The event is not saved until you click Save.</p>
+                <div class="event-refine-compare">
+                  <div>
+                    <p class="event-refine-compare__label">Current title</p>
+                    <p class="event-refine-compare__value">${esc(suggestion.currentTitle) || '—'}</p>
+                  </div>
+                  <div>
+                    <p class="event-refine-compare__label">Suggested title</p>
+                    <p class="event-refine-compare__value">${esc(suggestion.suggestedTitle) || '—'}</p>
+                  </div>
+                  <div>
+                    <p class="event-refine-compare__label">Current description</p>
+                    <p class="event-refine-compare__value">${esc(suggestion.currentDescription) || '—'}</p>
+                  </div>
+                  <div>
+                    <p class="event-refine-compare__label">Suggested description</p>
+                    <p class="event-refine-compare__value">${esc(suggestion.suggestedDescription) || '—'}</p>
+                  </div>
+                </div>
+                <div class="event-refine-dialog__actions">
+                  <button type="button" class="event-dialog__button" data-ev-refine-dismiss>Dismiss</button>
+                  <button type="button" class="event-dialog__button" data-ev-refine-adopt="title" ${suggestion.suggestedTitle ? '' : 'disabled'}>Use title</button>
+                  <button type="button" class="event-dialog__button" data-ev-refine-adopt="description" ${suggestion.suggestedDescription ? '' : 'disabled'}>Use description</button>
+                  <button type="button" class="event-dialog__button event-dialog__button--primary" data-ev-refine-adopt="both" ${suggestion.suggestedTitle || suggestion.suggestedDescription ? '' : 'disabled'}>Use both</button>
+                </div>
+              </section>`;
+            document.body.appendChild(overlay);
+            let settled = false;
+            const finish = (choice) => {
+                if (settled) return;
+                settled = true;
+                document.removeEventListener('keydown', onRefineKey, true);
+                overlay.remove();
+                resolve(choice);
+            };
+            const onRefineKey = (e) => {
+                if (e.key !== 'Escape') return;
+                e.preventDefault();
+                e.stopPropagation();
+                finish(null);
+            };
+            document.addEventListener('keydown', onRefineKey, true);
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) finish(null);
+            });
+            overlay.querySelector('[data-ev-refine-dismiss]')?.addEventListener('click', () => finish(null));
+            overlay.querySelectorAll('[data-ev-refine-adopt]').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    const choice = btn.getAttribute('data-ev-refine-adopt');
+                    if (choice === 'title' || choice === 'description' || choice === 'both') finish(choice);
+                });
+            });
+            const firstAction = overlay.querySelector('[data-ev-refine-adopt="both"]:not([disabled])')
+                || overlay.querySelector('[data-ev-refine-dismiss]');
+            if (firstAction instanceof HTMLElement) firstAction.focus();
+        });
+    }
+
+    async function runRefineWithAi() {
+        if (mode !== 'edit' || !canEdit) return;
+        readFields();
+        if (getDataSource() !== 'live') {
+            await openStudioNoticeDialog({
+                title: 'Live data required',
+                message: 'Refine with AI requires live mode and Studio LLM access.',
+                okLabel: 'OK',
+            });
+            return;
+        }
+        if (!scheduleEventRefineHasContext(draft)) {
+            await openStudioNoticeDialog({
+                title: 'Add some context',
+                message: 'Enter a title, description, program, date, or location before refining.',
+                okLabel: 'OK',
+            });
+            return;
+        }
+        const btn = root.querySelector('[data-ev-refine-ai]');
+        if (btn instanceof HTMLButtonElement) {
+            btn.disabled = true;
+            btn.textContent = 'Refining…';
+        }
+        try {
+            const raw = await studioReinterpretWithPrompt(
+                buildScheduleEventRefinePrompt(draft),
+                buildScheduleEventRefineSource(draft),
+                'en',
+            );
+            const parsed = parseScheduleEventRefineJson(raw);
+            if (!parsed) {
+                throw new Error('The model did not return a usable title and description. Try again.');
+            }
+            const choice = await openEventRefineReview({
+                currentTitle: draft.title,
+                currentDescription: draft.notes,
+                suggestedTitle: parsed.title,
+                suggestedDescription: parsed.description,
+            });
+            if (!choice) return;
+            if (choice === 'title' || choice === 'both') draft.title = parsed.title || draft.title;
+            if (choice === 'description' || choice === 'both') draft.notes = parsed.description || draft.notes;
+            dirty = true;
+            paint();
+        } catch (err) {
+            await openStudioNoticeDialog({
+                title: 'Refine failed',
+                message: err instanceof Error ? err.message : String(err),
+                okLabel: 'OK',
+            });
+        } finally {
+            const again = root.querySelector('[data-ev-refine-ai]');
+            if (again instanceof HTMLButtonElement) {
+                again.disabled = false;
+                again.textContent = 'Refine with AI';
+            }
+        }
+    }
 
     // Function declaration (hoisted) so paint() never hits TDZ if roster/staff reload early.
     function bindDialog() {
@@ -499,6 +746,39 @@ export function openScheduleEventModal(opts) {
 
         root.querySelector('[data-ev-done]')?.addEventListener('click', () => {
             void close(true);
+        });
+        root.querySelector('[data-ev-member-rsvp]')?.addEventListener('click', async () => {
+            const btn = root.querySelector('[data-ev-member-rsvp]');
+            if (!(btn instanceof HTMLButtonElement) || btn.disabled) return;
+            const attending = btn.getAttribute('data-ev-member-rsvp') === '1';
+            const eventId = String(draft.id || event?.id || '').trim();
+            if (!eventId) return;
+            btn.disabled = true;
+            liveMessage = attending ? 'Saving RSVP…' : 'Cancelling RSVP…';
+            paint();
+            try {
+                const updated = await memberRsvpScheduleEvent(eventId, attending);
+                event = { ...(event || {}), ...updated };
+                draft = {
+                    ...draft,
+                    ...updated,
+                    assignedStaff: [...(updated.assignedStaff || draft.assignedStaff || [])],
+                    participantIds: [...(updated.participantIds || [])],
+                    rsvpIds: [...(updated.rsvpIds || [])],
+                };
+                liveMessage = attending ? 'You’re going' : 'RSVP cancelled';
+                opts.onChanged?.();
+                await refreshPeople();
+            } catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                liveMessage = msg;
+                paint();
+                await openStudioNoticeDialog({
+                    title: 'RSVP failed',
+                    message: msg,
+                    okLabel: 'OK',
+                });
+            }
         });
         root.querySelector('[data-ev-cancel]')?.addEventListener('click', () => {
             const isCreateFlow = !opts.eventId && !opts.event && !event?.id;
@@ -762,6 +1042,13 @@ export function openScheduleEventModal(opts) {
             });
         });
 
+        root.querySelector('[data-ev-select-all-staff]')?.addEventListener('click', () => {
+            if (mode !== 'edit' || !canEdit) return;
+            draft.assignedStaff = assignAllScheduleStaff(fusionStaff);
+            dirty = true;
+            paint();
+        });
+
         root.querySelector('[data-ev-clear-staff]')?.addEventListener('click', () => {
             if (mode !== 'edit' || !canEdit) return;
             draft.assignedStaff = [];
@@ -801,12 +1088,24 @@ export function openScheduleEventModal(opts) {
             });
         });
 
+        root.querySelector('[data-ev-select-all-participants]')?.addEventListener('click', () => {
+            if (mode !== 'edit' || !canEdit) return;
+            draft.participantIds = assignAllScheduleParticipantIds(rosterArtists);
+            draft.participantCount = draft.participantIds.length;
+            dirty = true;
+            paint();
+        });
+
         root.querySelector('[data-ev-clear-participants]')?.addEventListener('click', () => {
             if (mode !== 'edit' || !canEdit) return;
             draft.participantIds = [];
             draft.participantCount = 0;
             dirty = true;
             paint();
+        });
+
+        root.querySelector('[data-ev-refine-ai]')?.addEventListener('click', () => {
+            void runRefineWithAi();
         });
 
         root.querySelector('[data-ev-send-reminder]')?.addEventListener('click', async () => {
@@ -892,62 +1191,6 @@ export function openScheduleEventModal(opts) {
             dirty = true;
         };
 
-        const readFields = () => {
-            const g = (sel) => {
-                const el = root.querySelector(sel);
-                return el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement
-                    ? el.value
-                    : '';
-            };
-            draft.title = g('[name="title"]') || draft.title;
-            draft.date = g('[name="date"]') || draft.date;
-            const allDayEl = root.querySelector('[name="allDay"]');
-            draft.allDay = allDayEl instanceof HTMLInputElement ? allDayEl.checked : Boolean(draft.allDay);
-            if (draft.allDay) {
-                draft.startTime = '00:00';
-                draft.endTime = '23:59';
-            } else {
-                draft.startTime = normalizeTimeInputValue(g('[name="startTime"]')) || draft.startTime;
-                draft.endTime = normalizeTimeInputValue(g('[name="endTime"]')) || draft.endTime;
-            }
-            draft.timezone = g('[name="timezone"]') || draft.timezone || getScheduleTimezonePreference();
-            draft.relationKind =
-                normalizeScheduleRelationKind(g('[name="relationKind"]') || draft.relationKind) ||
-                draft.relationKind;
-            draft.eventKind = g('[name="eventKind"]') || draft.eventKind || 'standard';
-            const programId = g('[name="programId"]');
-            if (programId) {
-                draft.programId = programId;
-                draft.programName =
-                    getScheduleProgramOptions().find((p) => p.id === programId)?.name || draft.programName;
-                setScheduleProgramPreference(draft.programId, draft.programName);
-            }
-            if (draft.relationKind === 'program') {
-                draft.relationProgramId = draft.programId;
-            } else {
-                draft.relationProgramId = '';
-            }
-            const locationId = g('[name="locationId"]');
-            draft.locationId = locationId;
-            draft.locationName =
-                getScheduleLocations().find((l) => l.id === locationId)?.name || draft.locationName;
-            draft.notes = g('[name="notes"]');
-            const rem = g('[name="reminderMinutes"]');
-            draft.reminderMinutes = rem === '' ? null : Number(rem);
-            draft.status = /** @type {any} */ (g('[name="status"]') || draft.status);
-            draft.color = /** @type {any} */ (g('[name="color"]') || draft.color);
-            const publicEl = root.querySelector('[name="publicOnSite"]');
-            draft.publicOnSite =
-                publicEl instanceof HTMLInputElement ? publicEl.checked : Boolean(draft.publicOnSite);
-            if (isStaffRelationEvent(draft.relationKind)) {
-                draft.publicOnSite = false;
-            }
-            const imageEl = root.querySelector('[name="imageUrl"]');
-            if (imageEl instanceof HTMLInputElement) {
-                draft.imageUrl = imageEl.value.trim();
-            }
-        };
-
         root.querySelectorAll('.event-field__control').forEach((el) => {
             // Search boxes have their own handlers; skip to avoid fighting paint/focus.
             if (
@@ -985,6 +1228,21 @@ export function openScheduleEventModal(opts) {
         });
 
         root.querySelector('[name="publicOnSite"]')?.addEventListener('change', () => {
+            markDirty();
+            readFields();
+        });
+
+        root.querySelector('[name="acceptRsvp"]')?.addEventListener('change', () => {
+            markDirty();
+            const wasOn = Boolean(draft.acceptRsvp);
+            readFields();
+            if (draft.acceptRsvp && !wasOn && !draft.availability) {
+                draft.availability = 20;
+            }
+            paint();
+        });
+
+        root.querySelector('[name="importance"]')?.addEventListener('change', () => {
             markDirty();
             readFields();
         });
@@ -1036,6 +1294,9 @@ export function openScheduleEventModal(opts) {
                         publicOnSite: isStaffRelationEvent(draft.relationKind)
                             ? false
                             : Boolean(draft.publicOnSite),
+                        importance: normalizeScheduleImportance(draft.importance),
+                        acceptRsvp: Boolean(draft.acceptRsvp),
+                        availability: clampScheduleAvailability(draft.availability, Boolean(draft.acceptRsvp)),
                     });
                     event = getEvent(id);
                 } else {
@@ -1068,13 +1329,21 @@ export function openScheduleEventModal(opts) {
                         publicOnSite: isStaffRelationEvent(draft.relationKind)
                             ? false
                             : Boolean(draft.publicOnSite),
+                        importance: normalizeScheduleImportance(draft.importance),
+                        acceptRsvp: Boolean(draft.acceptRsvp),
+                        availability: clampScheduleAvailability(draft.availability, Boolean(draft.acceptRsvp)),
                     });
                 }
                 if (!event) throw new Error('Save failed');
                 if (draft.programId) {
                     setScheduleProgramPreference(draft.programId, draft.programName);
                 }
-                draft = { ...event, assignedStaff: [...event.assignedStaff] };
+                draft = {
+                    ...event,
+                    assignedStaff: [...event.assignedStaff],
+                    participantIds: [...(event.participantIds || [])],
+                    rsvpIds: [...(event.rsvpIds || [])],
+                };
                 dirty = false;
                 mode = 'view';
                 liveMessage = 'Saved';
@@ -1096,7 +1365,7 @@ export function openScheduleEventModal(opts) {
                     okLabel: 'OK',
                 });
             } catch (e) {
-                const msg = e instanceof Error ? e.message : String(e);
+                const msg = formatScheduleCanisterError(e);
                 if (/version conflict/i.test(msg)) {
                     liveMessage =
                         'Another staff member saved this event first. Reload latest, or keep editing your draft.';
@@ -1144,22 +1413,35 @@ export function openScheduleEventModal(opts) {
         });
     }
 
-    loadRosterForProgram(draft.programId);
-    void refreshPeople();
-
-    listFusionScheduleStaff()
-        .then((rows) => {
-            fusionStaff = Array.isArray(rows) && rows.length ? rows : SCHEDULE_STAFF.map((s) => ({ ...s }));
-            staffLoading = false;
-            void refreshPeople();
-        })
-        .catch(() => {
-            fusionStaff = SCHEDULE_STAFF.map((s) => ({ ...s }));
-            staffLoading = false;
-            void refreshPeople();
-        });
-
     paint({ autofocus: true });
+    void (async () => {
+        try {
+            await Promise.all([
+                listFusionScheduleStaff()
+                    .then((rows) => {
+                        fusionStaff =
+                            Array.isArray(rows) && rows.length ? rows : SCHEDULE_STAFF.map((s) => ({ ...s }));
+                    })
+                    .catch(() => {
+                        fusionStaff = SCHEDULE_STAFF.map((s) => ({ ...s }));
+                    })
+                    .finally(() => {
+                        staffLoading = false;
+                    }),
+                loadRosterForProgram(draft.programId, { silent: true }),
+                refreshPeople({ silent: true }),
+            ]);
+        } finally {
+            staffLoading = false;
+            rosterLoading = false;
+            if (mode === 'edit' && !showParticipants && !showStaffPicker) {
+                syncParticipantChrome();
+                syncStaffChrome();
+            } else {
+                paint();
+            }
+        }
+    })();
     return { close: () => close(true) };
 }
 
@@ -1169,7 +1451,7 @@ export function openScheduleEventModal(opts) {
  */
 function blankEvent(date, programIdHint = '') {
     const locs = getScheduleLocations();
-    const loc = locs[0] || { id: 'loc-studio', name: 'Main Studio' };
+    const loc = locs[0] || { id: '', name: '' };
     const prog = resolvePreferredScheduleProgram(programIdHint);
     return {
         id: '',
@@ -1197,6 +1479,12 @@ function blankEvent(date, programIdHint = '') {
         eventKind: /** @type {const} */ ('standard'),
         imageUrl: '',
         publicOnSite: false,
+        importance: /** @type {const} */ ('general'),
+        acceptRsvp: false,
+        availability: 0,
+        rsvpIds: [],
+        rsvpCount: 0,
+        myRsvp: false,
         conflicts: [],
         createdAt: '',
         updatedAt: '',
@@ -1212,11 +1500,15 @@ function validateDraft(draft) {
     if (!draft.date) return 'Date is required';
     const relationKind = normalizeScheduleRelationKind(draft.relationKind);
     if (!relationKind) return 'Relation is required';
-    if (!draft.programId) return 'Program is required';
+    if (!draft.programId) {
+        return 'Program is required. Publish a program with Public visibility in Studio → Programs.';
+    }
     if (relationKind === 'program' && !String(draft.relationProgramId || draft.programId || '').trim()) {
         return 'Program relation requires a program';
     }
-    if (!draft.locationId) return 'Location is required';
+    if (!draft.locationId) {
+        return 'Location is required. Use Manage locations to add one.';
+    }
     if (!draft.timezone) return 'Timezone is required';
     if (!draft.allDay) {
         if (!draft.startTime || !draft.endTime) return 'Start and end time are required';
@@ -1252,12 +1544,16 @@ function buildDialogHtml(ctx) {
         viewStaff = [],
         viewParticipants = [],
         attribution = 'fusion',
+        allowMemberRsvp = false,
     } = ctx;
     const editing = mode === 'edit';
     const conflict = draft.conflicts?.[0];
     const titleId = 'event-dialog-title';
     const descId = 'event-dialog-desc';
-    const selectedIds = new Set(draft.participantIds || []);
+    const rsvpMode = Boolean(draft.acceptRsvp);
+    const rsvpIds = Array.isArray(draft.rsvpIds) ? draft.rsvpIds : [];
+    const availability = clampScheduleAvailability(draft.availability, rsvpMode);
+    const selectedIds = new Set(rsvpMode ? rsvpIds : draft.participantIds || []);
     const selectedStaffIds = new Set((draft.assignedStaff || []).map((s) => s.id));
     const q = String(participantQuery || '')
         .trim()
@@ -1283,7 +1579,7 @@ function buildDialogHtml(ctx) {
           }));
     const participantPeople = viewParticipants.length
         ? viewParticipants
-        : (draft.participantIds || []).map((id) => ({
+        : (rsvpMode ? rsvpIds : draft.participantIds || []).map((id) => ({
               id,
               name: id,
               initials: initialsFromName(id) || '?',
@@ -1322,9 +1618,19 @@ function buildDialogHtml(ctx) {
               )
               .join('')
         : `<option value="">No public programs available</option>`;
-    const locOpts = getScheduleLocations().map(
-        (l) => `<option value="${esc(l.id)}" ${draft.locationId === l.id ? 'selected' : ''}>${esc(l.name)}</option>`,
-    ).join('');
+    const locations = getScheduleLocations();
+    let locOpts = locations
+        .map(
+            (l) =>
+                `<option value="${esc(l.id)}" ${draft.locationId === l.id ? 'selected' : ''}>${esc(l.name)}</option>`,
+        )
+        .join('');
+    if (draft.locationId && !locations.some((l) => l.id === draft.locationId)) {
+        locOpts = `<option value="${esc(draft.locationId)}" selected>${esc(draft.locationName || 'Saved location')}</option>${locOpts}`;
+    }
+    if (!locOpts) {
+        locOpts = `<option value="">Add a location first (Manage locations)</option>`;
+    }
     const staffRelation = isStaffRelationEvent(draft.relationKind);
     const startTimeValue = esc(normalizeTimeInputValue(draft.startTime) || '09:00');
     const endTimeValue = esc(normalizeTimeInputValue(draft.endTime) || '10:00');
@@ -1366,8 +1672,11 @@ function buildDialogHtml(ctx) {
                           : `<p class="event-field__hint">${(fusionStaff || []).length ? 'No staff match this search.' : 'No Fusion staff available.'}</p>`
                 }
                 ${
-                    editing && canEdit && selectedStaffIds.size
-                        ? `<button type="button" class="event-dialog__button" data-ev-clear-staff style="margin-top:8px">Clear all</button>`
+                    editing && canEdit && (fusionStaff || []).length
+                        ? `<div class="event-picker-actions">
+                            <button type="button" class="event-dialog__button" data-ev-select-all-staff>Select all staff</button>
+                            ${selectedStaffIds.size ? `<button type="button" class="event-dialog__button" data-ev-clear-staff>Clear all</button>` : ''}
+                          </div>`
                         : ''
                 }
               </div>`
@@ -1469,8 +1778,11 @@ function buildDialogHtml(ctx) {
                             }</p>`
                 }
                 ${
-                    editing && canEdit && selectedIds.size
-                        ? `<button type="button" class="event-dialog__button" data-ev-clear-participants style="margin-top:8px">Clear all</button>`
+                    editing && canEdit && rosterArtists.length
+                        ? `<div class="event-picker-actions">
+                            <button type="button" class="event-dialog__button" data-ev-select-all-participants>Select all artists</button>
+                            ${selectedIds.size ? `<button type="button" class="event-dialog__button" data-ev-clear-participants>Clear all</button>` : ''}
+                          </div>`
                         : ''
                 }
               </div>`
@@ -1519,10 +1831,14 @@ function buildDialogHtml(ctx) {
           <button type="button" class="event-fact event-fact--participants" data-ev-artists aria-expanded="${showParticipants ? 'true' : 'false'}">
             ${ICONS.user.replace('<svg', '<svg class="event-fact__icon"')}
             <div>
-              <p class="event-eyebrow">Artists</p>
+              <p class="event-eyebrow">${esc(scheduleEventPeopleLabel(rsvpMode))}</p>
               <div class="event-participants__content">
                 <div class="event-avatar-stack" aria-hidden="true">${stackAvatars || '<span class="event-avatar-stack__avatar"></span>'}</div>
-                <span class="event-participants__count">${selectedIds.size} participating artist${selectedIds.size === 1 ? '' : 's'}</span>
+                <span class="event-participants__count">${
+                    rsvpMode
+                        ? esc(scheduleEventRsvpCountLabel(rsvpIds.length, availability))
+                        : `${selectedIds.size} participating artist${selectedIds.size === 1 ? '' : 's'}`
+                }</span>
                 <span class="event-participants__chevron">${ICONS.chevron}</span>
               </div>
             </div>
@@ -1543,7 +1859,7 @@ function buildDialogHtml(ctx) {
         <section class="event-notes">
           ${ICONS.file}
           <div>
-            <p class="event-eyebrow">Notes</p>
+            <p class="event-eyebrow">Description</p>
             <p class="event-notes__text">${esc(draft.notes) || '—'}</p>
           </div>
         </section>
@@ -1567,19 +1883,45 @@ function buildDialogHtml(ctx) {
         ${field('Program', 'programId', `<select class="event-field__control" id="ev-programId" name="programId">${programOpts}</select>`)}
         ${field('Timezone', 'timezone', `<div style="display:flex;gap:8px;align-items:center"><input type="hidden" name="timezone" id="ev-timezone" value="${esc(draft.timezone || getScheduleTimezonePreference())}" /><button type="button" class="event-dialog__button" data-ev-timezone style="flex:1;justify-content:flex-start">${esc(tzLabel)}</button></div>`)}
         ${field('Location', 'locationId', `<select class="event-field__control" id="ev-locationId" name="locationId">${locOpts}</select>`)}
+        ${field(
+            'Importance',
+            'importance',
+            `<select class="event-field__control" id="ev-importance" name="importance">
+              <option value="general" ${normalizeScheduleImportance(draft.importance) === 'general' ? 'selected' : ''}>General</option>
+              <option value="suggested" ${normalizeScheduleImportance(draft.importance) === 'suggested' ? 'selected' : ''}>Suggested</option>
+              <option value="optional" ${normalizeScheduleImportance(draft.importance) === 'optional' ? 'selected' : ''}>Optional</option>
+            </select>`,
+        )}
         <div class="event-field event-field--wide">
           <span class="event-field__label">Assigned staff</span>
           ${staffHtml}
         </div>
-        <div class="event-field event-field--wide">
+        ${
+            rsvpMode
+                ? `<div class="event-field event-field--wide">
+          <span class="event-field__label">RSVPs</span>
+          <p class="event-field__hint" style="margin:0">${rsvpIds.length} / ${availability} reserved. Cohort members RSVP from Settings → Programs → Calendar.</p>
+        </div>`
+                : `<div class="event-field event-field--wide">
           <span class="event-field__label">Artists</span>
           <button type="button" class="event-participants" data-ev-artists aria-expanded="${showParticipants ? 'true' : 'false'}">
             <span>${selectedIds.size} participant${selectedIds.size === 1 ? '' : 's'}</span>
             ${ICONS.chevron}
           </button>
           ${participantsPanel}
+        </div>`
+        }
+        <div class="event-field event-field--wide">
+          <div class="event-field__label-row">
+            <label class="event-field__label" for="ev-notes">Description</label>
+            ${
+                editing && canEdit
+                    ? `<button type="button" class="event-dialog__button" data-ev-refine-ai>Refine with AI</button>`
+                    : ''
+            }
+          </div>
+          <textarea class="event-field__control" id="ev-notes" name="notes" rows="4">${esc(draft.notes)}</textarea>
         </div>
-        ${field('Notes', 'notes', `<textarea class="event-field__control" id="ev-notes" name="notes">${esc(draft.notes)}</textarea>`, true)}
         <div class="event-field event-field--wide event-flier-field">
           <span class="event-field__label">Flier image</span>
           <input type="hidden" name="imageUrl" id="ev-imageUrl" value="${esc(draft.imageUrl || '')}" />
@@ -1607,8 +1949,20 @@ function buildDialogHtml(ctx) {
           <p class="event-field__hint" data-ev-staff-public-hint ${staffRelation ? '' : 'hidden'}>
             Staff-relation events are Studio-only for staff and admin — they are not published to the public site.
           </p>
-          <p class="event-field__hint" data-ev-public-hint ${staffRelation ? 'hidden' : ''}>When enabled, this event appears on the journal with RSVP (uses title, time, location, notes, and flier).</p>
+          <p class="event-field__hint" data-ev-public-hint ${staffRelation ? 'hidden' : ''}>When enabled, this event appears on the journal with RSVP (uses title, time, location, description, and flier).</p>
         </div>
+        <div class="event-field event-field--wide">
+          <label class="event-public-toggle">
+            <input type="checkbox" name="acceptRsvp" id="ev-acceptRsvp" ${rsvpMode ? 'checked' : ''} ${editing && canEdit ? '' : 'disabled'} />
+            <span>Accept RSVP</span>
+          </label>
+          <p class="event-field__hint">When enabled, cohort members can RSVP from Settings → Programs → Calendar. The event view lists RSVPs instead of assigned artists.</p>
+        </div>
+        ${field(
+            'Availability',
+            'availability',
+            `<input class="event-field__control" id="ev-availability" name="availability" type="number" min="1" max="200" step="1" value="${esc(String(rsvpMode ? availability || 20 : ''))}" ${rsvpMode && editing && canEdit ? '' : 'disabled'} />`,
+        )}
         ${field(
             'Reminder',
             'reminderMinutes',
@@ -1722,6 +2076,7 @@ function buildDialogHtml(ctx) {
             <span class="event-dialog__status-dot" aria-hidden="true"></span>
             <span>${esc(statusLabel(draft.status))}</span>
             <span class="event-dialog__attribution">${esc(attrLabel)}</span>
+            <span class="${esc(scheduleImportancePillClass(draft.importance))}">${esc(scheduleImportanceLabel(draft.importance))}</span>
           </div>
           <h1 class="event-dialog__title" id="${titleId}">${esc(draft.title || 'Event')}</h1>
           <p class="event-dialog__program" id="${descId}">${esc(draft.programName || '—')}</p>
@@ -1750,6 +2105,15 @@ function buildDialogHtml(ctx) {
         ${canEdit && draft.id ? `<button type="button" class="event-dialog__danger" data-ev-delete>Delete event</button>` : ''}
         <button type="button" class="event-dialog__button" data-ev-ics>${ICONS.calendarIcs} Download .ics</button>
         <span class="event-dialog__footer-spacer"></span>
+        ${
+            allowMemberRsvp && rsvpMode && draft.status === 'confirmed' && draft.id
+                ? draft.myRsvp
+                    ? `<button type="button" class="event-dialog__button" data-ev-member-rsvp="0">Cancel RSVP</button>`
+                    : rsvpIds.length >= availability
+                      ? `<button type="button" class="event-dialog__button" disabled>Full (${rsvpIds.length}/${availability})</button>`
+                      : `<button type="button" class="event-dialog__button event-dialog__button--primary" data-ev-member-rsvp="1">RSVP</button>`
+                : ''
+        }
         <button type="button" class="event-dialog__button event-dialog__button--primary" data-ev-done>Done</button>
       </footer>
       <div class="event-live" aria-live="polite">${esc(liveMessage)}</div>

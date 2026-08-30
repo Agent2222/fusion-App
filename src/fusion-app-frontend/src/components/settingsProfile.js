@@ -34,6 +34,7 @@ import {
   getMyArtistAudioCollection,
   addMyArtistAudioEntry,
   removeMyArtistAudioEntry,
+  replaceMyArtistAudioEntry,
   setMyArtistHighlightAudio,
   getMyAssetReviewNotes,
   getMembershipTierForCaller,
@@ -45,8 +46,31 @@ import {
   getMyFlightBooking,
   setMyEstimatedArrival,
   listTravelPrepLinks,
+  listMyProgramCommsRooms,
+  getProgramDisplayNameFromRow,
 } from "../utils/database.js";
+import {
+  resolveInviteMessage,
+  resolveProviderThumbUrl,
+} from "../utils/programCommsInvite.js";
 import { withSeoImageAlt } from "../utils/mediaAltSeo.js";
+import {
+  cacheBustMpdPreviewUrl,
+  failMpdImagePreview,
+  revokeMpdLocalPreview,
+  setMpdMediaSurfaceState,
+  showMpdLocalImagePreview as showMpdLocalImagePreviewCore,
+} from "../utils/mpdLocalImagePreview.js";
+import {
+  clearMpdPendingAudioPreview,
+  showMpdPendingAudioPreview,
+} from "../utils/mpdAudioPreview.js";
+import {
+  pendingAudioSaveError,
+  titleFromAudioFileName,
+  uniqueAudioUploadFieldKey,
+  validateAudioFile,
+} from "../utils/artistAudioCollection.js";
 import {
   introSlotsFromWorld,
   localeBlock,
@@ -585,21 +609,13 @@ function setIntroSpinnerVisible(i, visible) {
  * @param {string} key
  * @param {{ hasMedia?: boolean; hasPreview?: boolean }} state
  */
-function setMpdMediaSurfaceState(key, state) {
-  const surface = document.querySelector(`[data-mpd-media-surface="${key}"]`);
-  if (!surface) return;
-  const hasPreview = Boolean(state.hasPreview ?? state.hasMedia);
-  surface.classList.toggle("has-media", Boolean(state.hasMedia));
-  surface.classList.toggle("has-preview", hasPreview);
+function setMpdMediaSurfaceStateOnPage(key, state) {
+  setMpdMediaSurfaceState(document, key, state);
 }
 
 /** @param {string} key */
 function mpdRevokeLocalPreview(key) {
-  const prev = mpdLocalPreviewObjectUrls.get(key);
-  if (prev) {
-    URL.revokeObjectURL(prev);
-    mpdLocalPreviewObjectUrls.delete(key);
-  }
+  revokeMpdLocalPreview(mpdLocalPreviewObjectUrls, key);
 }
 
 /**
@@ -608,48 +624,12 @@ function mpdRevokeLocalPreview(key) {
  * @param {File} file
  */
 function showMpdLocalImagePreview(key, file) {
-  mpdRevokeLocalPreview(key);
-  const url = URL.createObjectURL(file);
-  mpdLocalPreviewObjectUrls.set(key, url);
-
-  const introMatch = /^intro-(\d+)$/.exec(key);
-  if (introMatch) {
-    const i = Number(introMatch[1]);
-    setMpdMediaSurfaceState(key, { hasMedia: false, hasPreview: true });
-    setIntroSpinnerVisible(i, false);
-    const th = /** @type {HTMLImageElement | null} */ (
-      document.getElementById(`mpd_intro_${i}_thumb`)
-    );
-    if (th) {
-      th.src = url;
-      th.style.display = "block";
-    }
-    return;
-  }
-
-  if (key === "hero") {
-    setMpdMediaSurfaceState("hero", { hasMedia: false, hasPreview: true });
-    setHeroSpinnerVisible(false);
-    const heroPrev = /** @type {HTMLImageElement | null} */ (
-      document.getElementById("mpd_hero_preview")
-    );
-    if (heroPrev) {
-      heroPrev.src = url;
-      heroPrev.style.display = "block";
-    }
-    return;
-  }
-
-  if (key === "heroProfile") {
-    setMpdMediaSurfaceState("heroProfile", { hasMedia: false, hasPreview: true });
-    setHeroProfileSpinnerVisible(false);
-    const prev = /** @type {HTMLImageElement | null} */ (
-      document.getElementById("mpd_hero_profile_preview")
-    );
-    if (prev) {
-      prev.src = url;
-      prev.style.display = "block";
-    }
+  showMpdLocalImagePreviewCore(document, mpdLocalPreviewObjectUrls, key, file);
+  if (key === "hero") setHeroSpinnerVisible(false);
+  else if (key === "heroProfile") setHeroProfileSpinnerVisible(false);
+  else {
+    const introMatch = /^intro-(\d+)$/.exec(key);
+    if (introMatch) setIntroSpinnerVisible(Number(introMatch[1]), false);
   }
 }
 
@@ -662,7 +642,7 @@ function mpdFinishIntroRemotePreview(key, remoteUrl) {
   const introMatch = /^intro-(\d+)$/.exec(key);
   if (!introMatch) return;
   const i = Number(introMatch[1]);
-  setMpdMediaSurfaceState(key, { hasMedia: true, hasPreview: true });
+  setMpdMediaSurfaceStateOnPage(key, { hasMedia: true, hasPreview: true });
   const th = /** @type {HTMLImageElement | null} */ (
     document.getElementById(`mpd_intro_${i}_thumb`)
   );
@@ -676,7 +656,7 @@ function mpdFinishIntroRemotePreview(key, remoteUrl) {
   };
   th.onerror = () => {
     setIntroSpinnerVisible(i, false);
-    setMpdMediaSurfaceState(key, { hasMedia: true, hasPreview: false });
+    setMpdMediaSurfaceStateOnPage(key, { hasMedia: true, hasPreview: false });
     mpdNotifyStatus("Preview could not load. Save and refresh, or try another image.");
     th.onload = null;
     th.onerror = null;
@@ -694,41 +674,12 @@ function mpdFinishIntroRemotePreview(key, remoteUrl) {
  * @param {string} key
  */
 function mpdFailImagePreview(key) {
-  mpdRevokeLocalPreview(key);
-  setMpdMediaSurfaceState(key, { hasMedia: false, hasPreview: false });
-  if (key === "hero") {
-    const heroPrev = /** @type {HTMLImageElement | null} */ (
-      document.getElementById("mpd_hero_preview")
-    );
-    if (heroPrev) {
-      heroPrev.removeAttribute("src");
-      heroPrev.style.display = "none";
-    }
-    setHeroSpinnerVisible(false);
-    return;
-  }
-  if (key === "heroProfile") {
-    const prev = /** @type {HTMLImageElement | null} */ (
-      document.getElementById("mpd_hero_profile_preview")
-    );
-    if (prev) {
-      prev.removeAttribute("src");
-      prev.style.display = "none";
-    }
-    setHeroProfileSpinnerVisible(false);
-    return;
-  }
-  const introMatch = /^intro-(\d+)$/.exec(key);
-  if (introMatch) {
-    const i = Number(introMatch[1]);
-    setIntroSpinnerVisible(i, false);
-    const th = /** @type {HTMLImageElement | null} */ (
-      document.getElementById(`mpd_intro_${i}_thumb`)
-    );
-    if (th) {
-      th.removeAttribute("src");
-      th.style.display = "none";
-    }
+  failMpdImagePreview(document, mpdLocalPreviewObjectUrls, key);
+  if (key === "hero") setHeroSpinnerVisible(false);
+  else if (key === "heroProfile") setHeroProfileSpinnerVisible(false);
+  else {
+    const introMatch = /^intro-(\d+)$/.exec(key);
+    if (introMatch) setIntroSpinnerVisible(Number(introMatch[1]), false);
   }
 }
 
@@ -775,24 +726,6 @@ function hideMpdUploadOverlay() {
   if (!overlay) return;
   overlay.hidden = true;
   overlay.setAttribute("aria-hidden", "true");
-}
-
-/**
- * Preview only: keep stored S3 URLs clean while forcing the browser to fetch
- * an overwritten object whose public URL did not change.
- * @param {string} url
- */
-function cacheBustMpdPreviewUrl(url) {
-  const raw = String(url || "").trim();
-  if (!raw || typeof window === "undefined") return raw;
-  try {
-    const u = new URL(raw, window.location.origin);
-    u.searchParams.set("mpdPreview", String(Date.now()));
-    return u.href;
-  } catch {
-    const sep = raw.includes("?") ? "&" : "?";
-    return `${raw}${sep}mpdPreview=${Date.now()}`;
-  }
 }
 
 /**
@@ -1317,7 +1250,7 @@ function fillFormFromLocales(locales, active) {
       document.getElementById(`mpd_intro_${i}_thumb`)
     );
     if (!im) continue;
-    setMpdMediaSurfaceState(`intro-${i}`, {
+    setMpdMediaSurfaceStateOnPage(`intro-${i}`, {
       hasMedia: Boolean(s.src),
       hasPreview: Boolean(s.src),
     });
@@ -1479,8 +1412,11 @@ function renderMpdHeroProfileReviewBanner() {
   });
 }
 
+/** Saved audio bites currently listed in Media Library (max 5). */
+let mpdAudioEntryCount = 0;
+
 /**
- * Render the audio collection list with playback, delete, and highlight controls.
+ * Render the audio collection list with playback, delete, highlight, and replace controls.
  * @param {{ entries: { url: string, title: string, addedAt: string }[], highlightUrl: string, approvedUrls: string[] } | null} collection
  */
 function renderMpdAudioCollection(collection) {
@@ -1489,6 +1425,7 @@ function renderMpdAudioCollection(collection) {
   const actionsEl = document.getElementById("mpd_audio_actions");
   if (!container) return;
   const entries = collection?.entries ?? [];
+  mpdAudioEntryCount = entries.length;
   const highlightUrl = collection?.highlightUrl ?? "";
   const approvedSet = new Set(collection?.approvedUrls ?? []);
   const fullSiteSet = new Set(collection?.fullSiteApprovedUrls ?? []);
@@ -1528,12 +1465,13 @@ function renderMpdAudioCollection(collection) {
       }
       const audioNote = mpdAssetReviewNotes.audioEntries.find(([k]) => k.endsWith('|' + e.url));
       const audioBanner = audioNote ? mpdReviewBannerHtml(audioNote[1]) : '';
-      return `<div class="mpd-audio-entry${hlClass}" data-audio-url="${escHtml(e.url)}">
+      return `<div class="mpd-audio-entry${hlClass}" data-audio-url="${escHtml(e.url)}" data-audio-title="${escHtml(e.title)}">
         ${audioBanner}
         <app-audio-row active="true" data-audio-src="${escHtml(e.url)}" data-audio-title="${escHtml(e.title)}" data-layout="profile"></app-audio-row>
         <div class="mpd-audio-entry-controls">
           <button type="button" class="mpd-audio-highlight-btn${isHighlight ? " active" : ""}" title="${isHighlight ? "Currently highlighted" : "Set as highlight"}" data-action="highlight">★</button>
           <span class="mpd-audio-entry-status ${statusClass}">${statusText}</span>
+          <button type="button" class="mpd-audio-replace-btn" data-action="replace">Replace</button>
           <button type="button" class="mpd-audio-delete-btn" title="Delete" data-action="delete">&times;</button>
         </div>
       </div>`;
@@ -1889,9 +1827,6 @@ function mpdText(value) {
 }
 
 /**
- * @param {string} tab
- */
-/**
  * @param {Element | null} el
  */
 function mpdProgramTabIsAvailable(el) {
@@ -1903,17 +1838,39 @@ function mpdProgramTabIsAvailable(el) {
 }
 
 /**
+ * @param {string} hash
+ */
+function mpdProgramsCalendarHash(hash) {
+  const h = String(hash || "").replace(/^#/, "").toLowerCase();
+  return (
+    h === "calendar" ||
+    h === "programs-calendar" ||
+    h === "calendar-download" ||
+    h === "programs-calendar-download"
+  );
+}
+
+/**
+ * @param {string} hash
+ */
+function mpdProgramsCalendarDownloadHash(hash) {
+  const h = String(hash || "").replace(/^#/, "").toLowerCase();
+  return h === "calendar-download" || h === "programs-calendar-download";
+}
+
+/**
  * @param {string} tab
  */
 function setMpdProgramsTab(tab) {
   const root = document.getElementById("mpd-programs");
   if (!root) return;
-  const target = ["explore", "my-programs", "payments", "calendar", "travel"].includes(tab)
+  const target = ["explore", "my-programs", "payments", "calendar", "travel", "communications"].includes(tab)
     ? tab
     : "explore";
   const targetTab = root.querySelector(`[data-mpd-program-tab="${target}"]`);
   const safeTarget =
-    (target === "payments" || target === "calendar" || target === "travel") && !mpdProgramTabIsAvailable(targetTab)
+    (target === "payments" || target === "calendar" || target === "travel" || target === "communications") &&
+    !mpdProgramTabIsAvailable(targetTab)
       ? "my-programs"
       : target;
   root.querySelectorAll("[data-mpd-program-tab]").forEach((el) => {
@@ -3341,6 +3298,7 @@ async function hydrateProgramPaymentsPanel(programs) {
   renderMpdPaymentsWorkspace();
   await hydrateProgramCalendarPanel(payments);
   await hydrateProgramTravelPanel(payments);
+  await hydrateProgramCommsPanel();
 }
 
 /**
@@ -3369,10 +3327,23 @@ async function hydrateProgramCalendarPanel(payments) {
     if (tab.classList.contains("is-active")) setMpdProgramsTab("my-programs");
     return;
   }
+  const hash = typeof window !== "undefined" ? window.location.hash.replace(/^#/, "").toLowerCase() : "";
+  const autoDownload = mpdProgramsCalendarDownloadHash(hash);
   await mountMemberProgramCalendar(root, {
     eligiblePrograms: gate.eligible,
     canCreate: true,
+    autoDownloadIcs: autoDownload,
   });
+  if (mpdProgramsCalendarHash(hash)) {
+    setMpdProgramsTab("calendar");
+  }
+  if (autoDownload && typeof history !== "undefined" && history.replaceState && typeof window !== "undefined") {
+    try {
+      history.replaceState(null, "", `${window.location.pathname}${window.location.search}#calendar`);
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 async function hydrateProgramTravelPanel(payments) {
@@ -3398,6 +3369,11 @@ async function hydrateProgramTravelPanel(payments) {
 
   tab.toggleAttribute("hidden", false);
   tab.setAttribute("aria-hidden", "false");
+
+  const hash = typeof window !== "undefined" ? window.location.hash.replace(/^#/, "").toLowerCase() : "";
+  if (hash === "travel" || hash === "programs-travel") {
+    setMpdProgramsTab("travel");
+  }
 
   const programs = mpdLastProgramsForPayments || [];
   const securedPrograms = programs.filter((p) => securedIds.has(String(p.id || "")));
@@ -3451,6 +3427,7 @@ async function hydrateProgramTravelPanel(payments) {
     const prepLinksHtml = prepLinks.length
       ? `<div class="mpd-travel-prep-links"><h4>Travel Preparation</h4><div class="mpd-travel-prep-links__grid">${prepLinks.map((l) =>
           `<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer" class="mpd-travel-prep-link-card">
+              ${l.imageUrl ? `<img class="mpd-travel-prep-link-card__img" src="${esc(l.imageUrl)}" alt="" />` : ""}
               <strong>${esc(l.title)}</strong>
               <span>${esc(l.description)}</span>
               <span class="mpd-travel-prep-link-card__arrow">→</span>
@@ -3504,6 +3481,74 @@ async function hydrateProgramTravelPanel(payments) {
       }
     }
   });
+}
+
+async function hydrateProgramCommsPanel() {
+  const tab = document.getElementById("mpd-program-tab-communications");
+  const root = document.getElementById("mpd_program_comms_workspace");
+  if (!tab || !root) return;
+
+  let rooms = [];
+  try {
+    rooms = await listMyProgramCommsRooms();
+  } catch {
+    rooms = [];
+  }
+  if (!Array.isArray(rooms)) rooms = [];
+
+  const forceHidden = tab.classList.contains("mpd-program-tab--force-hidden");
+  const showTab = rooms.length > 0 && !forceHidden;
+  tab.toggleAttribute("hidden", !showTab);
+  tab.setAttribute("aria-hidden", showTab ? "false" : "true");
+  if (!showTab) {
+    root.innerHTML = `<div class="mpd-program-placeholder"><h3>Communications</h3><p class="studio-muted">Program chat rooms appear here when Fusion publishes a LINE invite for a program you are confirmed on.</p></div>`;
+    if (tab.classList.contains("is-active")) setMpdProgramsTab("my-programs");
+    return;
+  }
+
+  const programs = mpdLastProgramsForPayments || [];
+  const esc = (s) =>
+    String(s ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+
+  root.innerHTML = rooms
+    .map((room) => {
+      const program = programs.find((p) => String(p.id || "") === String(room.programId || "")) || null;
+      const title = program
+        ? getProgramDisplayNameFromRow(program)
+        : String(room.groupName || room.programId || "Program");
+      const message = resolveInviteMessage(room);
+      const thumb = resolveProviderThumbUrl({ ...room, provider: "line" });
+      const join = String(room.groupInviteUrl || "").trim();
+      const qr = String(room.groupQrUrl || "").trim();
+      return `<article class="mpd-comms-room" data-mpd-comms-program="${esc(room.programId)}">
+        <header class="mpd-comms-room__head">
+          ${thumb ? `<img class="mpd-comms-room__provider" src="${esc(thumb)}" alt="" />` : ""}
+          <div>
+            <h3 class="mpd-comms-room__title">${esc(title)}</h3>
+            ${room.groupName ? `<p class="mpd-comms-room__group">${esc(room.groupName)}</p>` : ""}
+          </div>
+        </header>
+        <p class="mpd-comms-room__invite">${esc(message)}</p>
+        <div class="mpd-comms-room__qr-wrap">
+          ${qr ? `<img class="mpd-comms-room__qr" src="${esc(qr)}" alt="Scan to join the LINE group" />` : ""}
+        </div>
+        ${
+          join
+            ? `<a class="studio-btn-primary mpd-comms-room__join" href="${esc(join)}" target="_blank" rel="noopener noreferrer">Open in LINE</a>`
+            : ""
+        }
+      </article>`;
+    })
+    .join("");
+
+  const hash = typeof window !== "undefined" ? window.location.hash.replace(/^#/, "").toLowerCase() : "";
+  if (hash === "communications" || hash === "programs-communications") {
+    setMpdProgramsTab("communications");
+  }
 }
 
 function mpdCurrentPaymentItem() {
@@ -5305,6 +5350,10 @@ export function generateSettingsProfileContent() {
                                         <span class="mpd-program-tab__icon" aria-hidden="true">✈</span>
                                         <span>Travel</span>
                                     </button>
+                                    <button type="button" class="mpd-program-tab mpd-program-tab--communications" id="mpd-program-tab-communications" role="tab" aria-selected="false" tabindex="-1" aria-controls="mpd-program-panel-communications" data-mpd-program-tab="communications" hidden aria-hidden="true">
+                                        <span class="mpd-program-tab__icon" aria-hidden="true">💬</span>
+                                        <span>Communications</span>
+                                    </button>
                                 </div>
 
                                 <div class="mpd-program-tab-panel" id="mpd-program-panel-explore" role="tabpanel" aria-labelledby="mpd-program-tab-explore" data-mpd-program-panel="explore">
@@ -5420,6 +5469,15 @@ export function generateSettingsProfileContent() {
                                         </div>
                                     </div>
                                 </div>
+
+                                <div class="mpd-program-tab-panel" id="mpd-program-panel-communications" role="tabpanel" aria-labelledby="mpd-program-tab-communications" data-mpd-program-panel="communications" hidden>
+                                    <div id="mpd_program_comms_workspace" aria-live="polite">
+                                        <div class="mpd-program-placeholder">
+                                            <h3>Communications</h3>
+                                            <p class="studio-muted">Program chat rooms appear here when Fusion publishes a LINE invite for a program you are confirmed on.</p>
+                                        </div>
+                                    </div>
+                                </div>
                             </section>
                         </div>
 
@@ -5494,18 +5552,29 @@ export function generateSettingsProfileContent() {
                                 <div id="mpd_audio_section" class="mpd-audio-section">
                                 <h3 class="studio-subheading mpd-media-subhead">Audio bite</h3>
                                 <blockquote class="mpd-audio-inspiration" id="mpd_audio_inspiration">\u201CWords mean more than what is set down on paper. It takes the human voice to infuse them with deeper meaning.\u201D \u2014 Maya Angelou</blockquote>
-                                <p class="studio-muted mpd-media-helper">Upload a file or record up to 3 minutes with your microphone. A title is required. Staff may approve clips for your public profile and/or for full-site play (sound environment and other site audio rows).</p>
+                                <p class="studio-muted mpd-media-helper">Choose a file or record up to 3 minutes with your microphone. Preview the clip, then save it to your collection. You can delete a selection before saving, or replace a saved bite. A title is required. Staff may approve clips for your public profile and/or for full-site play (sound environment and other site audio rows).</p>
                                 <p class="studio-muted mpd-media-helper mpd-audio-eligibility-notice">Audio without background noise or music may be eligible to play throughout the site after staff approval. Other audio stays on your public profile page only.</p>
                                 <input type="hidden" id="mpd_audio_url" value="" />
+                                <input type="file" id="mpd_audio_file" class="mpd-file-input-hidden" accept="audio/*" />
                                 <div class="mpd-audio-actions" id="mpd_audio_actions">
-                                    <input type="file" id="mpd_audio_file" class="mpd-file-input-hidden" accept="audio/*" />
-                                    <label for="mpd_audio_file" class="mpd-upload-btn">Upload audio</label>
+                                    <label for="mpd_audio_file" class="mpd-upload-btn" id="mpd_audio_file_label">Choose audio file</label>
                                     <button type="button" class="mpd-upload-btn mpd-audio-record-btn" id="mpd_audio_record_open">Record audio</button>
                                 </div>
-                                <p id="mpd_audio_approval_status" class="mpd-audio-approval-status" hidden></p>
                                 <label class="studio-field studio-field--full"><span>Audio title <span class="mpd-required-mark" aria-hidden="true">*</span></span>
-                                    <input type="text" id="mpd_audio_title" class="studio-input" maxlength="120" placeholder="Required before upload or record" />
+                                    <input type="text" id="mpd_audio_title" class="studio-input" maxlength="120" placeholder="Required before save or record" />
                                 </label>
+                                <div id="mpd_audio_pending" class="mpd-audio-pending" hidden>
+                                    <p class="mpd-audio-pending__kicker">Preview before saving</p>
+                                    <p id="mpd_audio_pending_name" class="mpd-audio-pending__name"></p>
+                                    <audio id="mpd_audio_pending_player" class="mpd-audio-pending__player" controls hidden></audio>
+                                    <p id="mpd_audio_pending_replace_hint" class="studio-muted mpd-audio-pending__hint" hidden></p>
+                                    <div class="mpd-audio-pending__actions">
+                                        <button type="button" class="mpd-upload-btn" id="mpd_audio_pending_save">Save to collection</button>
+                                        <button type="button" class="mpd-upload-btn mpd-audio-record-btn" id="mpd_audio_pending_replace">Replace file</button>
+                                        <button type="button" class="mpd-audio-pending-discard" id="mpd_audio_pending_discard">Delete selection</button>
+                                    </div>
+                                </div>
+                                <p id="mpd_audio_approval_status" class="mpd-audio-approval-status" hidden></p>
                                 <div id="mpd_audio_collection" class="mpd-audio-collection"></div>
                                 <p class="studio-muted mpd-audio-count" id="mpd_audio_count" hidden></p>
                                 </div>
@@ -5851,6 +5920,11 @@ export default function initSettingsProfile() {
   let heroImageCleared = false;
   let heroProfileImageCleared = false;
   let profileAudioUrl = "";
+  const mpdPendingAudioStore = new Map();
+  /** @type {File | null} */
+  let mpdPendingAudioFile = null;
+  let mpdPendingReplaceUrl = "";
+  let mpdPendingReplaceTitle = "";
   let adminPreviewBypassEnabled = false;
   /** @type {string} */
   let baselineSnapshot = "";
@@ -6063,6 +6137,127 @@ export default function initSettingsProfile() {
       operation: op?.operation || "",
       detail: op?.detail || "",
     });
+  };
+
+  const syncMpdAudioPendingChooser = () => {
+    const section = document.getElementById("mpd_audio_section");
+    section?.classList.toggle("is-pending-audio", Boolean(mpdPendingAudioFile));
+  };
+
+  const clearPendingMpdAudio = () => {
+    clearMpdPendingAudioPreview(document, mpdPendingAudioStore);
+    mpdPendingAudioFile = null;
+    mpdPendingReplaceUrl = "";
+    mpdPendingReplaceTitle = "";
+    const input = /** @type {HTMLInputElement | null} */ (
+      document.getElementById("mpd_audio_file")
+    );
+    if (input) input.value = "";
+    syncMpdAudioPendingChooser();
+  };
+
+  /**
+   * @param {File} file
+   * @param {{ replaceUrl?: string, replaceTitle?: string }} [opts]
+   */
+  const showPendingMpdAudio = (file, opts = {}) => {
+    if (opts.replaceUrl != null) mpdPendingReplaceUrl = String(opts.replaceUrl || "");
+    if (opts.replaceTitle != null) mpdPendingReplaceTitle = String(opts.replaceTitle || "");
+    mpdPendingAudioFile = file;
+    showMpdPendingAudioPreview(document, mpdPendingAudioStore, file, {
+      replaceTitle: mpdPendingReplaceTitle,
+    });
+    const titleEl = /** @type {HTMLInputElement | null} */ (
+      document.getElementById("mpd_audio_title")
+    );
+    if (titleEl && !titleEl.value.trim()) {
+      const fromName = titleFromAudioFileName(file.name);
+      if (fromName) titleEl.value = fromName;
+    }
+    syncMpdAudioPendingChooser();
+  };
+
+  const openMpdAudioFilePicker = () => {
+    document.getElementById("mpd_audio_file")?.click();
+  };
+
+  const markAudioPendingApproval = () => {
+    const badge = document.getElementById("mpd_audio_approval_status");
+    if (!badge) return;
+    badge.hidden = false;
+    badge.textContent = "Pending staff approval";
+    badge.classList.add("is-pending");
+    badge.classList.remove("is-approved");
+  };
+
+  const savePendingMpdAudio = async () => {
+    const file = mpdPendingAudioFile;
+    const replaceUrl = mpdPendingReplaceUrl;
+    const audioTitle = getVal("mpd_audio_title").trim();
+    const saveError = pendingAudioSaveError({
+      file,
+      title: audioTitle,
+      entryCount: mpdAudioEntryCount,
+      replaceUrl,
+    });
+    if (saveError) {
+      mpdNotifyStatus(saveError);
+      if (/title/i.test(saveError)) document.getElementById("mpd_audio_title")?.focus();
+      return;
+    }
+    if (!file) return;
+    if (
+      !beginMpdOperation("audio-upload", {
+        operation: "Audio bite",
+        detail: replaceUrl ? "Replacing audio bite" : "Uploading audio bite",
+        message: replaceUrl ? "Replacing audio bite…" : "Uploading audio bite…",
+        pendingMessage: replaceUrl
+          ? "Still replacing audio bite..."
+          : "Still uploading audio bite...",
+      })
+    ) {
+      return;
+    }
+    showMpdUploadOverlay(replaceUrl ? "Replacing audio bite..." : "Uploading audio bite...");
+    try {
+      const url = await uploadBlobToS3(file, null, {
+        area: "account/profile",
+        entityType: "artist",
+        entityId: currentArtistId || profileSlug || "me",
+        fieldKey: uniqueAudioUploadFieldKey(),
+        timeoutMs: 120000,
+      });
+      setVal("mpd_audio_url", url);
+      profileAudioUrl = url;
+      mediaUploadRevision += 1;
+      if (replaceUrl) {
+        await replaceMyArtistAudioEntry(replaceUrl, url, audioTitle);
+      } else {
+        await addMyArtistAudioEntry(url, audioTitle);
+      }
+      setVal("mpd_audio_title", "");
+      clearPendingMpdAudio();
+      markAudioPendingApproval();
+      await loadMpdAudioCollection();
+      finishMpdOperation(
+        "audio-upload",
+        "saved",
+        replaceUrl
+          ? "Audio bite replaced in your collection."
+          : "Audio bite saved to your collection.",
+      );
+    } catch (err) {
+      finishMpdOperation(
+        "audio-upload",
+        "error",
+        err instanceof Error ? err.message : String(err),
+      );
+    } finally {
+      if (activeMpdOperations.has("audio-upload")) {
+        finishMpdOperation("audio-upload", "idle");
+      }
+      hideMpdUploadOverlay();
+    }
   };
 
   const setAdminBypassVisible = (visible) => {
@@ -6788,6 +6983,12 @@ export default function initSettingsProfile() {
       "mpd-links": "identity",
       "mpd-seo": "studio-overview",
       "mpd-programs": "programs",
+      travel: "programs",
+      "programs-travel": "programs",
+      calendar: "programs",
+      "programs-calendar": "programs",
+      "calendar-download": "programs",
+      "programs-calendar-download": "programs",
       "mpd-membership": "settings",
       "membership": "settings",
       "mpd-dev": "dev",
@@ -7084,7 +7285,7 @@ export default function initSettingsProfile() {
       document.getElementById("mpd_hero_preview")
     );
     if (!heroPrev) return;
-    setMpdMediaSurfaceState("hero", {
+    setMpdMediaSurfaceStateOnPage("hero", {
       hasMedia: Boolean(u),
       hasPreview: Boolean(u),
     });
@@ -7104,7 +7305,7 @@ export default function initSettingsProfile() {
     };
     heroPrev.onerror = () => {
       setHeroSpinnerVisible(false);
-      setMpdMediaSurfaceState("hero", {
+      setMpdMediaSurfaceStateOnPage("hero", {
         hasMedia: Boolean(getVal("mpd_hero_url").trim()),
         hasPreview: false,
       });
@@ -7132,7 +7333,7 @@ export default function initSettingsProfile() {
     );
     updateHeroProfileCardCopy();
     if (!prev) return;
-    setMpdMediaSurfaceState("heroProfile", {
+    setMpdMediaSurfaceStateOnPage("heroProfile", {
       hasMedia: Boolean(u),
       hasPreview: Boolean(displayUrl),
     });
@@ -7152,7 +7353,7 @@ export default function initSettingsProfile() {
     };
     prev.onerror = () => {
       setHeroProfileSpinnerVisible(false);
-      setMpdMediaSurfaceState("heroProfile", {
+      setMpdMediaSurfaceStateOnPage("heroProfile", {
         hasMedia: Boolean(getVal("mpd_hero_profile_url").trim()),
         hasPreview: false,
       });
@@ -7202,7 +7403,7 @@ export default function initSettingsProfile() {
       setVal(`mpd_intro_${i}_caption`, "");
       mediaUploadRevision += 1;
       setIntroSpinnerVisible(i, false);
-      setMpdMediaSurfaceState(`intro-${i}`, { hasMedia: false, hasPreview: false });
+      setMpdMediaSurfaceStateOnPage(`intro-${i}`, { hasMedia: false, hasPreview: false });
       const thumb = /** @type {HTMLImageElement | null} */ (
         document.getElementById(`mpd_intro_${i}_thumb`)
       );
@@ -7426,6 +7627,34 @@ export default function initSettingsProfile() {
         }
         return;
       }
+      const audioChooseLabel =
+        e.target && /** @type {Element} */ (e.target).closest?.("#mpd_audio_file_label");
+      if (audioChooseLabel && rootEl.contains(audioChooseLabel)) {
+        mpdPendingReplaceUrl = "";
+        mpdPendingReplaceTitle = "";
+      }
+      const pendingSaveBtn =
+        e.target && /** @type {Element} */ (e.target).closest?.("#mpd_audio_pending_save");
+      if (pendingSaveBtn && rootEl.contains(pendingSaveBtn)) {
+        e.preventDefault();
+        void savePendingMpdAudio();
+        return;
+      }
+      const pendingReplaceBtn =
+        e.target && /** @type {Element} */ (e.target).closest?.("#mpd_audio_pending_replace");
+      if (pendingReplaceBtn && rootEl.contains(pendingReplaceBtn)) {
+        e.preventDefault();
+        openMpdAudioFilePicker();
+        return;
+      }
+      const pendingDiscardBtn =
+        e.target && /** @type {Element} */ (e.target).closest?.("#mpd_audio_pending_discard");
+      if (pendingDiscardBtn && rootEl.contains(pendingDiscardBtn)) {
+        e.preventDefault();
+        clearPendingMpdAudio();
+        mpdNotifyStatus("Selection deleted. Choose another file or record.");
+        return;
+      }
       const audioEntryBtn =
         e.target && /** @type {Element} */ (e.target).closest?.("[data-action]");
       if (audioEntryBtn) {
@@ -7441,6 +7670,22 @@ export default function initSettingsProfile() {
               setStatus(`Delete failed: ${err instanceof Error ? err.message : String(err)}`);
               audioEntryBtn.disabled = false;
             });
+          return;
+        }
+        if (audioUrl && action === "replace") {
+          e.preventDefault();
+          mpdPendingReplaceUrl = audioUrl;
+          mpdPendingReplaceTitle = entryEl?.getAttribute("data-audio-title") || "";
+          const titleField = /** @type {HTMLInputElement | null} */ (
+            document.getElementById("mpd_audio_title")
+          );
+          if (titleField && mpdPendingReplaceTitle && !titleField.value.trim()) {
+            titleField.value = mpdPendingReplaceTitle;
+          }
+          mpdNotifyStatus(
+            "Choose a new audio file to preview, then save to replace this bite.",
+          );
+          openMpdAudioFilePicker();
           return;
         }
         if (audioUrl && action === "highlight") {
@@ -7471,6 +7716,7 @@ export default function initSettingsProfile() {
           document.getElementById("mpd_audio_title")?.focus();
           return;
         }
+        clearPendingMpdAudio();
         openMpdAudioCaptureModal({
           artistId: currentArtistId,
           slug: profileSlug,
@@ -7835,75 +8081,19 @@ export default function initSettingsProfile() {
       }
       if (t.id === "mpd_audio_file" && t.files?.[0]) {
         const f = t.files[0];
-        const audioTitle = getVal("mpd_audio_title").trim();
-        if (!audioTitle) {
-          mpdNotifyStatus("Add an audio title before uploading.");
-          document.getElementById("mpd_audio_title")?.focus();
+        const check = validateAudioFile(f);
+        if (!check.ok) {
+          mpdNotifyStatus(check.error);
           t.value = "";
           return;
         }
-        const MPD_MAX_AUDIO_BYTES = 10 * 1024 * 1024;
-        if (f.size > MPD_MAX_AUDIO_BYTES) {
-          mpdNotifyStatus(
-            `Audio file is too large (${Math.round(f.size / 1024)} KB). Maximum size is ${Math.round(MPD_MAX_AUDIO_BYTES / 1024)} KB.`,
-          );
-          t.value = "";
-          return;
-        }
-        if (
-          !beginMpdOperation("audio-upload", {
-            operation: "Audio bite",
-            detail: "Uploading audio bite",
-            message: "Uploading audio bite…",
-            pendingMessage: "Still uploading audio bite...",
-          })
-        ) {
-          t.value = "";
-          return;
-        }
-        showMpdUploadOverlay("Uploading audio bite...");
-        try {
-          const url = await uploadBlobToS3(f, null, {
-            area: "account/profile",
-            entityType: "artist",
-            entityId: currentArtistId || profileSlug || "me",
-            fieldKey: "audio",
-            timeoutMs: 120000,
-          });
-          setVal("mpd_audio_url", url);
-          profileAudioUrl = url;
-          mediaUploadRevision += 1;
-          addMyArtistAudioEntry(url, audioTitle)
-            .then(() => {
-              setVal("mpd_audio_title", "");
-              return loadMpdAudioCollection();
-            })
-            .catch((err) => console.error("Failed to add audio entry", err));
-          const badge = document.getElementById("mpd_audio_approval_status");
-          if (badge) {
-            badge.hidden = false;
-            badge.textContent = "Pending staff approval";
-            badge.classList.add("is-pending");
-            badge.classList.remove("is-approved");
-          }
-          finishMpdOperation(
-            "audio-upload",
-            "saved",
-            "Audio bite uploaded and added to your collection.",
-          );
-        } catch (err) {
-          finishMpdOperation(
-            "audio-upload",
-            "error",
-            err instanceof Error ? err.message : String(err),
-          );
-        } finally {
-          if (activeMpdOperations.has("audio-upload")) {
-            finishMpdOperation("audio-upload", "idle");
-          }
-          hideMpdUploadOverlay();
-        }
+        showPendingMpdAudio(f);
         t.value = "";
+        mpdNotifyStatus(
+          mpdPendingReplaceUrl
+            ? "Preview the new file, then save to replace this bite or delete this selection."
+            : "Preview your audio, then save it to your collection or delete this selection.",
+        );
         return;
       }
       const slot = t.getAttribute("data-intro-slot");
@@ -8571,6 +8761,13 @@ export default function initSettingsProfile() {
 
   window.addEventListener("hashchange", () => {
     showMpdPanel(panelKeyFromHash());
+    const hash = window.location.hash.replace(/^#/, "").toLowerCase();
+    if (hash === "travel" || hash === "programs-travel") {
+      setMpdProgramsTab("travel");
+    }
+    if (mpdProgramsCalendarHash(hash)) {
+      setMpdProgramsTab("calendar");
+    }
   });
 
   document

@@ -217,6 +217,9 @@
 .studio-schedule-page .button--ics {
   border-color: var(--fusion-ink, #111827);
 }
+.studio-schedule-page .button--email {
+  border-color: var(--fusion-ink, #111827);
+}
 
 .studio-schedule-page .calendar-heading {
   display: flex;

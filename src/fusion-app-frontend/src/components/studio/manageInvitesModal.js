@@ -1,5 +1,5 @@
 /**
- * Studio "Manage Invites" — pill-based modal for viewing and managing broadcast credits.
+ * Studio broadcast credits — pill-based modal for viewing and managing email blast credits.
  * Color-coded pills by credit count: 0=red, 1=amber, 2=blue, 3+=green.
  */
 import { getAccountsForStudio, staffListBroadcastCreditsStudio, staffBatchSetBroadcastCreditsForStudio } from '../../utils/database.js';
@@ -59,7 +59,7 @@ function renderPills(users, selected, filter, search) {
     .join('');
 }
 
-export async function openManageInvitesModal() {
+export async function openManageBroadcastCreditsModal() {
   const [accounts, creditRows] = await Promise.all([
     getAccountsForStudio(),
     staffListBroadcastCreditsStudio(),
@@ -227,3 +227,5 @@ export async function openManageInvitesModal() {
     void applyCredits((bal) => Math.max(0, bal - 1));
   });
 }
+
+export { openManageBroadcastCreditsModal as openManageInvitesModal };

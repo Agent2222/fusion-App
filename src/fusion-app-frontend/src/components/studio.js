@@ -26,6 +26,12 @@ import {
 } from '../utils/studioShellState.js';
 import { studioGroupIconHref, studioNavIconHref } from '../utils/studioIconRegistry.js';
 import studioWordmarkLogo from '../assets/Fusion-X-logo-03.png';
+import { isRadarPreviewActive } from '../utils/radarPreview.js';
+import { isBroadcastsPreviewActive } from '../utils/broadcastsPreview.js';
+
+function isStudioDevPreviewActive() {
+    return isRadarPreviewActive() || isBroadcastsPreviewActive();
+}
 
 function normalizeHash() {
     const raw = (window.location.hash || '').replace(/^#/, '').trim().toLowerCase();
@@ -421,6 +427,18 @@ export default function initStudio() {
 
     const authGate = document.getElementById('studioAuthGate');
     const applyAuthGate = async () => {
+        if (isStudioDevPreviewActive()) {
+            if (authGate) {
+                authGate.hidden = true;
+                authGate.setAttribute('aria-hidden', 'true');
+            }
+            if (root) {
+                root.removeAttribute('data-studio-anonymous');
+                if (isRadarPreviewActive()) root.setAttribute('data-radar-preview', '1');
+                if (isBroadcastsPreviewActive()) root.setAttribute('data-broadcasts-preview', '1');
+            }
+            return;
+        }
         const snap = await getAuthSnapshot();
         if (authGate) {
             const show = !snap.authenticated;
@@ -455,6 +473,24 @@ export default function initStudio() {
     window.addEventListener('fusion-auth-change', _studioAuthChangeHandler);
 
     void (async () => {
+        if (isStudioDevPreviewActive()) {
+            setStudioShellGate({
+                effectiveMatrix: null,
+                permissionsNavAllowed: true,
+                teamNavAllowed: true,
+            });
+            const navEl = document.getElementById('studioNav');
+            if (navEl) {
+                navEl.innerHTML = buildStudioNavButtonsHtml(normalizeHash());
+                attachStudioNavClickHandlers(navEl);
+            }
+            if (settingsBtn) {
+                settingsBtn.hidden = false;
+            }
+            await applyAuthGate();
+            await applySection(normalizeHash());
+            return;
+        }
         await applyAuthGate();
         await refreshShellAndNav();
     })();

@@ -23,6 +23,11 @@ import {
     initialsFromName,
     parseYmd,
     toYmd,
+    clampScheduleAvailability,
+    formatScheduleCanisterError,
+    isSeededDemoScheduleEvent,
+    normalizeScheduleImportance,
+    normalizeScheduleRsvpIds,
     weekRangeContaining,
     ymdInRange,
 } from './scheduleModel.js';
@@ -119,6 +124,12 @@ function mapRow(row) {
         eventKind: /** @type {CalendarEvent['eventKind']} */ (row.eventKind || 'standard'),
         imageUrl: String(row.imageUrl || '').trim(),
         publicOnSite: Boolean(row.publicOnSite),
+        importance: normalizeScheduleImportance(row.importance),
+        acceptRsvp: Boolean(row.acceptRsvp),
+        availability: clampScheduleAvailability(row.availability, Boolean(row.acceptRsvp)),
+        rsvpIds: normalizeScheduleRsvpIds(row.rsvpIds),
+        rsvpCount: Math.max(0, Math.round(Number(row.rsvpCount) || 0)) || normalizeScheduleRsvpIds(row.rsvpIds).length,
+        myRsvp: Boolean(row.myRsvp),
         createdBy: String(row.createdBy || ''),
         conflicts: [],
         createdAt: String(row.createdAt || ''),
@@ -302,13 +313,24 @@ export async function listScheduleArtistsForProgram(programId) {
 
 /**
  * Load locations from canister only (no dummy seed).
+ * If the catalog is empty, create a default "Main Studio" so staff can save events.
  */
 export async function loadScheduleLocations() {
-    const rows = await listScheduleLocationsStudio();
-    locationOptions = (Array.isArray(rows) ? rows : [])
-        .slice()
-        .sort((a, b) => a.name.localeCompare(b.name));
-    SCHEDULE_LOCATIONS = locationOptions;
+    const apply = (rows) => {
+        locationOptions = (Array.isArray(rows) ? rows : [])
+            .slice()
+            .sort((a, b) => a.name.localeCompare(b.name));
+        SCHEDULE_LOCATIONS = locationOptions;
+    };
+    apply(await listScheduleLocationsStudio());
+    if (!locationOptions.length) {
+        try {
+            await upsertScheduleLocationStudio({ name: 'Main Studio' });
+            apply(await listScheduleLocationsStudio());
+        } catch (err) {
+            console.warn('[schedule] could not create default location', err);
+        }
+    }
     notify();
     return getScheduleLocations();
 }
@@ -331,45 +353,9 @@ export async function removeScheduleLocation(id) {
     await loadScheduleLocations();
 }
 
-/** Fixture program ids from retired staffSeedScheduleDemoIfEmpty. */
-const SEEDED_DEMO_PROGRAM_IDS = new Set(['prog-kaga', 'prog-tokyo']);
-
-/** Fixture event ids from retired staffSeedScheduleDemoIfEmpty. */
-const SEEDED_DEMO_EVENT_IDS = new Set([
-    'evt-kaga-arrival',
-    'evt-studio-orient-early',
-    'evt-open-studios-10',
-    'evt-gallery-10a',
-    'evt-mentor-10b',
-    'evt-mentor-12',
-    'evt-orient-12',
-    'evt-gallery-12',
-    'evt-open-12',
-    'evt-sync-12',
-    'evt-dinner-12',
-    'evt-tokyo-14',
-    'evt-gallery-15',
-    'evt-dinner-18',
-    'evt-install-22',
-    'evt-mentor-25',
-    'evt-open-28',
-]);
-
 /**
- * @param {any} row
- */
-function isSeededDemoScheduleEvent(row) {
-    const id = String(row?.id || '').trim();
-    const programId = String(row?.programId || '').trim();
-    const createdBy = String(row?.createdBy || '').trim();
-    if (createdBy === 'seed') return true;
-    if (SEEDED_DEMO_EVENT_IDS.has(id)) return true;
-    if (SEEDED_DEMO_PROGRAM_IDS.has(programId)) return true;
-    return false;
-}
-
-/**
- * One-shot cleanup of canister rows left by the old demo seed.
+ * One-shot cleanup of leftover demo-seed rows only (fixed fixture ids / createdBy=seed).
+ * Never deletes staff-created events, including ones that reused old demo program ids.
  * @param {any[]} rows
  */
 async function purgeSeededDemoScheduleEvents(rows) {
@@ -409,7 +395,7 @@ export async function loadScheduleEvents() {
         return listEvents();
     } catch (err) {
         loadState = 'error';
-        loadError = String(err?.message || err || 'Failed to load schedule');
+        loadError = formatScheduleCanisterError(err);
         notify();
         throw err;
     }
@@ -612,6 +598,33 @@ export function scheduleTodayYmd() {
 /**
  * @param {Partial<CalendarEvent> & { title: string, date: string }} input
  */
+function rememberOptimisticEvent(row) {
+    const mapped = mapRow(row);
+    events = applyConflicts([...events.filter((e) => e.id !== mapped.id), mapped]);
+    if (loadState !== 'ready') {
+        loadState = 'ready';
+        loadError = '';
+    }
+    notify();
+    return getEvent(mapped.id);
+}
+
+/**
+ * Reload after a successful write. A failed reload must not look like a failed save.
+ */
+async function reloadAfterWrite() {
+    try {
+        await loadScheduleEvents();
+        return true;
+    } catch (err) {
+        console.warn('[schedule] reload after write failed', err);
+        return false;
+    }
+}
+
+/**
+ * @param {Partial<CalendarEvent> & { title: string, date: string }} input
+ */
 export async function createEvent(input) {
     const publicPrograms = programOptions.filter((p) => publicProgramIds.has(p.id));
     const program =
@@ -619,11 +632,19 @@ export async function createEvent(input) {
         publicPrograms[0] ||
         null;
     const locs = getScheduleLocations();
-    const location = locs.find((l) => l.id === input.locationId) || null;
+    const location = locs.find((l) => l.id === input.locationId) || locs[0] || null;
     const participantIds = Array.isArray(input.participantIds) ? input.participantIds : [];
-    const programId = input.programId || program?.id || '';
-    if (!programId) throw new Error('Program required');
-    const newId = await upsertScheduleEventStudio({
+    const programId = String(input.programId || program?.id || '').trim();
+    if (!programId) {
+        throw new Error(
+            'Program required — choose a public program (Studio → Programs, set visibility to Public).',
+        );
+    }
+    const locationId = String(input.locationId || location?.id || '').trim();
+    if (!locationId) {
+        throw new Error('Location required — add one under Manage locations.');
+    }
+    const payload = {
         id: '',
         expectedVersion: 0,
         title: input.title,
@@ -635,8 +656,8 @@ export async function createEvent(input) {
         programId,
         programName: input.programName || program?.name || '',
         team: input.team || 'Residency',
-        locationId: input.locationId || locs[0]?.id || 'loc-studio',
-        locationName: input.locationName || location?.name || locs[0]?.name || 'Main Studio',
+        locationId,
+        locationName: input.locationName || location?.name || 'Main Studio',
         assignedStaff: input.assignedStaff || [],
         participantIds,
         participantCount: participantIds.length || input.participantCount || 0,
@@ -647,15 +668,26 @@ export async function createEvent(input) {
         relationKind: input.relationKind || 'program',
         relationProgramId:
             input.relationProgramId ||
-            (input.relationKind === 'program' || !input.relationKind
-                ? programId
-                : ''),
+            (input.relationKind === 'program' || !input.relationKind ? programId : ''),
         eventKind: input.eventKind || 'standard',
         imageUrl: String(input.imageUrl || '').trim(),
         publicOnSite: Boolean(input.publicOnSite),
+        importance: normalizeScheduleImportance(input.importance),
+        acceptRsvp: Boolean(input.acceptRsvp),
+        availability: clampScheduleAvailability(input.availability, Boolean(input.acceptRsvp)),
+    };
+    const newId = await upsertScheduleEventStudio(payload);
+    await reloadAfterWrite();
+    const found = getEvent(String(newId));
+    if (found) return found;
+    return rememberOptimisticEvent({
+        ...payload,
+        id: String(newId),
+        version: 1,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        createdBy: 'studio',
     });
-    await loadScheduleEvents();
-    return getEvent(String(newId));
 }
 
 /**
@@ -697,18 +729,27 @@ export async function updateEvent(id, patch) {
             eventKind: next.eventKind || 'standard',
             imageUrl: String(next.imageUrl || '').trim(),
             publicOnSite: Boolean(next.publicOnSite),
+            importance: normalizeScheduleImportance(next.importance),
+            acceptRsvp: Boolean(next.acceptRsvp),
+            availability: clampScheduleAvailability(next.availability, Boolean(next.acceptRsvp)),
         });
     } catch (err) {
-        const msg = String(err?.message || err || '');
+        const msg = formatScheduleCanisterError(err);
         if (/version conflict/i.test(msg)) {
             const e = new Error('version conflict');
             e.name = 'ScheduleVersionConflict';
             throw e;
         }
-        throw err;
+        throw new Error(msg);
     }
-    await loadScheduleEvents();
-    return getEvent(id);
+    await reloadAfterWrite();
+    const found = getEvent(id);
+    if (found) return found;
+    return rememberOptimisticEvent({
+        ...next,
+        version: Number(prev.version) + 1,
+        updatedAt: new Date().toISOString(),
+    });
 }
 
 /**

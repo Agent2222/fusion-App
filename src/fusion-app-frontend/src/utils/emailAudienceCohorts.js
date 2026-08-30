@@ -8,11 +8,13 @@ import {
     getAccountsForStudio,
     getApplicants,
     getArtistsForStudio,
+    getCurrentProgramSeason,
     getProgramDisplayNameFromRow,
     getPrograms,
     getSubscribersForEmailStudio,
     listProgramAwardEntriesStudio,
 } from './database.js';
+import { normalizeProgramId } from './programAlumniEligibility.js';
 import {
     normalizeConfirmedArtistsList,
     studioArtistCanonicalEnglishName,
@@ -22,6 +24,11 @@ import {
     studioMembershipStatusIsPaid,
     studioTrialState,
 } from './studioMembershipPresentation.js';
+import {
+    getApplicantIsTester,
+    getApplicantManualDepositSubmitted,
+    getApplicantSponsorshipMode,
+} from './studioPlainForms.js';
 
 export const COHORT_ACTIVE_MEMBERS = 'cohort:active-members';
 export const COHORT_VETERANS = 'cohort:veterans';
@@ -88,19 +95,21 @@ export function cohortAudienceLabel(v) {
  * @param {unknown} row
  * @returns {boolean}
  */
-export function isActiveMemberAccount(row) {
-    if (!row || typeof row !== 'object') return false;
-    if (studioTrialState(/** @type {any} */ (row)) === 'active') return true;
-    return studioMembershipStatusIsPaid(studioEffectiveMembershipStatus(row));
+export function isExemptAccount(row) {
+    const r = row && typeof row === 'object' ? /** @type {Record<string, unknown>} */ (row) : {};
+    return Boolean(r.membershipExemptManual ?? r.membership_exempt_manual);
 }
 
 /**
+ * Paid, trialing, or complimentary / manual-exempt membership.
  * @param {unknown} row
  * @returns {boolean}
  */
-export function isExemptAccount(row) {
-    const r = row && typeof row === 'object' ? /** @type {Record<string, unknown>} */ (row) : {};
-    return Boolean(r.membershipExemptManual);
+export function isActiveMemberAccount(row) {
+    if (!row || typeof row !== 'object') return false;
+    if (isExemptAccount(row)) return true;
+    if (studioTrialState(/** @type {any} */ (row)) === 'active') return true;
+    return studioMembershipStatusIsPaid(studioEffectiveMembershipStatus(row));
 }
 
 /**
@@ -229,6 +238,81 @@ function artistIdFromApplicant(applicant) {
 }
 
 /**
+ * Studio treats open / full / active as the live (current) program lifecycle.
+ * @param {unknown} studioStatus
+ */
+export function isLiveStudioProgramStatus(studioStatus) {
+    const s = String(studioStatus || '')
+        .trim()
+        .toLowerCase();
+    return s === 'active' || s === 'open' || s === 'full';
+}
+
+/**
+ * Site current-season program, else every live (open/full/active) program.
+ * @param {object[]} programs
+ * @param {string} [seasonKey]
+ * @returns {Set<string>} raw program ids
+ */
+export function resolveCurrentProgramIds(programs, seasonKey = '') {
+    /** @type {Set<string>} */
+    const ids = new Set();
+    const seasonRaw = String(seasonKey || '').trim();
+    const seasonNorm = normalizeProgramId(seasonRaw);
+    if (seasonNorm) {
+        for (const p of Array.isArray(programs) ? programs : []) {
+            if (!p || typeof p !== 'object') continue;
+            const id = String(/** @type {any} */ (p).id || '').trim();
+            if (!id) continue;
+            if (id === seasonRaw || normalizeProgramId(id) === seasonNorm) ids.add(id);
+        }
+    }
+    if (ids.size) return ids;
+    for (const p of Array.isArray(programs) ? programs : []) {
+        if (!p || typeof p !== 'object') continue;
+        if (!isLiveStudioProgramStatus(/** @type {any} */ (p).studioStatus)) continue;
+        const id = String(/** @type {any} */ (p).id || '').trim();
+        if (id) ids.add(id);
+    }
+    return ids;
+}
+
+/**
+ * @param {string} programId
+ * @param {Set<string>} currentIds
+ */
+function programIdIsCurrent(programId, currentIds) {
+    const raw = String(programId || '').trim();
+    if (!raw) return false;
+    if (currentIds.has(raw)) return true;
+    const norm = normalizeProgramId(raw);
+    if (currentIds.has(norm)) return true;
+    for (const id of currentIds) {
+        if (normalizeProgramId(id) === norm) return true;
+    }
+    return false;
+}
+
+/**
+ * Accepted decision, or Confirmed (slot-secured) via deposit / full sponsorship.
+ * @param {unknown} applicant
+ */
+export function isCurrentProgramCohortApplicant(applicant) {
+    if (!applicant || typeof applicant !== 'object') return false;
+    const o = /** @type {Record<string, unknown>} */ (applicant);
+    const st = String(o.status || '')
+        .trim()
+        .toLowerCase();
+    if (st === 'withdrawn' || st === 'pulledout' || st === 'rejected') return false;
+    if (getApplicantIsTester(String(o.payloadJson || ''))) return false;
+    if (st === 'accepted') return true;
+    const payload = String(o.payloadJson || '');
+    if (getApplicantSponsorshipMode(payload) === 'full') return true;
+    if (getApplicantManualDepositSubmitted(payload)) return true;
+    return false;
+}
+
+/**
  * Programs with studioStatus active or completed.
  * @param {object[]} programs
  * @returns {Set<string>}
@@ -321,6 +405,7 @@ function isDrawEntryIncluded(status) {
  *   applicants: object[],
  *   subscribers: object[],
  *   veteranArtistIds: Set<string>,
+ *   currentProgramSeason: string,
  * }} EmailCohortContext
  */
 
@@ -354,7 +439,7 @@ export async function loadEmailCohortContext(opts = {}) {
         return ctx;
     }
     cohortCtxInflight = (async () => {
-        const [accounts, contactsRaw, artists, programs, applicants, subscribers] = await Promise.all([
+        const [accounts, contactsRaw, artists, programs, applicants, subscribers, season] = await Promise.all([
             getAccountsForStudio().catch(() => []),
             adminListAccountContactsForStudio().catch(() => []),
             getArtistsForStudio().catch(() => []),
@@ -363,6 +448,7 @@ export async function loadEmailCohortContext(opts = {}) {
             Array.isArray(opts.subscribers)
                 ? Promise.resolve(opts.subscribers)
                 : getSubscribersForEmailStudio().catch(() => []),
+            getCurrentProgramSeason().catch(() => ''),
         ]);
         const contactsByPrincipal = mapContactsByPrincipal(contactsRaw);
         const artistEmailById = buildArtistEmailById(artists);
@@ -379,6 +465,7 @@ export async function loadEmailCohortContext(opts = {}) {
             applicants: Array.isArray(applicants) ? applicants : [],
             subscribers: Array.isArray(subscribers) ? subscribers : [],
             veteranArtistIds,
+            currentProgramSeason: String(season || '').trim(),
         };
         cohortCtxCache = ctx;
         return ctx;
@@ -424,6 +511,33 @@ function emailIsVeteran(ctx, email) {
         if (aem === em && ctx.veteranArtistIds.has(aid)) return true;
     }
     return false;
+}
+
+/**
+ * @param {unknown} applicant
+ * @param {EmailCohortContext} ctx
+ * @returns {string}
+ */
+function applicantEmail(applicant, ctx) {
+    const o = applicant && typeof applicant === 'object' ? /** @type {Record<string, unknown>} */ (applicant) : {};
+    const direct = normEmail(o.email);
+    if (isValidEmail(direct)) return direct;
+    const aid = artistIdFromApplicant(applicant);
+    if (aid) {
+        const fromArtist = ctx.artistEmailById.get(aid) || '';
+        if (fromArtist) return fromArtist;
+        const acc = ctx.accounts.find(
+            (a) => String(/** @type {any} */ (a).linkedArtistId || '').trim() === aid,
+        );
+        if (acc) {
+            return accountEmail(
+                /** @type {any} */ (acc),
+                ctx.contactsByPrincipal,
+                ctx.artistEmailById,
+            );
+        }
+    }
+    return '';
 }
 
 /**
@@ -473,28 +587,19 @@ function resolveFromContext(audienceValue, ctx) {
     if (v === COHORT_CURRENT_PROGRAM) {
         /** @type {string[]} */
         const emails = [];
-        const activePrograms = ctx.programs.filter((p) => {
-            const st = String(/** @type {any} */ (p)?.studioStatus || '')
-                .trim()
-                .toLowerCase();
-            return st === 'active';
-        });
-        /** @type {Set<string>} */
-        const activeIds = new Set(
-            activePrograms.map((p) => String(/** @type {any} */ (p).id || '').trim()).filter(Boolean),
-        );
+        const currentIds = resolveCurrentProgramIds(ctx.programs, ctx.currentProgramSeason);
         for (const app of ctx.applicants) {
             if (!app || typeof app !== 'object') continue;
             const pid = String(/** @type {any} */ (app).programId || '').trim();
-            if (!activeIds.has(pid)) continue;
-            const st = String(/** @type {any} */ (app).status || '')
-                .trim()
-                .toLowerCase();
-            if (st !== 'accepted') continue;
-            const em = /** @type {any} */ (app).email;
-            if (em) emails.push(String(em));
+            if (!programIdIsCurrent(pid, currentIds)) continue;
+            if (!isCurrentProgramCohortApplicant(app)) continue;
+            const em = applicantEmail(app, ctx);
+            if (em) emails.push(em);
         }
-        for (const prog of activePrograms) {
+        const currentPrograms = ctx.programs.filter((p) =>
+            programIdIsCurrent(String(/** @type {any} */ (p)?.id || ''), currentIds),
+        );
+        for (const prog of currentPrograms) {
             for (const name of confirmedNamesForProgram(prog)) {
                 const aid = ctx.artistIdByName.get(String(name).trim().toLowerCase());
                 if (!aid) continue;

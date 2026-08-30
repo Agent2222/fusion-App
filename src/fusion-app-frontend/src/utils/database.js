@@ -55,6 +55,22 @@ import { sendEmail } from './integrationApi.js';
 import { getApplicationStaffNotificationEmails } from './studioServicesConfig.js';
 import { distributeUploadedAssetUrls, toCloudFrontAssetUrl } from './assetDistribution.js';
 import { filterPublishedJournalEntries, resolveHomeJournalCarouselEntries, sortJournalEntriesNewestFirst } from './journalPublicVisibility.js';
+import {
+    clampScheduleAvailability,
+    formatScheduleCanisterError,
+    normalizeScheduleImportance,
+    normalizeScheduleRsvpIds,
+    parseCanisterJsonText,
+} from './scheduleModel.js';
+import {
+    MAX_ARTIST_AUDIO_ENTRIES,
+    addArtistAudioEntry,
+    emptyArtistAudioCollection,
+    normalizeArtistAudioCollection,
+    removeArtistAudioEntry,
+    replaceArtistAudioEntry,
+    setArtistAudioHighlight,
+} from './artistAudioCollection.js';
 
 export { hasUsableWorldLlmSourceInput };
 
@@ -4077,6 +4093,30 @@ export async function staffListPromoCodesStudio() {
     }
 }
 
+/**
+ * Staff/admin: activate or retire a promo code.
+ * @param {string} code
+ * @param {boolean} active
+ * @returns {Promise<boolean>}
+ */
+export async function staffSetPromoCodeActiveStudio(code, active) {
+    const norm = String(code || '').trim().toUpperCase();
+    if (!norm) return false;
+    if (getDataSource() === 'test') {
+        const codes = JSON.parse(localStorage.getItem(LS_PROMO_CODES) || '[]');
+        const idx = codes.findIndex((c) => String(c?.code || '').toUpperCase() === norm);
+        if (idx < 0) return false;
+        codes[idx] = { ...codes[idx], active: Boolean(active) };
+        localStorage.setItem(LS_PROMO_CODES, JSON.stringify(codes));
+        return true;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffSetPromoCodeActive !== 'function') {
+        throw new Error('staffSetPromoCodeActive unavailable — run dfx generate fusion-app-backend from the project root.');
+    }
+    return Boolean(await actor.staffSetPromoCodeActive(norm, Boolean(active)));
+}
+
 // ——— Member invite code wrappers ———
 
 const LS_MEMBER_INVITES = 'fusion_test_member_invites';
@@ -4838,18 +4878,9 @@ export async function getMyArtistAudioCollection() {
         const id = getProfileSettingsDevArtistId();
         const raw = readStudioLs('audioCollection_' + id);
         if (raw && typeof raw === 'object') {
-            return {
-                entries: Array.isArray(raw.entries) ? raw.entries : [],
-                highlightUrl: String(raw.highlightUrl ?? ''),
-                approvedUrls: Array.isArray(raw.approvedUrls) ? raw.approvedUrls : [],
-                fullSiteApprovedUrls: Array.isArray(raw.fullSiteApprovedUrls)
-                    ? raw.fullSiteApprovedUrls
-                    : Array.isArray(raw.approvedUrls)
-                      ? raw.approvedUrls
-                      : [],
-            };
+            return normalizeArtistAudioCollection(raw);
         }
-        return { entries: [], highlightUrl: '', approvedUrls: [], fullSiteApprovedUrls: [] };
+        return emptyArtistAudioCollection();
     }
     const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
     const actor = await getAuthenticatedFusionBackendActor();
@@ -4885,11 +4916,8 @@ export async function addMyArtistAudioEntry(url, title) {
     if (getDataSource() === 'test') {
         const id = getProfileSettingsDevArtistId();
         if (!id) throw new Error('Select which artist profile to edit (test mode).');
-        const col = (readStudioLs('audioCollection_' + id)) || { entries: [], highlightUrl: '', approvedUrls: [] };
-        if (col.entries.length >= 5) throw new Error('Maximum of 5 audio bites reached');
-        col.entries.push({ url, title, addedAt: ts });
-        if (!col.highlightUrl) col.highlightUrl = url;
-        writeStudioLs('audioCollection_' + id, col);
+        const col = normalizeArtistAudioCollection(readStudioLs('audioCollection_' + id));
+        writeStudioLs('audioCollection_' + id, addArtistAudioEntry(col, url, title, ts));
         return;
     }
     const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
@@ -4902,11 +4930,8 @@ export async function removeMyArtistAudioEntry(url) {
     if (getDataSource() === 'test') {
         const id = getProfileSettingsDevArtistId();
         if (!id) throw new Error('Select which artist profile to edit (test mode).');
-        const col = (readStudioLs('audioCollection_' + id)) || { entries: [], highlightUrl: '', approvedUrls: [] };
-        col.entries = col.entries.filter((e) => e.url !== url);
-        col.approvedUrls = (col.approvedUrls || []).filter((u) => u !== url);
-        if (col.highlightUrl === url) col.highlightUrl = col.entries[0]?.url || '';
-        writeStudioLs('audioCollection_' + id, col);
+        const col = normalizeArtistAudioCollection(readStudioLs('audioCollection_' + id));
+        writeStudioLs('audioCollection_' + id, removeArtistAudioEntry(col, url));
         return;
     }
     const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
@@ -4914,14 +4939,49 @@ export async function removeMyArtistAudioEntry(url) {
     await actor.removeMyArtistAudioEntry(url);
 }
 
+/**
+ * Replace a saved bite with a newly uploaded URL (keeps list position in test mode).
+ * Live canister: add then remove, or remove then add when already at the 5-bite cap.
+ * @param {string} oldUrl
+ * @param {string} newUrl
+ * @param {string} title
+ */
+export async function replaceMyArtistAudioEntry(oldUrl, newUrl, title) {
+    const ts = new Date().toISOString();
+    const from = String(oldUrl ?? '').trim();
+    const to = String(newUrl ?? '').trim();
+    if (getDataSource() === 'test') {
+        const id = getProfileSettingsDevArtistId();
+        if (!id) throw new Error('Select which artist profile to edit (test mode).');
+        const col = normalizeArtistAudioCollection(readStudioLs('audioCollection_' + id));
+        writeStudioLs('audioCollection_' + id, replaceArtistAudioEntry(col, from, to, title, ts));
+        return;
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (from && from === to) {
+        await actor.removeMyArtistAudioEntry(from);
+        await actor.addMyArtistAudioEntry(to, title, ts);
+        return;
+    }
+    const collection = await getMyArtistAudioCollection();
+    const count = collection?.entries?.length ?? 0;
+    if (count >= MAX_ARTIST_AUDIO_ENTRIES) {
+        await actor.removeMyArtistAudioEntry(from);
+        await actor.addMyArtistAudioEntry(to, title, ts);
+        return;
+    }
+    await actor.addMyArtistAudioEntry(to, title, ts);
+    await actor.removeMyArtistAudioEntry(from);
+}
+
 /** @param {string} url */
 export async function setMyArtistHighlightAudio(url) {
     if (getDataSource() === 'test') {
         const id = getProfileSettingsDevArtistId();
         if (!id) throw new Error('Select which artist profile to edit (test mode).');
-        const col = (readStudioLs('audioCollection_' + id)) || { entries: [], highlightUrl: '', approvedUrls: [] };
-        col.highlightUrl = url;
-        writeStudioLs('audioCollection_' + id, col);
+        const col = normalizeArtistAudioCollection(readStudioLs('audioCollection_' + id));
+        writeStudioLs('audioCollection_' + id, setArtistAudioHighlight(col, url));
         return;
     }
     const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
@@ -10328,6 +10388,14 @@ function normalizeScheduleEventRow(raw) {
         eventKind: String(raw.eventKind || 'standard').trim() || 'standard',
         imageUrl: String(raw.imageUrl || '').trim(),
         publicOnSite: Boolean(raw.publicOnSite),
+        importance: normalizeScheduleImportance(raw.importance),
+        acceptRsvp: Boolean(raw.acceptRsvp),
+        availability: clampScheduleAvailability(raw.availability, Boolean(raw.acceptRsvp)),
+        rsvpIds: normalizeScheduleRsvpIds(raw.rsvpIds),
+        rsvpCount:
+            Math.max(0, Math.round(Number(raw.rsvpCount) || 0)) ||
+            normalizeScheduleRsvpIds(raw.rsvpIds).length,
+        myRsvp: Boolean(raw.myRsvp),
         conflicts: Array.isArray(raw.conflicts) ? raw.conflicts : [],
         createdAt: String(raw.createdAt || ''),
         updatedAt: String(raw.updatedAt || ''),
@@ -10350,14 +10418,18 @@ export async function listScheduleEventsStudio() {
     try {
         const actor = await getStudioAuthenticatedActor();
         if (!actor || typeof actor.staffListScheduleEventsJson !== 'function') {
-            return [];
+            throw new Error(
+                'Schedule list is unavailable. Redeploy the frontend after generating canister bindings.',
+            );
         }
         const raw = await actor.staffListScheduleEventsJson();
-        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-        if (!Array.isArray(parsed)) return [];
+        const parsed = parseCanisterJsonText(raw);
+        if (!Array.isArray(parsed)) {
+            throw new Error('Schedule list returned unexpected data.');
+        }
         return parsed.map(normalizeScheduleEventRow).filter(Boolean);
-    } catch {
-        return [];
+    } catch (err) {
+        throw new Error(formatScheduleCanisterError(err));
     }
 }
 
@@ -10378,7 +10450,7 @@ export async function getScheduleEventStudio(id) {
             throw new Error('staffGetScheduleEventJson missing — run dfx generate');
         }
         const raw = await actor.staffGetScheduleEventJson(eventId);
-        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        const parsed = parseCanisterJsonText(raw);
         return normalizeScheduleEventRow(parsed);
     } catch (err) {
         const msg = String(err?.message || err || '');
@@ -10413,6 +10485,9 @@ export async function upsertScheduleEventStudio(opts) {
     const eventKind = String(opts?.eventKind || 'standard').trim() || 'standard';
     const imageUrl = String(opts?.imageUrl || '').trim();
     const publicOnSite = Boolean(opts?.publicOnSite);
+    const importance = normalizeScheduleImportance(opts?.importance);
+    const acceptRsvp = Boolean(opts?.acceptRsvp);
+    const availability = clampScheduleAvailability(opts?.availability, acceptRsvp);
     const id = String(opts?.id || '').trim();
     const expectedVersion = Math.max(0, Math.round(Number(opts?.expectedVersion) || 0));
     const participantCount = Math.max(0, Math.round(Number(opts?.participantCount) || 0));
@@ -10473,6 +10548,12 @@ export async function upsertScheduleEventStudio(opts) {
                 eventKind,
                 imageUrl,
                 publicOnSite,
+                importance,
+                acceptRsvp,
+                availability,
+                rsvpIds: normalizeScheduleRsvpIds(prev.rsvpIds),
+                rsvpCount: normalizeScheduleRsvpIds(prev.rsvpIds).length,
+                myRsvp: Boolean(prev.myRsvp),
                 updatedAt: now,
                 version: Number(prev.version) + 1,
                 activity: [
@@ -10510,6 +10591,12 @@ export async function upsertScheduleEventStudio(opts) {
             eventKind,
             imageUrl,
             publicOnSite,
+            importance,
+            acceptRsvp,
+            availability,
+            rsvpIds: [],
+            rsvpCount: 0,
+            myRsvp: false,
             conflicts: [],
             createdAt: now,
             updatedAt: now,
@@ -10527,35 +10614,42 @@ export async function upsertScheduleEventStudio(opts) {
     }
     // Motoko signature includes imageUrl + publicOnSite — regenerate bindings after backend deploy:
     // `dfx generate fusion-app-backend` (or frontend `prebuild`).
-    return String(
-        await actor.staffUpsertScheduleEvent(
-            id,
-            BigInt(expectedVersion),
-            title,
-            date,
-            startTime,
-            endTime,
-            allDay,
-            timezone,
-            programId,
-            programName,
-            team,
-            locationId,
-            locationName,
-            assignedStaff,
-            participantIds,
-            BigInt(participantCount),
-            notes,
-            BigInt(reminderMinutes),
-            status,
-            color,
-            relationKind,
-            relationKind === 'program' ? relationProgramId || programId : '',
-            eventKind,
-            imageUrl,
-            publicOnSite,
-        ),
-    );
+    try {
+        return String(
+            await actor.staffUpsertScheduleEvent(
+                id,
+                BigInt(expectedVersion),
+                title,
+                date,
+                startTime,
+                endTime,
+                allDay,
+                timezone,
+                programId,
+                programName,
+                team,
+                locationId,
+                locationName,
+                assignedStaff,
+                participantIds,
+                BigInt(participantCount),
+                notes,
+                BigInt(reminderMinutes),
+                status,
+                color,
+                relationKind,
+                relationKind === 'program' ? relationProgramId || programId : '',
+                eventKind,
+                imageUrl,
+                publicOnSite,
+                importance,
+                acceptRsvp,
+                BigInt(availability),
+            ),
+        );
+    } catch (err) {
+        throw new Error(formatScheduleCanisterError(err));
+    }
 }
 
 /**
@@ -10573,7 +10667,11 @@ export async function deleteScheduleEventStudio(id) {
     if (!actor || typeof actor.staffDeleteScheduleEvent !== 'function') {
         throw new Error('staffDeleteScheduleEvent missing — run dfx generate fusion-app-backend from the project root.');
     }
-    await actor.staffDeleteScheduleEvent(eventId);
+    try {
+        await actor.staffDeleteScheduleEvent(eventId);
+    } catch (err) {
+        throw new Error(formatScheduleCanisterError(err));
+    }
 }
 
 /**
@@ -10595,6 +10693,9 @@ export async function duplicateScheduleEventStudio(id) {
             // Copy flier; do not auto-publish the duplicate.
             imageUrl: String(src.imageUrl || '').trim(),
             publicOnSite: false,
+            rsvpIds: [],
+            rsvpCount: 0,
+            myRsvp: false,
         });
     }
     const actor = await getStudioAuthenticatedActor();
@@ -10643,14 +10744,18 @@ export async function listScheduleLocationsStudio() {
     try {
         const actor = await getStudioAuthenticatedActor();
         if (!actor || typeof actor.staffListScheduleLocationsJson !== 'function') {
-            return [];
+            throw new Error(
+                'Schedule locations are unavailable. Redeploy the frontend after generating canister bindings.',
+            );
         }
         const raw = await actor.staffListScheduleLocationsJson();
-        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-        if (!Array.isArray(parsed)) return [];
+        const parsed = parseCanisterJsonText(raw);
+        if (!Array.isArray(parsed)) {
+            throw new Error('Schedule locations returned unexpected data.');
+        }
         return parsed.map(normalizeScheduleLocationRow).filter(Boolean);
-    } catch {
-        return [];
+    } catch (err) {
+        throw new Error(formatScheduleCanisterError(err));
     }
 }
 
@@ -10669,7 +10774,7 @@ export async function listScheduleLocationsMember() {
             return listScheduleLocationsStudio();
         }
         const raw = await actor.memberListScheduleLocationsJson();
-        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        const parsed = parseCanisterJsonText(raw);
         if (!Array.isArray(parsed)) return [];
         return parsed.map(normalizeScheduleLocationRow).filter(Boolean);
     } catch {
@@ -10809,7 +10914,7 @@ export async function listProgramScheduleLiveStudio() {
         const actor = await getStudioAuthenticatedActor();
         if (!actor || typeof actor.listProgramScheduleLiveJson !== 'function') return {};
         const raw = await actor.listProgramScheduleLiveJson();
-        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        const parsed = parseCanisterJsonText(raw);
         return parsed && typeof parsed === 'object' ? parsed : {};
     } catch {
         return {};
@@ -10900,14 +11005,24 @@ export async function listMyScheduleEvents() {
         }
         const all = await listScheduleEventsStudio();
         const caller = 'test';
-        return all.filter((e) => {
-            if (String(e.relationKind || 'program') !== 'program') return false;
-            const pid = String(e.relationProgramId || e.programId || '');
-            if (!pid || !secured.has(pid) || !liveMap[pid]) return false;
-            if (e.status === 'confirmed') return true;
-            if (e.status === 'awaiting_confirmation' && String(e.createdBy || '') === caller) return true;
-            return false;
-        });
+        return all
+            .filter((e) => {
+                if (String(e.relationKind || 'program') !== 'program') return false;
+                const pid = String(e.relationProgramId || e.programId || '');
+                if (!pid || !secured.has(pid) || !liveMap[pid]) return false;
+                if (e.status === 'confirmed') return true;
+                if (e.status === 'awaiting_confirmation' && String(e.createdBy || '') === caller) return true;
+                return false;
+            })
+            .map((e) => {
+                const rsvpIds = normalizeScheduleRsvpIds(e.rsvpIds);
+                return {
+                    ...e,
+                    rsvpIds,
+                    rsvpCount: rsvpIds.length,
+                    myRsvp: rsvpIds.includes(caller),
+                };
+            });
     }
     try {
         const actor = await getStudioAuthenticatedActor();
@@ -10917,12 +11032,71 @@ export async function listMyScheduleEvents() {
             );
         }
         const raw = await actor.listMyScheduleEventsJson();
-        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        const parsed = parseCanisterJsonText(raw);
         if (!Array.isArray(parsed)) return [];
         return parsed.map(normalizeScheduleEventRow).filter(Boolean);
     } catch (err) {
         throw err;
     }
+}
+
+/**
+ * Member RSVP / cancel RSVP for a program calendar event.
+ * @param {string} eventId
+ * @param {boolean} attending
+ * @returns {Promise<object>}
+ */
+export async function memberRsvpScheduleEvent(eventId, attending) {
+    const id = String(eventId || '').trim();
+    if (!id) throw new Error('id required');
+    if (getDataSource() === 'test') {
+        const list = await listScheduleEventsStudio();
+        const idx = list.findIndex((e) => e.id === id);
+        if (idx < 0) throw new Error('Event not found');
+        const prev = list[idx];
+        if (prev.status !== 'confirmed') throw new Error('Event is not open for RSVP');
+        if (!prev.acceptRsvp) throw new Error('Event does not accept RSVP');
+        const identity = 'test';
+        const current = normalizeScheduleRsvpIds(prev.rsvpIds);
+        const already = current.includes(identity);
+        let nextIds = current;
+        if (attending) {
+            if (!already) {
+                const cap = clampScheduleAvailability(prev.availability, true);
+                if (current.length >= cap) throw new Error('Event is full');
+                nextIds = [...current, identity];
+            }
+        } else {
+            nextIds = current.filter((x) => x !== identity);
+        }
+        const now = new Date().toISOString();
+        const next = {
+            ...prev,
+            rsvpIds: nextIds,
+            rsvpCount: nextIds.length,
+            myRsvp: nextIds.includes(identity),
+            updatedAt: now,
+            version: Number(prev.version || 1) + 1,
+            activity: [
+                { id: `act-${now}`, at: now, text: attending ? 'RSVP added' : 'RSVP cancelled' },
+                ...(Array.isArray(prev.activity) ? prev.activity : []),
+            ],
+        };
+        list[idx] = next;
+        writeStudioLs(LS_STAFF_SCHEDULE_EVENTS, list);
+        return next;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.memberRsvpScheduleEvent !== 'function') {
+        throw new Error(
+            'memberRsvpScheduleEvent missing — run dfx generate fusion-app-backend from the project root.',
+        );
+    }
+    const raw = await actor.memberRsvpScheduleEvent(id, Boolean(attending));
+    const parsed = parseCanisterJsonText(raw);
+    const row = normalizeScheduleEventRow(parsed);
+    if (!row) throw new Error('Invalid RSVP response');
+    return row;
 }
 
 /**
@@ -11161,6 +11335,7 @@ export async function staffUpsertTravelPrepLinks(programId, links) {
         title: String(l.title || ''),
         url: String(l.url || ''),
         description: String(l.description || ''),
+        imageUrl: String(l.imageUrl || ''),
         sortOrder: Math.max(0, Math.round(Number(l.sortOrder) || 0)),
         updatedAt: new Date().toISOString(),
     }));
@@ -11227,7 +11402,204 @@ function mapTravelPrepLinkToJs(raw) {
         title: String(raw.title ?? ''),
         url: String(raw.url ?? ''),
         description: String(raw.description ?? ''),
+        imageUrl: String(raw.imageUrl ?? ''),
         sortOrder: Number(raw.sortOrder ?? 0),
         updatedAt: String(raw.updatedAt ?? ''),
     };
+}
+
+/**
+ * Unique image URLs already saved on travel prep links (any program).
+ * @returns {Promise<string[]>}
+ */
+export async function staffListTravelPrepImages() {
+    if (getDataSource() === 'test') {
+        const all = readStudioLs(LS_TRAVEL_PREP_LINKS) || {};
+        const seen = new Set();
+        const out = [];
+        for (const rows of Object.values(all)) {
+            if (!Array.isArray(rows)) continue;
+            for (const l of rows) {
+                const url = String(l?.imageUrl || '').trim();
+                if (!url || seen.has(url)) continue;
+                seen.add(url);
+                out.push(url);
+            }
+        }
+        return out;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffListTravelPrepImages !== 'function') {
+        return [];
+    }
+    const rows = await actor.staffListTravelPrepImages();
+    return Array.isArray(rows) ? rows.map((u) => String(u || '').trim()).filter(Boolean) : [];
+}
+
+const LS_PROGRAM_COMMS = 'studioProgramCommsConfig';
+
+function mapInviteSentPairs(raw) {
+    if (!Array.isArray(raw)) return [];
+    return raw
+        .map((entry) => {
+            if (Array.isArray(entry) && entry.length >= 2) {
+                return [String(entry[0] || ''), String(entry[1] || '')];
+            }
+            if (entry && typeof entry === 'object') {
+                const o = /** @type {Record<string, unknown>} */ (entry);
+                return [String(o[0] ?? o['0'] ?? ''), String(o[1] ?? o['1'] ?? '')];
+            }
+            return ['', ''];
+        })
+        .filter(([id]) => id);
+}
+
+function mapProgramCommsConfigToJs(raw) {
+    const row = raw && typeof raw === 'object' ? raw : {};
+    return {
+        programId: String(row.programId ?? ''),
+        provider: String(row.provider ?? 'line') || 'line',
+        oaName: String(row.oaName ?? ''),
+        basicId: String(row.basicId ?? ''),
+        channelId: String(row.channelId ?? ''),
+        addFriendUrl: String(row.addFriendUrl ?? ''),
+        groupName: String(row.groupName ?? ''),
+        groupInviteUrl: String(row.groupInviteUrl ?? ''),
+        addFriendQrUrl: String(row.addFriendQrUrl ?? ''),
+        groupQrUrl: String(row.groupQrUrl ?? ''),
+        inviteSentAtByApplicant: mapInviteSentPairs(row.inviteSentAtByApplicant),
+        memberActive: Boolean(row.memberActive),
+        inviteMessage: String(row.inviteMessage ?? ''),
+        providerThumbUrl: String(row.providerThumbUrl ?? ''),
+        updatedAt: String(row.updatedAt ?? ''),
+    };
+}
+
+function mapProgramCommsMemberRoomToJs(raw) {
+    const row = raw && typeof raw === 'object' ? raw : {};
+    return {
+        programId: String(row.programId ?? ''),
+        groupName: String(row.groupName ?? ''),
+        groupInviteUrl: String(row.groupInviteUrl ?? ''),
+        groupQrUrl: String(row.groupQrUrl ?? ''),
+        inviteMessage: String(row.inviteMessage ?? ''),
+        providerThumbUrl: String(row.providerThumbUrl ?? ''),
+    };
+}
+
+function testCommsSlotSecuredProgramIds(payments) {
+    const secured = new Set();
+    for (const approval of payments?.approvedPrograms || []) {
+        if (approval?.manualDepositSubmitted === true) {
+            const id = String(approval.programId || '').trim();
+            if (id) secured.add(id);
+        }
+    }
+    for (const summary of payments?.summaries || []) {
+        const status = String(summary?.depositStatus || '');
+        if (status === 'paid' || status === 'paid_full' || status === 'waived') {
+            const id = String(summary.programId || '').trim();
+            if (id) secured.add(id);
+        }
+    }
+    return secured;
+}
+
+/**
+ * @param {string} programId
+ * @returns {Promise<object | null>}
+ */
+export async function staffGetProgramCommsConfig(programId) {
+    const pid = String(programId || '').trim();
+    if (!pid) return null;
+    if (getDataSource() === 'test') {
+        const all = readStudioLs(LS_PROGRAM_COMMS) || {};
+        return all[pid] ? mapProgramCommsConfigToJs(all[pid]) : null;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffGetProgramCommsConfig !== 'function') {
+        throw new Error('staffGetProgramCommsConfig missing — run dfx generate after backend deploy.');
+    }
+    const raw = await actor.staffGetProgramCommsConfig(pid);
+    const rec = unwrapCandidOptionalRecord(raw);
+    return rec ? mapProgramCommsConfigToJs(rec) : null;
+}
+
+/**
+ * @param {object} rec
+ * @returns {Promise<void>}
+ */
+export async function staffUpsertProgramCommsConfig(rec) {
+    const programId = String(rec?.programId || '').trim();
+    if (!programId) throw new Error('programId required');
+    const mapped = mapProgramCommsConfigToJs({ ...rec, programId });
+    mapped.updatedAt = new Date().toISOString();
+    if (getDataSource() === 'test') {
+        const all = readStudioLs(LS_PROGRAM_COMMS) || {};
+        const prior = all[programId] ? mapProgramCommsConfigToJs(all[programId]) : null;
+        if (prior && (!mapped.inviteSentAtByApplicant || !mapped.inviteSentAtByApplicant.length)) {
+            mapped.inviteSentAtByApplicant = prior.inviteSentAtByApplicant;
+        }
+        all[programId] = mapped;
+        writeStudioLs(LS_PROGRAM_COMMS, all);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffUpsertProgramCommsConfig !== 'function') {
+        throw new Error('staffUpsertProgramCommsConfig missing — run dfx generate after backend deploy.');
+    }
+    await actor.staffUpsertProgramCommsConfig({
+        ...mapped,
+        memberActive: Boolean(mapped.memberActive),
+        inviteSentAtByApplicant: mapped.inviteSentAtByApplicant,
+    });
+}
+
+/**
+ * @param {string} programId
+ * @param {string[]} applicantIds
+ * @returns {Promise<void>}
+ */
+export async function staffRecordProgramCommsInvites(programId, applicantIds) {
+    const pid = String(programId || '').trim();
+    const ids = (Array.isArray(applicantIds) ? applicantIds : []).map((id) => String(id || '').trim()).filter(Boolean);
+    if (!pid || !ids.length) return;
+    if (getDataSource() === 'test') {
+        const all = readStudioLs(LS_PROGRAM_COMMS) || {};
+        const existing = all[pid] ? mapProgramCommsConfigToJs(all[pid]) : null;
+        if (!existing) throw new Error('Comms config not found');
+        const now = new Date().toISOString();
+        const map = new Map(existing.inviteSentAtByApplicant);
+        for (const id of ids) map.set(id, now);
+        existing.inviteSentAtByApplicant = [...map.entries()];
+        existing.updatedAt = now;
+        all[pid] = existing;
+        writeStudioLs(LS_PROGRAM_COMMS, all);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffRecordProgramCommsInvites !== 'function') {
+        throw new Error('staffRecordProgramCommsInvites missing — run dfx generate after backend deploy.');
+    }
+    await actor.staffRecordProgramCommsInvites(pid, ids);
+}
+
+/**
+ * Confirmed-member rooms for Settings → Communications (activated + slot secured).
+ * @returns {Promise<object[]>}
+ */
+export async function listMyProgramCommsRooms() {
+    if (getDataSource() === 'test') {
+        const { filterMemberCommsRooms } = await import('./programCommsInvite.js');
+        const all = readStudioLs(LS_PROGRAM_COMMS) || {};
+        const payments = await getMyProgramPayments().catch(() => null);
+        return filterMemberCommsRooms(Object.values(all), testCommsSlotSecuredProgramIds(payments));
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.listMyProgramCommsRooms !== 'function') {
+        return [];
+    }
+    const rows = await actor.listMyProgramCommsRooms();
+    return Array.isArray(rows) ? rows.map(mapProgramCommsMemberRoomToJs) : [];
 }

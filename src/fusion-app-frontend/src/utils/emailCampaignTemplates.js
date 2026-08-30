@@ -4,12 +4,20 @@
  */
 import {
     defaultProgramUpdateLayoutSlots,
+    fusionEmailDiscountCodeBlock,
     fusionEmailLayout,
     fusionEmailLink,
     fusionEmailParagraph,
     FUSION_EMAIL_STYLES,
     renderFusionEmailFromSlots,
 } from './emailFusionLayout.js';
+import {
+    PROGRAM_CALENDAR_HERO_URL,
+    buildProgramCalendarEmailHtml,
+    sampleProgramCalendarEvents,
+} from './scheduleCalendarEmail.js';
+import { interpolateRadarDiscountHtml, joinUrlForPromoCode } from './studioPromoCodes.js';
+import { sampleProgramCommsInviteHtml } from './programCommsInvite.js';
 
 /**
  * @typedef {'artist' | 'journal' | 'program' | 'video' | 'website'} EmailContentSourceType
@@ -149,6 +157,32 @@ export const EMAIL_CAMPAIGN_TEMPLATES = {
             cta: { label: 'VIEW PROGRAM', href: 'https://www.fusionart.world/programs' },
         }),
         notes: 'Bind a program card to auto-fill hero, title, and CTA.',
+    },
+    tpl_program_calendar: {
+        id: 'tpl_program_calendar',
+        name: 'Program Calendar',
+        templateGroup: 'updates',
+        defaultEyebrow: 'Schedule',
+        contentSourceTypes: ['program'],
+        defaultSubject: 'Kaga City Artist Residency Calendar',
+        defaultPreview: 'Confirmed dates and times for the Fusion program calendar.',
+        bodyHtml: buildProgramCalendarEmailHtml({
+            programName: 'Kaga City Artist Residency',
+            events: sampleProgramCalendarEvents(),
+            heroImageUrl: PROGRAM_CALENDAR_HERO_URL,
+            heroAlt: 'Kaga City, Ishikawa',
+        }),
+        notes: 'Select a program under Content source to pull confirmed calendar events. Hero defaults to the Kaga corridor photograph.',
+    },
+    tpl_program_comms_line: {
+        id: 'tpl_program_comms_line',
+        name: 'Program comms — LINE invite',
+        templateGroup: 'updates',
+        defaultEyebrow: 'Program Comms',
+        defaultSubject: 'Join the program LINE chat',
+        defaultPreview: 'Add Fusion on LINE and join the program group.',
+        bodyHtml: sampleProgramCommsInviteHtml(),
+        notes: 'Used by Studio → Comms. Includes add-friend and group-join QRs plus CTAs.',
     },
     tpl_featured_artist: {
         id: 'tpl_featured_artist',
@@ -410,6 +444,42 @@ export const EMAIL_CAMPAIGN_TEMPLATES = {
         }),
         notes: 'Platform feature announcement — edit CTA if you want a different deep link.',
     },
+    tpl_radar_artists: {
+        id: 'tpl_radar_artists',
+        name: 'Radar — Artist invite',
+        templateGroup: 'campaigns',
+        defaultEyebrow: 'Fusion Radar',
+        defaultSubject: 'An invitation to Fusion — 50% off membership',
+        defaultPreview:
+            'A personal invitation to Fusion’s curated network, with a membership discount code to join.',
+        bodyHtml: renderFusionEmailFromSlots({
+            eyebrow: 'From Fusion',
+            heroImageUrl: generalSlots.heroImageUrl,
+            heroAlt: 'Fusion — artist membership',
+            pillLabel: 'INVITE',
+            headlineHtml: 'You belong<br>in this<br>network.',
+            bodyHtml: [
+                fusionEmailParagraph(
+                    'Fusion is a curated art network — artists, galleries, and programs rooted in Japan. I am writing because your practice belongs in that conversation, and I wanted the door in to be clear.',
+                    'lead',
+                ),
+                fusionEmailParagraph(
+                    'Membership is how you apply to residencies, stay in the loop, and meet the rest of the roster. Use the code below for 50% off when you join.',
+                ),
+                fusionEmailDiscountCodeBlock(),
+                fusionEmailParagraph(
+                    'If a conversation would help before you sign up, reply to this note. Otherwise, the code is yours — tap Join Fusion and enter it at checkout.',
+                    'last',
+                ),
+            ].join('\n'),
+            cta: {
+                label: 'JOIN FUSION',
+                href: '{{JOIN_URL}}',
+            },
+            footnote: '50% off applies to the first months of a monthly plan · Code is unique to this invite',
+        }),
+        notes: 'Radar outreach — artists. Interpolate discount code before send.',
+    },
     tpl_radar_residency_invite: {
         id: 'tpl_radar_residency_invite',
         name: 'Radar — Residency invite',
@@ -417,7 +487,7 @@ export const EMAIL_CAMPAIGN_TEMPLATES = {
         defaultEyebrow: 'Fusion Radar',
         defaultSubject: 'An invitation — programs rooted in Japan',
         defaultPreview:
-            'A personal note about Fusion’s Japan artist residency and curated art network.',
+            'A personal note about Fusion’s Japan artist residency, with a membership discount to join.',
         bodyHtml: renderFusionEmailFromSlots({
             eyebrow: 'From Fusion',
             heroImageUrl: generalSlots.heroImageUrl,
@@ -430,14 +500,19 @@ export const EMAIL_CAMPAIGN_TEMPLATES = {
                     'lead',
                 ),
                 fusionEmailParagraph(
-                    'If you are open to a short conversation, I would be glad to share dates, structure, and how membership connects to applications.',
+                    'Membership is the path into applications and the wider network. Use this invite code for 50% off when you join.',
+                ),
+                fusionEmailDiscountCodeBlock(),
+                fusionEmailParagraph(
+                    'If you are open to a short conversation first, reply and I will share dates and structure. The code is ready whenever you are.',
                     'last',
                 ),
             ].join('\n'),
             cta: {
-                label: 'VIEW PROGRAMS',
-                href: 'https://fusionart.world/programs',
+                label: 'JOIN FUSION',
+                href: '{{JOIN_URL}}',
             },
+            footnote: '50% off applies to the first months of a monthly plan',
         }),
         notes: 'Radar outreach — residency candidates.',
     },
@@ -447,7 +522,7 @@ export const EMAIL_CAMPAIGN_TEMPLATES = {
         templateGroup: 'campaigns',
         defaultEyebrow: 'Fusion Radar',
         defaultSubject: 'Introducing Fusion — a curated art network',
-        defaultPreview: 'Galleries, artists, and programs rooted in Japan.',
+        defaultPreview: 'Galleries, artists, and programs rooted in Japan — with a membership invite code.',
         bodyHtml: renderFusionEmailFromSlots({
             eyebrow: 'From Fusion',
             heroImageUrl: generalSlots.heroImageUrl,
@@ -460,13 +535,17 @@ export const EMAIL_CAMPAIGN_TEMPLATES = {
                     'lead',
                 ),
                 fusionEmailParagraph(
-                    'If a conversation about roster exchange, residency partnerships, or introductions would be useful, I would welcome a reply.',
+                    'If a conversation about roster exchange, residency partnerships, or introductions would be useful, I would welcome a reply. The code below is 50% off membership if you or a colleague want to join the network.',
+                ),
+                fusionEmailDiscountCodeBlock(),
+                fusionEmailParagraph(
+                    'Join with the code, or write back and we will set a time.',
                     'last',
                 ),
             ].join('\n'),
             cta: {
-                label: 'JOIN THE NETWORK',
-                href: 'https://fusionart.world/join-network',
+                label: 'JOIN FUSION',
+                href: '{{JOIN_URL}}',
             },
         }),
         notes: 'Radar outreach — galleries.',
@@ -490,13 +569,17 @@ export const EMAIL_CAMPAIGN_TEMPLATES = {
                     'lead',
                 ),
                 fusionEmailParagraph(
-                    'If you are open to an introduction or a short exchange, I would be glad to continue the conversation.',
+                    'If you are open to an introduction or a short exchange, I would be glad to continue the conversation. Membership is how the network stays in touch — 50% off with the code below.',
+                ),
+                fusionEmailDiscountCodeBlock(),
+                fusionEmailParagraph(
+                    'Join when it is useful, or reply and we will talk first.',
                     'last',
                 ),
             ].join('\n'),
             cta: {
-                label: 'EXPLORE CONTEXT',
-                href: 'https://fusionart.world/context',
+                label: 'JOIN FUSION',
+                href: '{{JOIN_URL}}',
             },
         }),
         notes: 'Radar outreach — curators.',
@@ -520,13 +603,17 @@ export const EMAIL_CAMPAIGN_TEMPLATES = {
                     'lead',
                 ),
                 fusionEmailParagraph(
-                    'If a personal introduction or a look at current editions would be welcome, reply and we will follow up carefully.',
+                    'If a personal introduction or a look at current editions would be welcome, reply and we will follow up carefully. The invite code is 50% off membership if you want a seat in the network.',
+                ),
+                fusionEmailDiscountCodeBlock(),
+                fusionEmailParagraph(
+                    'Use the code at signup, or write back and we will arrange an introduction.',
                     'last',
                 ),
             ].join('\n'),
             cta: {
-                label: 'VIEW EDITIONS',
-                href: 'https://fusionart.world/editions',
+                label: 'JOIN FUSION',
+                href: '{{JOIN_URL}}',
             },
         }),
         notes: 'Radar outreach — collector-adjacent organizations and patrons.',
@@ -555,6 +642,29 @@ export const EMAIL_TEMPLATE_GROUPS = [
 export function getEmailTemplateById(id) {
     if (id === 'tpl_artist_feature') return EMAIL_CAMPAIGN_TEMPLATES.tpl_featured_artist;
     return EMAIL_CAMPAIGN_TEMPLATES[id];
+}
+
+export const RADAR_EMAIL_TEMPLATE_IDS = [
+    'tpl_radar_artists',
+    'tpl_radar_residency_invite',
+    'tpl_radar_gallery_intro',
+    'tpl_radar_curator_connect',
+    'tpl_radar_collector_intro',
+];
+
+/**
+ * @param {{ templateId?: string, code?: string, durationMonths?: number }} opts
+ */
+export function renderRadarTemplateHtml(opts = {}) {
+    const id = String(opts.templateId || 'tpl_radar_artists');
+    const t = getEmailTemplateById(id) || getEmailTemplateById('tpl_radar_artists');
+    const code = String(opts.code || '').trim();
+    const html = String(t?.bodyHtml || '');
+    return interpolateRadarDiscountHtml(html, {
+        code,
+        durationMonths: opts.durationMonths,
+        joinUrl: joinUrlForPromoCode(code),
+    });
 }
 
 /**

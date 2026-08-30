@@ -14,7 +14,6 @@ import {
     RADAR_TRIGGER_TYPES,
     emptyLead,
     filterLeads,
-    leadsToCsv,
     scoreTier,
 } from '../../utils/radarModel.js';
 import {
@@ -24,14 +23,18 @@ import {
     getRadarRelationshipsCached,
     getRadarSourcesCached,
     loadRadarWorkspace,
+    notifyRadar,
     removeRadarLead,
+    saveRadarLead,
+    saveRadarOutreach,
+    saveRadarSource,
     subscribeRadar,
+    hydrateRadarWorkspace,
 } from '../../utils/radarStore.js';
 import {
     deleteRadarSource,
     getRadarTriggerConfig,
     setRadarTriggerConfig,
-    upsertRadarOutreach,
     upsertRadarRelationship,
     upsertRadarSource,
     bootstrapRadarAdmin,
@@ -43,6 +46,27 @@ import { computeRadarEntityBridges, syncRadarBridgeRelationships } from '../../u
 import { openStudioModal } from '../../utils/studioModal.js';
 import { openRadarLeadModal } from './radarLeadModal.js';
 import { openRadarOutreachComposer } from './radarOutreachComposer.js';
+import { isRadarPreviewActive, getRadarPreviewState } from '../../utils/radarPreview.js';
+import {
+    buildRadarPreviewWorkspace,
+    emptyRadarPreviewWorkspace,
+} from '../../utils/radarPreviewFixtures.js';
+import {
+    ARTIST_LEADS_SOURCE_LABEL,
+    artistLeadsTemplateCsv,
+    classifyArtistLeadsCsv,
+    findArtistLeadsSheetSource,
+    getLeadSheetExtras,
+    leadHasRedFlags,
+    leadsToArtistSheetCsv,
+} from '../../utils/radarLeadImport.js';
+import {
+    isRadarOutreachReadyToSend,
+    RADAR_OUTREACH_BATCH_CAP,
+} from '../../utils/radarOutreachReady.js';
+import { sendRadarOutreachBatch, sendRadarOutreachTestEmail } from '../../utils/radarOutreachSend.js';
+import { STUDIO_EMAIL_ALWAYS_CC } from '../../utils/studioEmailCc.js';
+import { getDataSource } from '../../utils/database.js';
 
 function esc(s) {
     return String(s ?? '')
@@ -52,10 +76,14 @@ function esc(s) {
         .replace(/"/g, '&quot;');
 }
 
-/** @type {'discover'|'leads'|'relationships'|'outreach'|'sources'|'analytics'} */
-let activeTab = 'leads';
-/** @type {{ q: string, type: string, status: string, region: string }} */
-let filters = { q: '', type: '', status: '', region: '' };
+/** @type {'discover'|'relationships'|'outreach'|'invites'|'sources'|'analytics'} */
+let activeTab = 'discover';
+/** @type {'board'|'list'} */
+let viewMode = 'board';
+/** @type {{ q: string, type: string, status: string, region: string, hasRedFlag: boolean }} */
+let filters = { q: '', type: '', status: '', region: '', hasRedFlag: false };
+/** @type {Set<string>} */
+let selectedOutreachIds = new Set();
 /** @type {(() => void) | null} */
 let unsub = null;
 /** @type {{ isAdmin: boolean, isStaffOrAdmin: boolean, bootstrapped: boolean, error?: string, bootstrapNote?: string }} */
@@ -79,40 +107,46 @@ function formatRadarLoadHint(loadError) {
 const TABS = [
     {
         id: 'discover',
-        label: 'Discover',
+        label: 'Pipeline',
         icon: 'nav-ai',
-        blurb: 'Scan your pipeline board. Add leads manually or run discovery, then open a card to qualify and score.',
-    },
-    {
-        id: 'leads',
-        label: 'Leads',
-        icon: 'nav-subscribers',
-        blurb: 'Search and filter your roster of prospects. Export CSV, open a row to edit, or bulk-delete selected leads.',
+        blurb: '',
     },
     {
         id: 'relationships',
         label: 'Relationships',
         icon: 'nav-community',
-        blurb: 'Map how leads connect to each other and to Fusion. Compute roster bridges, then sync edges onto Radar.',
+        blurb: 'Map warm paths between leads and Fusion, then sync edges onto Radar.',
     },
     {
         id: 'outreach',
         label: 'Outreach',
         icon: 'nav-email',
-        blurb: 'Configure event triggers, queue drafts for approval, and track what has been sent or replied.',
+        blurb: 'Triggers queue drafts. Nothing sends without approval.',
+    },
+    {
+        id: 'invites',
+        label: 'Invites',
+        icon: 'nav-community',
+        blurb: '50% membership codes for Radar outreach — quantity is the send budget.',
     },
     {
         id: 'sources',
         label: 'Sources',
         icon: 'nav-content',
-        blurb: 'Manage discovery feeds (RSS, lists, Places queries). Enable or disable sources before running Discover.',
+        blurb: 'Feeds and lists that fill the pipeline.',
     },
     {
         id: 'analytics',
         label: 'Analytics',
         icon: 'group-overview',
-        blurb: 'Glance at funnel volume, average fit score, outreach response rate, and lead-type mix.',
+        blurb: 'Funnel volume, fit, and response.',
     },
+];
+
+const LATER_STATUSES = ['replied', 'connected', 'rejected', 'archived'];
+const BOARD_COLUMNS = [
+    ...RADAR_PIPELINE_STATUSES.map((id) => ({ id, label: id, statuses: [id] })),
+    { id: 'later', label: 'later', statuses: LATER_STATUSES },
 ];
 
 /**
@@ -127,7 +161,7 @@ function tabIconStyle(iconKey) {
  * @param {typeof activeTab} id
  */
 function tabMeta(id) {
-    return TABS.find((t) => t.id === id) || TABS[1];
+    return TABS.find((t) => t.id === id) || TABS[0];
 }
 
 export function renderRadar() {
@@ -145,10 +179,58 @@ export async function initRadar(mainEl) {
     const root = mainEl.querySelector('#studio-radar-root');
     if (!(root instanceof HTMLElement)) return;
     const canEdit = root.getAttribute('data-can-edit') === '1';
+    const preview = isRadarPreviewActive();
+    const previewQuery = preview ? getRadarPreviewState() : null;
 
     if (unsub) {
         unsub();
         unsub = null;
+    }
+
+    if (preview && previewQuery) {
+        if (previewQuery.tab === 'leads') {
+            activeTab = 'discover';
+            viewMode = 'list';
+        } else if (previewQuery.tab) {
+            activeTab = /** @type {typeof activeTab} */ (previewQuery.tab);
+            if (previewQuery.tab === 'discover') viewMode = 'board';
+        }
+        radarAccess = {
+            isAdmin: true,
+            isStaffOrAdmin: true,
+            bootstrapped: true,
+        };
+        hydrateRadarWorkspace(
+            previewQuery.empty ? emptyRadarPreviewWorkspace() : buildRadarPreviewWorkspace(),
+            { preview: true },
+        );
+        const { hydrateRadarPromoPreview } = await import('../../utils/studioPromoCodes.js');
+        hydrateRadarPromoPreview(
+            previewQuery.empty
+                ? []
+                : [
+                      {
+                          code: 'RADAR-KAGA26',
+                          codeType: 'promo',
+                          discountDurationMonths: 2,
+                          maxRedemptions: 40,
+                          currentRedemptions: 3,
+                          active: true,
+                          campaignTag: 'radar-batch',
+                          createdAt: '2026-08-01T00:00:00.000Z',
+                      },
+                      {
+                          code: 'RADAR-A7K2',
+                          codeType: 'promo',
+                          discountDurationMonths: 1,
+                          maxRedemptions: 1,
+                          currentRedemptions: 0,
+                          active: true,
+                          campaignTag: 'radar-individual',
+                          createdAt: '2026-08-12T00:00:00.000Z',
+                      },
+                  ],
+        );
     }
 
     const paint = () => {
@@ -169,21 +251,18 @@ export async function initRadar(mainEl) {
         }).join('');
 
         let body = '';
-        if (activeTab === 'discover') body = renderDiscover(leads, canEdit);
-        else if (activeTab === 'leads') body = renderLeads(filtered, canEdit);
-        else if (activeTab === 'relationships') body = renderRelationships(relationships, leads, canEdit);
+        if (activeTab === 'discover') {
+            body = viewMode === 'list' ? renderLeads(filtered, canEdit) : renderDiscover(leads, canEdit);
+        } else if (activeTab === 'relationships') body = renderRelationships(relationships, leads, canEdit);
         else if (activeTab === 'outreach') body = renderOutreach(outreach, leads, canEdit);
+        else if (activeTab === 'invites') body = `<div id="radar-invites-host"></div>`;
         else if (activeTab === 'sources') body = renderSources(sources, canEdit);
         else body = renderAnalytics(leads, outreach, sources);
 
         const accessBanner = renderAccessBanner(loadState, loadError);
 
         root.innerHTML = `
-      <div class="studio-radar-intro">
-        <h2 class="studio-radar-intro__title">Radar</h2>
-        <p class="studio-muted studio-radar-intro__hint">Relationship intelligence for Fusion outreach — find fit, map warm paths, and draft messages with human approval before send.</p>
-      </div>
-      ${accessBanner}
+      <p class="studio-muted studio-radar-intro__hint">Find fit, map a warm path, draft with approval.</p>
       <p class="member-profile-dashboard__status-line" role="status" aria-live="polite" id="studio-radar-status-line">${
           loadState === 'loading'
               ? 'Loading Radar…'
@@ -202,22 +281,48 @@ export async function initRadar(mainEl) {
         </div>
         <div class="mpd-program-tab-panel" id="studio-radar-panel" role="tabpanel" aria-labelledby="studio-radar-tab-${esc(activeTab)}" data-radar-panel>
           <section class="member-profile-dashboard__card">
-            <div class="studio-radar-panel-head">
+            ${
+                meta.blurb
+                    ? `<div class="studio-radar-panel-head">
               <h2>${esc(meta.label)}</h2>
               <p>${esc(meta.blurb)}</p>
-            </div>
+            </div>`
+                    : ''
+            }
             ${body}
           </section>
         </div>
       </div>
+      <input type="file" id="radarLeadCsvInput" accept=".csv,text/csv" hidden />
+      ${accessBanner}
     `;
         bindChildListeners(root, canEdit, paint);
+        root.dataset.radarReady = '1';
+        if (preview) root.dataset.radarPreview = '1';
+        if (activeTab === 'invites') {
+            const host = root.querySelector('#radar-invites-host');
+            if (host instanceof HTMLElement) {
+                void import('./studioPromoCodesPanel.js').then(({ mountStudioPromoCodesPanel }) =>
+                    mountStudioPromoCodesPanel(host, { radarOnly: true, canEdit }),
+                );
+            }
+        }
     };
 
     rootActionsBound = false;
     bindRootActions(root, canEdit, paint);
     unsub = subscribeRadar(paint);
     paint();
+    if (preview) {
+        const leadId = previewQuery?.leadId || '';
+        if (leadId) {
+            const lead = getRadarLeadsCached().find((l) => l.id === leadId);
+            if (lead) {
+                void openRadarLeadModal(lead, { canEdit, onSaved: () => {} }).catch(() => {});
+            }
+        }
+        return;
+    }
     try {
         let bootstrapNote = '';
         try {
@@ -264,7 +369,7 @@ function renderAccessBanner(loadState, loadError) {
     } else if (radarAccess.isStaffOrAdmin) {
         const role = radarAccess.isAdmin ? 'admin' : 'staff';
         parts.push(
-            `<p class="studio-radar-access-ok">Radar access: <strong>${esc(role)}</strong>. Studio permission gates the nav; canister allowlist gates reads/writes.</p>`,
+            `<p class="studio-radar-access-ok">Canister allowlist: <strong>${esc(role)}</strong>. Studio permission gates the nav; this list gates reads and writes.</p>`,
         );
     }
     if (radarAccess.isAdmin) {
@@ -278,8 +383,56 @@ function renderAccessBanner(loadState, loadError) {
         <span class="studio-radar-status" id="radarStaffStatus" role="status"></span>
       </div>`);
     }
+    parts.push(
+        `<p><button type="button" class="studio-btn-ghost" data-radar-act="health">API health</button></p>`,
+    );
     if (!parts.length) return '';
-    return `<div class="studio-radar-banner ${loadState === 'error' || (!radarAccess.isStaffOrAdmin && loadState !== 'loading') ? 'studio-radar-banner--warn' : ''}" role="status">${parts.join('')}</div>`;
+    const warn = loadState === 'error' || (!radarAccess.isStaffOrAdmin && loadState !== 'loading');
+    const summary = radarAccess.isStaffOrAdmin
+        ? `Access · ${radarAccess.isAdmin ? 'admin' : 'staff'}`
+        : 'Access';
+    return `<details class="studio-radar-access ${warn ? 'studio-radar-banner--warn' : ''}" ${warn ? 'open' : ''}>
+      <summary>${esc(summary)}</summary>
+      <div class="studio-radar-access__body">${parts.join('')}</div>
+    </details>`;
+}
+
+function renderViewToggle() {
+    return `<div class="studio-radar-view-toggle" role="group" aria-label="Pipeline view">
+      <button type="button" class="studio-radar-view-toggle__btn${viewMode === 'board' ? ' is-active' : ''}" data-radar-view="board">Board</button>
+      <button type="button" class="studio-radar-view-toggle__btn${viewMode === 'list' ? ' is-active' : ''}" data-radar-view="list">List</button>
+    </div>`;
+}
+
+function statusSelectHtml(lead, canEdit) {
+    const opts = RADAR_STATUSES.map(
+        (s) => `<option value="${esc(s)}" ${lead.status === s ? 'selected' : ''}>${esc(s)}</option>`,
+    ).join('');
+    if (!canEdit) {
+        return `<span class="studio-radar-chip">${esc(lead.status)}</span>`;
+    }
+    return `<select class="studio-radar-stage" data-radar-status="${esc(lead.id)}" aria-label="Stage for ${esc(lead.name || 'lead')}" onclick="event.stopPropagation()">${opts}</select>`;
+}
+
+function redFlagChipHtml(lead) {
+    return leadHasRedFlags(lead)
+        ? `<span class="studio-radar-chip studio-radar-chip--flag">Red flag</span>`
+        : '';
+}
+
+function downloadTextFile(filename, text, type = 'text/csv') {
+    const blob = new Blob([text], { type });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+}
+
+function pipelineUploadButton(canEdit) {
+    return canEdit
+        ? `<button type="button" class="studio-btn-ghost" data-radar-act="upload-leads">Upload leads</button>`
+        : '';
 }
 
 /**
@@ -287,41 +440,55 @@ function renderAccessBanner(loadState, loadError) {
  * @param {boolean} canEdit
  */
 function renderDiscover(leads, canEdit) {
-    const cols = RADAR_PIPELINE_STATUSES.map((status) => {
-        const count = leads.filter((l) => l.status === status).length;
-        const cards = leads
-            .filter((l) => l.status === status)
+    if (!leads.length) {
+        return `
+    <div class="studio-radar-toolbar">
+      ${renderViewToggle()}
+      <div class="studio-radar-toolbar-actions">
+        ${canEdit ? `<button type="button" class="studio-btn-primary" data-radar-act="add-lead">Add lead</button>` : ''}
+        ${pipelineUploadButton(canEdit)}
+        ${canEdit ? `<button type="button" class="studio-btn-ghost" data-radar-act="run-discovery">Run discovery</button>` : ''}
+      </div>
+    </div>
+    <p class="studio-radar-status" id="radarDiscoverStatus" role="status"></p>
+    <div class="studio-radar-empty-compose" data-radar-empty>
+      <p>No one on Radar yet.</p>
+      <p>Add a lead or run discovery to fill the board.</p>
+    </div>`;
+    }
+
+    const cols = BOARD_COLUMNS.map((col) => {
+        const cardsLeads = leads.filter((l) => col.statuses.includes(l.status));
+        const cards = cardsLeads
             .map(
                 (l) => `
         <div class="studio-radar-card" data-open-lead="${esc(l.id)}">
           <div class="studio-radar-card__head">
             <strong>${esc(l.name || 'Untitled')}</strong>
-            <span class="studio-radar-score studio-radar-score--${scoreTier(l.aiScore)}" style="width:1.6rem;height:1.6rem;font-size:0.65rem">${esc(String(l.aiScore || 0))}</span>
+            <span class="studio-radar-score studio-radar-score--${scoreTier(l.aiScore)}">${esc(String(l.aiScore || 0))}</span>
           </div>
-          <span class="studio-radar-chip">${esc(l.leadType)}</span>
+          <div class="studio-radar-card__meta">
+            <span class="studio-radar-chip">${esc(l.leadType)}</span>
+            ${statusSelectHtml(l, canEdit)}
+            ${redFlagChipHtml(l)}
+          </div>
           <p class="studio-radar-why">${esc(l.aiRationale || l.discoveryReason || 'Awaiting qualification')}</p>
         </div>`,
             )
             .join('');
-        return `<div class="studio-radar-col">
-          <div class="studio-radar-col__header"><h3>${esc(status)}</h3><span class="studio-radar-col__count">${count}</span></div>
-          ${cards || '<p class="studio-radar-empty">No cards in this stage</p>'}
+        return `<div class="studio-radar-col" data-radar-col="${esc(col.id)}">
+          <div class="studio-radar-col__header"><h3>${esc(col.label)}</h3><span class="studio-radar-col__count">${cardsLeads.length}</span></div>
+          ${cards || '<p class="studio-radar-empty">None</p>'}
         </div>`;
     }).join('');
 
     return `
-    <div class="studio-radar-section-intro">
-      <div class="studio-radar-section-intro__steps">
-        <div class="studio-radar-step"><span class="studio-radar-step__num">1</span><span>Add leads manually or import from discovery sources</span></div>
-        <div class="studio-radar-step"><span class="studio-radar-step__num">2</span><span>Open a card to qualify, score, and add context</span></div>
-        <div class="studio-radar-step"><span class="studio-radar-step__num">3</span><span>Move qualified leads to Outreach for drafting</span></div>
-      </div>
-    </div>
     <div class="studio-radar-toolbar">
-      <div class="studio-radar-toolbar-actions" style="margin-left:0">
+      ${renderViewToggle()}
+      <div class="studio-radar-toolbar-actions">
         ${canEdit ? `<button type="button" class="studio-btn-primary" data-radar-act="add-lead">Add lead</button>` : ''}
+        ${pipelineUploadButton(canEdit)}
         ${canEdit ? `<button type="button" class="studio-btn-ghost" data-radar-act="run-discovery">Run discovery</button>` : ''}
-        <button type="button" class="studio-btn-ghost" data-radar-act="health">API health</button>
       </div>
     </div>
     <p class="studio-radar-status" id="radarDiscoverStatus" role="status"></p>
@@ -329,37 +496,84 @@ function renderDiscover(leads, canEdit) {
   `;
 }
 
+function leadsTableRowsHtml(filtered) {
+    return filtered
+        .map(
+            (l) => `
+      <tr data-open-lead="${esc(l.id)}">
+        <td><input type="checkbox" data-bulk="${esc(l.id)}" onclick="event.stopPropagation()" /></td>
+        <td><strong>${esc(l.name)}</strong> ${redFlagChipHtml(l)}<div class="studio-radar-muted">${esc(l.publicEmail)}</div></td>
+        <td><span class="studio-radar-chip">${esc(l.leadType)}</span></td>
+        <td>${esc(l.location)}</td>
+        <td><span class="studio-radar-score studio-radar-score--${scoreTier(l.aiScore)}">${esc(String(l.aiScore || 0))}</span></td>
+        <td>${esc(l.status)}</td>
+        <td>${esc(l.nextAction)}</td>
+      </tr>`,
+        )
+        .join('');
+}
+
+function leadsFilterSummary(filtered) {
+    if (!filtered.length) return '';
+    return `Showing ${filtered.length} lead${filtered.length === 1 ? '' : 's'}${filters.q || filters.type || filters.status || filters.region || filters.hasRedFlag ? ' (filtered)' : ''}`;
+}
+
+/**
+ * Patch list rows without rebuilding search inputs (keeps caret).
+ * @param {HTMLElement} root
+ */
+function updateLeadsTable(root) {
+    const filtered = filterLeads(getRadarLeadsCached(), filters);
+    const tbody = root.querySelector('[data-radar-tbody]');
+    const summary = root.querySelector('.studio-radar-filter-summary');
+    if (tbody) {
+        tbody.innerHTML =
+            leadsTableRowsHtml(filtered) ||
+            `<tr><td colspan="7"><p class="studio-radar-empty">No leads match these filters.</p></td></tr>`;
+        tbody.querySelectorAll('[data-open-lead]').forEach((el) => {
+            el.addEventListener('click', () => {
+                const id = el.getAttribute('data-open-lead');
+                const lead = getRadarLeadsCached().find((l) => l.id === id);
+                if (!lead) return;
+                const canEdit = root.getAttribute('data-can-edit') === '1';
+                void openRadarLeadModal(lead, {
+                    canEdit,
+                    onSaved: () => loadRadarWorkspace(),
+                }).catch((err) => {
+                    openStudioModal(
+                        `<p class="studio-radar-error">${esc(err instanceof Error ? err.message : String(err))}</p>`,
+                        { title: 'Radar lead' },
+                    );
+                });
+            });
+        });
+    }
+    if (summary) summary.textContent = leadsFilterSummary(filtered);
+}
+
 /**
  * @param {ReturnType<typeof emptyLead>[]} filtered
  * @param {boolean} canEdit
  */
 function renderLeads(filtered, canEdit) {
-    const rows = filtered
-        .map(
-            (l) => `
-      <tr data-open-lead="${esc(l.id)}">
-        <td><input type="checkbox" data-bulk="${esc(l.id)}" onclick="event.stopPropagation()" /></td>
-        <td><strong>${esc(l.name)}</strong><div class="studio-radar-muted">${esc(l.publicEmail)}</div></td>
-        <td><span class="studio-radar-chip">${esc(l.leadType)}</span></td>
-        <td>${esc(l.location)}</td>
-        <td><span class="studio-radar-score studio-radar-score--${scoreTier(l.aiScore)}">${esc(String(l.aiScore || 0))}</span></td>
-        <td>${esc(l.status)}</td>
-        <td>${esc(l.fusionFit)}</td>
-        <td>${esc(l.japanConnection)}</td>
-        <td>${esc(l.nextAction)}</td>
-      </tr>`,
-        )
-        .join('');
-
-    const summary = filtered.length
-        ? `Showing ${filtered.length} lead${filtered.length === 1 ? '' : 's'}${filters.q || filters.type || filters.status || filters.region ? ' (filtered)' : ''}`
-        : '';
+    const rows = leadsTableRowsHtml(filtered);
+    const summary = leadsFilterSummary(filtered);
 
     return `
+    <div class="studio-radar-toolbar">
+      ${renderViewToggle()}
+      <div class="studio-radar-toolbar-actions">
+        ${canEdit ? `<button type="button" class="studio-btn-primary" data-radar-act="add-lead">Add lead</button>` : ''}
+        ${pipelineUploadButton(canEdit)}
+        <button type="button" class="studio-btn-ghost" data-radar-act="export-csv">Export CSV</button>
+        ${canEdit ? `<button type="button" class="studio-btn-secondary" data-radar-act="bulk-delete">Delete selected</button>` : ''}
+      </div>
+    </div>
+    <p class="studio-radar-status" id="radarDiscoverStatus" role="status"></p>
     <div class="studio-radar-toolbar studio-radar-toolbar--filters">
       <label class="studio-field studio-field--grow">
         <span>Search</span>
-        <input type="search" class="studio-input" placeholder="Name, email, notes…" data-filter="q" value="${esc(filters.q)}" autocomplete="off" />
+        <input type="search" class="studio-input" placeholder="Name, place, notes…" data-filter="q" value="${esc(filters.q)}" autocomplete="off" />
       </label>
       <label class="studio-field">
         <span>Type</span>
@@ -371,21 +585,18 @@ function renderLeads(filtered, canEdit) {
       </label>
       <label class="studio-field">
         <span>Region</span>
-        <input type="text" class="studio-input" placeholder="e.g. Tokyo, NYC…" data-filter="region" value="${esc(filters.region)}" />
+        <input type="text" class="studio-input" placeholder="Tokyo, NYC…" data-filter="region" value="${esc(filters.region)}" />
+      </label>
+      <label class="studio-radar-check studio-radar-check--filter">
+        <input type="checkbox" data-filter-flag="hasRedFlag" ${filters.hasRedFlag ? 'checked' : ''} />
+        Has red flag
       </label>
     </div>
-    <div class="studio-radar-toolbar">
-      <p class="studio-radar-filter-summary">${esc(summary)}</p>
-      <div class="studio-radar-toolbar-actions">
-        ${canEdit ? `<button type="button" class="studio-btn-primary" data-radar-act="add-lead">Add lead</button>` : ''}
-        <button type="button" class="studio-btn-ghost" data-radar-act="export-csv">Export CSV</button>
-        ${canEdit ? `<button type="button" class="studio-btn-secondary" data-radar-act="bulk-delete">Delete selected</button>` : ''}
-      </div>
-    </div>
-    <div class="studio-table-wrap studio-table-wrap--sticky-head">
+    <p class="studio-radar-filter-summary">${esc(summary)}</p>
+    <div class="studio-table-wrap studio-table-wrap--sticky-head" data-radar-list>
       <table class="studio-table studio-table--dense">
-        <thead><tr><th></th><th>Name</th><th>Type</th><th>Location</th><th>Score</th><th>Status</th><th>Fit</th><th>Japan</th><th>Next</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="9"><p class="studio-radar-empty">No leads match these filters. Add a lead or clear filters.</p></td></tr>`}</tbody>
+        <thead><tr><th></th><th>Name</th><th>Type</th><th>Place</th><th>Score</th><th>Status</th><th>Next</th></tr></thead>
+        <tbody data-radar-tbody>${rows || `<tr><td colspan="7"><p class="studio-radar-empty">No leads match these filters.</p></td></tr>`}</tbody>
       </table>
     </div>
   `;
@@ -417,9 +628,6 @@ function renderRelationships(relationships, leads, canEdit) {
         .join('');
 
     return `
-    <div class="studio-radar-section-intro">
-      <p>Relationships map how leads connect to each other, to Fusion members, and to the broader network. Use <strong>Compute bridges</strong> to auto-detect connections from your roster, then sync them onto Radar.</p>
-    </div>
     <div class="studio-radar-toolbar">
       <div class="studio-radar-toolbar-actions" style="margin-left:0">
         <button type="button" class="studio-btn-ghost" data-radar-act="compute-bridges">Compute Fusion bridges</button>
@@ -429,7 +637,7 @@ function renderRelationships(relationships, leads, canEdit) {
     </div>
     <p class="studio-radar-status" id="radarRelStatus" role="status"></p>
     <div class="studio-radar-stats-grid" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))">
-      ${blocks || '<p class="studio-radar-empty">No relationships mapped yet. Run <strong>Compute bridges</strong> to detect connections from your Fusion roster, or add a relationship manually.</p>'}
+      ${blocks || '<p class="studio-radar-empty">No relationships mapped yet. Compute bridges from the Fusion roster, or add one by hand.</p>'}
     </div>
   `;
 }
@@ -451,12 +659,19 @@ function renderOutreach(outreach, leads, canEdit) {
     const draftRows = drafts
         .map((o) => {
             const lead = leads.find((l) => l.id === o.leadId);
+            const ready = isRadarOutreachReadyToSend(o, lead);
+            const flagged = leadHasRedFlags(lead);
+            const checked = selectedOutreachIds.has(o.id);
             return `<tr>
-        <td>${esc(lead?.name || o.leadId)}</td>
+        <td><input type="checkbox" data-outreach-select="${esc(o.id)}" ${checked ? 'checked' : ''} ${canEdit ? '' : 'disabled'} onclick="event.stopPropagation()" aria-label="Select ${esc(lead?.name || o.subject || 'outreach')}" /></td>
+        <td>${esc(lead?.name || o.leadId)}${flagged ? ` ${redFlagChipHtml(lead)}` : ''}${ready ? ' <span class="studio-radar-muted">ready</span>' : ''}</td>
         <td>${esc(o.subject)}</td>
         <td>${esc(o.triggerEvent)}</td>
         <td>${esc(o.status)}</td>
-        <td>${canEdit ? `<button type="button" class="studio-btn-ghost" data-open-outreach="${esc(o.leadId)}">Open</button>` : ''}</td>
+        <td>
+          ${canEdit && o.status === 'drafted' ? `<button type="button" class="studio-btn-ghost" data-approve-outreach="${esc(o.id)}">Approve</button>` : ''}
+          ${canEdit ? `<button type="button" class="studio-btn-ghost" data-open-outreach="${esc(o.leadId)}">Open</button>` : ''}
+        </td>
       </tr>`;
         })
         .join('');
@@ -469,12 +684,9 @@ function renderOutreach(outreach, leads, canEdit) {
         .join('');
 
     return `
-    <div class="studio-radar-section-intro">
-      <p>Outreach manages the full cycle from draft to send. Configure triggers, let AI draft messages, then review and approve before anything goes out. Nothing is sent without explicit human approval.</p>
-    </div>
     <div class="studio-radar-why-block">
       <h4>Event triggers</h4>
-      <p>Select which events should auto-queue outreach drafts. When a trigger fires, Radar creates a draft for you to review — it won't send on its own.</p>
+      <p>Checked events queue a draft. Radar never sends on its own.</p>
       <div class="studio-radar-trigger-grid">${triggers}</div>
       <label class="studio-radar-check"><input type="checkbox" id="radarAutoDraft" ${cfg.autoDraft ? 'checked' : ''}/> Auto-create drafts</label>
       <div class="studio-radar-toolbar" style="margin:0.75rem 0 0">
@@ -485,7 +697,18 @@ function renderOutreach(outreach, leads, canEdit) {
       </div>
     </div>
     <h3 class="studio-radar-section-title">Draft queue</h3>
-    <div class="studio-table-wrap studio-table-wrap--sticky-head"><table class="studio-table studio-table--dense"><thead><tr><th>Lead</th><th>Subject</th><th>Trigger</th><th>Status</th><th></th></tr></thead><tbody>${draftRows || '<tr><td colspan="5"><p class="studio-radar-empty">No drafts waiting for approval.</p></td></tr>'}</tbody></table></div>
+    ${
+        canEdit
+            ? `<div class="studio-radar-toolbar">
+      <div class="studio-radar-toolbar-actions" style="margin-left:0">
+        <button type="button" class="studio-btn-ghost" data-radar-act="select-ready">Select ready</button>
+        <button type="button" class="studio-btn-primary" data-radar-act="send-selected" ${selectedOutreachIds.size ? '' : 'disabled'}>Send selected (${selectedOutreachIds.size})</button>
+      </div>
+    </div>`
+            : ''
+    }
+    <p class="studio-radar-status" id="radarOutreachStatus" role="status"></p>
+    <div class="studio-table-wrap studio-table-wrap--sticky-head"><table class="studio-table studio-table--dense"><thead><tr><th></th><th>Lead</th><th>Subject</th><th>Trigger</th><th>Status</th><th></th></tr></thead><tbody>${draftRows || '<tr><td colspan="6"><p class="studio-radar-empty">No drafts waiting for approval.</p></td></tr>'}</tbody></table></div>
     <h3 class="studio-radar-section-title">Sent</h3>
     <div class="studio-table-wrap studio-table-wrap--sticky-head"><table class="studio-table studio-table--dense"><thead><tr><th>Lead</th><th>Subject</th><th>Status</th><th>Sent</th></tr></thead><tbody>${sentRows || '<tr><td colspan="4"><p class="studio-radar-empty">Nothing sent yet.</p></td></tr>'}</tbody></table></div>
   `;
@@ -516,18 +739,14 @@ function renderSources(sources, canEdit) {
         .join('');
 
     return `
-    <div class="studio-radar-section-intro">
-      <p>Sources feed discovery with leads from external data — RSS artist feeds, curated lists, or Google Places queries. Enable a source, then run <strong>Discover</strong> to pull in new prospects.</p>
-      <div class="studio-radar-stats-row">
-        <span>${sources.length} source${sources.length === 1 ? '' : 's'} configured</span>
-        <span class="studio-radar-stats-sep">·</span>
-        <span>${enabledCount} active</span>
-      </div>
+    <div class="studio-radar-stats-row">
+      <span>${sources.length} source${sources.length === 1 ? '' : 's'}</span>
+      <span class="studio-radar-stats-sep">·</span>
+      <span>${enabledCount} active</span>
     </div>
     <div class="studio-radar-toolbar">
       <div class="studio-radar-toolbar-actions" style="margin-left:0">
         ${canEdit ? `<button type="button" class="studio-btn-primary" data-radar-act="add-source">Add source</button>` : ''}
-        <button type="button" class="studio-btn-ghost" data-radar-act="health">API status</button>
       </div>
     </div>
     <p class="studio-radar-status" id="radarSourceStatus" role="status"></p>
@@ -576,9 +795,6 @@ function renderAnalytics(leads, outreach, sources) {
         .join('');
 
     return `
-    <div class="studio-radar-section-intro">
-      <p>A snapshot of your pipeline health — funnel progression, scoring averages, and outreach performance at a glance.</p>
-    </div>
     <h3 class="studio-radar-section-title">Pipeline funnel</h3>
     <div class="studio-radar-stats-grid">
       <div class="studio-radar-stat"><div class="l">Total leads</div><div class="n">${leads.length}</div></div>
@@ -609,7 +825,17 @@ function renderAnalytics(leads, outreach, sources) {
 function bindChildListeners(root, canEdit, paint) {
     root.querySelectorAll('[data-radar-tab]').forEach((btn) => {
         btn.addEventListener('click', () => {
-            activeTab = /** @type {any} */ (btn.getAttribute('data-radar-tab') || 'leads');
+            activeTab = /** @type {any} */ (btn.getAttribute('data-radar-tab') || 'discover');
+            paint();
+        });
+    });
+
+    root.querySelectorAll('button[data-radar-view]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const next = btn.getAttribute('data-radar-view');
+            if (next !== 'board' && next !== 'list') return;
+            viewMode = next;
+            activeTab = 'discover';
             paint();
         });
     });
@@ -619,10 +845,77 @@ function bindChildListeners(root, canEdit, paint) {
             const key = el.getAttribute('data-filter');
             if (!key) return;
             filters = { ...filters, [key]: /** @type {HTMLInputElement} */ (el).value };
+            if (activeTab === 'discover' && viewMode === 'list' && root.querySelector('[data-radar-tbody]')) {
+                updateLeadsTable(root);
+                return;
+            }
             paint();
         };
         el.addEventListener('change', apply);
         el.addEventListener('input', apply);
+    });
+
+    root.querySelectorAll('[data-filter-flag]').forEach((el) => {
+        el.addEventListener('change', () => {
+            const key = el.getAttribute('data-filter-flag');
+            if (!key) return;
+            filters = { ...filters, [key]: /** @type {HTMLInputElement} */ (el).checked };
+            if (activeTab === 'discover' && viewMode === 'list' && root.querySelector('[data-radar-tbody]')) {
+                updateLeadsTable(root);
+                return;
+            }
+            paint();
+        });
+    });
+
+    const csvInput = /** @type {HTMLInputElement | null} */ (root.querySelector('#radarLeadCsvInput'));
+    csvInput?.addEventListener('change', async () => {
+        const file = csvInput.files?.[0];
+        csvInput.value = '';
+        if (!file) return;
+        try {
+            const text = await file.text();
+            openArtistLeadsImportModal(text, root);
+        } catch (err) {
+            openStudioModal(
+                `<p class="studio-radar-error">${esc(err instanceof Error ? err.message : String(err))}</p>`,
+                { title: 'Upload leads' },
+            );
+        }
+    });
+
+    root.querySelectorAll('[data-outreach-select]').forEach((el) => {
+        el.addEventListener('change', () => {
+            const id = el.getAttribute('data-outreach-select');
+            if (!id) return;
+            const checked = /** @type {HTMLInputElement} */ (el).checked;
+            if (checked) {
+                if (selectedOutreachIds.size >= RADAR_OUTREACH_BATCH_CAP) {
+                    /** @type {HTMLInputElement} */ (el).checked = false;
+                    return;
+                }
+                selectedOutreachIds.add(id);
+            } else {
+                selectedOutreachIds.delete(id);
+            }
+            const sendBtn = root.querySelector('[data-radar-act="send-selected"]');
+            if (sendBtn instanceof HTMLButtonElement) {
+                sendBtn.disabled = selectedOutreachIds.size === 0;
+                sendBtn.textContent = `Send selected (${selectedOutreachIds.size})`;
+            }
+        });
+    });
+
+    root.querySelectorAll('[data-radar-status]').forEach((el) => {
+        el.addEventListener('click', (ev) => ev.stopPropagation());
+        el.addEventListener('change', async (ev) => {
+            ev.stopPropagation();
+            const id = el.getAttribute('data-radar-status');
+            const lead = getRadarLeadsCached().find((l) => l.id === id);
+            if (!lead || !canEdit) return;
+            const status = /** @type {HTMLSelectElement} */ (el).value;
+            await saveRadarLead({ ...lead, status });
+        });
     });
 
     root.querySelectorAll('[data-open-lead]').forEach((el) => {
@@ -732,19 +1025,36 @@ function bindRootActions(root, canEdit, paint) {
                             st.textContent = err instanceof Error ? err.message : String(err);
                         }
                     }
+                } else if (act === 'upload-leads') {
+                    const input = /** @type {HTMLInputElement | null} */ (
+                        root.querySelector('#radarLeadCsvInput')
+                    );
+                    if (input) {
+                        input.value = '';
+                        input.click();
+                    }
+                } else if (act === 'export-csv') {
+                    const csv = leadsToArtistSheetCsv(filterLeads(getRadarLeadsCached(), filters));
+                    downloadTextFile('fusion-artist-leads.csv', csv);
+                } else if (act === 'select-ready') {
+                    const leads = getRadarLeadsCached();
+                    const ready = getRadarOutreachCached()
+                        .filter((o) => {
+                            const lead = leads.find((l) => l.id === o.leadId);
+                            return isRadarOutreachReadyToSend(o, lead);
+                        })
+                        .slice(0, RADAR_OUTREACH_BATCH_CAP);
+                    selectedOutreachIds = new Set(ready.map((o) => String(o.id)));
+                    paint();
+                } else if (act === 'send-selected') {
+                    if (!canEdit) return;
+                    await openOutreachBatchConfirm(root);
                 } else if (act === 'health') {
                     const h = await radarDiscoverHealth();
                     openStudioModal(
                         `<pre style="white-space:pre-wrap;font-size:0.85rem">${esc(JSON.stringify(h, null, 2))}</pre>`,
                         { title: 'Radar API health' },
                     );
-                } else if (act === 'export-csv') {
-                    const csv = leadsToCsv(filterLeads(getRadarLeadsCached(), filters));
-                    const blob = new Blob([csv], { type: 'text/csv' });
-                    const a = document.createElement('a');
-                    a.href = URL.createObjectURL(blob);
-                    a.download = 'fusion-radar-leads.csv';
-                    a.click();
                 } else if (act === 'bulk-delete' && canEdit) {
                     const ids = [...root.querySelectorAll('[data-bulk]:checked')].map((x) =>
                         x.getAttribute('data-bulk'),
@@ -808,14 +1118,16 @@ function bindRootActions(root, canEdit, paint) {
                         );
                         return;
                     }
+                    const { loadRadarTemplateDraft } = await import('../../utils/radarOutreachTemplates.js');
+                    const draft = await loadRadarTemplateDraft('tpl_radar_artists', 1);
                     for (const lead of leads.slice(0, 20)) {
-                        await upsertRadarOutreach({
+                        await saveRadarOutreach({
                             id: '',
                             leadId: lead.id,
-                            subject: `Fusion — ${lead.name}`,
-                            bodyHtml: lead.aiRationale || lead.aiBestOpeningTopic || '',
+                            subject: draft.subject,
+                            bodyHtml: draft.htmlBody,
                             triggerEvent: 'manual',
-                            templateId: '',
+                            templateId: draft.templateId,
                             status: 'drafted',
                         });
                     }
@@ -833,6 +1145,14 @@ function bindRootActions(root, canEdit, paint) {
             }
         }
 
+        const approve = t.closest?.('[data-approve-outreach]');
+        if (approve instanceof HTMLElement && canEdit) {
+            const id = approve.getAttribute('data-approve-outreach');
+            const rec = getRadarOutreachCached().find((o) => o.id === id);
+            if (rec) {
+                await saveRadarOutreach({ ...rec, status: 'approved' });
+            }
+        }
         const tog = t.closest?.('[data-toggle-source]');
         if (tog instanceof HTMLElement && canEdit) {
             const id = tog.getAttribute('data-toggle-source');
@@ -989,3 +1309,436 @@ function openAddRelationshipModal(onDone) {
         onDone();
     });
 }
+
+/**
+ * @param {string} text
+ * @param {HTMLElement} radarRoot
+ */
+function openArtistLeadsImportModal(text, radarRoot) {
+    const classified = classifyArtistLeadsCsv(text, getRadarLeadsCached());
+    const sampleNames = [...classified.toCreate, ...classified.toMerge]
+        .slice(0, 6)
+        .map((x) => x.name)
+        .filter(Boolean);
+    const invalidPreview = classified.invalid.slice(0, 8);
+    const canImport = classified.toCreate.length + classified.toMerge.length > 0;
+    const { root, close } = openStudioModal(
+        `<div class="studio-radar-import">
+      <p>New <strong>${classified.toCreate.length}</strong> · merge <strong>${classified.toMerge.length}</strong> · skip <strong>${classified.invalid.length}</strong></p>
+      ${
+          sampleNames.length
+              ? `<p class="studio-radar-muted">Sample: ${esc(sampleNames.join(', '))}${classified.toCreate.length + classified.toMerge.length > sampleNames.length ? '…' : ''}</p>`
+              : '<p class="studio-radar-muted">No valid rows to import.</p>'
+      }
+      ${
+          invalidPreview.length
+              ? `<ul class="studio-radar-import__invalid">${invalidPreview
+                    .map(
+                        (x) =>
+                            `<li>Row ${esc(String(x.rowNumber))}${x.name ? ` (${esc(x.name)})` : ''}: ${esc(x.reasons.join('; '))}</li>`,
+                    )
+                    .join('')}</ul>`
+              : ''
+      }
+      <p class="studio-radar-muted">Existing leads match by email, then Instagram. Empty Radar fields fill from the sheet; status and score overwrite only when the sheet date is newer.</p>
+      <div class="studio-radar-import__progress" data-imp-progress hidden>
+        <div class="studio-radar-import__progress-row">
+          <span class="studio-radar-import__spinner" aria-hidden="true"></span>
+          <p class="studio-radar-import__progress-label" data-imp-progress-label role="status">Preparing…</p>
+        </div>
+        <div class="studio-radar-import__progress-track" role="progressbar" data-imp-progress-bar aria-valuemin="0" aria-valuemax="${classified.toCreate.length + classified.toMerge.length}" aria-valuenow="0">
+          <span class="studio-radar-import__progress-fill" data-imp-progress-fill></span>
+        </div>
+      </div>
+    </div>`,
+        {
+            title: 'Import leads',
+            subtitle: 'Artist leads sheet',
+            wide: true,
+            footerHtml: `<div class="studio-radar-modal-footer">
+        <button type="button" class="studio-btn-ghost" data-imp="template">Download template</button>
+        <button type="button" class="studio-btn-ghost" data-studio-modal-close="1">Cancel</button>
+        <button type="button" class="studio-btn-primary" data-imp="import" ${canImport ? '' : 'disabled'}>Import</button>
+      </div>`,
+        },
+    );
+
+    const progressWrap = root.querySelector('[data-imp-progress]');
+    const progressLabel = root.querySelector('[data-imp-progress-label]');
+    const progressBar = root.querySelector('[data-imp-progress-bar]');
+    const progressFill = root.querySelector('[data-imp-progress-fill]');
+    let importing = false;
+    const setImportBusy = (busy) => {
+        importing = busy;
+        root.querySelectorAll('[data-imp="template"], [data-imp="import"]').forEach((el) => {
+            if (el instanceof HTMLButtonElement) el.disabled = busy;
+        });
+        root.querySelectorAll('[data-studio-modal-close]').forEach((el) => {
+            if (el instanceof HTMLButtonElement) el.disabled = busy;
+            else if (el instanceof HTMLElement) el.style.pointerEvents = busy ? 'none' : '';
+        });
+        if (progressWrap instanceof HTMLElement) progressWrap.hidden = !busy;
+        root.querySelector('.studio-modal-panel')?.setAttribute('aria-busy', busy ? 'true' : 'false');
+    };
+    root.addEventListener(
+        'keydown',
+        (e) => {
+            if (importing && e.key === 'Escape') {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+            }
+        },
+        true,
+    );
+    const paintProgress = ({ done, total, label }) => {
+        const n = Math.max(0, Number(total) || 0);
+        const d = Math.min(n, Math.max(0, Number(done) || 0));
+        const pct = n ? Math.round((d / n) * 100) : 0;
+        if (progressLabel) progressLabel.textContent = label || `Saving ${d} of ${n}…`;
+        if (progressFill instanceof HTMLElement) progressFill.style.width = `${pct}%`;
+        if (progressBar instanceof HTMLElement) {
+            progressBar.setAttribute('aria-valuenow', String(d));
+            progressBar.setAttribute('aria-valuemax', String(n));
+        }
+        const st = radarRoot.querySelector('#radarDiscoverStatus');
+        if (st) st.textContent = label || `Importing ${d} of ${n}…`;
+    };
+
+    root.addEventListener('click', async (ev) => {
+        const btn = /** @type {HTMLElement} */ (ev.target)?.closest?.('[data-imp]');
+        if (!(btn instanceof HTMLButtonElement)) return;
+        const act = btn.getAttribute('data-imp');
+        if (act === 'template') {
+            downloadTextFile('fusion-artist-leads-template.csv', artistLeadsTemplateCsv());
+            return;
+        }
+        if (act !== 'import' || !canImport) return;
+        const total = classified.toCreate.length + classified.toMerge.length;
+        setImportBusy(true);
+        paintProgress({ done: 0, total, label: 'Preparing Radar source…' });
+        try {
+            const result = await importArtistLeadsSheet(classified, {
+                onProgress: paintProgress,
+            });
+            close();
+            const st = radarRoot.querySelector('#radarDiscoverStatus');
+            const line = `Imported ${result.imported} · merged ${result.merged} · skipped ${result.skipped}`;
+            if (st) st.textContent = line;
+            else {
+                openStudioModal(`<p>${esc(line)}</p>`, { title: 'Import leads' });
+            }
+        } catch (err) {
+            setImportBusy(false);
+            openStudioModal(
+                `<p class="studio-radar-error">${esc(err instanceof Error ? err.message : String(err))}</p>`,
+                { title: 'Import leads' },
+            );
+        }
+    });
+}
+
+/**
+ * @param {ReturnType<typeof classifyArtistLeadsCsv>} classified
+ * @param {{ onProgress?: (p: { done: number, total: number, label: string }) => void }} [opts]
+ */
+async function importArtistLeadsSheet(classified, opts = {}) {
+    const jobs = [...classified.toCreate, ...classified.toMerge];
+    const total = jobs.length;
+    const report = (done, label) => {
+        opts.onProgress?.({ done, total, label });
+    };
+    const yieldUi = () =>
+        new Promise((resolve) => {
+            if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve());
+            else setTimeout(resolve, 0);
+        });
+
+    report(0, total ? 'Preparing Radar source…' : 'Nothing to import.');
+    let source = findArtistLeadsSheetSource(getRadarSourcesCached());
+    if (!source) {
+        source = await saveRadarSource(
+            {
+                id: '',
+                label: ARTIST_LEADS_SOURCE_LABEL,
+                sourceType: 'manualList',
+                url: '',
+                query: '',
+                regionKey: '',
+                enabled: true,
+                runIntervalHours: 24,
+                lastRunAt: '',
+                createdAt: '',
+            },
+            { silent: true },
+        );
+    }
+    const sourceId = String(source?.id || '');
+    let imported = 0;
+    let merged = 0;
+    let skipped = classified.invalid.length;
+    let done = 0;
+    for (const row of classified.toCreate) {
+        const name = String(row.lead?.name || row.name || 'lead').trim() || 'lead';
+        report(done, `Saving new ${done + 1} of ${total} — ${name}`);
+        await yieldUi();
+        try {
+            await saveRadarLead(
+                emptyLead({
+                    ...row.lead,
+                    sourceId: row.lead.sourceId || sourceId,
+                    createdAt: row.lead.createdAt || new Date().toISOString(),
+                }),
+                { silent: true },
+            );
+            imported += 1;
+        } catch {
+            skipped += 1;
+        }
+        done += 1;
+    }
+    for (const row of classified.toMerge) {
+        const name = String(row.lead?.name || row.name || 'lead').trim() || 'lead';
+        report(done, `Merging ${done + 1} of ${total} — ${name}`);
+        await yieldUi();
+        try {
+            await saveRadarLead(
+                emptyLead({
+                    ...row.lead,
+                    sourceId: row.lead.sourceId || sourceId,
+                }),
+                { silent: true },
+            );
+            merged += 1;
+        } catch {
+            skipped += 1;
+        }
+        done += 1;
+    }
+    report(done, 'Finishing…');
+    notifyRadar();
+    return { imported, merged, skipped };
+}
+
+/**
+ * @param {HTMLElement} radarRoot
+ */
+async function openOutreachBatchConfirm(radarRoot) {
+    const leads = getRadarLeadsCached();
+    const selected = getRadarOutreachCached()
+        .filter((o) => selectedOutreachIds.has(o.id))
+        .slice(0, RADAR_OUTREACH_BATCH_CAP)
+        .map((o) => ({
+            outreach: o,
+            lead: leads.find((l) => l.id === o.leadId) || emptyLead({ id: o.leadId }),
+        }));
+    const ready = selected.filter((item) => isRadarOutreachReadyToSend(item.outreach, item.lead));
+    const flagged = ready.filter((item) => leadHasRedFlags(item.lead));
+    const others = ready.filter((item) => !leadHasRedFlags(item.lead));
+    const ordered = [...flagged, ...others];
+    if (!ordered.length) {
+        openStudioModal(
+            `<p>No selected rows are ready. Approve a draft and add a public email, subject, and body first.</p>`,
+            { title: 'Send selected' },
+        );
+        return;
+    }
+
+    const {
+        campaignSendBlockedReason,
+        createStudioPromoCode,
+        durationSelectHtml,
+        isRadarPromoCode,
+        listStudioPromoCodes,
+        remainingPromoQuantity,
+    } = await import('../../utils/studioPromoCodes.js');
+    let codes = (await listStudioPromoCodes()).filter((pc) => isRadarPromoCode(pc) && pc.active !== false);
+    const n = ordered.length;
+    const codeOpts = codes
+        .map((pc) => {
+            const rem = remainingPromoQuantity(pc);
+            const remLabel = Number.isFinite(rem) ? `${rem} left` : 'unlimited';
+            return `<option value="${esc(pc.code)}">${esc(pc.code)} · ${esc(remLabel)}</option>`;
+        })
+        .join('');
+
+    const flagList = flagged.length
+        ? `<p><strong>Red flags (listed first):</strong></p><ul>${flagged
+              .map((i) => `<li>${esc(i.lead.name)} — ${esc(getLeadSheetExtras(i.lead).redFlags)}</li>`)
+              .join('')}</ul>`
+        : '';
+    const toList = ordered
+        .map((i) => `<li>${esc(i.lead.name)} &lt;${esc(i.lead.publicEmail)}&gt;</li>`)
+        .join('');
+
+    const { root, close } = openStudioModal(
+        `<div class="studio-radar-import studio-radar-batch-confirm">
+      <p>Send <strong>${n}</strong> approved message${n === 1 ? '' : 's'} (cap ${RADAR_OUTREACH_BATCH_CAP} per click). Every email gets the same campaign code.</p>
+      ${flagList}
+      <div class="studio-radar-form-grid">
+        <label class="full">Campaign code
+          <select id="radarBatchCode" class="studio-select">
+            <option value="">— Select a code —</option>
+            ${codeOpts}
+            <option value="__new__">Create campaign code…</option>
+          </select>
+        </label>
+      </div>
+      <div id="radarBatchNew" class="studio-radar-batch-new" hidden>
+        <div class="studio-radar-form-grid">
+        <label>Slug
+          <input id="radarBatchNewCode" class="studio-input" value="RADAR-BATCH" maxlength="32" />
+        </label>
+        <label>Offer
+          ${durationSelectHtml(2, 'radarBatchDuration')}
+        </label>
+        <label>Quantity
+          <input id="radarBatchQty" class="studio-input" type="number" min="${n}" value="${Math.max(n, 25)}" />
+        </label>
+        </div>
+      </div>
+      <p class="studio-radar-batch-budget" id="radarBatchBudget" role="status"></p>
+      <p><strong>To</strong></p>
+      <ul>${toList}</ul>
+      <p class="studio-radar-muted">${esc(STUDIO_EMAIL_ALWAYS_CC)} is CC’d on every message. Send test email delivers the first selected draft to that address only.</p>
+    </div>`,
+        {
+            title: 'Send selected outreach',
+            wide: true,
+            footerHtml: `<div class="studio-radar-modal-footer">
+        <button type="button" class="studio-btn-ghost" data-studio-modal-close="1">Cancel</button>
+        <button type="button" class="studio-btn-secondary" data-batch-test="1">Send test email</button>
+        <button type="button" class="studio-btn-primary" data-batch-send="1" disabled>Send</button>
+      </div>`,
+        },
+    );
+
+    const codeEl = /** @type {HTMLSelectElement} */ (root.querySelector('#radarBatchCode'));
+    const newWrap = root.querySelector('#radarBatchNew');
+    const budgetEl = root.querySelector('#radarBatchBudget');
+    const sendBtn = /** @type {HTMLButtonElement} */ (root.querySelector('[data-batch-send]'));
+    const testBtn = /** @type {HTMLButtonElement | null} */ (root.querySelector('[data-batch-test]'));
+
+    const selectedCampaign = () => {
+        const val = codeEl?.value || '';
+        if (!val || val === '__new__') return null;
+        return codes.find((pc) => pc.code === val) || null;
+    };
+
+    const refreshBudget = () => {
+        const creating = codeEl?.value === '__new__';
+        if (newWrap instanceof HTMLElement) newWrap.hidden = !creating;
+        let pc = selectedCampaign();
+        if (creating) {
+            const qty = Number(/** @type {HTMLInputElement} */ (root.querySelector('#radarBatchQty'))?.value || 0);
+            pc = {
+                code: String(/** @type {HTMLInputElement} */ (root.querySelector('#radarBatchNewCode'))?.value || '')
+                    .trim()
+                    .toUpperCase(),
+                active: true,
+                maxRedemptions: qty,
+                currentRedemptions: 0,
+            };
+        }
+        const reason = campaignSendBlockedReason(pc, n);
+        const rem = pc ? remainingPromoQuantity(pc) : 0;
+        const remLabel = pc && Number.isFinite(rem) ? `${rem} remaining` : pc ? 'unlimited' : 'no code';
+        if (budgetEl) {
+            budgetEl.textContent = reason
+                ? reason
+                : `${pc.code} · ${remLabel} · sending ${n}`;
+        }
+        if (sendBtn) sendBtn.disabled = Boolean(reason);
+    };
+
+    codeEl?.addEventListener('change', refreshBudget);
+    root.querySelector('#radarBatchQty')?.addEventListener('input', refreshBudget);
+    root.querySelector('#radarBatchNewCode')?.addEventListener('input', refreshBudget);
+    if (codes.length) {
+        const preferred =
+            codes.find((pc) => remainingPromoQuantity(pc) >= n && String(pc.campaignTag).includes('batch')) ||
+            codes.find((pc) => remainingPromoQuantity(pc) >= n) ||
+            codes[0];
+        if (preferred) codeEl.value = preferred.code;
+    }
+    refreshBudget();
+
+    testBtn?.addEventListener('click', async () => {
+        const sample = ordered[0];
+        if (!sample) return;
+        testBtn.disabled = true;
+        try {
+            const pc = selectedCampaign();
+            await sendRadarOutreachTestEmail({
+                subject: String(sample.outreach?.subject || ''),
+                body: String(sample.outreach?.bodyHtml || ''),
+                durationMonths: pc?.discountDurationMonths,
+                code: pc?.code,
+            });
+            if (budgetEl) {
+                budgetEl.textContent = `Test sent to ${STUDIO_EMAIL_ALWAYS_CC}. Leads were not contacted.`;
+            }
+        } catch (err) {
+            openStudioModal(
+                `<p class="studio-radar-error">${esc(err instanceof Error ? err.message : String(err))}</p>`,
+                { title: 'Send test email' },
+            );
+        } finally {
+            testBtn.disabled = false;
+        }
+    });
+
+    sendBtn?.addEventListener('click', async () => {
+        if (getDataSource() !== 'live') {
+            openStudioModal(`<p>Switch to live data source to send email.</p>`, {
+                title: 'Send selected outreach',
+            });
+            return;
+        }
+        sendBtn.disabled = true;
+        try {
+            let pc = selectedCampaign();
+            if (codeEl?.value === '__new__') {
+                pc = await createStudioPromoCode({
+                    code: String(
+                        /** @type {HTMLInputElement} */ (root.querySelector('#radarBatchNewCode'))?.value || '',
+                    ),
+                    durationMonths: Number(
+                        /** @type {HTMLSelectElement} */ (root.querySelector('#radarBatchDuration'))?.value || 2,
+                    ),
+                    maxRedemptions: Number(
+                        /** @type {HTMLInputElement} */ (root.querySelector('#radarBatchQty'))?.value || n,
+                    ),
+                    campaignTag: 'radar-batch',
+                });
+                codes = [...codes, pc];
+            }
+            const reason = campaignSendBlockedReason(pc, n);
+            if (reason) throw new Error(reason);
+            const result = await sendRadarOutreachBatch(ordered, {
+                code: pc.code,
+                durationMonths: pc.discountDurationMonths,
+            });
+            selectedOutreachIds = new Set();
+            close();
+            const failList = (result.failed || [])
+                .map((f) => `<li>${esc(f.name || f.email)} — ${esc(f.error)}</li>`)
+                .join('');
+            openStudioModal(
+                `<p>Sent <strong>${result.sent}</strong> · failed <strong>${(result.failed || []).length}</strong> with code <strong>${esc(pc.code)}</strong></p>
+        ${failList ? `<ul>${failList}</ul>` : ''}`,
+                { title: 'Outreach send result' },
+            );
+            const st = radarRoot.querySelector('#radarOutreachStatus');
+            if (st) {
+                st.textContent = `Sent ${result.sent} · failed ${(result.failed || []).length}`;
+            }
+        } catch (err) {
+            sendBtn.disabled = false;
+            openStudioModal(
+                `<p class="studio-radar-error">${esc(err instanceof Error ? err.message : String(err))}</p>`,
+                { title: 'Send selected outreach' },
+            );
+        }
+    });
+}
+

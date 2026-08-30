@@ -57,6 +57,7 @@ export const STUDIO_NAV_ICON_ALIASES = {
     schedule: 'nav-status',
     finance: 'nav-services',
     travel: 'nav-programs',
+    comms: 'nav-email',
     radar: 'nav-ai',
     'join-network': 'nav-gallery-access',
 };

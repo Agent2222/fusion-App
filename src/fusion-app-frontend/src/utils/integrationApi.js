@@ -1380,7 +1380,7 @@ export async function fetchPayPalPaymentReceipts(orderIds) {
 }
 
 /**
- * @param {{ to: string, subject: string, html?: string, text?: string, replyTo?: string, from?: string, cc?: string | string[] }} opts
+ * @param {{ to: string, subject: string, html?: string, text?: string, replyTo?: string, from?: string, cc?: string | string[], attachments?: Array<{ filename?: string, content?: string, contentType?: string }> }} opts
  */
 export async function sendEmail(opts) {
     const base = getIntegrationBaseUrl();
@@ -1404,7 +1404,7 @@ export async function sendEmail(opts) {
 
 /**
  * @param {Array<{ to: string, subject: string, html?: string, text?: string }>} messages
- * @param {{ from?: string, replyTo?: string, cc?: string | string[] }} [opts]
+ * @param {{ from?: string, replyTo?: string, cc?: string | string[], attachments?: Array<{ filename?: string, content?: string, contentType?: string }> }} [opts]
  * @returns {Promise<{ ok?: boolean, okCount?: number, failCount?: number, results?: unknown, cc?: string[] }>}
  */
 export async function sendEmailBatch(messages, opts = {}) {
@@ -1420,6 +1420,7 @@ export async function sendEmailBatch(messages, opts = {}) {
             ...(opts.from ? { from: opts.from } : {}),
             ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
             ...(opts.cc != null ? { cc: opts.cc } : {}),
+            ...(opts.attachments != null ? { attachments: opts.attachments } : {}),
         }),
     });
     if (!res.ok) {

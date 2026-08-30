@@ -57,6 +57,8 @@ import {
     resolveContentSource,
     serializeCampaignMeta,
 } from '../../utils/emailCampaignContentSources.js';
+import { consumeEmailCampaignPrefill, PROGRAM_CALENDAR_TEMPLATE_ID } from '../../utils/scheduleCalendarEmail.js';
+import { listEvents, loadScheduleEvents } from '../../utils/scheduleStore.js';
 import {
     applySocialCropToStage,
     DEFAULT_SOCIAL_CROP,
@@ -2161,8 +2163,8 @@ export async function initEmailCampaignStudio(mainEl) {
             if (sourceTypeSel.value && !types.includes(/** @type {any} */ (sourceTypeSel.value))) {
                 sourceTypeSel.value = '';
             }
-            if (types.includes('website') && !sourceTypeSel.value) {
-                sourceTypeSel.value = 'website';
+            if (types.length === 1 && !sourceTypeSel.value) {
+                sourceTypeSel.value = types[0];
             }
         }
         populateSourceIdSelect();
@@ -2199,7 +2201,7 @@ export async function initEmailCampaignStudio(mainEl) {
         }
     };
 
-    const applyContentSourceToForm = (force = false) => {
+    const applyContentSourceToForm = async (force = false) => {
         const tplId = templateSel instanceof HTMLSelectElement ? templateSel.value : '';
         const source = getCurrentSourceRef();
         if (!tplId || !source) {
@@ -2213,7 +2215,16 @@ export async function initEmailCampaignStudio(mainEl) {
                 if (!ok) return;
             }
         }
-        const draft = buildTemplateDraftFromSource(tplId, source, contentCaches);
+        const caches = { ...contentCaches };
+        if (tplId === PROGRAM_CALENDAR_TEMPLATE_ID && source.type === 'program') {
+            try {
+                await loadScheduleEvents();
+                caches.scheduleEvents = listEvents({});
+            } catch {
+                caches.scheduleEvents = [];
+            }
+        }
+        const draft = buildTemplateDraftFromSource(tplId, source, caches);
         if (!draft) {
             setMsg('error', 'Could not resolve content for that item.');
             return;
@@ -2428,6 +2439,10 @@ export async function initEmailCampaignStudio(mainEl) {
         const source = getCurrentSourceRef();
         if (source) campaignMeta = { ...campaignMeta, source };
         markDirty();
+        const tplId = templateSel instanceof HTMLSelectElement ? templateSel.value : '';
+        if (tplId === PROGRAM_CALENDAR_TEMPLATE_ID && source?.type === 'program') {
+            void applyContentSourceToForm(true);
+        }
     });
 
     root.querySelector('#studio-ec-apply-template')?.addEventListener('click', () => {
@@ -2442,7 +2457,7 @@ export async function initEmailCampaignStudio(mainEl) {
     });
 
     root.querySelector('#studio-ec-apply-content')?.addEventListener('click', () => {
-        applyContentSourceToForm(false);
+        void applyContentSourceToForm(false);
     });
 
     root.querySelector('#studio-ec-quick-design')?.addEventListener('click', async () => {
@@ -3227,7 +3242,39 @@ export async function initEmailCampaignStudio(mainEl) {
     }
     await refreshList();
 
-    if (!listEl?.querySelector('button[data-id]')) {
+    const applyScheduleEmailPrefill = async () => {
+        const prefill = consumeEmailCampaignPrefill();
+        const tplId = String(prefill?.templateId || '').trim();
+        if (!tplId || !getEmailTemplateById(tplId)) return false;
+        root.querySelector('#studio-ec-new')?.dispatchEvent(new Event('click'));
+        if (templateSel instanceof HTMLSelectElement) templateSel.value = tplId;
+        applyTemplate(tplId);
+        const sourceType = String(prefill?.sourceType || '').trim();
+        const sourceId = String(prefill?.sourceId || '').trim();
+        if (sourceTypeSel instanceof HTMLSelectElement && sourceType) {
+            sourceTypeSel.value = sourceType;
+        }
+        updateSourcePanelVisibility();
+        if (sourceIdSel instanceof HTMLSelectElement && sourceId) {
+            if (![...sourceIdSel.options].some((o) => o.value === sourceId)) {
+                const opt = document.createElement('option');
+                opt.value = sourceId;
+                opt.textContent = sourceId;
+                sourceIdSel.appendChild(opt);
+            }
+            sourceIdSel.value = sourceId;
+            campaignMeta = { templateId: tplId, source: { type: /** @type {any} */ (sourceType || 'program'), id: sourceId } };
+            await applyContentSourceToForm(true);
+        }
+        if (titleInp instanceof HTMLInputElement && !titleInp.value.trim()) {
+            titleInp.value = 'Program calendar';
+        }
+        return true;
+    };
+
+    if (await applyScheduleEmailPrefill()) {
+        /* composer opened from Studio → Schedule */
+    } else if (!listEl?.querySelector('button[data-id]')) {
         root.querySelector('#studio-ec-new')?.dispatchEvent(new Event('click'));
     } else {
         const first = listEl.querySelector('button[data-id]');

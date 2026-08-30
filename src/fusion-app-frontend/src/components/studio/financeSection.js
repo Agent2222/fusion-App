@@ -9,6 +9,7 @@ import {
     archiveFinancePromotionStudio,
     getAccountsForStudio,
     getApplicants,
+    getArtistsForStudio,
     getProgramDisplayNameFromRow,
     getPrograms,
     getStaffProgramPaymentsFinanceStudio,
@@ -59,6 +60,7 @@ import {
     shortPrincipalDisplay,
 } from '../../utils/studioPlainForms.js';
 import { firstNonEmptyString } from '../../utils/localeFallback.js';
+import { artistDisplayDiscipline } from '../../utils/artistSlug.js';
 import { parseProgramEndDate } from '../../utils/programAlumniEligibility.js';
 import {
     buildProgramPaymentIndex,
@@ -1146,6 +1148,10 @@ export async function initFinance(mainEl) {
     let allPrograms = [];
     /** @type {object[]} */
     let allApplicants = [];
+    /** @type {object[]} */
+    let allArtists = [];
+    /** @type {Map<string, object>} */
+    let artistById = new Map();
     /** @type {Map<string, object[]>} */
     let applicantsByProgramId = new Map();
     /** @type {Map<string, ReturnType<typeof buildFinanceProgramCardModel>>} */
@@ -1460,11 +1466,82 @@ export async function initFinance(mainEl) {
         });
     };
 
-    const getFilteredFinanceRows = () =>
-        buildStudioProgramFinanceRows(allApplicants, allPrograms, paymentIndex, {
-            filterProgramId: selectedProgramId,
-            activeOnly: !selectedProgramId,
+    const indexArtists = (artists) => {
+        allArtists = Array.isArray(artists) ? artists : [];
+        artistById = new Map();
+        for (const artist of allArtists) {
+            const id = String(artist?.id || '').trim();
+            if (id) artistById.set(id, artist);
+        }
+    };
+
+    const resolveApplicantPrincipal = (applicant) => {
+        const appId = String(applicant?.id || '').trim();
+        if (appId) {
+            const summary = (financeBundle.summaries || []).find(
+                (s) => String(s?.applicationId || '') === appId,
+            );
+            if (summary?.principal) return String(summary.principal).trim();
+            const ledgerHit = (financeBundle.ledger || []).find(
+                (r) => String(r?.applicationId || '') === appId && r?.principal,
+            );
+            if (ledgerHit?.principal) return String(ledgerHit.principal).trim();
+        }
+        const email = String(applicant?.email || '')
+            .trim()
+            .toLowerCase();
+        if (email) {
+            for (const [principal, contact] of contactByPrincipal.entries()) {
+                if (String(contact?.email || '').trim().toLowerCase() === email) {
+                    return String(principal).trim();
+                }
+            }
+            for (const acc of allAccounts) {
+                const p = String(acc?.principal || '').trim();
+                const contact = contactByPrincipal.get(p);
+                if (String(contact?.email || '').trim().toLowerCase() === email) return p;
+            }
+        }
+        return '';
+    };
+
+    const profileDisciplineForApplicant = (applicant) => {
+        if (!applicant || typeof applicant !== 'object') return '';
+        const appId = String(applicant.id || '').trim();
+        const candidateIds = [];
+        if (appId.includes('|')) candidateIds.push(appId.split('|')[0]);
+        if (appId) candidateIds.push(appId);
+        for (const id of candidateIds) {
+            const artist = artistById.get(id);
+            const discipline = artistDisplayDiscipline(artist);
+            if (discipline) return discipline;
+        }
+        const principal = resolveApplicantPrincipal(applicant);
+        if (principal) {
+            const acc = allAccounts.find((a) => String(a?.principal || '').trim() === principal);
+            const linkedId = String(acc?.linkedArtistId || acc?.linked_artist_id || '').trim();
+            const artist = linkedId ? artistById.get(linkedId) : null;
+            const discipline = artistDisplayDiscipline(artist);
+            if (discipline) return discipline;
+        }
+        return '';
+    };
+
+    const applyProfileDisciplineToFinanceRows = (rows) =>
+        (Array.isArray(rows) ? rows : []).map((row) => {
+            const applicant = applicantById.get(String(row?.applicantId || '').trim());
+            const profileDiscipline = profileDisciplineForApplicant(applicant);
+            if (!profileDiscipline) return row;
+            return { ...row, discipline: profileDiscipline };
         });
+
+    const getFilteredFinanceRows = () =>
+        applyProfileDisciplineToFinanceRows(
+            buildStudioProgramFinanceRows(allApplicants, allPrograms, paymentIndex, {
+                filterProgramId: selectedProgramId,
+                activeOnly: !selectedProgramId,
+            }),
+        );
 
     const selectedTeamMembers = () =>
         selectedProgramId ? teamMembersByProgramId.get(selectedProgramId) || [] : [];
@@ -1946,12 +2023,14 @@ export async function initFinance(mainEl) {
     };
 
     const reloadAllFinanceData = async () => {
-        const [applicants, bundle, promos] = await Promise.all([
+        const [applicants, bundle, promos, artists] = await Promise.all([
             getApplicants(),
             getStaffProgramPaymentsFinanceStudio(),
             listFinancePromotionsStudio().catch(() => []),
+            getArtistsForStudio().catch(() => []),
         ]);
         allApplicants = Array.isArray(applicants) ? applicants : [];
+        indexArtists(artists);
         financeBundle = normalizeFinanceBundle(bundle);
         paymentIndex = buildProgramPaymentIndex(bundle);
         financePromotions = Array.isArray(promos) ? promos : [];
@@ -2571,33 +2650,8 @@ export async function initFinance(mainEl) {
             .join('');
 
         const resolvePrincipalForApplicant = (applicantId) => {
-            const appId = String(applicantId || '').trim();
-            if (!appId) return '';
-            const summary = (financeBundle.summaries || []).find(
-                (s) => String(s?.applicationId || '') === appId,
-            );
-            if (summary?.principal) return String(summary.principal).trim();
-            const ledgerHit = (financeBundle.ledger || []).find(
-                (r) => String(r?.applicationId || '') === appId && r?.principal,
-            );
-            if (ledgerHit?.principal) return String(ledgerHit.principal).trim();
-            const applicant = applicantById.get(appId);
-            const email = String(applicant?.email || '')
-                .trim()
-                .toLowerCase();
-            if (email) {
-                for (const [principal, contact] of contactByPrincipal.entries()) {
-                    if (String(contact?.email || '').trim().toLowerCase() === email) {
-                        return String(principal).trim();
-                    }
-                }
-                for (const acc of allAccounts) {
-                    const p = String(acc?.principal || '').trim();
-                    const contact = contactByPrincipal.get(p);
-                    if (String(contact?.email || '').trim().toLowerCase() === email) return p;
-                }
-            }
-            return '';
+            const applicant = applicantById.get(String(applicantId || '').trim());
+            return resolveApplicantPrincipal(applicant);
         };
 
         const inner = `
@@ -3815,14 +3869,16 @@ export async function initFinance(mainEl) {
 
     if (programsVisible) {
         try {
-            const [programs, applicants, paymentsBundle, promos] = await Promise.all([
+            const [programs, applicants, paymentsBundle, promos, artists] = await Promise.all([
                 getPrograms(),
                 getApplicants(),
                 getStaffProgramPaymentsFinanceStudio(),
                 listFinancePromotionsStudio().catch(() => []),
+                getArtistsForStudio().catch(() => []),
             ]);
             allPrograms = Array.isArray(programs) ? programs : [];
             allApplicants = Array.isArray(applicants) ? applicants : [];
+            indexArtists(artists);
             financeBundle = normalizeFinanceBundle(paymentsBundle);
             paymentIndex = buildProgramPaymentIndex(paymentsBundle);
             financePromotions = Array.isArray(promos) ? promos : [];

@@ -129,6 +129,11 @@ function truncatedSafeBase(fileName, maxStem = 40) {
 function uploadError(err, status) {
     const raw = err instanceof Error ? err.message : String(err);
     const msg = mapIntegrationUserMessage(raw, status);
+    if (/failed to fetch/i.test(raw)) {
+        return new Error(
+            'Could not reach the upload service. Check Studio → Services (Integration API URL) and try again.',
+        );
+    }
     if (/S3 upload failed/i.test(raw)) {
         return new Error(
             `${raw} — check S3 configuration under Studio → Services and bucket CORS for this site.`,

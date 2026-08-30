@@ -93,6 +93,9 @@ export default defineConfig(({ mode }) => {
     const replicaProxyTarget = replicaMerged || 'http://127.0.0.1:4943';
 
     return {
+        ...(process.env.PLAYWRIGHT_RADAR
+            ? { cacheDir: '/tmp/fusion-vite-radar-cache' }
+            : {}),
         build: {
             emptyOutDir: true,
         },

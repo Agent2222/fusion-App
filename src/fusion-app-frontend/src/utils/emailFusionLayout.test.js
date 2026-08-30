@@ -112,4 +112,26 @@ describe('emailFusionLayout', () => {
         expect(slots?.bodyHtml).toContain(FUSION_EMAIL_STYLES.bodyLead);
         expect(html).toContain(FUSION_EMAIL_LAYOUT_MARKER);
     });
+
+    it('renders a secondary CTA and round-trips it', () => {
+        const html = fusionEmailLayout({
+            eyebrow: 'Schedule',
+            pillLabel: 'PROGRAM CALENDAR',
+            headlineHtml: 'Your program<br>calendar',
+            bodyHtml: fusionEmailParagraph('Body copy', 'lead'),
+            cta: { label: 'OPEN SCHEDULE', href: 'https://www.fusionart.world/settings/profile#calendar' },
+            ctaSecondary: {
+                label: 'DOWNLOAD CALENDAR',
+                href: 'https://www.fusionart.world/settings/profile#calendar-download',
+            },
+        });
+        expect(html).toContain('OPEN SCHEDULE');
+        expect(html).toContain('DOWNLOAD CALENDAR');
+        expect(html).toContain('#calendar-download');
+        expect(html).toContain('#a2b792');
+        const slots = extractFusionEmailSlots(html);
+        expect(slots?.cta?.label).toBe('OPEN SCHEDULE');
+        expect(slots?.ctaSecondary?.label).toBe('DOWNLOAD CALENDAR');
+        expect(slots?.ctaSecondary?.href).toContain('#calendar-download');
+    });
 });

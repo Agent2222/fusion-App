@@ -38,6 +38,10 @@ import {
     scheduleTimezoneButtonLabel,
 } from '../../utils/scheduleTimezones.js';
 import { openStudioModal } from '../../utils/studioModal.js';
+import {
+    PROGRAM_CALENDAR_TEMPLATE_ID,
+    setEmailCampaignPrefill,
+} from '../../utils/scheduleCalendarEmail.js';
 import { openScheduleEventModal } from './scheduleEventModal.js';
 import { openScheduleLocationsModal } from './scheduleLocationsModal.js';
 import { openScheduleAttentionReview } from './scheduleAttentionModal.js';
@@ -203,7 +207,8 @@ function buildPageHtml(state, canEdit) {
           <button type="button" class="button" data-sch-action="today">Today</button>
           ${
               canEdit
-                  ? `<button type="button" class="button button--primary" data-sch-action="new-event">${SVG.plus} New event</button>`
+                  ? `<button type="button" class="button" data-sch-action="email-program-calendar">Email</button>
+          <button type="button" class="button button--primary" data-sch-action="new-event">${SVG.plus} New event</button>`
                   : ''
           }
         </div>
@@ -220,7 +225,7 @@ function buildPageHtml(state, canEdit) {
       </section>
       <section class="schedule-workspace">
         <div class="calendar-card">
-          ${toolbarHtml(state)}
+          ${toolbarHtml(state, canEdit)}
           ${headingHtml(state)}
           <div class="calendar-scroll">
             ${
@@ -262,8 +267,9 @@ function statCardHtml(tone, icon, label, value, meta, signal) {
 
 /**
  * @param {NonNullable<typeof uiState>} state
+ * @param {boolean} canEdit
  */
-function toolbarHtml(state) {
+function toolbarHtml(state, canEdit) {
     const progOpts = [`<option value="">All programs</option>`]
         .concat(
             getScheduleProgramOptions().map(
@@ -301,6 +307,9 @@ function toolbarHtml(state) {
         state.programId
             ? `<button type="button" class="button button--ics" data-sch-action="download-program-ics">Download program calendar</button>`
             : '';
+    const programEmail = canEdit
+        ? `<button type="button" class="button button--ics button--email" data-sch-action="email-program-calendar">Email</button>`
+        : '';
     return `<div class="calendar-toolbar">
       <select class="filter-select" data-sch-filter="program" aria-label="Filter by program">${progOpts}</select>
       <select class="filter-select" data-sch-filter="team" aria-label="Filter by team">${teamOpts}</select>
@@ -310,6 +319,7 @@ function toolbarHtml(state) {
       <button type="button" class="button button--timezone" data-sch-action="timezone" aria-label="Choose timezone">${esc(tzLabel)}</button>
       <button type="button" class="button button--ics" data-sch-action="download-month-ics">Download month</button>
       ${programIcs}
+      ${programEmail}
       <button type="button" class="button" data-sch-action="manage-locations">Locations</button>
       <button type="button" class="icon-button icon-button--bare" data-sch-action="settings" aria-label="Manage event locations">${SVG.settings}</button>
     </div>`;
@@ -542,7 +552,7 @@ function bindPage(root) {
                 date: uiState.selectedDate,
                 programId: uiState.programId || getScheduleProgramPreference(),
             },
-            canEdit: true,
+            canEdit,
             onChanged: paint,
         });
     });
@@ -792,5 +802,18 @@ function bindPage(root) {
             getScheduleProgramOptions().find((p) => p.id === programId)?.name || 'Program calendar';
         const ics = buildMultiEventIcs(events, getScheduleTimezonePreference(), name);
         downloadIcsFile(ics, `${name.replace(/\s+/g, '-').toLowerCase() || 'program'}-calendar.ics`);
+    });
+
+    root.querySelectorAll('[data-sch-action="email-program-calendar"]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            if (!canEdit) return;
+            const programId = uiState.programId;
+            setEmailCampaignPrefill({
+                templateId: PROGRAM_CALENDAR_TEMPLATE_ID,
+                sourceType: 'program',
+                sourceId: programId || '',
+            });
+            window.location.hash = 'email';
+        });
     });
 }

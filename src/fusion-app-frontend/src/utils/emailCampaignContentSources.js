@@ -11,6 +11,7 @@ import {
     getArtistsForStudio,
     getContentBundleForStudio,
     getJournalEntries,
+    getProgramDisplayNameFromRow,
     getPrograms,
     listCommunityVideosStudio,
 } from './database.js';
@@ -25,6 +26,12 @@ import {
 } from './emailFusionLayout.js';
 import { toCloudFrontAssetUrl } from './assetDistribution.js';
 import { normalizeCommunityVideoRecord, parseVideoLocales } from './videoPageModel.js';
+import {
+    PROGRAM_CALENDAR_HERO_URL,
+    PROGRAM_CALENDAR_TEMPLATE_ID,
+    buildProgramCalendarLayoutSlots,
+    eventsForProgramCalendar,
+} from './scheduleCalendarEmail.js';
 
 const META_PREFIX = 'FUSION_EC_META=';
 const JOIN_NETWORK_CTA_HREF = 'https://fusionart.world/join-network';
@@ -697,6 +704,28 @@ export function buildTemplateDraftFromSlots(templateId, slots) {
  */
 export function buildTemplateDraftFromSource(templateId, source, caches = {}) {
     if (!source) return null;
+    if (templateId === PROGRAM_CALENDAR_TEMPLATE_ID && source.type === 'program') {
+        const program = (caches.programs || []).find((p) => String(p?.id ?? '') === String(source.id || ''));
+        if (!program) return null;
+        const card = program.enCard && typeof program.enCard === 'object' ? program.enCard : program;
+        const programName =
+            getProgramDisplayNameFromRow(program) ||
+            String(card?.focus || card?.location || program?.id || 'Fusion program').trim();
+        const events = eventsForProgramCalendar(caches.scheduleEvents || [], source.id);
+        const slots = buildProgramCalendarLayoutSlots({
+            programName,
+            events,
+            heroImageUrl: PROGRAM_CALENDAR_HERO_URL,
+            heroAlt: String(card?.location || programName).trim() || programName,
+        });
+        return {
+            subject: String(slots.subject || `${programName} Calendar`).trim(),
+            previewText: String(slots.previewText || '')
+                .trim()
+                .slice(0, 200),
+            bodyHtml: renderFusionEmailFromSlots(slots),
+        };
+    }
     const slots = resolveContentSource(
         source,
         caches.artists || [],

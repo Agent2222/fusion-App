@@ -12,10 +12,15 @@ import {
     staffUpsertApplicantFlightBooking,
     staffUpsertTravelPrepLinks,
     staffDeleteTravelPrepLink,
+    staffListTravelPrepImages,
     listTravelPrepLinks,
 } from '../../utils/database.js';
 import { getApplicantSlotSecuredStudio } from '../../utils/database.js';
 import { getApplicantManualDepositSubmitted } from '../../utils/studioPlainForms.js';
+import { uploadBlobToS3 } from '../../utils/studioS3Upload.js';
+import { prepareImageFileForUpload } from '../../utils/imageUploadPrep.js';
+import { collectTravelPrepImageOptions } from '../../utils/travelPrepImages.js';
+import { openTravelPrepImagePicker } from './travelPrepImagePicker.js';
 import {
     buildTravelProgramCardModel,
     travelProgramCardsRailHtml,
@@ -149,7 +154,8 @@ export async function initTravel(mainEl) {
         if (!canEdit) {
             if (!prepLinks.length) { prepLinksHost.innerHTML = ''; return; }
             const cards = prepLinks.map((l) =>
-                `<div class="studio-travel-prep-link-row" style="grid-template-columns:1fr 1fr 2fr">
+                `<div class="studio-travel-prep-link-row studio-travel-prep-link-row--readonly">
+                    ${prepLinkThumbHtml(l.imageUrl, l.title)}
                     <span>${escapeHtml(l.title)}</span>
                     <a href="${escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(l.url)}</a>
                     <span>${escapeHtml(l.description)}</span>
@@ -159,6 +165,16 @@ export async function initTravel(mainEl) {
         }
         const rows = prepLinks.map((l, i) =>
             `<div class="studio-travel-prep-link-row" data-prep-idx="${i}">
+                <div class="studio-travel-prep-link-media">
+                    ${prepLinkThumbHtml(l.imageUrl, l.title)}
+                    <input type="hidden" data-prep-field="imageUrl" value="${escapeHtml(l.imageUrl || '')}" />
+                    <input type="file" class="studio-sr-only" accept="image/*" data-prep-file="${i}" />
+                    <div class="studio-travel-prep-link-media__actions">
+                        <button type="button" class="studio-btn-ghost" data-prep-upload="${i}">Upload</button>
+                        <button type="button" class="studio-btn-ghost" data-prep-pick="${i}">Choose image</button>
+                        ${l.imageUrl ? `<button type="button" class="studio-btn-ghost" data-prep-clear-image="${i}">Remove</button>` : ''}
+                    </div>
+                </div>
                 <input type="text" class="studio-input" placeholder="Title" value="${escapeHtml(l.title)}" data-prep-field="title" />
                 <input type="url" class="studio-input" placeholder="URL" value="${escapeHtml(l.url)}" data-prep-field="url" />
                 <input type="text" class="studio-input" placeholder="Description" value="${escapeHtml(l.description)}" data-prep-field="description" />
@@ -167,12 +183,21 @@ export async function initTravel(mainEl) {
         prepLinksHost.innerHTML = `
         <div class="studio-travel-prep-links">
             <h4 class="studio-travel-prep-links__heading">Travel Prep Links</h4>
+            <p class="studio-muted studio-travel-prep-links__hint">Each link can have a photo. Upload a new image or choose one already used on travel prep links.</p>
             ${rows}
             <div class="studio-travel-prep-links__actions">
                 <button type="button" class="studio-btn-secondary" id="studio-travel-add-prep-link">+ Add link</button>
                 <button type="button" class="studio-btn-primary" id="studio-travel-save-prep-links">Save links</button>
             </div>
         </div>`;
+    }
+
+    function prepLinkThumbHtml(url, title) {
+        const src = String(url || '').trim();
+        if (!src) {
+            return `<div class="studio-travel-prep-link-thumb studio-travel-prep-link-thumb--empty" aria-hidden="true"></div>`;
+        }
+        return `<img class="studio-travel-prep-link-thumb" src="${escapeHtml(src)}" alt="${escapeHtml(title || 'Travel prep')}" />`;
     }
 
     function readPrepLinksFromDom() {
@@ -186,10 +211,31 @@ export async function initTravel(mainEl) {
                 title: el.querySelector('[data-prep-field="title"]')?.value || '',
                 url: el.querySelector('[data-prep-field="url"]')?.value || '',
                 description: el.querySelector('[data-prep-field="description"]')?.value || '',
+                imageUrl: el.querySelector('[data-prep-field="imageUrl"]')?.value || existing.imageUrl || '',
                 sortOrder: i,
                 updatedAt: new Date().toISOString(),
             };
         });
+    }
+
+    async function applyPrepLinkImage(idx, url) {
+        prepLinks = readPrepLinksFromDom();
+        if (!prepLinks[idx]) return;
+        prepLinks[idx] = { ...prepLinks[idx], imageUrl: String(url || '').trim() };
+        renderPrepLinksEditor();
+    }
+
+    async function uploadPrepLinkImage(idx, file) {
+        if (!file || !selectedProgramId) return;
+        const link = readPrepLinksFromDom()[idx] || prepLinks[idx] || {};
+        const prepared = await prepareImageFileForUpload(file);
+        const url = await uploadBlobToS3(prepared.file || file, null, {
+            area: 'studio/programs',
+            entityType: 'travel-prep',
+            entityId: selectedProgramId,
+            fieldKey: String(link.id || `link-${idx}`),
+        });
+        await applyPrepLinkImage(idx, url);
     }
 
     function renderPage() {
@@ -377,16 +423,47 @@ export async function initTravel(mainEl) {
         if (!t) return;
 
         if (t.id === 'studio-travel-add-prep-link') {
+            prepLinks = readPrepLinksFromDom();
             prepLinks.push({
                 id: `tpl-${Date.now()}`,
                 programId: selectedProgramId || '',
                 title: '',
                 url: '',
                 description: '',
+                imageUrl: '',
                 sortOrder: prepLinks.length,
                 updatedAt: new Date().toISOString(),
             });
             renderPrepLinksEditor();
+            return;
+        }
+
+        const uploadBtn = t.closest('[data-prep-upload]');
+        if (uploadBtn) {
+            const idx = parseInt(uploadBtn.getAttribute('data-prep-upload'), 10);
+            const fileInput = prepLinksHost.querySelector(`[data-prep-file="${idx}"]`);
+            if (fileInput instanceof HTMLInputElement) fileInput.click();
+            return;
+        }
+
+        const pickBtn = t.closest('[data-prep-pick]');
+        if (pickBtn) {
+            const idx = parseInt(pickBtn.getAttribute('data-prep-pick'), 10);
+            prepLinks = readPrepLinksFromDom();
+            const library = await staffListTravelPrepImages().catch(() => []);
+            const images = collectTravelPrepImageOptions(prepLinks, library);
+            const picked = await openTravelPrepImagePicker({
+                images,
+                selectedUrl: prepLinks[idx]?.imageUrl,
+            });
+            if (picked) await applyPrepLinkImage(idx, picked);
+            return;
+        }
+
+        const clearBtn = t.closest('[data-prep-clear-image]');
+        if (clearBtn) {
+            const idx = parseInt(clearBtn.getAttribute('data-prep-clear-image'), 10);
+            await applyPrepLinkImage(idx, '');
             return;
         }
 
@@ -404,6 +481,7 @@ export async function initTravel(mainEl) {
 
         const delBtn = t.closest('[data-prep-delete]');
         if (delBtn) {
+            prepLinks = readPrepLinksFromDom();
             const idx = parseInt(delBtn.getAttribute('data-prep-delete'), 10);
             const link = prepLinks[idx];
             if (link) {
@@ -413,6 +491,22 @@ export async function initTravel(mainEl) {
                 }
                 renderPrepLinksEditor();
             }
+        }
+    });
+
+    prepLinksHost?.addEventListener('change', async (e) => {
+        const t = e.target instanceof Element ? e.target : null;
+        if (!t) return;
+        const fileInput = t.closest('[data-prep-file]');
+        if (!(fileInput instanceof HTMLInputElement)) return;
+        const idx = parseInt(fileInput.getAttribute('data-prep-file'), 10);
+        const file = fileInput.files?.[0];
+        fileInput.value = '';
+        if (!file) return;
+        try {
+            await uploadPrepLinkImage(idx, file);
+        } catch (err) {
+            alert('Failed to upload image: ' + (err instanceof Error ? err.message : String(err)));
         }
     });
 
