@@ -20,6 +20,7 @@ import { renderRadar, initRadar } from './radarSection.js';
 import { renderPermissions, initPermissions } from './permissionsSection.js';
 import { renderTravel, initTravel } from './travelSection.js';
 import { renderComms, initComms } from './commsSection.js';
+import { renderScheduledTasks, initScheduledTasks } from './scheduledTasksSection.js';
 import {
     APPLICANTS_PROGRAM_SELECT_STORAGE_KEY,
     aggregateApplicantsByProgram,
@@ -369,6 +370,7 @@ export const STUDIO_NAV_GROUPS = [
             { id: 'join-network', label: 'Join Network' },
             { id: 'users', label: 'Users' },
             { id: 'services', label: 'Services' },
+            { id: 'scheduled-tasks', label: 'Scheduled Tasks' },
             { id: 'settings', label: 'Settings' },
         ],
     },
@@ -464,6 +466,8 @@ export function renderStudioMain(sectionId) {
             return renderUsers();
         case 'services':
             return renderServices();
+        case 'scheduled-tasks':
+            return renderScheduledTasks();
         case 'settings':
             return renderSettings();
         case 'permissions':
@@ -3087,6 +3091,7 @@ const STUDIO_INIT = {
     curators: (el) => initAudience(el, 'curators'),
     users: initUsers,
     services: initServices,
+    'scheduled-tasks': initScheduledTasks,
     settings: initSettings,
     permissions: initPermissions,
     team: initTeamSection,

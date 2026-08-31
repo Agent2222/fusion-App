@@ -353,6 +353,82 @@ function emailStepHeading(label) {
 }
 
 /**
+ * @param {unknown} raw
+ * @returns {{ title: string, url: string, description: string, imageUrl: string, sortOrder: number }[]}
+ */
+export function normalizeTravelPrepLinksForEmail(raw) {
+    return (Array.isArray(raw) ? raw : [])
+        .map((row, i) => {
+            const rec = row && typeof row === 'object' ? /** @type {Record<string, unknown>} */ (row) : {};
+            return {
+                title: String(rec.title ?? '').trim(),
+                url: String(rec.url ?? '').trim(),
+                description: String(rec.description ?? '').trim(),
+                imageUrl: String(rec.imageUrl ?? '').trim(),
+                sortOrder: Number(rec.sortOrder ?? i) || i,
+            };
+        })
+        .filter((row) => row.title || row.url || row.imageUrl)
+        .sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
+export const SAMPLE_COMMS_TRAVEL_PREP_LINKS = [
+    {
+        title: 'Suica',
+        url: 'https://www.jreast.co.jp/multi/en/pass/suica.html',
+        description: 'JR East IC card for trains, buses, and shops around Tokyo.',
+        imageUrl: 'https://fusionart.world/email/Fusion-X-logo-02.png',
+        sortOrder: 0,
+    },
+    {
+        title: 'ICOCA',
+        url: 'https://www.jr-odekake.net/icoca/',
+        description: 'JR West IC card for Kansai and western Japan travel.',
+        imageUrl: 'https://fusionart.world/email/Fusion-Logo-Sig-1.png',
+        sortOrder: 1,
+    },
+];
+
+/**
+ * @param {unknown} rawLinks
+ */
+export function renderTravelPrepCardsHtml(rawLinks) {
+    const links = normalizeTravelPrepLinksForEmail(rawLinks);
+    if (!links.length) return '';
+    const cell = (link) => {
+        const title = link.title || 'Travel card';
+        const img = link.imageUrl
+            ? `<img src="${escapeHtmlForEmailLayout(link.imageUrl)}" alt="${escapeHtmlForEmailLayout(title)}" width="120" style="display:block;margin:0 auto 10px;width:120px;height:auto;border:0;border-radius:8px;" />`
+            : '';
+        const desc = link.description
+            ? `<p style="margin:0 0 10px;font-size:13px;line-height:1.45;color:#000000;">${escapeHtmlForEmailLayout(link.description)}</p>`
+            : '';
+        const cta = emailInBodyCta(link.url ? 'Add to wallet' : '', link.url, EMAIL_CTA_INK);
+        return `<td align="center" valign="top" style="padding:8px;">
+${img}
+<p style="margin:0 0 8px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;font-weight:700;color:#000000;">${escapeHtmlForEmailLayout(title)}</p>
+${desc}
+${cta}
+</td>`;
+    };
+    const chunkSize = Math.min(3, Math.max(1, links.length));
+    const rows = [];
+    for (let i = 0; i < links.length; i += chunkSize) {
+        rows.push(`<tr>${links.slice(i, i + chunkSize).map(cell).join('')}</tr>`);
+    }
+    return [
+        emailStepHeading('Travel preparation'),
+        fusionEmailParagraph(
+            'Download one of these cards to your mobile wallet if you can — it makes getting around much easier when you arrive.',
+        ),
+        `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:8px 0 8px;">
+<tbody>
+${rows.join('\n')}
+</tbody></table>`,
+    ].join('\n');
+}
+
+/**
  * @param {{
  *   programName?: string,
  *   heroImageUrl?: string,
@@ -370,6 +446,7 @@ function emailStepHeading(label) {
  *   groupAnnounceQrUrl?: string,
  *   applicantName?: string,
  *   oaName?: string,
+ *   travelPrepLinks?: unknown[],
  * }} opts
  */
 export function programCommsInviteSlots(opts = {}) {
@@ -426,6 +503,7 @@ export function programCommsInviteSlots(opts = {}) {
                     ctaBg: EMAIL_CTA_RED,
                 },
             ),
+            renderTravelPrepCardsHtml(opts.travelPrepLinks),
         ].join('\n'),
         footnote: 'Questions? Reply to this email or write the Fusion team in the chat rooms.',
     };
@@ -460,6 +538,7 @@ export function sampleProgramCommsInviteHtml() {
         groupAnnounceQrUrl: 'https://fusionart.world/email/Fusion-Logo-Sig-1.png',
         applicantName: 'Alex',
         oaName: 'Fusion',
+        travelPrepLinks: SAMPLE_COMMS_TRAVEL_PREP_LINKS,
     });
 }
 
@@ -503,6 +582,7 @@ export async function qrPngFileFromUrl(text, filename) {
  *   cfg: object,
  *   programName?: string,
  *   heroImageUrl?: string,
+ *   travelPrepLinks?: unknown[],
  * }} opts
  */
 export function collectProgramCommsInviteMessages(opts) {
@@ -537,6 +617,7 @@ export function collectProgramCommsInviteMessages(opts) {
             groupAnnounceQrUrl: cfg.groupAnnounceQrUrl,
             applicantName: String(row.fullName || '').trim(),
             oaName: cfg.oaName,
+            travelPrepLinks: opts?.travelPrepLinks,
         }),
         applicantId: String(row.id || ''),
     }));

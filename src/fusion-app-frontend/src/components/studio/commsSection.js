@@ -10,6 +10,7 @@ import {
     getDataSource,
     getProgramDisplayNameFromRow,
     getPrograms,
+    listTravelPrepLinks,
     staffGetProgramCommsConfig,
     staffGetProgramCommsLineBinding,
     staffListSeenLineGroups,
@@ -710,7 +711,12 @@ export async function initComms(mainEl) {
         }
     }
 
-    function inviteHtmlFor(row, cfg) {
+    async function travelPrepLinksForCurrent() {
+        if (!selectedProgramId) return [];
+        return listTravelPrepLinks(selectedProgramId).catch(() => []);
+    }
+
+    function inviteHtmlFor(row, cfg, travelPrepLinks = []) {
         const program = currentProgram();
         return renderProgramCommsInviteHtml({
             programName: getProgramDisplayNameFromRow(program),
@@ -728,6 +734,7 @@ export async function initComms(mainEl) {
             groupAnnounceQrUrl: cfg.groupAnnounceQrUrl,
             applicantName: String(row.fullName || '').trim(),
             oaName: cfg.oaName,
+            travelPrepLinks,
         });
     }
 
@@ -749,10 +756,11 @@ export async function initComms(mainEl) {
         try {
             assertLiveSend();
             const program = currentProgram();
+            const travelPrepLinks = await travelPrepLinksForCurrent();
             await sendEmail({
                 to: email,
                 subject: buildProgramCommsInviteSubject(getProgramDisplayNameFromRow(program)),
-                html: inviteHtmlFor(row, cfg),
+                html: inviteHtmlFor(row, cfg, travelPrepLinks),
                 cc: buildStudioEmailCcList(''),
             });
             await staffRecordProgramCommsInvites(selectedProgramId, [String(row.id)]);
@@ -780,11 +788,13 @@ export async function initComms(mainEl) {
         try {
             assertLiveSend();
             const program = currentProgram();
+            const travelPrepLinks = await travelPrepLinksForCurrent();
             const { messages, skipped } = collectProgramCommsInviteMessages({
                 applicants: confirmedForProgram(selectedProgramId),
                 cfg,
                 programName: getProgramDisplayNameFromRow(program),
                 heroImageUrl: programHero(program),
+                travelPrepLinks,
             });
             if (!messages.length) {
                 setSendStatus(

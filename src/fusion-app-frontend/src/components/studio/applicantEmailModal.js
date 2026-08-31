@@ -2,10 +2,11 @@
  * Studio — email to a program applicant (Integration API + LLM + templates in localStorage).
  */
 import { getPublicSiteOrigin } from '../../config.js';
-import { getDataSource, getPrograms, studioReinterpretWithPrompt, appendApplicantEmailOutreachStudio, getApplicantEmailOutreachForStudio, applicantEmailOutreachApiAvailable, clearApplicantEmailOutreachStudio, staffGetApplicantFlightBooking } from '../../utils/database.js';
+import { getDataSource, getPrograms, listTravelPrepLinks, studioReinterpretWithPrompt, appendApplicantEmailOutreachStudio, getApplicantEmailOutreachForStudio, applicantEmailOutreachApiAvailable, clearApplicantEmailOutreachStudio, staffGetApplicantFlightBooking } from '../../utils/database.js';
 import { openStudioModal } from '../../utils/studioModal.js';
 import { getIntegrationBaseUrl, sendEmail } from '../../utils/integrationApi.js';
 import { wrapEmailHtml } from '../../utils/emailCampaignTemplates.js';
+import { renderFlightFollowUpHtml } from '../../utils/flightFollowUpEmail.js';
 import {
     fusionEmailLink,
     fusionEmailParagraph,
@@ -30,6 +31,7 @@ const APPROVED_TEMPLATE_ID = 'tpl-applicant-approved-invitation';
 const SLOT_NUDGE_TEMPLATE_ID = 'tpl-applicant-secure-slot-nudge';
 const REMAINING_BALANCE_TEMPLATE_ID = 'tpl-applicant-remaining-balance';
 const FLIGHT_INFO_TEMPLATE_ID = 'tpl-applicant-flight-info';
+const FLIGHT_FOLLOWUP_TEMPLATE_ID = 'tpl-applicant-flight-followup';
 
 /**
  * @param {string} displayName
@@ -355,6 +357,27 @@ If anything looks incorrect or you have questions about your travel, reply to th
 We look forward to seeing you in {{programLocation}}.`,
         },
         {
+            id: FLIGHT_FOLLOWUP_TEMPLATE_ID,
+            name: 'Follow up flight information',
+            subject: 'Fusion {{programLocation}} Program — add your arrival date and time',
+            signatureHtml: FUSION_TEAM_SIGNATURE_HTML,
+            signatureKey: 'fusion-team',
+            builtIn: true,
+            body: `Hi {{firstName}},
+
+A reminder about your upcoming flight for the Fusion {{programLocation}} Program ({{programStartDate}} – {{programEndDate}}).
+
+Please add your estimated arrival date and time in your profile so our team can keep up with your flight and meet you on arrival.
+
+1. Sign in to Fusion.
+2. Open your profile Travel tab: {{profileTravelUrl}}
+3. Enter the date and time you expect to land.
+
+Suggested transit cards to download to your mobile wallet are included below this note.
+
+If anything has changed with your flight, reply to this email and our team will help.`,
+        },
+        {
             id: 'tpl-default-schedule',
             name: 'Schedule meeting',
             subject: '[Fusion] Program application — {{programId}}',
@@ -518,6 +541,11 @@ export async function openApplicantEmailModal(row, opts = {}) {
         }
     } catch { /* keep empty defaults */ }
 
+    let travelPrepLinks = [];
+    try {
+        if (programId) travelPrepLinks = await listTravelPrepLinks(programId);
+    } catch { /* omit travel prep section */ }
+
     const vars = {
         firstName,
         fullName,
@@ -527,6 +555,7 @@ export async function openApplicantEmailModal(row, opts = {}) {
         programStartDate,
         programEndDate,
         profileProgramsUrl: profileProgramsUrl(),
+        profileTravelUrl: profileTravelTabUrl(),
         email: toEmail,
         remainingBalance: formatUsdFromCents(financeContext?.remainingBalanceCents ?? 0),
         totalPaid: formatUsdFromCents(financeContext?.totalPaymentsCents ?? 0),
@@ -889,6 +918,17 @@ export async function openApplicantEmailModal(row, opts = {}) {
                 bodyHtml,
                 cta: { label: 'ADD ARRIVAL TIME', href: profileTravelTabUrl() },
                 footnote: 'Sign in, open Programs, then the Travel tab to add your estimated arrival date and time.',
+            });
+        }
+        if (appliedId === FLIGHT_FOLLOWUP_TEMPLATE_ID) {
+            return renderFlightFollowUpHtml({
+                programName: programLocation,
+                heroImageUrl: programHeroImageUrl,
+                heroAlt: programLocation,
+                applicantName: firstName,
+                profileTravelUrl: profileTravelTabUrl(),
+                travelPrepLinks,
+                bodyHtmlOverride: plainBodyToFusionEmailHtml(bodyPlain),
             });
         }
         const bodyHtml = plainBodyToEmailHtml(bodyPlain);

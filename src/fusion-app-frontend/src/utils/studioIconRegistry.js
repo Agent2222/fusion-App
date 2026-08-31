@@ -5,7 +5,7 @@
  * Example: `src/assets/icons/ic-nav-artists.svg` -> key `nav-artists`
  */
 export const ICON_KEYS = {
-    groups: ['group-overview', 'group-content', 'group-accounts', 'group-operations', 'group-admin'],
+    groups: ['group-overview', 'group-content', 'group-accounts', 'group-operations', 'group-admin', 'group-moderation'],
     nav: [
         'nav-home',
         'nav-subscribers',
@@ -30,6 +30,10 @@ export const ICON_KEYS = {
         'nav-settings',
         'nav-team',
         'nav-permissions',
+        'nav-scheduled-tasks',
+        'nav-user-studio',
+        'nav-profile-images',
+        'nav-broadcasts',
     ],
     artistManage: [
         'artist-identity',
@@ -60,6 +64,7 @@ export const STUDIO_NAV_ICON_ALIASES = {
     comms: 'nav-email',
     radar: 'nav-ai',
     'join-network': 'nav-gallery-access',
+    'audio-files': 'nav-sound',
 };
 
 /** Sidebar group label (lowercase) → existing group icon. */

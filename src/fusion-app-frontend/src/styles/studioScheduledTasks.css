@@ -1,0 +1,310 @@
+/* Studio Scheduled Tasks — Schedule visual language */
+.studio-scheduled-tasks-page,
+.studio-st-modal {
+  --fusion-ink: #111827;
+  --fusion-ink-soft: #3f3d3a;
+  --fusion-muted: #706d69;
+  --fusion-faint: #9c9894;
+  --fusion-canvas: #fbf6f7;
+  --fusion-surface: #ffffff;
+  --fusion-border: #e9e5e4;
+  --fusion-border-strong: #d9d4d2;
+  --fusion-hover: #f8f5f4;
+  --fusion-black: #080808;
+  --fusion-sage: #dcebdc;
+  --fusion-sage-ink: #285c38;
+  --fusion-blue: #dceaf8;
+  --fusion-blue-ink: #235f93;
+  --fusion-sand: #f5e6c8;
+  --fusion-sand-ink: #76500c;
+  --fusion-blush: #f7d8da;
+  --fusion-blush-ink: #8c343c;
+  --fusion-danger: #dc4f57;
+  --fusion-radius: 11px;
+  --fusion-shadow: 0 1px 2px rgba(17, 24, 39, 0.035), 0 8px 30px rgba(17, 24, 39, 0.025);
+  font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  color: var(--fusion-ink);
+}
+
+.studio-scheduled-tasks-page {
+  background: var(--fusion-canvas);
+}
+
+.studio-scheduled-tasks-page .schedule-page {
+  min-width: 0;
+  padding: 20px 22px 28px;
+  background: var(--fusion-canvas);
+}
+
+.studio-scheduled-tasks-page .schedule-breadcrumbs {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 28px;
+  margin: -8px 0 12px;
+  color: var(--fusion-muted);
+  font-size: 13px;
+}
+
+.studio-scheduled-tasks-page .schedule-breadcrumbs a { color: inherit; text-underline-offset: 3px; }
+.studio-scheduled-tasks-page .schedule-breadcrumbs strong { color: var(--fusion-ink); font-weight: 500; }
+
+.studio-scheduled-tasks-page .schedule-hero,
+.studio-scheduled-tasks-page .stat-card,
+.studio-scheduled-tasks-page .attention-card,
+.studio-scheduled-tasks-page .st-toolbar,
+.studio-scheduled-tasks-page .st-card {
+  background: var(--fusion-surface);
+  border: 1px solid var(--fusion-border);
+  border-radius: var(--fusion-radius);
+  box-shadow: var(--fusion-shadow);
+}
+
+.studio-scheduled-tasks-page .schedule-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  min-height: 86px;
+  padding: 17px 20px;
+}
+
+.studio-scheduled-tasks-page .schedule-hero__title { margin: 0; font-size: 23px; line-height: 1.15; letter-spacing: -0.035em; }
+.studio-scheduled-tasks-page .schedule-hero__subtitle { margin: 6px 0 0; color: var(--fusion-muted); font-size: 13px; }
+.studio-scheduled-tasks-page .schedule-hero__actions { display: flex; align-items: center; gap: 10px; }
+
+.studio-scheduled-tasks-page .button,
+.studio-scheduled-tasks-page .filter-select,
+.studio-scheduled-tasks-page .view-tab,
+.studio-scheduled-tasks-page .st-search,
+.studio-st-modal .button,
+.studio-st-modal input,
+.studio-st-modal select,
+.studio-st-modal textarea {
+  border: 1px solid var(--fusion-border-strong);
+  background: #fff !important;
+  background-color: #fff !important;
+  color: var(--fusion-ink) !important;
+  transition: border-color 160ms ease, background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.studio-scheduled-tasks-page .button,
+.studio-st-modal .button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.studio-scheduled-tasks-page .button:hover,
+.studio-scheduled-tasks-page .filter-select:hover,
+.studio-scheduled-tasks-page .view-tab:hover,
+.studio-st-modal .button:hover {
+  border-color: #aaa4a0;
+  background: var(--fusion-hover) !important;
+  background-color: var(--fusion-hover) !important;
+  color: var(--fusion-ink) !important;
+}
+
+.studio-scheduled-tasks-page .button--primary,
+.studio-scheduled-tasks-page .button--primary:hover,
+.studio-st-modal .button--primary,
+.studio-st-modal .button--primary:hover {
+  color: #fff !important;
+  background: var(--fusion-ink) !important;
+  background-color: var(--fusion-ink) !important;
+  border-color: var(--fusion-ink) !important;
+}
+
+.studio-scheduled-tasks-page .schedule-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.studio-scheduled-tasks-page .stat-card {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: center;
+  min-height: 86px;
+  padding: 14px 16px;
+}
+
+.studio-scheduled-tasks-page .stat-card__icon { width: 48px; height: 48px; border-radius: 8px; }
+.studio-scheduled-tasks-page .stat-card__icon--green { background: #edf5ed; }
+.studio-scheduled-tasks-page .stat-card__icon--blue { background: #eef6fc; }
+.studio-scheduled-tasks-page .stat-card__icon--amber { background: #fbf5e8; }
+.studio-scheduled-tasks-page .stat-card__icon--red { background: #fcedee; }
+.studio-scheduled-tasks-page .stat-card__body { padding-left: 16px; }
+.studio-scheduled-tasks-page .stat-card__label { margin: 0 0 5px; font-size: 12px; font-weight: 600; }
+.studio-scheduled-tasks-page .stat-card__value { margin: 0; font-size: 23px; line-height: 1; font-weight: 650; letter-spacing: -0.03em; }
+.studio-scheduled-tasks-page .stat-card__meta { margin: 5px 0 0; color: var(--fusion-muted); font-size: 11px; }
+
+.studio-scheduled-tasks-page .st-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px 14px;
+}
+
+.studio-scheduled-tasks-page .st-search {
+  flex: 1 1 220px;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.studio-scheduled-tasks-page .filter-select {
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.studio-scheduled-tasks-page .view-tabs {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.studio-scheduled-tasks-page .view-tab {
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.studio-scheduled-tasks-page .view-tab.is-active {
+  background: var(--fusion-ink) !important;
+  background-color: var(--fusion-ink) !important;
+  color: #fff !important;
+  border-color: var(--fusion-ink) !important;
+}
+
+.studio-scheduled-tasks-page .st-health {
+  margin: 10px 0 0;
+  color: var(--fusion-muted);
+  font-size: 12px;
+}
+
+.studio-scheduled-tasks-page .schedule-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 10px;
+  align-items: start;
+  margin-top: 10px;
+}
+
+.studio-scheduled-tasks-page .st-card-list {
+  display: grid;
+  gap: 10px;
+}
+
+.studio-scheduled-tasks-page .st-card {
+  padding: 16px 18px;
+  cursor: pointer;
+}
+
+.studio-scheduled-tasks-page .st-card:hover { background: var(--fusion-hover); }
+.studio-scheduled-tasks-page .st-card__top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+.studio-scheduled-tasks-page .st-card__name { margin: 0; font-size: 16px; letter-spacing: -0.02em; }
+.studio-scheduled-tasks-page .st-card__chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.studio-scheduled-tasks-page .st-card__kind,
+.studio-scheduled-tasks-page .st-card__programs,
+.studio-scheduled-tasks-page .st-card__next,
+.studio-scheduled-tasks-page .st-card__result {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--fusion-muted);
+}
+.studio-scheduled-tasks-page .st-card__result { color: var(--fusion-ink-soft); font-weight: 600; }
+
+.studio-scheduled-tasks-page .st-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 650;
+}
+.studio-scheduled-tasks-page .st-chip--blue { background: var(--fusion-blue); color: var(--fusion-blue-ink); }
+.studio-scheduled-tasks-page .st-chip--sage { background: var(--fusion-sage); color: var(--fusion-sage-ink); }
+.studio-scheduled-tasks-page .st-chip--sand { background: var(--fusion-sand); color: var(--fusion-sand-ink); }
+.studio-scheduled-tasks-page .st-chip--blush { background: var(--fusion-blush); color: var(--fusion-blush-ink); }
+.studio-scheduled-tasks-page .st-chip--faint { background: #f1eeec; color: var(--fusion-muted); }
+
+.studio-scheduled-tasks-page .st-empty,
+.studio-scheduled-tasks-page .st-readonly {
+  padding: 28px 18px;
+  color: var(--fusion-muted);
+  font-size: 14px;
+}
+
+.studio-scheduled-tasks-page .schedule-rail { display: grid; gap: 10px; }
+.studio-scheduled-tasks-page .st-rail-card { padding: 16px; }
+.studio-scheduled-tasks-page .st-rail-title { margin: 0 0 10px; font-size: 14px; }
+.studio-scheduled-tasks-page .st-rail-empty { margin: 0; color: var(--fusion-muted); font-size: 13px; }
+.studio-scheduled-tasks-page .st-rail-list { margin: 0; padding: 0; list-style: none; }
+.studio-scheduled-tasks-page .st-rail-list li { display: grid; gap: 2px; padding: 8px 0; border-top: 1px solid var(--fusion-border); }
+.studio-scheduled-tasks-page .st-rail-list li:first-child { border-top: 0; padding-top: 0; }
+.studio-scheduled-tasks-page .st-rail-list span { color: var(--fusion-muted); font-size: 12px; }
+
+.studio-st-modal .st-modal-form { display: grid; gap: 14px; }
+.studio-st-modal [hidden] { display: none !important; }
+.studio-st-modal .st-field { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color: var(--fusion-ink); }
+.studio-st-modal .st-field input,
+.studio-st-modal .st-field select,
+.studio-st-modal .st-field textarea {
+  min-height: 36px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-weight: 400;
+  font-size: 13px;
+}
+.studio-st-modal .st-field textarea { min-height: 90px; resize: vertical; }
+.studio-st-modal .st-check-list { display: grid; gap: 8px; }
+.studio-st-modal .st-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+.studio-st-modal .st-help { margin: 0; color: var(--fusion-muted); font-size: 12px; font-weight: 400; }
+.studio-st-modal .st-estimate { margin: 0; font-size: 13px; font-weight: 600; }
+.studio-st-modal .st-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  padding-top: 8px;
+}
+
+@media (max-width: 920px) {
+  .studio-scheduled-tasks-page .schedule-workspace { grid-template-columns: 1fr; }
+  .studio-scheduled-tasks-page .schedule-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 700px) {
+  .studio-scheduled-tasks-page .schedule-page { padding: 14px; }
+  .studio-scheduled-tasks-page .schedule-hero { align-items: flex-start; flex-direction: column; }
+  .studio-scheduled-tasks-page .schedule-stats { grid-template-columns: 1fr; }
+  .studio-scheduled-tasks-page .view-tabs { margin-left: 0; width: 100%; }
+  .studio-scheduled-tasks-page .view-tab { flex: 1; }
+}

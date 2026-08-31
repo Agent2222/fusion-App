@@ -58,6 +58,7 @@ import { filterPublishedJournalEntries, resolveHomeJournalCarouselEntries, sortJ
 import {
     clampScheduleAvailability,
     formatScheduleCanisterError,
+    normalizeScheduleColor,
     normalizeScheduleImportance,
     normalizeScheduleRsvpIds,
     parseCanisterJsonText,
@@ -10382,7 +10383,7 @@ function normalizeScheduleEventRow(raw) {
         reminderMinutes,
         reminderSentAt: String(raw.reminderSentAt || '').trim() || '',
         status: String(raw.status || 'confirmed').trim(),
-        color: String(raw.color || 'sage').trim(),
+        color: normalizeScheduleColor(raw.color),
         relationKind: String(raw.relationKind || 'program').trim() || 'program',
         relationProgramId: String(raw.relationProgramId || raw.programId || '').trim(),
         eventKind: String(raw.eventKind || 'standard').trim() || 'standard',
@@ -10477,7 +10478,7 @@ export async function upsertScheduleEventStudio(opts) {
     const locationName = String(opts?.locationName || '').trim();
     const notes = String(opts?.notes || '');
     const status = String(opts?.status || 'confirmed').trim();
-    const color = String(opts?.color || 'sage').trim();
+    const color = normalizeScheduleColor(opts?.color);
     const relationKind = String(opts?.relationKind || 'program').trim() || 'program';
     const relationProgramId = String(
         opts?.relationProgramId || (relationKind === 'program' ? opts?.programId : '') || '',
@@ -11154,7 +11155,7 @@ export async function memberCreateProgramEvent(opts) {
             notes,
             reminderMinutes: null,
             status: 'awaiting_confirmation',
-            color: 'sage',
+            color: 'creating',
             relationKind: 'program',
             relationProgramId: programId,
             eventKind,
@@ -11718,4 +11719,169 @@ export async function staffSetProgramCommsLineRoom(programId, room, groupId) {
         throw new Error('staffSetProgramCommsLineRoom missing — run dfx generate after backend deploy.');
     }
     await actor.staffSetProgramCommsLineRoom(pid, key, gid);
+}
+
+const LS_SCHEDULED_TASKS = 'scheduledTasks';
+const LS_SCHEDULED_TASK_RUNS = 'scheduledTaskRuns';
+
+function mapScheduledTaskToJs(raw) {
+    const row = raw && typeof raw === 'object' ? raw : {};
+    return {
+        id: String(row.id ?? ''),
+        name: String(row.name ?? ''),
+        enabled: Boolean(row.enabled),
+        channels: String(row.channels ?? 'email') || 'email',
+        kind: String(row.kind ?? 'custom') || 'custom',
+        programIds: Array.isArray(row.programIds) ? row.programIds.map((id) => String(id || '')).filter(Boolean) : [],
+        lineRooms: String(row.lineRooms ?? 'both') || 'both',
+        customSubject: String(row.customSubject ?? ''),
+        customBodyText: String(row.customBodyText ?? ''),
+        customLineText: String(row.customLineText ?? ''),
+        timezone: String(row.timezone ?? 'Asia/Tokyo') || 'Asia/Tokyo',
+        firstRunLocal: String(row.firstRunLocal ?? ''),
+        repeat: String(row.repeat ?? 'once') || 'once',
+        skipIfDone: row.skipIfDone !== false,
+        nextRunAtIso: String(row.nextRunAtIso ?? ''),
+        lockedUntilIso: String(row.lockedUntilIso ?? ''),
+        lastRunAt: String(row.lastRunAt ?? ''),
+        lastStatus: String(row.lastStatus ?? ''),
+        lastSummary: String(row.lastSummary ?? ''),
+        createdAt: String(row.createdAt ?? ''),
+        updatedAt: String(row.updatedAt ?? ''),
+        createdBy: String(row.createdBy ?? ''),
+    };
+}
+
+function mapScheduledTaskRunToJs(raw) {
+    const row = raw && typeof raw === 'object' ? raw : {};
+    return {
+        id: String(row.id ?? ''),
+        taskId: String(row.taskId ?? ''),
+        startedAt: String(row.startedAt ?? ''),
+        finishedAt: String(row.finishedAt ?? ''),
+        status: String(row.status ?? ''),
+        emailOk: Number(row.emailOk ?? 0),
+        emailFail: Number(row.emailFail ?? 0),
+        lineOk: Number(row.lineOk ?? 0),
+        lineFail: Number(row.lineFail ?? 0),
+        skipped: Number(row.skipped ?? 0),
+        summary: String(row.summary ?? ''),
+    };
+}
+
+function scheduledTasksFromLs() {
+    const raw = readStudioLs(LS_SCHEDULED_TASKS);
+    return Array.isArray(raw) ? raw.map(mapScheduledTaskToJs) : [];
+}
+
+function writeScheduledTasksLs(tasks) {
+    writeStudioLs(LS_SCHEDULED_TASKS, (Array.isArray(tasks) ? tasks : []).map(mapScheduledTaskToJs));
+}
+
+function useScheduledTasksLocal() {
+    return getDataSource() === 'test';
+}
+
+/**
+ * @returns {Promise<object[]>}
+ */
+export async function staffListScheduledTasks() {
+    if (useScheduledTasksLocal()) return scheduledTasksFromLs();
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffListScheduledTasks !== 'function') {
+        return scheduledTasksFromLs();
+    }
+    const rows = await actor.staffListScheduledTasks();
+    return Array.isArray(rows) ? rows.map(mapScheduledTaskToJs) : [];
+}
+
+/**
+ * @param {string} taskId
+ */
+export async function staffGetScheduledTask(taskId) {
+    const id = String(taskId || '').trim();
+    if (!id) return null;
+    if (useScheduledTasksLocal()) {
+        return scheduledTasksFromLs().find((t) => t.id === id) || null;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffGetScheduledTask !== 'function') {
+        return scheduledTasksFromLs().find((t) => t.id === id) || null;
+    }
+    const raw = await actor.staffGetScheduledTask(id);
+    if (!raw || (Array.isArray(raw) && raw.length === 0)) return null;
+    const row = Array.isArray(raw) ? raw[0] : raw;
+    return mapScheduledTaskToJs(row);
+}
+
+/**
+ * @param {object} rec
+ */
+export async function staffUpsertScheduledTask(rec) {
+    const mapped = mapScheduledTaskToJs(rec);
+    if (!mapped.id) throw new Error('id required');
+    if (!mapped.name) throw new Error('name required');
+    const now = new Date().toISOString();
+    if (!mapped.createdAt) mapped.createdAt = now;
+    mapped.updatedAt = now;
+    if (useScheduledTasksLocal()) {
+        const all = scheduledTasksFromLs();
+        const idx = all.findIndex((t) => t.id === mapped.id);
+        if (idx >= 0) all[idx] = { ...all[idx], ...mapped, lockedUntilIso: all[idx].lockedUntilIso };
+        else all.push(mapped);
+        writeScheduledTasksLs(all);
+        return mapped;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffUpsertScheduledTask !== 'function') {
+        const all = scheduledTasksFromLs();
+        const idx = all.findIndex((t) => t.id === mapped.id);
+        if (idx >= 0) all[idx] = { ...all[idx], ...mapped };
+        else all.push(mapped);
+        writeScheduledTasksLs(all);
+        return mapped;
+    }
+    await actor.staffUpsertScheduledTask(mapped);
+    return mapped;
+}
+
+/**
+ * @param {string} taskId
+ */
+export async function staffDeleteScheduledTask(taskId) {
+    const id = String(taskId || '').trim();
+    if (!id) return;
+    if (useScheduledTasksLocal()) {
+        writeScheduledTasksLs(scheduledTasksFromLs().filter((t) => t.id !== id));
+        const runs = readStudioLs(LS_SCHEDULED_TASK_RUNS) || {};
+        delete runs[id];
+        writeStudioLs(LS_SCHEDULED_TASK_RUNS, runs);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffDeleteScheduledTask !== 'function') {
+        writeScheduledTasksLs(scheduledTasksFromLs().filter((t) => t.id !== id));
+        return;
+    }
+    await actor.staffDeleteScheduledTask(id);
+}
+
+/**
+ * @param {string} taskId
+ * @param {number} [limit]
+ */
+export async function staffListScheduledTaskRuns(taskId, limit = 20) {
+    const id = String(taskId || '').trim();
+    const cap = Math.max(1, Number(limit) || 20);
+    if (useScheduledTasksLocal()) {
+        const all = readStudioLs(LS_SCHEDULED_TASK_RUNS) || {};
+        const rows = Array.isArray(all[id]) ? all[id].map(mapScheduledTaskRunToJs) : [];
+        return rows.slice(-cap);
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffListScheduledTaskRuns !== 'function') {
+        return [];
+    }
+    const rows = await actor.staffListScheduledTaskRuns(id, cap);
+    return Array.isArray(rows) ? rows.map(mapScheduledTaskRunToJs) : [];
 }

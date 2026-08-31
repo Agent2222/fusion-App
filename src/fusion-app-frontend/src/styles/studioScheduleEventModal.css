@@ -68,6 +68,25 @@
   background: var(--event-sage);
 }
 
+.event-category-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.event-category-swatch {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  border: 1px solid rgba(17, 24, 39, 0.12);
+}
+
+.event-category-field .event-field__control {
+  flex: 1;
+  min-width: 0;
+}
+
 .event-dialog__title {
   margin: 0;
   font-size: 21px;
@@ -1003,10 +1022,17 @@
 .event-dialog--view .event-dialog__footer {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   min-height: 68px;
   gap: 12px;
   padding: 13px 28px;
 }
+
+.schedule-announce-meta { margin: 0 0 0.35rem; font-size: 14px; font-weight: 600; }
+.schedule-announce-list { margin: 0.5rem 0 0.75rem; padding-left: 1.15rem; font-size: 13px; line-height: 1.45; }
+.schedule-announce-list li + li { margin-top: 0.3rem; }
+.schedule-announce-warn { margin: 0.75rem 0 0; color: #9a3412; font-size: 13px; }
+.schedule-announce-error { margin: 0.75rem 0 0; color: #b91c1c; font-size: 13px; }
 
 .event-dialog__footer-spacer { flex: 1; }
 

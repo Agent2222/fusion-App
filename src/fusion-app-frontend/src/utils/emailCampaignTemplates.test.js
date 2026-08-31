@@ -115,9 +115,28 @@ describe('EMAIL_CAMPAIGN_TEMPLATES', () => {
         expect(tpl?.bodyHtml).toContain('Official Chat Rooms');
         expect(tpl?.bodyHtml).toContain('Step 1 — Download');
         expect(tpl?.bodyHtml).toContain('Step 2 — Join both rooms');
+        expect(tpl?.bodyHtml).toContain('Travel preparation');
+        expect(tpl?.bodyHtml).toContain('Suica');
+        expect(tpl?.bodyHtml).toContain('Add to wallet');
         expect(tpl?.bodyHtml).not.toContain('#a2b792');
         expect(tpl?.bodyHtml).not.toMatch(/you are confirmed/i);
         expect(tpl?.defaultSubject).toMatch(/Official Chat Rooms/i);
+    });
+
+    it('follow up flight template reminds arrival time and lists travel prep', () => {
+        const tpl = getEmailTemplateById('tpl_flight_followup');
+        expect(tpl?.templateGroup).toBe('updates');
+        expect(tpl?.contentSourceTypes).toContain('program');
+        expect(isFusionEmailLayout(tpl?.bodyHtml || '')).toBe(true);
+        expect(tpl?.bodyHtml).toContain('FLIGHT FOLLOW-UP');
+        expect(tpl?.bodyHtml).toContain('ADD ARRIVAL TIME');
+        expect(tpl?.bodyHtml).toContain('/settings/profile#travel');
+        expect(tpl?.bodyHtml).toContain('Travel preparation');
+        expect(tpl?.bodyHtml).toContain('Suica');
+        expect(tpl?.bodyHtml).toContain('Add to wallet');
+        expect(tpl?.bodyHtml).not.toContain('Confirmation number');
+        expect(tpl?.bodyHtml).not.toContain('#a2b792');
+        expect(tpl?.defaultSubject).toMatch(/arrival date and time/i);
     });
 
     it('legacy tpl_artist_feature resolves to featured artist', () => {

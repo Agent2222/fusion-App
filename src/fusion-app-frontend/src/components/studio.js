@@ -28,9 +28,10 @@ import { studioGroupIconHref, studioNavIconHref } from '../utils/studioIconRegis
 import studioWordmarkLogo from '../assets/Fusion-X-logo-03.png';
 import { isRadarPreviewActive } from '../utils/radarPreview.js';
 import { isBroadcastsPreviewActive } from '../utils/broadcastsPreview.js';
+import { isScheduledTasksPreviewActive } from '../utils/scheduledTasksPreview.js';
 
 function isStudioDevPreviewActive() {
-    return isRadarPreviewActive() || isBroadcastsPreviewActive();
+    return isRadarPreviewActive() || isBroadcastsPreviewActive() || isScheduledTasksPreviewActive();
 }
 
 function normalizeHash() {
@@ -436,6 +437,7 @@ export default function initStudio() {
                 root.removeAttribute('data-studio-anonymous');
                 if (isRadarPreviewActive()) root.setAttribute('data-radar-preview', '1');
                 if (isBroadcastsPreviewActive()) root.setAttribute('data-broadcasts-preview', '1');
+                if (isScheduledTasksPreviewActive()) root.setAttribute('data-scheduled-tasks-preview', '1');
             }
             return;
         }

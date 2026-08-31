@@ -575,7 +575,7 @@ function monthHtml(state, events) {
             const chips = list
                 .slice(0, 3)
                 .map((e) => {
-                    const hex = SCHEDULE_DOT_HEX[e.color] || SCHEDULE_DOT_HEX.sage;
+                    const hex = SCHEDULE_DOT_HEX[e.color] || SCHEDULE_DOT_HEX.creating;
                     return `<span class="event-chip" role="button" tabindex="0" data-mpc-open-event="${esc(e.id)}" style="background:${hex}" title="${esc(e.title)}">${esc(e.title)}</span>`;
                 })
                 .join('');

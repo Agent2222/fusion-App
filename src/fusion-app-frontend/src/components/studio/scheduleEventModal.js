@@ -6,7 +6,10 @@ import {
     clampScheduleAvailability,
     formatTimeRange,
     formatScheduleCanisterError,
+    normalizeScheduleColor,
     normalizeScheduleImportance,
+    scheduleCategoryMeta,
+    SCHEDULE_EVENT_CATEGORIES,
     parseYmd,
     scheduleEventPeopleLabel,
     scheduleEventRsvpCountLabel,
@@ -65,6 +68,7 @@ import {
     removeScheduleEventFromPublicSite,
     syncPublicSiteForScheduleEvent,
 } from '../../utils/schedulePublicSync.js';
+import { openScheduleAnnounceConfirm } from '../../utils/scheduleAnnounce.js';
 
 /**
  * @param {string} s
@@ -89,6 +93,18 @@ function rosterArtistName(artist) {
  */
 function rosterArtistId(artist) {
     return String(artist?.id || '').trim();
+}
+
+/**
+ * @param {ParentNode | null} root
+ * @param {unknown} color
+ */
+function syncCategorySwatches(root, color) {
+    if (!root) return;
+    const hex = scheduleCategoryMeta(color).hex;
+    root.querySelectorAll('.event-dialog__color, [data-ev-category-swatch]').forEach((el) => {
+        if (el instanceof HTMLElement) el.style.background = hex;
+    });
 }
 
 const ICONS = {
@@ -582,7 +598,7 @@ export function openScheduleEventModal(opts) {
         const rem = g('[name="reminderMinutes"]');
         draft.reminderMinutes = rem === '' ? null : Number(rem);
         draft.status = /** @type {any} */ (g('[name="status"]') || draft.status);
-        draft.color = /** @type {any} */ (g('[name="color"]') || draft.color);
+        draft.color = normalizeScheduleColor(g('[name="color"]') || draft.color);
         const publicEl = root.querySelector('[name="publicOnSite"]');
         draft.publicOnSite =
             publicEl instanceof HTMLInputElement ? publicEl.checked : Boolean(draft.publicOnSite);
@@ -865,6 +881,17 @@ export function openScheduleEventModal(opts) {
             }
             showOverflow = false;
             paint();
+        });
+
+        root.querySelector('[data-ev-announce]')?.addEventListener('click', () => {
+            if (!canEdit || !draft.id) return;
+            void openScheduleAnnounceConfirm({
+                kind: 'event',
+                programId: draft.programId,
+                programName: draft.programName,
+                date: draft.date,
+                events: [draft],
+            });
         });
 
         root.querySelectorAll('[data-ev-ics]').forEach((btn) => {
@@ -1206,6 +1233,7 @@ export function openScheduleEventModal(opts) {
             el.addEventListener('change', () => {
                 markDirty();
                 readFields();
+                syncCategorySwatches(root, draft.color);
             });
         });
 
@@ -1473,7 +1501,7 @@ function blankEvent(date, programIdHint = '') {
         reminderMinutes: 30,
         reminderSentAt: '',
         status: /** @type {const} */ ('confirmed'),
-        color: /** @type {const} */ ('sage'),
+        color: /** @type {const} */ ('creating'),
         relationKind: 'program',
         relationProgramId: prog.id,
         eventKind: /** @type {const} */ ('standard'),
@@ -2006,14 +2034,14 @@ function buildDialogHtml(ctx) {
                       </select>`,
         )}
         ${field(
-            'Color',
+            'Category',
             'color',
-            `<select class="event-field__control" id="ev-color" name="color">
-                        <option value="sage" ${draft.color === 'sage' ? 'selected' : ''}>Sage</option>
-                        <option value="blue" ${draft.color === 'blue' ? 'selected' : ''}>Blue</option>
-                        <option value="sand" ${draft.color === 'sand' ? 'selected' : ''}>Sand</option>
-                        <option value="blush" ${draft.color === 'blush' ? 'selected' : ''}>Blush</option>
-                      </select>`,
+            `<div class="event-category-field">
+                        <span class="event-category-swatch" data-ev-category-swatch style="background:${esc(scheduleCategoryMeta(draft.color).hex)}"></span>
+                        <select class="event-field__control" id="ev-color" name="color">
+                          ${SCHEDULE_EVENT_CATEGORIES.map((c) => `<option value="${esc(c.id)}" ${normalizeScheduleColor(draft.color) === c.id ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}
+                        </select>
+                      </div>`,
         )}
         ${
             conflict
@@ -2103,6 +2131,7 @@ function buildDialogHtml(ctx) {
       </div>
       <footer class="event-dialog__footer">
         ${canEdit && draft.id ? `<button type="button" class="event-dialog__danger" data-ev-delete>Delete event</button>` : ''}
+        ${canEdit && draft.id ? `<button type="button" class="event-dialog__button" data-ev-announce>Announce event</button>` : ''}
         <button type="button" class="event-dialog__button" data-ev-ics>${ICONS.calendarIcs} Download .ics</button>
         <span class="event-dialog__footer-spacer"></span>
         ${
@@ -2124,7 +2153,7 @@ function buildDialogHtml(ctx) {
     <section class="event-dialog" role="dialog" aria-modal="true" aria-labelledby="${titleId}" aria-describedby="${descId}">
       <header class="event-dialog__header">
         <div class="event-dialog__identity">
-          <span class="event-dialog__color" aria-hidden="true"></span>
+          <span class="event-dialog__color" aria-hidden="true" style="background:${esc(scheduleCategoryMeta(draft.color).hex)}"></span>
           <div>
             <h2 class="event-dialog__title" id="${titleId}">${esc(draft.title || (isCreate ? 'New event' : 'Event'))}</h2>
             <p class="event-dialog__meta" id="${descId}">${esc(draft.programName)} · ${esc(statusLabel(draft.status))}</p>

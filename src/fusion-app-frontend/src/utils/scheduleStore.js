@@ -21,6 +21,7 @@ import {
     SCHEDULE_TIMEZONE_LABEL,
     applyConflicts,
     initialsFromName,
+    normalizeScheduleColor,
     parseYmd,
     toYmd,
     clampScheduleAvailability,
@@ -118,7 +119,7 @@ function mapRow(row) {
                 : Number(row.reminderMinutes) || null,
         reminderSentAt: String(row.reminderSentAt || '').trim(),
         status: /** @type {CalendarEvent['status']} */ (row.status || 'confirmed'),
-        color: /** @type {CalendarEvent['color']} */ (row.color || 'sage'),
+        color: /** @type {CalendarEvent['color']} */ (normalizeScheduleColor(row.color)),
         relationKind: String(row.relationKind || 'program'),
         relationProgramId: String(row.relationProgramId || row.programId || ''),
         eventKind: /** @type {CalendarEvent['eventKind']} */ (row.eventKind || 'standard'),
@@ -664,7 +665,7 @@ export async function createEvent(input) {
         notes: input.notes || '',
         reminderMinutes: input.reminderMinutes === undefined ? 30 : input.reminderMinutes,
         status: input.status || 'confirmed',
-        color: input.color || 'sage',
+        color: normalizeScheduleColor(input.color),
         relationKind: input.relationKind || 'program',
         relationProgramId:
             input.relationProgramId ||

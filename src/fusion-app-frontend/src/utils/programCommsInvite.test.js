@@ -22,6 +22,7 @@ import {
     resolveInviteMessage,
     resolveProviderThumbUrl,
     DEFAULT_MEMBER_COMMS_INVITE_MESSAGE,
+    SAMPLE_COMMS_TRAVEL_PREP_LINKS,
     renderProgramCommsInviteHtml,
     sampleProgramCommsInviteHtml,
 } from './programCommsInvite.js';
@@ -153,6 +154,21 @@ describe('renderProgramCommsInviteHtml', () => {
         expect(html).not.toContain('#a2b792');
         expect(html).not.toContain('ADD FUSION ON LINE');
         expect(html).not.toContain('JOIN THE GROUP');
+        expect(html).not.toContain('Travel preparation');
+    });
+
+    it('appends travel prep wallet cards in a row with descriptions', () => {
+        const html = renderProgramCommsInviteHtml({
+            programName: 'Kaga City',
+            travelPrepLinks: SAMPLE_COMMS_TRAVEL_PREP_LINKS,
+        });
+        expect(html).toContain('Travel preparation');
+        expect(html).toMatch(/mobile wallet/i);
+        expect(html).toContain('Suica');
+        expect(html).toContain('ICOCA');
+        expect(html).toContain('JR East IC card');
+        expect(html).toContain('Add to wallet');
+        expect(html).not.toContain('#a2b792');
     });
 
     it('sample template is Fusion-branded communications email', () => {
@@ -160,6 +176,8 @@ describe('renderProgramCommsInviteHtml', () => {
         expect(isFusionEmailLayout(html)).toBe(true);
         expect(isProgramCommsInviteHtml(html)).toBe(true);
         expect(html).toContain('COMMUNICATIONS');
+        expect(html).toContain('Travel preparation');
+        expect(html).toContain('Suica');
         expect(html).not.toContain('#a2b792');
     });
 });
@@ -186,7 +204,20 @@ describe('collectProgramCommsInviteMessages', () => {
         expect(messages[0].applicantId).toBe('a');
         expect(messages[0].html).toContain('Ada');
         expect(messages[0].html).toContain('Official Chat Rooms');
+        expect(messages[0].html).not.toContain('Travel preparation');
         expect(skipped).toEqual([{ id: 'b', name: 'No Mail', reason: 'no public email' }]);
+    });
+
+    it('includes travel prep cards when links are passed', () => {
+        const cfg = normalizeProgramCommsConfig({ programId: 'p1', ...READY_ASSETS });
+        const { messages } = collectProgramCommsInviteMessages({
+            applicants: [{ id: 'a', email: 'a@x.com', fullName: 'Ada' }],
+            cfg,
+            programName: 'Kaga City',
+            travelPrepLinks: SAMPLE_COMMS_TRAVEL_PREP_LINKS,
+        });
+        expect(messages[0].html).toContain('Travel preparation');
+        expect(messages[0].html).toContain('Suica');
     });
 });
 

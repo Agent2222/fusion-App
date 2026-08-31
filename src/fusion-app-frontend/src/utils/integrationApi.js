@@ -1412,6 +1412,45 @@ export async function sendLineGroupMessage(opts) {
 }
 
 /**
+ * Push a Schedule day or event as LINE Flex to Announcements, or a 1:1 test to the bot admin.
+ * @param {{
+ *   programId: string,
+ *   test: boolean,
+ *   events: object[],
+ *   mode?: 'day' | 'event',
+ *   programName?: string,
+ *   date?: string,
+ * }} opts
+ */
+export async function announceScheduleOnLine(opts) {
+    const base = getIntegrationBaseUrl();
+    if (!base) {
+        throw new Error('Integration API URL not configured.');
+    }
+    const res = await fetch(`${base}/line/announce-schedule`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify({
+            programId: String(opts?.programId || '').trim(),
+            test: Boolean(opts?.test),
+            mode: opts?.mode === 'day' ? 'day' : 'event',
+            programName: String(opts?.programName || '').trim(),
+            date: String(opts?.date || '').trim(),
+            events: Array.isArray(opts?.events) ? opts.events : [],
+        }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(
+            typeof err.error === 'string' && err.error
+                ? err.error
+                : `Couldn’t send the announcement (HTTP ${res.status}).`,
+        );
+    }
+    return res.json();
+}
+
+/**
  * @param {{ to: string, subject: string, html?: string, text?: string, replyTo?: string, from?: string, cc?: string | string[], attachments?: Array<{ filename?: string, content?: string, contentType?: string }> }} opts
  */
 export async function sendEmail(opts) {
@@ -1719,4 +1758,29 @@ export function syncPayPalProgramFees(ledgerRows) {
  */
 export function syncStripeProgramFees(ledgerRows) {
     return integrationPost('/stripe/sync-program-fees', { ledgerRows });
+}
+
+/**
+ * Staff status chip for Scheduled Tasks (no host-scheduler wording).
+ */
+export async function fetchScheduledTasksHealth() {
+    const base = getIntegrationBaseUrl();
+    if (!base) throw new Error('Sending is not set up yet.');
+    const res = await fetch(`${base}/scheduled-tasks/health`, {
+        method: 'GET',
+        headers: integrationHeadersJson(),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(typeof err.error === 'string' ? err.error : `HTTP ${res.status}`);
+    }
+    return res.json();
+}
+
+/**
+ * Send one scheduled task immediately (Studio "Send now").
+ * @param {string} taskId
+ */
+export function runScheduledTaskNow(taskId) {
+    return integrationPost('/scheduled-tasks/run', { taskId: String(taskId || '').trim() });
 }

@@ -267,6 +267,44 @@ describe('emailCampaignContentSources', () => {
         expect(draft?.bodyHtml).toContain('Week 1');
     });
 
+    it('flight follow-up template binds program name, hero, and travel prep cards', () => {
+        const draft = buildTemplateDraftFromSource(
+            'tpl_flight_followup',
+            { type: 'program', id: 'kaga' },
+            {
+                programs: [
+                    {
+                        id: 'kaga',
+                        enCard: {
+                            headline: 'Kaga City Artist Residency',
+                            focus: 'Kaga City Artist Residency',
+                            location: 'Kaga City, Ishikawa',
+                            imageSrc: 'https://cdn.example/kaga-hero.jpg',
+                        },
+                    },
+                ],
+                travelPrepLinks: [
+                    {
+                        title: 'Suica',
+                        url: 'https://example.com/suica',
+                        description: 'JR East IC card',
+                        imageUrl: 'https://cdn.example/suica.png',
+                        sortOrder: 0,
+                    },
+                ],
+            },
+        );
+        expect(draft).not.toBeNull();
+        expect(draft?.subject).toBe('Kaga City Artist Residency — add your arrival date and time');
+        expect(draft?.bodyHtml).toContain('FLIGHT FOLLOW-UP');
+        expect(draft?.bodyHtml).toContain('ADD ARRIVAL TIME');
+        expect(draft?.bodyHtml).toContain('https://cdn.example/kaga-hero.jpg');
+        expect(draft?.bodyHtml).toContain('Travel preparation');
+        expect(draft?.bodyHtml).toContain('Suica');
+        expect(draft?.bodyHtml).toContain('JR East IC card');
+        expect(draft?.bodyHtml).not.toContain('Confirmation number');
+    });
+
     it('reminder template keeps last-chance copy when program source is applied', () => {
         const draft = buildTemplateDraftFromSource(
             'tpl_reminder',

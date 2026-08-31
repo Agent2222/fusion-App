@@ -17,6 +17,7 @@ import {
     getSubscribersForEmailStudio,
     listEmailCampaigns,
     listEmailOutboundRecords,
+    listTravelPrepLinks,
     markEmailCampaignSent,
     studioReinterpretWithPrompt,
     studioTranslateEnToJa,
@@ -57,6 +58,7 @@ import {
     resolveContentSource,
     serializeCampaignMeta,
 } from '../../utils/emailCampaignContentSources.js';
+import { FLIGHT_FOLLOWUP_TEMPLATE_ID } from '../../utils/flightFollowUpEmail.js';
 import { consumeEmailCampaignPrefill, PROGRAM_CALENDAR_TEMPLATE_ID } from '../../utils/scheduleCalendarEmail.js';
 import { listEvents, loadScheduleEvents } from '../../utils/scheduleStore.js';
 import {
@@ -2224,6 +2226,13 @@ export async function initEmailCampaignStudio(mainEl) {
                 caches.scheduleEvents = [];
             }
         }
+        if (tplId === FLIGHT_FOLLOWUP_TEMPLATE_ID && source.type === 'program') {
+            try {
+                caches.travelPrepLinks = await listTravelPrepLinks(source.id);
+            } catch {
+                caches.travelPrepLinks = [];
+            }
+        }
         const draft = buildTemplateDraftFromSource(tplId, source, caches);
         if (!draft) {
             setMsg('error', 'Could not resolve content for that item.');
@@ -2440,7 +2449,10 @@ export async function initEmailCampaignStudio(mainEl) {
         if (source) campaignMeta = { ...campaignMeta, source };
         markDirty();
         const tplId = templateSel instanceof HTMLSelectElement ? templateSel.value : '';
-        if (tplId === PROGRAM_CALENDAR_TEMPLATE_ID && source?.type === 'program') {
+        if (
+            (tplId === PROGRAM_CALENDAR_TEMPLATE_ID || tplId === FLIGHT_FOLLOWUP_TEMPLATE_ID) &&
+            source?.type === 'program'
+        ) {
             void applyContentSourceToForm(true);
         }
     });

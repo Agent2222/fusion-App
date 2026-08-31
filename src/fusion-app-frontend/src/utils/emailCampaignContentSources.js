@@ -27,6 +27,12 @@ import {
 import { toCloudFrontAssetUrl } from './assetDistribution.js';
 import { normalizeCommunityVideoRecord, parseVideoLocales } from './videoPageModel.js';
 import {
+    FLIGHT_FOLLOWUP_TEMPLATE_ID,
+    buildFlightFollowUpPreview,
+    buildFlightFollowUpSubject,
+    renderFlightFollowUpHtml,
+} from './flightFollowUpEmail.js';
+import {
     PROGRAM_CALENDAR_HERO_URL,
     PROGRAM_CALENDAR_TEMPLATE_ID,
     buildProgramCalendarLayoutSlots,
@@ -724,6 +730,27 @@ export function buildTemplateDraftFromSource(templateId, source, caches = {}) {
                 .trim()
                 .slice(0, 200),
             bodyHtml: renderFusionEmailFromSlots(slots),
+        };
+    }
+    if (templateId === FLIGHT_FOLLOWUP_TEMPLATE_ID && source.type === 'program') {
+        const program = (caches.programs || []).find((p) => String(p?.id ?? '') === String(source.id || ''));
+        if (!program) return null;
+        const card = program.enCard && typeof program.enCard === 'object' ? program.enCard : program;
+        const programName =
+            getProgramDisplayNameFromRow(program) ||
+            String(card?.focus || card?.location || program?.id || 'Fusion program').trim();
+        const heroImageUrl =
+            normUrl(card?.imageSrc ?? card?.heroMediaSrc ?? '') || DEFAULT_WEBSITE_HERO;
+        const html = renderFlightFollowUpHtml({
+            programName,
+            heroImageUrl,
+            heroAlt: String(card?.location || programName).trim() || programName,
+            travelPrepLinks: caches.travelPrepLinks,
+        });
+        return {
+            subject: buildFlightFollowUpSubject(programName),
+            previewText: buildFlightFollowUpPreview(programName).slice(0, 200),
+            bodyHtml: html,
         };
     }
     const slots = resolveContentSource(

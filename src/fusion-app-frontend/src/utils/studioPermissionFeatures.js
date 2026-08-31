@@ -38,6 +38,7 @@ export const STUDIO_PERMISSION_FEATURE_ROWS = [
     { id: 'users', label: 'Users' },
     { id: 'services', label: 'Services' },
     { id: 'settings', label: 'Settings' },
+    { id: 'scheduled-tasks', label: 'Scheduled Tasks' },
     { id: 'team', label: 'Team' },
 ];
 

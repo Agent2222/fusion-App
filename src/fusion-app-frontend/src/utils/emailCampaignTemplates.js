@@ -17,6 +17,7 @@ import {
     sampleProgramCalendarEvents,
 } from './scheduleCalendarEmail.js';
 import { interpolateRadarDiscountHtml, joinUrlForPromoCode } from './studioPromoCodes.js';
+import { sampleFlightFollowUpHtml } from './flightFollowUpEmail.js';
 import { sampleProgramCommsInviteHtml } from './programCommsInvite.js';
 
 /**
@@ -182,7 +183,18 @@ export const EMAIL_CAMPAIGN_TEMPLATES = {
         defaultSubject: 'The program Official Chat Rooms',
         defaultPreview: 'Download the app, then join both official chat rooms.',
         bodyHtml: sampleProgramCommsInviteHtml(),
-        notes: 'Used by Studio → Comms. Step 1 store QRs (iOS / Android) and step 2 room QRs (General / Announcements).',
+        notes: 'Used by Studio → Comms. Step 1 store QRs, step 2 room QRs, then travel prep wallet cards from Studio Travel.',
+    },
+    tpl_flight_followup: {
+        id: 'tpl_flight_followup',
+        name: 'Follow up flight information',
+        templateGroup: 'updates',
+        defaultEyebrow: 'Travel',
+        contentSourceTypes: ['program'],
+        defaultSubject: 'Kaga City Artist Residency — add your arrival date and time',
+        defaultPreview: 'Reminder about your Kaga City Artist Residency flight — add arrival date and time so we can meet you.',
+        bodyHtml: sampleFlightFollowUpHtml(),
+        notes: 'Arrival-time reminder for confirmed travelers. Distinct from Finance → Email “Flight information” (booking details). Bind a program to pull hero and travel prep wallet cards.',
     },
     tpl_featured_artist: {
         id: 'tpl_featured_artist',

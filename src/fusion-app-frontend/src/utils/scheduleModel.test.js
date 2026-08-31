@@ -4,7 +4,10 @@ import {
     escapeControlCharsInJsonStrings,
     formatScheduleCanisterError,
     isSeededDemoScheduleEvent,
+    normalizeScheduleColor,
     normalizeScheduleImportance,
+    scheduleCategoryMeta,
+    SCHEDULE_EVENT_CATEGORIES,
     normalizeScheduleRsvpIds,
     parseCanisterJsonText,
     scheduleEventPeopleLabel,
@@ -13,6 +16,24 @@ import {
     scheduleImportancePillClass,
     weekRangeContaining,
 } from './scheduleModel.js';
+
+describe('normalizeScheduleColor', () => {
+    it('maps legacy color names to categories', () => {
+        expect(normalizeScheduleColor('sage')).toBe('setup');
+        expect(normalizeScheduleColor('blue')).toBe('flights');
+        expect(normalizeScheduleColor('sand')).toBe('exploration');
+        expect(normalizeScheduleColor('blush')).toBe('traveling');
+    });
+
+    it('accepts the staff category list and defaults unknown values to creating', () => {
+        expect(normalizeScheduleColor('Workshop')).toBe('workshop');
+        expect(normalizeScheduleColor('')).toBe('creating');
+        expect(normalizeScheduleColor('magenta')).toBe('creating');
+        expect(SCHEDULE_EVENT_CATEGORIES).toHaveLength(11);
+        expect(scheduleCategoryMeta('meals').label).toBe('Meals');
+        expect(scheduleCategoryMeta('tours').hex).toBe('#ff8a1a');
+    });
+});
 
 describe('normalizeScheduleImportance', () => {
     it('defaults unknown values to general', () => {

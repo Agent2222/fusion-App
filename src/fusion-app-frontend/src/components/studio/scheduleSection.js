@@ -5,6 +5,7 @@ import '../../styles/studioSchedule.css';
 import { studioFeatureAccess } from '../../utils/studioShellState.js';
 import {
     SCHEDULE_DOT_HEX,
+    normalizeScheduleColor,
     buildMonthCells,
     eventDurationLabel,
     formatAgendaHeading,
@@ -42,6 +43,11 @@ import {
     PROGRAM_CALENDAR_TEMPLATE_ID,
     setEmailCampaignPrefill,
 } from '../../utils/scheduleCalendarEmail.js';
+import {
+    announceDayButtonState,
+    dayEventsForAnnounce,
+    openScheduleAnnounceConfirm,
+} from '../../utils/scheduleAnnounce.js';
 import { openScheduleEventModal } from './scheduleEventModal.js';
 import { openScheduleLocationsModal } from './scheduleLocationsModal.js';
 import { openScheduleAttentionReview } from './scheduleAttentionModal.js';
@@ -238,7 +244,7 @@ function buildPageHtml(state, canEdit) {
           </div>
         </div>
         <aside class="schedule-rail">
-          ${agendaHtml(state.selectedDate, dayEvents)}
+          ${agendaHtml(state.selectedDate, dayEvents, { canEdit, programId: state.programId })}
           ${attentionHtml(attention)}
         </aside>
       </section>
@@ -379,7 +385,7 @@ function monthHtml(state, events) {
             const chips = shown
                 .map(
                     (e) =>
-                        `<button type="button" class="event-chip event-chip--${esc(e.color)}" data-sch-event="${esc(e.id)}" title="${esc(e.title)}">${esc(e.allDay ? e.title : `${formatTime12(e.startTime).replace(' ', '')} ${e.title}`)}</button>`,
+                        `<button type="button" class="event-chip event-chip--${esc(normalizeScheduleColor(e.color))}" data-sch-event="${esc(e.id)}" title="${esc(e.title)}">${esc(e.allDay ? e.title : `${formatTime12(e.startTime).replace(' ', '')} ${e.title}`)}</button>`,
                 )
                 .join('');
             return `<div class="calendar-day ${cell.inMonth ? '' : 'calendar-day--outside'} ${isToday ? 'calendar-day--today' : ''} ${isSelected ? 'calendar-day--selected' : ''}" data-sch-day="${esc(cell.date)}" role="button" tabindex="0" aria-label="${esc(cell.date)}">
@@ -409,7 +415,7 @@ function weekHtml(state, events) {
         const chips = list
             .map(
                 (e) =>
-                    `<button type="button" class="event-chip event-chip--${esc(e.color)}" data-sch-event="${esc(e.id)}">${esc(e.title)}</button>`,
+                    `<button type="button" class="event-chip event-chip--${esc(normalizeScheduleColor(e.color))}" data-sch-event="${esc(e.id)}">${esc(e.title)}</button>`,
             )
             .join('');
         const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -434,7 +440,7 @@ function timelineHtml(state, events) {
             const chips = list
                 .map(
                     (e) =>
-                        `<button type="button" class="event-chip event-chip--${esc(e.color)}" data-sch-event="${esc(e.id)}">${esc(e.allDay ? e.title : `${e.startTime} ${e.title}`)}</button>`,
+                        `<button type="button" class="event-chip event-chip--${esc(normalizeScheduleColor(e.color))}" data-sch-event="${esc(e.id)}">${esc(e.allDay ? e.title : `${e.startTime} ${e.title}`)}</button>`,
                 )
                 .join('');
             return `<div class="timeline-day" data-sch-day="${esc(cell.date)}">
@@ -450,9 +456,9 @@ function timelineHtml(state, events) {
 /**
  * @param {string} date
  * @param {import('../../utils/scheduleModel.js').CalendarEvent[]} dayEvents
- * @param {boolean} canEdit
+ * @param {{ canEdit?: boolean, programId?: string }} [opts]
  */
-function agendaHtml(date, dayEvents) {
+function agendaHtml(date, dayEvents, opts = {}) {
     const items = dayEvents
         .map((e) => {
             const staff = e.assignedStaff[0];
@@ -461,7 +467,7 @@ function agendaHtml(date, dayEvents) {
             const dur = eventDurationLabel(e);
             return `<li class="agenda-item" data-sch-event-row="${esc(e.id)}">
         <div class="agenda-item__time"><strong>${esc(time)}</strong><span>${esc(dur)}</span></div>
-        <div class="agenda-item__track"><span class="agenda-item__dot" style="--dot:${SCHEDULE_DOT_HEX[e.color] || '#6da57a'}"></span></div>
+        <div class="agenda-item__track"><span class="agenda-item__dot" style="--dot:${SCHEDULE_DOT_HEX[normalizeScheduleColor(e.color)] || '#cfe8d6'}"></span></div>
         <button type="button" class="agenda-item__content" data-sch-event="${esc(e.id)}" style="border:0;background:transparent;padding:0;text-align:left;cursor:pointer">
           <strong>${esc(e.title)}</strong>
           <span>${esc(e.locationName)}</span>
@@ -473,8 +479,16 @@ function agendaHtml(date, dayEvents) {
       </li>`;
         })
         .join('');
+    const canEdit = Boolean(opts.canEdit);
+    const programId = String(opts.programId || '');
+    const dayBtn = announceDayButtonState({ programId });
+    const announceBtn = canEdit
+        ? `<button type="button" class="button button--announce-day" data-sch-action="announce-day" ${
+              dayBtn.enabled ? '' : 'disabled'
+          } title="${esc(dayBtn.title)}">Announce day</button>`
+        : '';
     return `<section class="agenda-card">
-      <div class="rail-heading"><h2>${esc(formatAgendaHeading(date))}</h2></div>
+      <div class="rail-heading"><h2>${esc(formatAgendaHeading(date))}</h2>${announceBtn}</div>
       <ul class="agenda-list">${items || '<li class="agenda-item"><div class="agenda-item__content"><strong>No events</strong><span>Select another day</span></div></li>'}</ul>
     </section>`;
 }
@@ -758,6 +772,24 @@ function bindPage(root) {
     };
     root.querySelector('[data-sch-action="manage-locations"]')?.addEventListener('click', openLocations);
     root.querySelector('[data-sch-action="settings"]')?.addEventListener('click', openLocations);
+
+    root.querySelector('[data-sch-action="announce-day"]')?.addEventListener('click', () => {
+        if (!canEdit || !uiState?.programId) return;
+        const programId = uiState.programId;
+        const events = dayEventsForAnnounce(listEvents({ programId }), {
+            date: uiState.selectedDate,
+            programId,
+        });
+        const programName =
+            getScheduleProgramOptions().find((p) => p.id === programId)?.name || '';
+        void openScheduleAnnounceConfirm({
+            kind: 'day',
+            programId,
+            programName,
+            date: uiState.selectedDate,
+            events,
+        });
+    });
 
     root.querySelector('[data-sch-action="timezone"]')?.addEventListener('click', async () => {
         const picked = await openScheduleTimezonePicker(openStudioModal, {

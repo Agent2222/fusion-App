@@ -5,8 +5,55 @@
 import { scheduleTimezoneButtonLabel } from './scheduleTimezones.js';
 
 /** @typedef {'draft' | 'awaiting_confirmation' | 'confirmed' | 'cancelled'} CalendarEventStatus */
-/** @typedef {'sage' | 'blue' | 'sand' | 'blush'} CalendarEventColor */
+/** @typedef {string} CalendarEventColor */
 /** @typedef {'optional' | 'suggested' | 'general'} ScheduleEventImportance */
+
+/**
+ * Schedule event categories — stored in the existing `color` field.
+ * Hex values follow the staff category color sheet.
+ * @type {ReadonlyArray<{ id: string, label: string, hex: string, ink: string }>}
+ */
+export const SCHEDULE_EVENT_CATEGORIES = [
+    { id: 'traveling', label: 'Traveling', hex: '#f4c2c8', ink: '#5c2a32' },
+    { id: 'creating', label: 'Creating', hex: '#cfe8d6', ink: '#2a4d38' },
+    { id: 'exploration', label: 'Exploration', hex: '#f3e6c0', ink: '#5c4d1f' },
+    { id: 'setup', label: 'Setup / clean up', hex: '#9caf88', ink: '#2a3824' },
+    { id: 'flights', label: 'Flights', hex: '#c5dff8', ink: '#23415c' },
+    { id: 'presentations', label: 'Misc presentations', hex: '#4a72c4', ink: '#ffffff' },
+    { id: 'meals', label: 'Meals', hex: '#e0b322', ink: '#3d2e00' },
+    { id: 'external', label: 'External event', hex: '#ffe14a', ink: '#3d3400' },
+    { id: 'workshop', label: 'Workshop / onsen event', hex: '#2ec8c8', ink: '#0b3d3d' },
+    { id: 'filming', label: 'Filming', hex: '#8ef04a', ink: '#1a3d0a' },
+    { id: 'tours', label: 'Tours', hex: '#ff8a1a', ink: '#3d1f00' },
+];
+
+const LEGACY_SCHEDULE_COLOR_TO_CATEGORY = {
+    sage: 'setup',
+    blue: 'flights',
+    sand: 'exploration',
+    blush: 'traveling',
+};
+
+/**
+ * @param {unknown} raw
+ * @returns {string}
+ */
+export function normalizeScheduleColor(raw) {
+    const t = String(raw || '')
+        .trim()
+        .toLowerCase();
+    if (LEGACY_SCHEDULE_COLOR_TO_CATEGORY[t]) return LEGACY_SCHEDULE_COLOR_TO_CATEGORY[t];
+    if (SCHEDULE_EVENT_CATEGORIES.some((c) => c.id === t)) return t;
+    return 'creating';
+}
+
+/**
+ * @param {unknown} raw
+ */
+export function scheduleCategoryMeta(raw) {
+    const id = normalizeScheduleColor(raw);
+    return SCHEDULE_EVENT_CATEGORIES.find((c) => c.id === id) || SCHEDULE_EVENT_CATEGORIES[1];
+}
 
 /**
  * @typedef {{ id: string, name: string, avatarUrl?: string, initials?: string }} CalendarPerson
@@ -68,12 +115,13 @@ import { scheduleTimezoneButtonLabel } from './scheduleTimezones.js';
 export const SCHEDULE_TIMEZONE_LABEL = scheduleTimezoneButtonLabel();
 export const SCHEDULE_FIXTURE_TODAY = '2026-08-12';
 
-/** @type {Record<CalendarEventColor, string>} */
+/** @type {Record<string, string>} */
 export const SCHEDULE_DOT_HEX = {
-    sage: '#6da57a',
-    blue: '#4d91ca',
-    sand: '#c68109',
-    blush: '#8c343c',
+    ...Object.fromEntries(SCHEDULE_EVENT_CATEGORIES.map((c) => [c.id, c.hex])),
+    sage: '#9caf88',
+    blue: '#c5dff8',
+    sand: '#f3e6c0',
+    blush: '#f4c2c8',
 };
 
 /**
