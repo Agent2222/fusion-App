@@ -1441,11 +1441,13 @@ export async function announceScheduleOnLine(opts) {
     });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(
-            typeof err.error === 'string' && err.error
-                ? err.error
-                : `Couldn’t send the announcement (HTTP ${res.status}).`,
-        );
+        const detail = typeof err.error === 'string' ? err.error.trim() : '';
+        if (res.status === 404 || /^not found\.?$/i.test(detail)) {
+            throw new Error(
+                'The Integration API on the host is an older build and does not have schedule announce yet. Redeploy fusion-integration-api (Render), then try again.',
+            );
+        }
+        throw new Error(detail || `Couldn’t send the announcement (HTTP ${res.status}).`);
     }
     return res.json();
 }
