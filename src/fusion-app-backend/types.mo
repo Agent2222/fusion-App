@@ -1228,6 +1228,65 @@ module {
         groupAnnounceId : Text;
     };
 
+    /// Studio Operations → Scheduled Tasks (staff-managed; executed by the integration API).
+    public type StudioScheduledTask = {
+        id : Text;
+        name : Text;
+        enabled : Bool;
+        channels : Text;
+        kind : Text;
+        programIds : [Text];
+        lineRooms : Text;
+        customSubject : Text;
+        customBodyText : Text;
+        customLineText : Text;
+        timezone : Text;
+        firstRunLocal : Text;
+        repeat : Text;
+        skipIfDone : Bool;
+        nextRunAtIso : Text;
+        lockedUntilIso : Text;
+        lastRunAt : Text;
+        lastStatus : Text;
+        lastSummary : Text;
+        createdAt : Text;
+        updatedAt : Text;
+        createdBy : Text;
+    };
+
+    public type StudioScheduledTaskRun = {
+        id : Text;
+        taskId : Text;
+        startedAt : Text;
+        finishedAt : Text;
+        status : Text;
+        emailOk : Nat;
+        emailFail : Nat;
+        lineOk : Nat;
+        lineFail : Nat;
+        skipped : Nat;
+        summary : Text;
+    };
+
+    public type StudioScheduledTaskAudienceRow = {
+        applicantId : Text;
+        email : Text;
+        fullName : Text;
+        slotSecured : Bool;
+        status : Text;
+        hasArrival : Bool;
+        inviteSentAt : Text;
+    };
+
+    public type StudioScheduledTaskAudience = {
+        programId : Text;
+        localesJson : Text;
+        comms : ?ProgramCommsConfig;
+        lineBinding : ProgramCommsLineBinding;
+        travelPrepLinks : [TravelPrepLink];
+        applicants : [StudioScheduledTaskAudienceRow];
+    };
+
     /// One Studio sidebar / workspace feature (id aligns with frontend section ids, e.g. `artists`, `settings`).
     public type StudioFeatureAccess = {
         visible : Bool;
@@ -1389,5 +1448,9 @@ module {
         programCommsLineSeenStable : ?[(Text, ProgramCommsLineSeenGroup)];
         /// Per-program LINE room bindings; optional for older backups.
         programCommsLineBindingStable : ?[(Text, ProgramCommsLineBinding)];
+        /// Studio scheduled tasks; optional for older backups.
+        scheduledTasksStable : ?[(Text, StudioScheduledTask)];
+        /// Send history keyed by task id; optional for older backups.
+        scheduledTaskRunsStable : ?[(Text, [StudioScheduledTaskRun])];
     };
 };

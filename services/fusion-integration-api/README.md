@@ -66,18 +66,35 @@ stripe listen --forward-to localhost:8787/webhooks/stripe
 | `FUSION_SIGNATURE_LOGO_URL` | no | If set, integration server rewrites `https://…/email/Fusion-X-logo-02.png` (and legacy `Fusion-Logo-Sig-1.png`) in HTML email bodies to this URL (e.g. CDN) for test/batch send |
 | `LINE_CHANNEL_SECRET` | for LINE webhook | Channel secret — HMAC for `x-line-signature`. Never store on the canister. |
 | `LINE_CHANNEL_ACCESS_TOKEN` | for LINE push | Long-lived **channel access token** (Messaging API → Issue), not the numeric Channel ID. |
+| `LINE_ADMIN_USER_ID` | for Schedule announce test | LINE user ID of the bot admin (1:1 Flex test send). Engineers only — never show in Studio. |
+| `FUSION_PUBLIC_SITE_ORIGIN` | optional | Public site origin for Schedule RSVP links (default `https://www.fusionart.world`). |
 
 ## Scripts
 
 - `npm run dev` — run with `--watch`
 - `npm start` — production
-- `npm test` — LINE webhook signature / event parse + push helpers
+- `npm test` — LINE webhook signature / event parse, push helpers, Schedule Flex announce, scheduled-task tick
 
 ## Routes
 
 - `GET /health` — status flags (no secrets); includes `stripePrice`, `fusionCanister`, `line`, `stripeWebhook`, `storageBackend`, nested `storage: { active, aws, r2 }`, and legacy `s3` (active backend configured)
 - `POST /webhooks/line` — LINE Messaging API webhook (raw JSON, `x-line-signature`); records seen group ids on the canister. URL: `https://<your-api-host>/webhooks/line`
 - `POST /line/push` — body `{ programId, room: "general" | "announce", text }` — push text to the bound LINE group (API key required)
+- `POST /line/announce-schedule` — body `{ programId, test, mode?: "day" | "event", programName?, date?, events: [{ id, title, date, startTime, endTime, allDay, timezone, locationName, imageUrl, acceptRsvp }] }` — push Flex to the Announcements chat (`test: false`) or `LINE_ADMIN_USER_ID` (`test: true`). API key required. Cap 24 events.
+- `GET /scheduled-tasks/health` — `{ ok, dueEstimate, enabled }` for Studio (API key required)
+- `POST /scheduled-tasks/tick` — process due Studio scheduled tasks (host scheduler; API key required)
+- `POST /scheduled-tasks/run` — body `{ taskId }` — send one scheduled task now (API key required)
+
+### Host scheduler (engineers)
+
+Create a Render Cron Job (or equivalent) every 5 minutes:
+
+```
+POST https://fusion-app-sycs.onrender.com/scheduled-tasks/tick
+Authorization: Bearer <INTEGRATION_API_KEY>
+```
+
+Staff manage tasks in Studio → Operations → Scheduled Tasks. Do not expose this URL in the Studio UI.
 - `GET /payments/config` — PayPal mode + `planMonthly` / `planQuarterly` / `planAnnual` / `planBimonthlyLegacy`
 - `POST /payments/subscription` — PayPal membership create (`subscriptionTier`: `monthly` | `quarterly` | `annual`)
 - `POST /payments/subscription/link` — bind pay-first subscription to principal after II

@@ -266,6 +266,8 @@ persistent actor {
   stable var programCommsConfigStableV2 : [(Text, Types.ProgramCommsConfig)] = [];
   stable var programCommsLineSeenStable : [(Text, Types.ProgramCommsLineSeenGroup)] = [];
   stable var programCommsLineBindingStable : [(Text, Types.ProgramCommsLineBinding)] = [];
+  stable var scheduledTasksStable : [(Text, Types.StudioScheduledTask)] = [];
+  stable var scheduledTaskRunsStable : [(Text, [Types.StudioScheduledTaskRun])] = [];
 
   // In-memory hashmap for fast lookups/updates.
   transient var subscribersByEmail : _HashMap.HashMap<Text, Types.Subscriber> =
@@ -376,6 +378,12 @@ persistent actor {
 
   transient var programCommsLineBindingByProgramId : _HashMap.HashMap<Text, Types.ProgramCommsLineBinding> =
     _HashMap.HashMap<Text, Types.ProgramCommsLineBinding>(0, Text.equal, Text.hash);
+
+  transient var scheduledTasksById : _HashMap.HashMap<Text, Types.StudioScheduledTask> =
+    _HashMap.HashMap<Text, Types.StudioScheduledTask>(0, Text.equal, Text.hash);
+
+  transient var scheduledTaskRunsByTaskId : _HashMap.HashMap<Text, [Types.StudioScheduledTaskRun]> =
+    _HashMap.HashMap<Text, [Types.StudioScheduledTaskRun]>(0, Text.equal, Text.hash);
 
   /// slug -> artist id
   transient var artistSlugToId : _HashMap.HashMap<Text, Text> =
@@ -975,6 +983,7 @@ persistent actor {
       "users",
       "services",
       "settings",
+      "scheduled-tasks",
       "team",
     ];
   };
@@ -2243,6 +2252,8 @@ persistent actor {
     );
     programCommsLineSeenStable := _Iter.toArray(programCommsLineSeenById.entries());
     programCommsLineBindingStable := _Iter.toArray(programCommsLineBindingByProgramId.entries());
+    scheduledTasksStable := _Iter.toArray(scheduledTasksById.entries());
+    scheduledTaskRunsStable := _Iter.toArray(scheduledTaskRunsByTaskId.entries());
   };
 
   system func postupgrade() {
@@ -2604,6 +2615,9 @@ persistent actor {
     hydrateProgramCommsLineFromStables();
     programCommsLineSeenStable := [];
     programCommsLineBindingStable := [];
+    hydrateScheduledTasksFromStables();
+    scheduledTasksStable := [];
+    scheduledTaskRunsStable := [];
 
     programPaymentSummariesByKey := _HashMap.HashMap<Text, Types.ProgramPaymentSummary>(0, Text.equal, Text.hash);
     for (entry in programPaymentSummariesStable.vals()) {
@@ -3197,6 +3211,7 @@ persistent actor {
 
     hydrateProgramCommsConfigFromStables();
     hydrateProgramCommsLineFromStables();
+    hydrateScheduledTasksFromStables();
 
     programPaymentSummariesByKey := _HashMap.HashMap<Text, Types.ProgramPaymentSummary>(0, Text.equal, Text.hash);
     for (entry in programPaymentSummariesStable.vals()) {
@@ -3381,6 +3396,8 @@ persistent actor {
       programCommsConfigStableV2 = ?(_Iter.toArray(programCommsConfigById.entries()));
       programCommsLineSeenStable = ?(_Iter.toArray(programCommsLineSeenById.entries()));
       programCommsLineBindingStable = ?(_Iter.toArray(programCommsLineBindingByProgramId.entries()));
+      scheduledTasksStable = ?(_Iter.toArray(scheduledTasksById.entries()));
+      scheduledTaskRunsStable = ?(_Iter.toArray(scheduledTaskRunsByTaskId.entries()));
       joinInvitesStable = _Iter.toArray(joinInvitesByCode.entries());
       joinInviteTrialMonthsStable = ?(_Iter.toArray(joinInviteTrialMonthsByCode.entries()));
       accountRecoveryCodesStable = ?(_Iter.toArray(accountRecoveryCodesByCode.entries()));
@@ -3567,6 +3584,14 @@ persistent actor {
       case (?rows) { rows };
     };
     programCommsLineBindingStable := switch (snapshot.programCommsLineBindingStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    scheduledTasksStable := switch (snapshot.scheduledTasksStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    scheduledTaskRunsStable := switch (snapshot.scheduledTaskRunsStable) {
       case null { [] };
       case (?rows) { rows };
     };
@@ -6890,7 +6915,12 @@ persistent actor {
 
   private func normalizeScheduleColor(raw : Text) : Text {
     let t = Text.trim(raw, #char ' ');
-    if (t == "sage" or t == "blue" or t == "sand" or t == "blush") { t } else { "sage" }
+    if (
+      t == "traveling" or t == "creating" or t == "exploration" or t == "setup"
+      or t == "flights" or t == "presentations" or t == "meals" or t == "external"
+      or t == "workshop" or t == "filming" or t == "tours"
+      or t == "sage" or t == "blue" or t == "sand" or t == "blush"
+    ) { t } else { "creating" }
   };
 
   private func truncateScheduleNotes(raw : Text) : Text {
@@ -7440,7 +7470,7 @@ persistent actor {
       notes = notesSafe;
       reminderMinutes = 0;
       status = "awaiting_confirmation";
-      color = "sage";
+      color = "creating";
       createdAt = now;
       updatedAt = now;
       version = 1;
@@ -11308,9 +11338,7 @@ persistent actor {
     };
   };
 
-  public shared query (msg) func staffIsApplicantSlotSecured(applicantId : Text, programId : Text) : async Bool {
-    assertStaffOrAdmin(msg.caller);
-    assertStudioFeatureVisible(msg.caller, "applicants");
+  private func applicantIdIsSlotSecured(applicantId : Text, programId : Text) : Bool {
     if (applicantRecordHasManualDepositSubmitted(applicantId)) return true;
     if (applicantRecordIsFullySponsored(applicantId)) return true;
 
@@ -11364,6 +11392,12 @@ persistent actor {
       };
     };
     false;
+  };
+
+  public shared query (msg) func staffIsApplicantSlotSecured(applicantId : Text, programId : Text) : async Bool {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "applicants");
+    applicantIdIsSlotSecured(applicantId, programId);
   };
 
   public shared (msg) func upsertApplicant(rec : Types.ApplicantRecord) : async () {
@@ -12046,6 +12080,247 @@ persistent actor {
       { programId = programId; groupGeneralId = prior.groupGeneralId; groupAnnounceId = groupId };
     };
     programCommsLineBindingByProgramId.put(programId, next);
+  };
+
+  public shared (msg) func integrationRecordProgramCommsInvites(programId : Text, applicantIds : [Text]) : async () {
+    assertIntegrationCaller(msg.caller);
+    if (Text.size(programId) == 0) { Debug.trap("programId required") };
+    switch (programCommsConfigById.get(programId)) {
+      case null { Debug.trap("Comms config not found") };
+      case (?cfg) {
+        let nowT = Int.toText(Time.now());
+        let map = _HashMap.HashMap<Text, Text>(cfg.inviteSentAtByApplicant.size() + applicantIds.size(), Text.equal, Text.hash);
+        for (entry in cfg.inviteSentAtByApplicant.vals()) {
+          map.put(entry.0, entry.1);
+        };
+        for (id in applicantIds.vals()) {
+          if (Text.size(id) > 0) {
+            map.put(id, nowT);
+          };
+        };
+        programCommsConfigById.put(
+          programId,
+          { cfg with programId = cfg.programId; inviteSentAtByApplicant = _Iter.toArray(map.entries()); updatedAt = nowT },
+        );
+      };
+    };
+  };
+
+  private func hydrateScheduledTasksFromStables() {
+    scheduledTasksById := _HashMap.HashMap<Text, Types.StudioScheduledTask>(
+      scheduledTasksStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in scheduledTasksStable.vals()) {
+      scheduledTasksById.put(entry.0, entry.1);
+    };
+    scheduledTaskRunsByTaskId := _HashMap.HashMap<Text, [Types.StudioScheduledTaskRun]>(
+      scheduledTaskRunsStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in scheduledTaskRunsStable.vals()) {
+      scheduledTaskRunsByTaskId.put(entry.0, entry.1);
+    };
+  };
+
+  private func inviteSentAtForApplicant(cfg : Types.ProgramCommsConfig, applicantId : Text) : Text {
+    for (entry in cfg.inviteSentAtByApplicant.vals()) {
+      if (entry.0 == applicantId) { return entry.1 };
+    };
+    "";
+  };
+
+  private func normalizeScheduledTask(rec : Types.StudioScheduledTask, nowT : Text, createdBy : Text) : Types.StudioScheduledTask {
+    let prior = scheduledTasksById.get(rec.id);
+    let created = switch (prior) {
+      case (?p) { p.createdAt };
+      case null { if (Text.size(rec.createdAt) > 0) { rec.createdAt } else { nowT } };
+    };
+    let by = switch (prior) {
+      case (?p) { if (Text.size(p.createdBy) > 0) { p.createdBy } else { createdBy } };
+      case null { createdBy };
+    };
+    {
+      rec with
+        id = rec.id;
+        enabled = rec.enabled;
+        skipIfDone = rec.skipIfDone;
+        createdAt = created;
+        updatedAt = nowT;
+        createdBy = by;
+        lockedUntilIso = switch (prior) {
+          case (?p) { p.lockedUntilIso };
+          case null { rec.lockedUntilIso };
+        };
+    };
+  };
+
+  public shared query (msg) func staffListScheduledTasks() : async [Types.StudioScheduledTask] {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "scheduled-tasks");
+    _Iter.toArray(scheduledTasksById.vals());
+  };
+
+  public shared query (msg) func staffGetScheduledTask(taskId : Text) : async ?Types.StudioScheduledTask {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "scheduled-tasks");
+    if (Text.size(taskId) == 0) { return null };
+    scheduledTasksById.get(taskId);
+  };
+
+  public shared (msg) func staffUpsertScheduledTask(rec : Types.StudioScheduledTask) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "scheduled-tasks");
+    if (Text.size(rec.id) == 0) { Debug.trap("id required") };
+    if (Text.size(rec.name) == 0) { Debug.trap("name required") };
+    let nowT = Int.toText(Time.now());
+    scheduledTasksById.put(rec.id, normalizeScheduledTask(rec, nowT, Principal.toText(msg.caller)));
+  };
+
+  public shared (msg) func staffDeleteScheduledTask(taskId : Text) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "scheduled-tasks");
+    if (Text.size(taskId) == 0) { return };
+    ignore scheduledTasksById.remove(taskId);
+    ignore scheduledTaskRunsByTaskId.remove(taskId);
+  };
+
+  public shared query (msg) func staffListScheduledTaskRuns(taskId : Text, limit : Nat) : async [Types.StudioScheduledTaskRun] {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "scheduled-tasks");
+    switch (scheduledTaskRunsByTaskId.get(taskId)) {
+      case null { [] };
+      case (?rows) {
+        if (limit == 0 or rows.size() <= limit) { rows } else {
+          let start = rows.size() - limit;
+          let buf = Buffer.Buffer<Types.StudioScheduledTaskRun>(limit);
+          var i = start;
+          while (i < rows.size()) {
+            buf.add(rows[i]);
+            i += 1;
+          };
+          Buffer.toArray(buf);
+        };
+      };
+    };
+  };
+
+  public shared query (msg) func integrationListEnabledScheduledTasks() : async [Types.StudioScheduledTask] {
+    assertIntegrationCaller(msg.caller);
+    let buf = Buffer.Buffer<Types.StudioScheduledTask>(0);
+    for (task in scheduledTasksById.vals()) {
+      if (task.enabled) { buf.add(task) };
+    };
+    Buffer.toArray(buf);
+  };
+
+  public shared (msg) func integrationClaimScheduledTask(taskId : Text, nowIso : Text, lockUntilIso : Text) : async ?Types.StudioScheduledTask {
+    assertIntegrationCaller(msg.caller);
+    if (Text.size(taskId) == 0) { return null };
+    switch (scheduledTasksById.get(taskId)) {
+      case null { null };
+      case (?task) {
+        if (not task.enabled) { return null };
+        if (Text.size(task.lockedUntilIso) > 0 and Text.size(nowIso) > 0 and task.lockedUntilIso > nowIso) {
+          return null;
+        };
+        let claimed = { task with lockedUntilIso = lockUntilIso };
+        scheduledTasksById.put(taskId, claimed);
+        ?claimed;
+      };
+    };
+  };
+
+  public shared (msg) func integrationCompleteScheduledTaskRun(
+    taskId : Text,
+    run : Types.StudioScheduledTaskRun,
+    nextRunAtIso : Text,
+    enabled : Bool,
+  ) : async () {
+    assertIntegrationCaller(msg.caller);
+    switch (scheduledTasksById.get(taskId)) {
+      case null { Debug.trap("Scheduled task not found") };
+      case (?task) {
+        let nowT = Int.toText(Time.now());
+        scheduledTasksById.put(
+          taskId,
+          {
+            task with
+              enabled = enabled;
+              nextRunAtIso = nextRunAtIso;
+              lockedUntilIso = "";
+              lastRunAt = run.finishedAt;
+              lastStatus = run.status;
+              lastSummary = run.summary;
+              updatedAt = nowT;
+          },
+        );
+        let prior = switch (scheduledTaskRunsByTaskId.get(taskId)) {
+          case null { [] };
+          case (?rows) { rows };
+        };
+        let buf = Buffer.Buffer<Types.StudioScheduledTaskRun>(prior.size() + 1);
+        for (r in prior.vals()) { buf.add(r) };
+        buf.add(run);
+        var kept = Buffer.toArray(buf);
+        if (kept.size() > 50) {
+          let start = kept.size() - 50;
+          let trim = Buffer.Buffer<Types.StudioScheduledTaskRun>(50);
+          var i = start;
+          while (i < kept.size()) {
+            trim.add(kept[i]);
+            i += 1;
+          };
+          kept := Buffer.toArray(trim);
+        };
+        scheduledTaskRunsByTaskId.put(taskId, kept);
+      };
+    };
+  };
+
+  public shared query (msg) func integrationGetScheduledTaskAudience(programId : Text) : async Types.StudioScheduledTaskAudience {
+    assertIntegrationCaller(msg.caller);
+    let comms = programCommsConfigById.get(programId);
+    let locales = switch (programsById.get(programId)) {
+      case null { "" };
+      case (?p) { p.localesJson };
+    };
+    let links = switch (programTravelPrepLinksById.get(programId)) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    let buf = Buffer.Buffer<Types.StudioScheduledTaskAudienceRow>(0);
+    for (row in applicantsById.vals()) {
+      if (row.programId == programId) {
+        let inviteAt = switch (comms) {
+          case null { "" };
+          case (?cfg) { inviteSentAtForApplicant(cfg, row.id) };
+        };
+        let arrival = switch (applicantFlightBookingsById.get(row.id)) {
+          case null { false };
+          case (?b) { Text.size(b.estArrivalDate) > 0 and Text.size(b.estArrivalTime) > 0 };
+        };
+        buf.add({
+          applicantId = row.id;
+          email = row.email;
+          fullName = row.fullName;
+          slotSecured = applicantIdIsSlotSecured(row.id, programId);
+          status = applicantStatusText(row.status);
+          hasArrival = arrival;
+          inviteSentAt = inviteAt;
+        });
+      };
+    };
+    {
+      programId = programId;
+      localesJson = locales;
+      comms = comms;
+      lineBinding = programCommsLineBindingOrEmpty(programId);
+      travelPrepLinks = links;
+      applicants = Buffer.toArray(buf);
+    };
   };
 
   public shared (msg) func staffDeleteTravelPrepLink(programId : Text, linkId : Text) : async () {

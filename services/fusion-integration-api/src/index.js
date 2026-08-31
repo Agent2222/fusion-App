@@ -22,10 +22,20 @@ import {
     fetchLineGroupSummaryName,
     isLinePushRoom,
     normalizeLinePushRoom,
+    pushLineMessages,
     pushLineTextToGroup,
     resolveBoundGroupId,
 } from './line/push.js';
+import {
+    buildDayFlexMessages,
+    buildEventFlexMessages,
+    calendarRsvpUrl,
+    normalizeAnnounceEvents,
+    resolveScheduleAnnounceDestination,
+} from './line/flexSchedule.js';
 import { getIntegrationActor, pushSubscriptionToCanister } from './canisterActor.js';
+import { isScheduledTaskDue } from './scheduledTasks/schedule.js';
+import { processDueScheduledTasks, processOneScheduledTask } from './scheduledTasks/tick.js';
 import {
     getActiveStorage,
     getStorageHealth,
@@ -77,6 +87,8 @@ const resendFrom = process.env.RESEND_FROM || '';
 const resendBroadcastSegmentId = (process.env.RESEND_BROADCAST_SEGMENT_ID || '').trim();
 const lineChannelSecret = (process.env.LINE_CHANNEL_SECRET || '').trim();
 const lineChannelAccessToken = (process.env.LINE_CHANNEL_ACCESS_TOKEN || '').trim();
+const lineAdminUserId = (process.env.LINE_ADMIN_USER_ID || '').trim();
+const fusionPublicSiteOrigin = (process.env.FUSION_PUBLIC_SITE_ORIGIN || '').trim();
 const lineConfigured = Boolean(lineChannelSecret && lineChannelAccessToken);
 /** Optional absolute URL to replace the default site logo in HTML (staff can also paste full URLs in the Studio modal). */
 const fusionSignatureLogoUrl = (process.env.FUSION_SIGNATURE_LOGO_URL || '').trim();
@@ -2434,6 +2446,115 @@ app.post('/stripe/cancel-subscription-at-period-end', requireApiKey, async (req,
     }
 });
 
+async function sendScheduledTaskEmailBatch(messages) {
+    if (!resend) {
+        throw new Error('Resend not configured');
+    }
+    const fromAddr = resendFrom;
+    if (!fromAddr) {
+        throw new Error('Set RESEND_FROM on server');
+    }
+    const ccList = normalizeEmailCcList([]);
+    const results = [];
+    let okCount = 0;
+    let failCount = 0;
+    for (let i = 0; i < messages.length; i += BATCH_CHUNK) {
+        const chunk = messages.slice(i, i + BATCH_CHUNK);
+        for (const m of chunk) {
+            const payload = {
+                from: fromAddr,
+                to: [m.to],
+                subject: String(m.subject || '').slice(0, 998),
+                html: maybeApplyFusionLogoUrl(m.html),
+            };
+            if (ccList.length) payload.cc = ccList;
+            const { data, error } = await resend.emails.send(payload);
+            if (error) {
+                results.push({ to: m.to, ok: false, error: error.message || 'Resend error' });
+                failCount += 1;
+            } else {
+                results.push({ to: m.to, ok: true, id: data?.id });
+                okCount += 1;
+            }
+        }
+        if (i + BATCH_CHUNK < messages.length) {
+            await new Promise((r) => setTimeout(r, BATCH_CHUNK_DELAY_MS));
+        }
+    }
+    return { ok: failCount === 0, okCount, failCount, results };
+}
+
+function scheduledTaskPushLine(opts) {
+    if (!lineChannelAccessToken) {
+        return Promise.reject(new Error('LINE_CHANNEL_ACCESS_TOKEN is not configured'));
+    }
+    return pushLineTextToGroup({
+        groupId: opts.groupId,
+        text: opts.text,
+        accessToken: lineChannelAccessToken,
+    });
+}
+
+app.get('/scheduled-tasks/health', requireApiKey, async (_req, res) => {
+    try {
+        const actor = await getIntegrationActor();
+        if (!actor || typeof actor.integrationListEnabledScheduledTasks !== 'function') {
+            return res.status(503).json({ error: 'Scheduled tasks unavailable — check integration canister identity' });
+        }
+        const listed = await actor.integrationListEnabledScheduledTasks();
+        const now = Date.now();
+        const dueEstimate = (Array.isArray(listed) ? listed : []).filter((t) =>
+            isScheduledTaskDue(t.nextRunAtIso, now),
+        ).length;
+        return res.json({ ok: true, dueEstimate, enabled: Array.isArray(listed) ? listed.length : 0 });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return res.status(500).json({ error: msg });
+    }
+});
+
+app.post('/scheduled-tasks/tick', requireApiKey, async (_req, res) => {
+    try {
+        const actor = await getIntegrationActor();
+        if (!actor || typeof actor.integrationListEnabledScheduledTasks !== 'function') {
+            return res.status(503).json({ error: 'Scheduled tasks unavailable — check integration canister identity' });
+        }
+        const out = await processDueScheduledTasks({
+            actor,
+            sendEmailBatch: sendScheduledTaskEmailBatch,
+            pushLine: scheduledTaskPushLine,
+        });
+        return res.json({ ok: true, ...out });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return res.status(500).json({ error: msg });
+    }
+});
+
+app.post('/scheduled-tasks/run', requireApiKey, async (req, res) => {
+    try {
+        const taskId = String(req.body?.taskId || '').trim();
+        if (!taskId) {
+            return res.status(400).json({ error: 'taskId required' });
+        }
+        const actor = await getIntegrationActor();
+        if (!actor || typeof actor.integrationClaimScheduledTask !== 'function') {
+            return res.status(503).json({ error: 'Scheduled tasks unavailable — check integration canister identity' });
+        }
+        const out = await processOneScheduledTask({
+            actor,
+            taskId,
+            sendEmailBatch: sendScheduledTaskEmailBatch,
+            pushLine: scheduledTaskPushLine,
+        });
+        return res.json({ ok: true, ...out });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const status = /not found|paused|already sending/i.test(msg) ? 400 : 500;
+        return res.status(status).json({ error: msg });
+    }
+});
+
 app.post('/line/push', requireApiKey, async (req, res) => {
     try {
         if (!lineChannelAccessToken) {
@@ -2468,6 +2589,74 @@ app.post('/line/push', requireApiKey, async (req, res) => {
         const status = code === 'LINE_ROOM_UNBOUND' || code === 'LINE_TEXT_REQUIRED' || code === 'LINE_TEXT_TOO_LONG'
             ? 400
             : 500;
+        return res.status(status).json({ error: msg });
+    }
+});
+
+app.post('/line/announce-schedule', requireApiKey, async (req, res) => {
+    try {
+        if (!lineChannelAccessToken) {
+            return res.status(503).json({ error: 'LINE_CHANNEL_ACCESS_TOKEN is not configured' });
+        }
+        const programId = String(req.body?.programId || '').trim();
+        if (!programId) {
+            return res.status(400).json({ error: 'programId required' });
+        }
+        const events = normalizeAnnounceEvents(req.body?.events);
+        if (!events.length) {
+            return res.status(400).json({ error: 'events required' });
+        }
+        const test = Boolean(req.body?.test);
+        let announceGroupId = '';
+        if (!test) {
+            const actor = await getIntegrationActor();
+            if (!actor || typeof actor.integrationGetProgramCommsLineBinding !== 'function') {
+                return res.status(503).json({ error: 'LINE room binding unavailable — check integration canister identity' });
+            }
+            const binding = await actor.integrationGetProgramCommsLineBinding(programId);
+            announceGroupId = resolveBoundGroupId(binding, 'announce');
+        }
+        let dest;
+        try {
+            dest = resolveScheduleAnnounceDestination({
+                test,
+                adminUserId: lineAdminUserId,
+                announceGroupId,
+            });
+        } catch (e) {
+            const code = e && typeof e === 'object' ? e.code : '';
+            const msg = e instanceof Error ? e.message : String(e);
+            const status = code === 'LINE_ADMIN_MISSING' ? 503 : 400;
+            return res.status(status).json({ error: msg });
+        }
+        const rsvpUrl = calendarRsvpUrl(fusionPublicSiteOrigin);
+        const mode = String(req.body?.mode || '').trim() === 'day' ? 'day' : 'event';
+        const programName = String(req.body?.programName || '').trim();
+        const date = String(req.body?.date || events[0]?.date || '');
+        const messages =
+            mode === 'day'
+                ? buildDayFlexMessages({ programName, date, events, rsvpUrl })
+                : buildEventFlexMessages(events[0], { rsvpUrl });
+        await pushLineMessages({
+            to: dest.to,
+            messages,
+            accessToken: lineChannelAccessToken,
+        });
+        return res.json({ ok: true, programId, mode: dest.mode, messageCount: messages.length });
+    } catch (e) {
+        const code = e && typeof e === 'object' ? e.code : '';
+        const msg = e instanceof Error ? e.message : String(e);
+        const status =
+            code === 'LINE_ADMIN_MISSING' || code === 'LINE_TOKEN_MISSING'
+                ? 503
+                : code === 'LINE_ROOM_UNBOUND' ||
+                    code === 'LINE_DEST_MISSING' ||
+                    code === 'LINE_MESSAGES_REQUIRED' ||
+                    code === 'LINE_MESSAGES_TOO_MANY'
+                  ? 400
+                  : typeof e?.status === 'number'
+                    ? e.status
+                    : 500;
         return res.status(status).json({ error: msg });
     }
 });

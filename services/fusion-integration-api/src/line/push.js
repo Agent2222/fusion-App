@@ -111,3 +111,54 @@ export async function pushLineTextToGroup(opts) {
     }
     return res.json().catch(() => ({ ok: true }));
 }
+
+/**
+ * Push one to five LINE message objects (text, flex, etc.) to a group or user.
+ * @param {{ to: string, messages: object[], accessToken: string }} opts
+ */
+export async function pushLineMessages(opts) {
+    const to = String(opts?.to || '').trim();
+    const accessToken = String(opts?.accessToken || '').trim();
+    const messages = Array.isArray(opts?.messages) ? opts.messages : [];
+    if (!to) {
+        const err = new Error('LINE destination is missing');
+        err.code = 'LINE_DEST_MISSING';
+        throw err;
+    }
+    if (!accessToken) {
+        const err = new Error('LINE_CHANNEL_ACCESS_TOKEN is not configured');
+        err.code = 'LINE_TOKEN_MISSING';
+        throw err;
+    }
+    if (!messages.length) {
+        const err = new Error('messages required');
+        err.code = 'LINE_MESSAGES_REQUIRED';
+        throw err;
+    }
+    if (messages.length > 5) {
+        const err = new Error('at most 5 messages per send');
+        err.code = 'LINE_MESSAGES_TOO_MANY';
+        throw err;
+    }
+    const res = await fetch(`${LINE_API_BASE}/message/push`, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ to, messages }),
+    });
+    if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        const lineNotFound = res.status === 404 || /not found/i.test(body);
+        const err = new Error(
+            lineNotFound
+                ? 'LINE could not deliver this message. Add the Fusion Official Account as a friend on this LINE account, then try Send test again.'
+                : body || `LINE push HTTP ${res.status}`,
+        );
+        err.code = 'LINE_PUSH_FAILED';
+        err.status = res.status;
+        throw err;
+    }
+    return res.json().catch(() => ({ ok: true }));
+}
