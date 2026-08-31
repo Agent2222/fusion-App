@@ -3501,7 +3501,7 @@ async function hydrateProgramCommsPanel() {
   tab.toggleAttribute("hidden", !showTab);
   tab.setAttribute("aria-hidden", showTab ? "false" : "true");
   if (!showTab) {
-    root.innerHTML = `<div class="mpd-program-placeholder"><h3>Communications</h3><p class="studio-muted">Program chat rooms appear here when Fusion publishes a LINE invite for a program you are confirmed on.</p></div>`;
+    root.innerHTML = `<div class="mpd-program-placeholder"><h3>Communications</h3><p class="studio-muted">Official chat rooms and app downloads appear here when Fusion publishes communications for a program you are confirmed on.</p></div>`;
     if (tab.classList.contains("is-active")) setMpdProgramsTab("my-programs");
     return;
   }
@@ -3514,33 +3514,78 @@ async function hydrateProgramCommsPanel() {
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
 
+  const storeSlot = (opts) => {
+    const label = String(opts.label || "");
+    const qr = String(opts.qr || "").trim();
+    const href = String(opts.href || "").trim();
+    const thumb = String(opts.thumb || "").trim();
+    return `<div class="mpd-comms-room__slot">
+      ${thumb ? `<img class="mpd-comms-room__store-thumb" src="${esc(thumb)}" alt="" />` : ""}
+      ${qr ? `<img class="mpd-comms-room__qr" src="${esc(qr)}" alt="${esc(label)} download QR" />` : ""}
+      <p class="mpd-comms-room__slot-label">${esc(label)}</p>
+      ${
+        href
+          ? `<a class="studio-btn-ghost mpd-comms-room__join" href="${esc(href)}" target="_blank" rel="noopener noreferrer">Open ${esc(label)}</a>`
+          : ""
+      }
+    </div>`;
+  };
+  const roomSlot = (opts) => {
+    const name = String(opts.name || "").trim() || opts.fallback;
+    const qr = String(opts.qr || "").trim();
+    const href = String(opts.href || "").trim();
+    return `<div class="mpd-comms-room__slot">
+      ${qr ? `<img class="mpd-comms-room__qr" src="${esc(qr)}" alt="Scan to join ${esc(name)}" />` : ""}
+      <p class="mpd-comms-room__slot-label">${esc(name)}</p>
+      ${
+        href
+          ? `<a class="studio-btn-primary mpd-comms-room__join" href="${esc(href)}" target="_blank" rel="noopener noreferrer">Open ${esc(name)}</a>`
+          : ""
+      }
+    </div>`;
+  };
+
   root.innerHTML = rooms
     .map((room) => {
       const program = programs.find((p) => String(p.id || "") === String(room.programId || "")) || null;
       const title = program
         ? getProgramDisplayNameFromRow(program)
-        : String(room.groupName || room.programId || "Program");
+        : String(room.groupGeneralName || room.programId || "Program");
       const message = resolveInviteMessage(room);
-      const thumb = resolveProviderThumbUrl({ ...room, provider: "line" });
-      const join = String(room.groupInviteUrl || "").trim();
-      const qr = String(room.groupQrUrl || "").trim();
+      const thumb = resolveProviderThumbUrl({ ...room, provider: room.provider || "line" });
       return `<article class="mpd-comms-room" data-mpd-comms-program="${esc(room.programId)}">
         <header class="mpd-comms-room__head">
           ${thumb ? `<img class="mpd-comms-room__provider" src="${esc(thumb)}" alt="" />` : ""}
           <div>
             <h3 class="mpd-comms-room__title">${esc(title)}</h3>
-            ${room.groupName ? `<p class="mpd-comms-room__group">${esc(room.groupName)}</p>` : ""}
+            <p class="mpd-comms-room__group">Official chat rooms</p>
           </div>
         </header>
         <p class="mpd-comms-room__invite">${esc(message)}</p>
-        <div class="mpd-comms-room__qr-wrap">
-          ${qr ? `<img class="mpd-comms-room__qr" src="${esc(qr)}" alt="Scan to join the LINE group" />` : ""}
-        </div>
-        ${
-          join
-            ? `<a class="studio-btn-primary mpd-comms-room__join" href="${esc(join)}" target="_blank" rel="noopener noreferrer">Open in LINE</a>`
-            : ""
-        }
+        <section class="mpd-comms-room__section">
+          <h4 class="mpd-comms-room__section-title">Download the app</h4>
+          <div class="mpd-comms-room__pair">
+            ${storeSlot({ label: "iOS", qr: room.iosQrUrl, href: room.iosStoreUrl, thumb: room.iosThumbUrl })}
+            ${storeSlot({ label: "Android", qr: room.androidQrUrl, href: room.androidStoreUrl, thumb: room.androidThumbUrl })}
+          </div>
+        </section>
+        <section class="mpd-comms-room__section">
+          <h4 class="mpd-comms-room__section-title">Join both rooms</h4>
+          <div class="mpd-comms-room__pair">
+            ${roomSlot({
+              name: room.groupGeneralName,
+              fallback: "General",
+              qr: room.groupGeneralQrUrl,
+              href: room.groupGeneralInviteUrl,
+            })}
+            ${roomSlot({
+              name: room.groupAnnounceName,
+              fallback: "Announcements",
+              qr: room.groupAnnounceQrUrl,
+              href: room.groupAnnounceInviteUrl,
+            })}
+          </div>
+        </section>
       </article>`;
     })
     .join("");

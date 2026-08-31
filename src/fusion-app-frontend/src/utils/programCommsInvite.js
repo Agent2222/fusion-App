@@ -1,5 +1,5 @@
 /**
- * Studio Comms — LINE invite helpers (QR URLs, confirmed-applicant gate, Fusion email HTML).
+ * Studio Comms — LINE invite helpers (store + two-room QRs, Fusion email HTML).
  */
 import lineLogoUrl from '../assets/comms/line-logo.png';
 import {
@@ -12,10 +12,15 @@ import {
 export const PROGRAM_COMMS_TEMPLATE_ID = 'tpl_program_comms_line';
 export const LINE_GETTING_STARTED_URL =
     'https://developers.line.biz/en/docs/messaging-api/getting-started/#create-oa-check';
+export const LINE_IOS_STORE_URL = 'https://apps.apple.com/app/line/id443904275';
+export const LINE_ANDROID_STORE_URL = 'https://play.google.com/store/apps/details?id=jp.naver.line.android';
 export const DEFAULT_MEMBER_COMMS_INVITE_MESSAGE =
-    "You're confirmed. Scan the QR or open the link to join the program LINE group.";
+    'The program is coming up quickly. Download the LINE app, then join both official chat rooms.';
 
 export { lineLogoUrl as LINE_PROVIDER_THUMB_URL };
+
+const EMAIL_CTA_RED = '#c12525';
+const EMAIL_CTA_INK = '#111827';
 
 /**
  * @param {string} [programId]
@@ -27,17 +32,37 @@ export function emptyProgramCommsConfig(programId = '') {
         oaName: '',
         basicId: '',
         channelId: '',
-        addFriendUrl: '',
-        groupName: '',
-        groupInviteUrl: '',
-        addFriendQrUrl: '',
-        groupQrUrl: '',
+        iosStoreUrl: LINE_IOS_STORE_URL,
+        androidStoreUrl: LINE_ANDROID_STORE_URL,
+        iosThumbUrl: '',
+        androidThumbUrl: '',
+        iosQrUrl: '',
+        androidQrUrl: '',
+        groupGeneralName: '',
+        groupGeneralInviteUrl: '',
+        groupGeneralQrUrl: '',
+        groupAnnounceName: '',
+        groupAnnounceInviteUrl: '',
+        groupAnnounceQrUrl: '',
         inviteSentAtByApplicant: [],
         memberActive: false,
         inviteMessage: '',
         providerThumbUrl: '',
         updatedAt: '',
     };
+}
+
+function firstNonEmptyText(...values) {
+    for (const value of values) {
+        const text = String(value ?? '').trim();
+        if (text) return text;
+    }
+    return '';
+}
+
+function isHostedImageUrl(url) {
+    const value = String(url || '').trim();
+    return Boolean(value && !value.startsWith('data:'));
 }
 
 /**
@@ -57,20 +82,25 @@ export function normalizeProgramCommsConfig(raw, programId = '') {
               })
               .filter(([id]) => id)
         : [];
-    const basicId = String(row.basicId ?? '').trim();
-    const addFriendUrl = String(row.addFriendUrl ?? '').trim() || addFriendUrlFromBasicId(basicId);
     return {
         ...base,
         programId: String(row.programId ?? programId ?? '').trim() || base.programId,
         provider: String(row.provider ?? 'line').trim() || 'line',
         oaName: String(row.oaName ?? '').trim(),
-        basicId,
+        basicId: String(row.basicId ?? '').trim(),
         channelId: String(row.channelId ?? '').trim(),
-        addFriendUrl,
-        groupName: String(row.groupName ?? '').trim(),
-        groupInviteUrl: String(row.groupInviteUrl ?? '').trim(),
-        addFriendQrUrl: String(row.addFriendQrUrl ?? '').trim(),
-        groupQrUrl: String(row.groupQrUrl ?? '').trim(),
+        iosStoreUrl: firstNonEmptyText(row.iosStoreUrl) || LINE_IOS_STORE_URL,
+        androidStoreUrl: firstNonEmptyText(row.androidStoreUrl) || LINE_ANDROID_STORE_URL,
+        iosThumbUrl: firstNonEmptyText(row.iosThumbUrl),
+        androidThumbUrl: firstNonEmptyText(row.androidThumbUrl),
+        iosQrUrl: firstNonEmptyText(row.iosQrUrl),
+        androidQrUrl: firstNonEmptyText(row.androidQrUrl),
+        groupGeneralName: firstNonEmptyText(row.groupGeneralName, row.groupName),
+        groupGeneralInviteUrl: firstNonEmptyText(row.groupGeneralInviteUrl, row.groupInviteUrl),
+        groupGeneralQrUrl: firstNonEmptyText(row.groupGeneralQrUrl, row.groupQrUrl),
+        groupAnnounceName: firstNonEmptyText(row.groupAnnounceName),
+        groupAnnounceInviteUrl: firstNonEmptyText(row.groupAnnounceInviteUrl),
+        groupAnnounceQrUrl: firstNonEmptyText(row.groupAnnounceQrUrl),
         inviteSentAtByApplicant: pairs,
         memberActive: Boolean(row.memberActive),
         inviteMessage: String(row.inviteMessage ?? '').trim(),
@@ -107,16 +137,22 @@ export function resolveInviteMessage(cfg) {
 }
 
 /**
- * Group join assets exist (member publish + Settings card).
  * @param {unknown} cfg
  */
 export function isProgramCommsMemberReady(cfg) {
     const rec = normalizeProgramCommsConfig(cfg);
-    return Boolean(rec.groupInviteUrl && rec.groupQrUrl && !rec.groupQrUrl.startsWith('data:'));
+    return Boolean(
+        rec.groupGeneralInviteUrl &&
+            rec.groupAnnounceInviteUrl &&
+            isHostedImageUrl(rec.groupGeneralQrUrl) &&
+            isHostedImageUrl(rec.groupAnnounceQrUrl) &&
+            isHostedImageUrl(rec.iosQrUrl) &&
+            isHostedImageUrl(rec.androidQrUrl),
+    );
 }
 
 /**
- * Studio activate is on and the group QR/link are ready.
+ * Studio activate is on and both rooms plus store QRs are ready.
  * @param {unknown} cfg
  */
 export function isMemberCommsRoomReady(cfg) {
@@ -132,11 +168,20 @@ export function toMemberCommsRoom(cfg) {
     return {
         programId: rec.programId,
         provider: rec.provider,
-        groupName: rec.groupName,
-        groupInviteUrl: rec.groupInviteUrl,
-        groupQrUrl: rec.groupQrUrl,
         inviteMessage: rec.inviteMessage,
         providerThumbUrl: rec.providerThumbUrl,
+        iosStoreUrl: rec.iosStoreUrl,
+        androidStoreUrl: rec.androidStoreUrl,
+        iosThumbUrl: rec.iosThumbUrl,
+        androidThumbUrl: rec.androidThumbUrl,
+        iosQrUrl: rec.iosQrUrl,
+        androidQrUrl: rec.androidQrUrl,
+        groupGeneralName: rec.groupGeneralName,
+        groupGeneralInviteUrl: rec.groupGeneralInviteUrl,
+        groupGeneralQrUrl: rec.groupGeneralQrUrl,
+        groupAnnounceName: rec.groupAnnounceName,
+        groupAnnounceInviteUrl: rec.groupAnnounceInviteUrl,
+        groupAnnounceQrUrl: rec.groupAnnounceQrUrl,
     };
 }
 
@@ -157,7 +202,7 @@ export function filterMemberCommsRooms(configs, slotSecuredIds) {
 }
 
 /**
- * Official Account add-friend URL from Basic ID (`@…`).
+ * Official Account add-friend URL from Basic ID (`@…`). Console notes only.
  * @param {string} basicId
  */
 export function addFriendUrlFromBasicId(basicId) {
@@ -168,19 +213,11 @@ export function addFriendUrlFromBasicId(basicId) {
 }
 
 /**
- * Config is ready to email when both join URLs and hosted QR images exist.
+ * Config is ready to email when both store QRs and both room QRs/URLs are hosted.
  * @param {unknown} cfg
  */
 export function isProgramCommsInviteReady(cfg) {
-    const rec = normalizeProgramCommsConfig(cfg);
-    return Boolean(
-        rec.addFriendUrl &&
-            rec.groupInviteUrl &&
-            rec.addFriendQrUrl &&
-            rec.groupQrUrl &&
-            !rec.addFriendQrUrl.startsWith('data:') &&
-            !rec.groupQrUrl.startsWith('data:'),
-    );
+    return isProgramCommsMemberReady(cfg);
 }
 
 /**
@@ -244,11 +281,21 @@ export function formatCommsInviteSentAt(raw) {
 }
 
 /**
+ * @param {string} [provider]
+ */
+export function providerAppLabel(provider) {
+    const key = String(provider || 'line').trim().toLowerCase();
+    if (key === 'whatsapp') return 'WhatsApp';
+    if (key === 'slack') return 'Slack';
+    return 'LINE';
+}
+
+/**
  * @param {string} [programName]
  */
 export function buildProgramCommsInviteSubject(programName) {
     const name = String(programName || '').trim() || 'the program';
-    return `Join the ${name} LINE chat`;
+    return `The ${name} Official Chat Rooms`;
 }
 
 /**
@@ -256,25 +303,53 @@ export function buildProgramCommsInviteSubject(programName) {
  */
 export function buildProgramCommsInvitePreview(programName) {
     const name = String(programName || '').trim() || 'the program';
-    return `Add Fusion on LINE and join the ${name} group.`;
+    return `Download the app, then join both official ${name} chat rooms.`;
 }
 
-function qrPairHtml(addFriendQrUrl, groupQrUrl) {
-    const friend = String(addFriendQrUrl || '').trim();
-    const group = String(groupQrUrl || '').trim();
-    if (!friend && !group) return '';
-    const cell = (src, caption) =>
-        src
-            ? `<td align="center" valign="top" width="50%" style="padding:8px;">
-<img src="${escapeHtmlForEmailLayout(src)}" alt="${escapeHtmlForEmailLayout(caption)}" width="180" style="display:block;margin:0 auto 10px;width:180px;height:auto;border:0;" />
-<p style="margin:0;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;font-weight:700;color:#000000;">${escapeHtmlForEmailLayout(caption)}</p>
-</td>`
-            : '<td width="50%"></td>';
+/**
+ * In-body CTA — Fusion red or ink. Do not use layout `ctaSecondary` (sage green).
+ * @param {string} label
+ * @param {string} href
+ * @param {string} [bg]
+ */
+function emailInBodyCta(label, href, bg = EMAIL_CTA_RED) {
+    const text = String(label || '').trim();
+    const url = String(href || '').trim();
+    if (!text || !url) return '';
+    return `<a href="${escapeHtmlForEmailLayout(url)}" style="display:inline-block;background:${escapeHtmlForEmailLayout(bg)};color:#ffffff;text-decoration:none;padding:12px 16px;font-size:12px;font-weight:800;letter-spacing:0.08em;">${escapeHtmlForEmailLayout(text)}</a>`;
+}
+
+/**
+ * @param {{ src?: string, caption?: string, ctaLabel?: string, href?: string, ctaBg?: string }} left
+ * @param {{ src?: string, caption?: string, ctaLabel?: string, href?: string, ctaBg?: string }} right
+ */
+function qrPairWithCtasHtml(left, right) {
+    const cell = (slot) => {
+        const src = String(slot?.src || '').trim();
+        const caption = String(slot?.caption || '').trim();
+        const cta = emailInBodyCta(slot?.ctaLabel, slot?.href, slot?.ctaBg || EMAIL_CTA_INK);
+        if (!src && !cta) return '<td width="50%"></td>';
+        const img = src
+            ? `<img src="${escapeHtmlForEmailLayout(src)}" alt="${escapeHtmlForEmailLayout(caption)}" width="180" style="display:block;margin:0 auto 10px;width:180px;height:auto;border:0;" />`
+            : '';
+        const cap = caption
+            ? `<p style="margin:0 0 10px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;font-weight:700;color:#000000;">${escapeHtmlForEmailLayout(caption)}</p>`
+            : '';
+        return `<td align="center" valign="top" width="50%" style="padding:8px;">
+${img}
+${cap}
+${cta}
+</td>`;
+    };
     return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:8px 0 24px;">
 <tbody><tr>
-${cell(friend, 'Add Fusion')}
-${cell(group, 'Join the group')}
+${cell(left)}
+${cell(right)}
 </tr></tbody></table>`;
+}
+
+function emailStepHeading(label) {
+    return `<p style="margin:8px 0 12px;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;font-weight:800;color:#000000;">${escapeHtmlForEmailLayout(label)}</p>`;
 }
 
 /**
@@ -282,52 +357,77 @@ ${cell(group, 'Join the group')}
  *   programName?: string,
  *   heroImageUrl?: string,
  *   heroAlt?: string,
- *   addFriendUrl?: string,
- *   groupInviteUrl?: string,
- *   addFriendQrUrl?: string,
- *   groupQrUrl?: string,
+ *   provider?: string,
+ *   iosStoreUrl?: string,
+ *   androidStoreUrl?: string,
+ *   iosQrUrl?: string,
+ *   androidQrUrl?: string,
+ *   groupGeneralName?: string,
+ *   groupGeneralInviteUrl?: string,
+ *   groupGeneralQrUrl?: string,
+ *   groupAnnounceName?: string,
+ *   groupAnnounceInviteUrl?: string,
+ *   groupAnnounceQrUrl?: string,
  *   applicantName?: string,
- *   groupName?: string,
  *   oaName?: string,
  * }} opts
  */
 export function programCommsInviteSlots(opts = {}) {
     const programName = String(opts.programName || '').trim() || 'the program';
     const applicantName = String(opts.applicantName || '').trim();
-    const groupName = String(opts.groupName || '').trim();
-    const oaName = String(opts.oaName || '').trim() || 'Fusion';
+    const providerLabel = providerAppLabel(opts.provider);
     const greeting = applicantName
         ? `Hi ${escapeHtmlForEmailLayout(applicantName)},`
         : 'Hello,';
-    const room = groupName
-        ? ` the ${escapeHtmlForEmailLayout(groupName)} LINE group`
-        : ' the program LINE group';
+    const generalName = String(opts.groupGeneralName || '').trim() || 'General';
+    const announceName = String(opts.groupAnnounceName || '').trim() || 'Announcements';
     return {
         eyebrow: 'Program Comms',
         heroImageUrl: String(opts.heroImageUrl || '').trim(),
         heroAlt: String(opts.heroAlt || programName).trim(),
-        pillLabel: 'LINE',
-        headlineHtml: 'Join the<br>LINE chat',
+        pillLabel: 'COMMUNICATIONS',
+        headlineHtml: `The ${escapeHtmlForEmailLayout(programName)}<br>Official Chat Rooms`,
         bodyHtml: [
             fusionEmailParagraph(greeting, 'lead'),
             fusionEmailParagraph(
-                `You are confirmed for ${escapeHtmlForEmailLayout(programName)}. Add ${escapeHtmlForEmailLayout(oaName)} on LINE, then scan or tap to join${room}.`,
+                `${escapeHtmlForEmailLayout(programName)} is coming up quickly. Download the ${escapeHtmlForEmailLayout(providerLabel)} app, then join both official chat rooms.`,
             ),
-            qrPairHtml(opts.addFriendQrUrl, opts.groupQrUrl),
-            fusionEmailParagraph(
-                'Save both links. The Official Account is Fusion’s public LINE; the group is the shared program room.',
-                'last',
+            emailStepHeading('Step 1 — Download'),
+            qrPairWithCtasHtml(
+                {
+                    src: opts.iosQrUrl,
+                    caption: 'iOS',
+                    ctaLabel: 'iOS',
+                    href: opts.iosStoreUrl,
+                    ctaBg: EMAIL_CTA_INK,
+                },
+                {
+                    src: opts.androidQrUrl,
+                    caption: 'Android',
+                    ctaLabel: 'Android',
+                    href: opts.androidStoreUrl,
+                    ctaBg: EMAIL_CTA_INK,
+                },
+            ),
+            emailStepHeading('Step 2 — Join both rooms'),
+            qrPairWithCtasHtml(
+                {
+                    src: opts.groupGeneralQrUrl,
+                    caption: generalName,
+                    ctaLabel: `Join ${generalName}`,
+                    href: opts.groupGeneralInviteUrl,
+                    ctaBg: EMAIL_CTA_RED,
+                },
+                {
+                    src: opts.groupAnnounceQrUrl,
+                    caption: announceName,
+                    ctaLabel: `Join ${announceName}`,
+                    href: opts.groupAnnounceInviteUrl,
+                    ctaBg: EMAIL_CTA_RED,
+                },
             ),
         ].join('\n'),
-        cta: {
-            label: 'ADD FUSION ON LINE',
-            href: String(opts.addFriendUrl || '').trim() || 'https://line.me',
-        },
-        ctaSecondary: {
-            label: 'JOIN THE GROUP',
-            href: String(opts.groupInviteUrl || '').trim() || 'https://line.me',
-        },
-        footnote: 'Questions? Reply to this email or write the Fusion team in LINE.',
+        footnote: 'Questions? Reply to this email or write the Fusion team in the chat rooms.',
     };
 }
 
@@ -347,12 +447,18 @@ export function sampleProgramCommsInviteHtml() {
         heroImageUrl:
             'https://fusionart-bucket.s3.us-east-2.amazonaws.com/uploads/platform-assets/program_hero-1.jpg',
         heroAlt: 'Kaga City, Ishikawa',
-        addFriendUrl: 'https://line.me/R/ti/p/@fusion',
-        groupInviteUrl: 'https://line.me/R/ti/g/example',
-        addFriendQrUrl: 'https://fusionart.world/email/Fusion-X-logo-02.png',
-        groupQrUrl: 'https://fusionart.world/email/Fusion-Logo-Sig-1.png',
+        provider: 'line',
+        iosStoreUrl: LINE_IOS_STORE_URL,
+        androidStoreUrl: LINE_ANDROID_STORE_URL,
+        iosQrUrl: 'https://fusionart.world/email/Fusion-X-logo-02.png',
+        androidQrUrl: 'https://fusionart.world/email/Fusion-Logo-Sig-1.png',
+        groupGeneralName: 'General',
+        groupAnnounceName: 'Announcements',
+        groupGeneralInviteUrl: 'https://line.me/R/ti/g/general',
+        groupAnnounceInviteUrl: 'https://line.me/R/ti/g/announce',
+        groupGeneralQrUrl: 'https://fusionart.world/email/Fusion-X-logo-02.png',
+        groupAnnounceQrUrl: 'https://fusionart.world/email/Fusion-Logo-Sig-1.png',
         applicantName: 'Alex',
-        groupName: 'Kaga Fall 2026',
         oaName: 'Fusion',
     });
 }
@@ -418,12 +524,18 @@ export function collectProgramCommsInviteMessages(opts) {
         html: renderProgramCommsInviteHtml({
             programName,
             heroImageUrl,
-            addFriendUrl: cfg.addFriendUrl,
-            groupInviteUrl: cfg.groupInviteUrl,
-            addFriendQrUrl: cfg.addFriendQrUrl,
-            groupQrUrl: cfg.groupQrUrl,
+            provider: cfg.provider,
+            iosStoreUrl: cfg.iosStoreUrl,
+            androidStoreUrl: cfg.androidStoreUrl,
+            iosQrUrl: cfg.iosQrUrl,
+            androidQrUrl: cfg.androidQrUrl,
+            groupGeneralName: cfg.groupGeneralName,
+            groupGeneralInviteUrl: cfg.groupGeneralInviteUrl,
+            groupGeneralQrUrl: cfg.groupGeneralQrUrl,
+            groupAnnounceName: cfg.groupAnnounceName,
+            groupAnnounceInviteUrl: cfg.groupAnnounceInviteUrl,
+            groupAnnounceQrUrl: cfg.groupAnnounceQrUrl,
             applicantName: String(row.fullName || '').trim(),
-            groupName: cfg.groupName,
             oaName: cfg.oaName,
         }),
         applicantId: String(row.id || ''),
@@ -435,5 +547,6 @@ export function collectProgramCommsInviteMessages(opts) {
  * @param {string} html
  */
 export function isProgramCommsInviteHtml(html) {
-    return isFusionEmailLayout(html) && /JOIN THE GROUP/i.test(String(html || ''));
+    const text = String(html || '');
+    return isFusionEmailLayout(text) && /COMMUNICATIONS/i.test(text) && /Official Chat Rooms/i.test(text);
 }

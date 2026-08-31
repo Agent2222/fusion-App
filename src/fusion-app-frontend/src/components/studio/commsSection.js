@@ -11,7 +11,10 @@ import {
     getProgramDisplayNameFromRow,
     getPrograms,
     staffGetProgramCommsConfig,
+    staffGetProgramCommsLineBinding,
+    staffListSeenLineGroups,
     staffRecordProgramCommsInvites,
+    staffSetProgramCommsLineRoom,
     staffUpsertProgramCommsConfig,
 } from '../../utils/database.js';
 import { getApplicantSlotSecuredStudio } from '../../utils/database.js';
@@ -19,10 +22,9 @@ import { getApplicantManualDepositSubmitted } from '../../utils/studioPlainForms
 import { firstNonEmptyString } from '../../utils/localeFallback.js';
 import { uploadBlobToS3 } from '../../utils/studioS3Upload.js';
 import { prepareImageFileForUpload } from '../../utils/imageUploadPrep.js';
-import { sendEmail, sendEmailBatch } from '../../utils/integrationApi.js';
+import { sendEmail, sendEmailBatch, sendLineGroupMessage } from '../../utils/integrationApi.js';
 import { buildStudioEmailCcList } from '../../utils/studioEmailCc.js';
 import {
-    addFriendUrlFromBasicId,
     applicantPublicEmail,
     collectProgramCommsInviteMessages,
     confirmedApplicantsForComms,
@@ -31,7 +33,9 @@ import {
     inviteSentAtMap,
     isProgramCommsInviteReady,
     isProgramCommsMemberReady,
+    LINE_ANDROID_STORE_URL,
     LINE_GETTING_STARTED_URL,
+    LINE_IOS_STORE_URL,
     normalizeProgramCommsConfig,
     resolveInviteMessage,
     resolveProviderThumbUrl,
@@ -49,9 +53,10 @@ import {
 export function renderComms() {
     return `
     <div class="studio-section-stack studio-category-page studio-comms-page">
-        ${studioPageHeaderHtml({ title: 'Comms', subtitle: 'LINE Official Account and group invites for confirmed applicants.', countId: 'studio-comms-header-count', countLabel: 'Invites sent' })}
+        ${studioPageHeaderHtml({ title: 'Comms', subtitle: 'LINE app downloads and two official chat rooms for confirmed applicants.', countId: 'studio-comms-header-count', countLabel: 'Invites sent' })}
         <div class="studio-comms-program-cards-rail" id="studio-comms-program-cards" role="list" aria-label="Program comms cards"></div>
         <div id="studio-comms-setup-host"></div>
+        <div id="studio-comms-line-rooms"></div>
         <div class="studio-comms-invites" id="studio-comms-invites-host"></div>
         ${studioFilterBarHtml({ searchId: 'studio-comms-search', searchPlaceholder: 'Search by name or email…' })}
         <table>
@@ -65,7 +70,7 @@ export function renderComms() {
             </thead>
             <tbody id="studio-comms-tbody"></tbody>
         </table>
-        <p class="studio-muted" id="studio-comms-empty-msg" hidden>Select a program above to set up LINE and send invites.</p>
+        <p class="studio-muted" id="studio-comms-empty-msg" hidden>Select a program above to set up chat rooms and send invites.</p>
     </div>`;
 }
 
@@ -86,9 +91,15 @@ export async function initComms(mainEl) {
     let searchTerm = '';
     let saveBusy = false;
     let sendBusy = false;
+    let lineBusy = false;
+    /** @type {{ groupId: string, groupName: string, lastSeenAt: string }[]} */
+    let lineSeen = [];
+    /** @type {{ programId: string, groupGeneralId: string, groupAnnounceId: string }} */
+    let lineBinding = { programId: '', groupGeneralId: '', groupAnnounceId: '' };
 
     const cardsRail = mainEl.querySelector('#studio-comms-program-cards');
     const setupHost = mainEl.querySelector('#studio-comms-setup-host');
+    const lineRoomsHost = mainEl.querySelector('#studio-comms-line-rooms');
     const invitesHost = mainEl.querySelector('#studio-comms-invites-host');
     const tbody = mainEl.querySelector('#studio-comms-tbody');
     const countEl = mainEl.querySelector('#studio-comms-header-count');
@@ -137,6 +148,7 @@ export async function initComms(mainEl) {
         );
         paintProgramCards();
         renderSetup();
+        await loadLineRooms();
         renderInvitesBar();
         renderTable();
     }
@@ -165,18 +177,24 @@ export async function initComms(mainEl) {
             return;
         }
         const cfg = currentConfig();
-        const addFriendUrl = cfg.addFriendUrl || addFriendUrlFromBasicId(cfg.basicId);
         const readonly = canEdit ? '' : 'disabled';
         const memberReady = isProgramCommsMemberReady(cfg);
         const thumbUrl = resolveProviderThumbUrl(cfg);
         const hasCustomThumb = Boolean(cfg.providerThumbUrl);
+        const storeThumb = (url, alt) =>
+            url
+                ? `<img src="${escapeHtml(url)}" alt="${escapeHtml(alt)}" />`
+                : '<span class="studio-comms-setup__thumb-empty">No image</span>';
+        const qrCell = (url, label) =>
+            url
+                ? `<div class="studio-comms-setup__qr"><img src="${escapeHtml(url)}" alt="${escapeHtml(label)}" /><span>${escapeHtml(label)}</span></div>`
+                : '';
         setupHost.innerHTML = `
         <div class="studio-comms-setup">
             <h3 class="studio-comms-setup__heading">LINE setup</h3>
             <p class="studio-comms-setup__help">
-                Create a LINE Official Account, enable Messaging API, then copy the Basic ID and channel IDs from the
-                Developers Console. Staff create the program group in the LINE app and paste the shareable invite URL.
-                LINE cannot create group rooms via API.
+                Create a LINE Official Account, then add General and Announcements group chats in the LINE app and paste
+                their invite URLs. Basic ID and channel IDs are optional console notes — they are not used for invite QRs.
                 <a href="${escapeHtml(LINE_GETTING_STARTED_URL)}" target="_blank" rel="noopener noreferrer">LINE getting started</a>
             </p>
             <div class="studio-comms-setup__publish">
@@ -184,7 +202,7 @@ export async function initComms(mainEl) {
                     <input type="checkbox" class="studio-checkbox" id="studio-comms-member-active" ${cfg.memberActive ? 'checked' : ''} ${canEdit && memberReady ? '' : 'disabled'} />
                     <span>Show in member Settings → Communications</span>
                 </label>
-                <p class="studio-comms-setup__note">${memberReady ? 'Confirmed applicants see the group QR when this is on.' : 'Save the group invite URL (and QR) before activating the member tab.'}</p>
+                <p class="studio-comms-setup__note">${memberReady ? 'Confirmed applicants see both rooms and store downloads when this is on.' : 'Save both room invite URLs and both store QRs before activating the member tab.'}</p>
             </div>
             <div class="studio-comms-setup__thumb">
                 <div class="studio-comms-setup__thumb-preview">
@@ -216,19 +234,10 @@ export async function initComms(mainEl) {
                     <input type="text" class="studio-input" id="studio-comms-oa-name" value="${escapeHtml(cfg.oaName)}" placeholder="Fusion" ${readonly} />
                 </label>
                 <label class="studio-field"><span>Basic ID</span>
-                    <input type="text" class="studio-input" id="studio-comms-basic-id" value="${escapeHtml(cfg.basicId)}" placeholder="@fusion" ${readonly} />
-                </label>
-                <label class="studio-field"><span>Add-friend URL</span>
-                    <input type="url" class="studio-input" id="studio-comms-add-friend-url" value="${escapeHtml(addFriendUrl)}" readonly />
+                    <input type="text" class="studio-input" id="studio-comms-basic-id" value="${escapeHtml(cfg.basicId)}" placeholder="@fusion (optional note)" ${readonly} />
                 </label>
                 <label class="studio-field"><span>Channel ID</span>
-                    <input type="text" class="studio-input" id="studio-comms-channel-id" value="${escapeHtml(cfg.channelId)}" placeholder="Public channel ID" ${readonly} />
-                </label>
-                <label class="studio-field"><span>Group name</span>
-                    <input type="text" class="studio-input" id="studio-comms-group-name" value="${escapeHtml(cfg.groupName)}" placeholder="Kaga Fall 2026" ${readonly} />
-                </label>
-                <label class="studio-field studio-field--wide"><span>Group invite URL</span>
-                    <input type="url" class="studio-input" id="studio-comms-group-url" value="${escapeHtml(cfg.groupInviteUrl)}" placeholder="https://line.me/R/ti/g/…" ${readonly} />
+                    <input type="text" class="studio-input" id="studio-comms-channel-id" value="${escapeHtml(cfg.channelId)}" placeholder="Optional console note" ${readonly} />
                 </label>
                 <label class="studio-field studio-field--wide"><span>Invitation text (optional)</span>
                     <textarea class="studio-input" id="studio-comms-invite-message" rows="3" placeholder="${escapeHtml(resolveInviteMessage({}))}" ${readonly}>${escapeHtml(cfg.inviteMessage)}</textarea>
@@ -243,17 +252,66 @@ export async function initComms(mainEl) {
                     <p class="studio-comms-setup__note">Paste only when we add webhook / push. Not persisted this cut.</p>
                 </label>
             </div>
+            <h4 class="studio-comms-setup__subhead">App download</h4>
+            <p class="studio-comms-setup__note">Store URLs default to the official LINE listings. Upload a thumbnail for each store if you want a branded tile.</p>
+            <div class="studio-comms-setup__stores">
+                <div class="studio-comms-setup__store">
+                    <div class="studio-comms-setup__store-thumb">${storeThumb(cfg.iosThumbUrl, 'iOS')}</div>
+                    <div>
+                        <p class="studio-comms-setup__thumb-label">iOS</p>
+                        ${
+                            canEdit
+                                ? `<div class="studio-comms-setup__thumb-actions">
+                            <input type="file" class="studio-sr-only" accept="image/*" id="studio-comms-ios-thumb-file" />
+                            <button type="button" class="studio-btn-ghost" id="studio-comms-ios-thumb-upload">Upload</button>
+                            ${cfg.iosThumbUrl ? '<button type="button" class="studio-btn-ghost" id="studio-comms-ios-thumb-clear">Clear</button>' : ''}
+                        </div>`
+                                : ''
+                        }
+                        <label class="studio-field"><span>App Store URL</span>
+                            <input type="url" class="studio-input" id="studio-comms-ios-url" value="${escapeHtml(cfg.iosStoreUrl)}" placeholder="${escapeHtml(LINE_IOS_STORE_URL)}" ${readonly} />
+                        </label>
+                    </div>
+                </div>
+                <div class="studio-comms-setup__store">
+                    <div class="studio-comms-setup__store-thumb">${storeThumb(cfg.androidThumbUrl, 'Android')}</div>
+                    <div>
+                        <p class="studio-comms-setup__thumb-label">Android</p>
+                        ${
+                            canEdit
+                                ? `<div class="studio-comms-setup__thumb-actions">
+                            <input type="file" class="studio-sr-only" accept="image/*" id="studio-comms-android-thumb-file" />
+                            <button type="button" class="studio-btn-ghost" id="studio-comms-android-thumb-upload">Upload</button>
+                            ${cfg.androidThumbUrl ? '<button type="button" class="studio-btn-ghost" id="studio-comms-android-thumb-clear">Clear</button>' : ''}
+                        </div>`
+                                : ''
+                        }
+                        <label class="studio-field"><span>Google Play URL</span>
+                            <input type="url" class="studio-input" id="studio-comms-android-url" value="${escapeHtml(cfg.androidStoreUrl)}" placeholder="${escapeHtml(LINE_ANDROID_STORE_URL)}" ${readonly} />
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <h4 class="studio-comms-setup__subhead">Chat rooms</h4>
+            <div class="studio-comms-setup__grid">
+                <label class="studio-field"><span>General name</span>
+                    <input type="text" class="studio-input" id="studio-comms-group-general-name" value="${escapeHtml(cfg.groupGeneralName)}" placeholder="General" ${readonly} />
+                </label>
+                <label class="studio-field"><span>Announcements name</span>
+                    <input type="text" class="studio-input" id="studio-comms-group-announce-name" value="${escapeHtml(cfg.groupAnnounceName)}" placeholder="Announcements" ${readonly} />
+                </label>
+                <label class="studio-field studio-field--wide"><span>General invite URL</span>
+                    <input type="url" class="studio-input" id="studio-comms-group-general-url" value="${escapeHtml(cfg.groupGeneralInviteUrl)}" placeholder="https://line.me/R/ti/g/…" ${readonly} />
+                </label>
+                <label class="studio-field studio-field--wide"><span>Announcements invite URL</span>
+                    <input type="url" class="studio-input" id="studio-comms-group-announce-url" value="${escapeHtml(cfg.groupAnnounceInviteUrl)}" placeholder="https://line.me/R/ti/g/…" ${readonly} />
+                </label>
+            </div>
             <div class="studio-comms-setup__qrs">
-                ${
-                    cfg.addFriendQrUrl
-                        ? `<div class="studio-comms-setup__qr"><img src="${escapeHtml(cfg.addFriendQrUrl)}" alt="Add-friend QR" /><span>Add friend</span></div>`
-                        : ''
-                }
-                ${
-                    cfg.groupQrUrl
-                        ? `<div class="studio-comms-setup__qr"><img src="${escapeHtml(cfg.groupQrUrl)}" alt="Group invite QR" /><span>Group join</span></div>`
-                        : ''
-                }
+                ${qrCell(cfg.iosQrUrl, 'iOS store')}
+                ${qrCell(cfg.androidQrUrl, 'Android store')}
+                ${qrCell(cfg.groupGeneralQrUrl, 'General')}
+                ${qrCell(cfg.groupAnnounceQrUrl, 'Announcements')}
             </div>
             ${
                 canEdit
@@ -264,6 +322,151 @@ export async function initComms(mainEl) {
                     : ''
             }
         </div>`;
+    }
+
+    function lineGroupLabel(groupId) {
+        const id = String(groupId || '').trim();
+        if (!id) return 'Not linked';
+        const row = lineSeen.find((g) => g.groupId === id);
+        return row?.groupName ? `${row.groupName}` : id;
+    }
+
+    async function loadLineRooms() {
+        if (!selectedProgramId) {
+            lineSeen = [];
+            lineBinding = { programId: '', groupGeneralId: '', groupAnnounceId: '' };
+            renderLineRooms();
+            return;
+        }
+        try {
+            const [seen, binding] = await Promise.all([
+                staffListSeenLineGroups().catch(() => []),
+                staffGetProgramCommsLineBinding(selectedProgramId).catch(() => ({
+                    programId: selectedProgramId,
+                    groupGeneralId: '',
+                    groupAnnounceId: '',
+                })),
+            ]);
+            lineSeen = Array.isArray(seen) ? seen : [];
+            lineBinding = binding || { programId: selectedProgramId, groupGeneralId: '', groupAnnounceId: '' };
+        } catch {
+            lineSeen = [];
+            lineBinding = { programId: selectedProgramId, groupGeneralId: '', groupAnnounceId: '' };
+        }
+        renderLineRooms();
+    }
+
+    function renderLineRooms() {
+        if (!lineRoomsHost) return;
+        if (!selectedProgramId) {
+            lineRoomsHost.innerHTML = '';
+            return;
+        }
+        const live = getDataSource() === 'live';
+        const generalId = String(lineBinding.groupGeneralId || '').trim();
+        const announceId = String(lineBinding.groupAnnounceId || '').trim();
+        const bound = new Set([generalId, announceId].filter(Boolean));
+        const inbox = lineSeen.filter((g) => g.groupId && !bound.has(g.groupId));
+        const roomRow = (room, label, groupId) => `
+            <div class="studio-comms-line-rooms__linked">
+                <div>
+                    <p class="studio-comms-setup__thumb-label">${escapeHtml(label)}</p>
+                    <p class="studio-comms-setup__note">${groupId ? escapeHtml(lineGroupLabel(groupId)) : 'Not linked'}</p>
+                    ${groupId ? `<p class="studio-comms-line-rooms__id">${escapeHtml(groupId)}</p>` : ''}
+                </div>
+                ${
+                    canEdit && groupId
+                        ? `<button type="button" class="studio-btn-ghost" data-comms-line-unassign="${escapeHtml(room)}">Unassign</button>`
+                        : ''
+                }
+            </div>`;
+        const inboxHtml = inbox.length
+            ? inbox
+                  .map(
+                      (g) => `<li class="studio-comms-line-rooms__inbox-item">
+                <div>
+                    <strong>${escapeHtml(g.groupName || g.groupId)}</strong>
+                    <p class="studio-comms-line-rooms__id">${escapeHtml(g.groupId)}</p>
+                </div>
+                ${
+                    canEdit
+                        ? `<div class="studio-comms-line-rooms__assign">
+                    <button type="button" class="studio-btn-ghost" data-comms-line-assign="general" data-comms-line-group="${escapeHtml(g.groupId)}">General</button>
+                    <button type="button" class="studio-btn-ghost" data-comms-line-assign="announce" data-comms-line-group="${escapeHtml(g.groupId)}">Announcements</button>
+                </div>`
+                        : ''
+                }
+            </li>`,
+                  )
+                  .join('')
+            : '<li class="studio-comms-setup__note">No unassigned LINE groups yet. Add the bot to a group (or send a message there), then refresh.</li>';
+        const sendDisabled = !canEdit || !live;
+        lineRoomsHost.innerHTML = `
+        <div class="studio-comms-setup studio-comms-line-rooms">
+            <h3 class="studio-comms-setup__heading">LINE rooms</h3>
+            <p class="studio-comms-setup__help">Webhook groups appear here. Assign one to General and one to Announcements, then send text from Studio.</p>
+            ${roomRow('general', 'General', generalId)}
+            ${roomRow('announce', 'Announcements', announceId)}
+            <h4 class="studio-comms-setup__subhead">Unassigned groups</h4>
+            <ul class="studio-comms-line-rooms__inbox">${inboxHtml}</ul>
+            ${
+                canEdit
+                    ? `<label class="studio-field studio-field--wide"><span>Message</span>
+                <textarea class="studio-input" id="studio-comms-line-message" rows="3" placeholder="Text to send into a linked room" ${sendDisabled ? 'disabled' : ''}></textarea>
+            </label>
+            <div class="studio-comms-setup__actions">
+                <button type="button" class="studio-btn-primary" id="studio-comms-line-send-general" ${sendDisabled || !generalId ? 'disabled' : ''}>Send to General</button>
+                <button type="button" class="studio-btn-primary" id="studio-comms-line-send-announce" ${sendDisabled || !announceId ? 'disabled' : ''}>Send to Announcements</button>
+                <span class="studio-muted" id="studio-comms-line-status">${live ? '' : 'Switch to live data source to send.'}</span>
+            </div>`
+                    : ''
+            }
+        </div>`;
+    }
+
+    function setLineStatus(text, kind = '') {
+        const el = mainEl.querySelector('#studio-comms-line-status');
+        if (!el) return;
+        el.textContent = text;
+        el.className = `studio-muted${kind ? ` studio-comms-status--${kind}` : ''}`;
+    }
+
+    async function assignLineRoom(room, groupId) {
+        if (!canEdit || !selectedProgramId || lineBusy) return;
+        lineBusy = true;
+        setLineStatus('Assigning…');
+        try {
+            await staffSetProgramCommsLineRoom(selectedProgramId, room, groupId);
+            await loadLineRooms();
+            setLineStatus('Assigned.', 'ok');
+        } catch (err) {
+            setLineStatus(err instanceof Error ? err.message : String(err), 'err');
+        } finally {
+            lineBusy = false;
+        }
+    }
+
+    async function sendLineRoom(room) {
+        if (!canEdit || !selectedProgramId || lineBusy) return;
+        if (getDataSource() !== 'live') {
+            setLineStatus('Switch to live data source to send.', 'warn');
+            return;
+        }
+        const text = String(mainEl.querySelector('#studio-comms-line-message')?.value || '').trim();
+        if (!text) {
+            setLineStatus('Enter a message.', 'warn');
+            return;
+        }
+        lineBusy = true;
+        setLineStatus('Sending…');
+        try {
+            await sendLineGroupMessage({ programId: selectedProgramId, room, text });
+            setLineStatus('Sent.', 'ok');
+        } catch (err) {
+            setLineStatus(err instanceof Error ? err.message : String(err), 'err');
+        } finally {
+            lineBusy = false;
+        }
     }
 
     function renderInvitesBar() {
@@ -280,7 +483,7 @@ export async function initComms(mainEl) {
         const sendDisabled = !canEdit || !ready || !live || !withEmail;
         let hint = '';
         if (!live) hint = 'Switch to live data source to send email.';
-        else if (!ready) hint = 'Save LINE setup with both QRs before sending.';
+        else if (!ready) hint = 'Save both rooms and both store QRs before sending.';
         else if (!withEmail) hint = 'No confirmed applicants with a public email.';
         invitesHost.innerHTML = `
         <div class="studio-comms-invites__head">
@@ -300,7 +503,7 @@ export async function initComms(mainEl) {
             tbody.innerHTML = '';
             if (emptyMsg) {
                 emptyMsg.hidden = false;
-                emptyMsg.textContent = 'Select a program above to set up LINE and send invites.';
+                emptyMsg.textContent = 'Select a program above to set up chat rooms and send invites.';
             }
             return;
         }
@@ -340,18 +543,23 @@ export async function initComms(mainEl) {
 
     function readSetupFromDom() {
         const prior = currentConfig();
-        const basicId = String(mainEl.querySelector('#studio-comms-basic-id')?.value || '').trim();
         return normalizeProgramCommsConfig(
             {
                 ...prior,
                 programId: selectedProgramId || '',
                 provider: 'line',
                 oaName: String(mainEl.querySelector('#studio-comms-oa-name')?.value || '').trim(),
-                basicId,
+                basicId: String(mainEl.querySelector('#studio-comms-basic-id')?.value || '').trim(),
                 channelId: String(mainEl.querySelector('#studio-comms-channel-id')?.value || '').trim(),
-                addFriendUrl: addFriendUrlFromBasicId(basicId),
-                groupName: String(mainEl.querySelector('#studio-comms-group-name')?.value || '').trim(),
-                groupInviteUrl: String(mainEl.querySelector('#studio-comms-group-url')?.value || '').trim(),
+                iosStoreUrl: String(mainEl.querySelector('#studio-comms-ios-url')?.value || '').trim() || LINE_IOS_STORE_URL,
+                androidStoreUrl:
+                    String(mainEl.querySelector('#studio-comms-android-url')?.value || '').trim() || LINE_ANDROID_STORE_URL,
+                iosThumbUrl: prior.iosThumbUrl,
+                androidThumbUrl: prior.androidThumbUrl,
+                groupGeneralName: String(mainEl.querySelector('#studio-comms-group-general-name')?.value || '').trim(),
+                groupGeneralInviteUrl: String(mainEl.querySelector('#studio-comms-group-general-url')?.value || '').trim(),
+                groupAnnounceName: String(mainEl.querySelector('#studio-comms-group-announce-name')?.value || '').trim(),
+                groupAnnounceInviteUrl: String(mainEl.querySelector('#studio-comms-group-announce-url')?.value || '').trim(),
                 inviteMessage: String(mainEl.querySelector('#studio-comms-invite-message')?.value || '').trim(),
                 memberActive: Boolean(mainEl.querySelector('#studio-comms-member-active')?.checked),
                 providerThumbUrl: prior.providerThumbUrl,
@@ -405,6 +613,18 @@ export async function initComms(mainEl) {
         await persistCurrentConfig({ providerThumbUrl: url });
     }
 
+    async function uploadStoreThumb(file, fieldKey, patchKey) {
+        if (!file || !selectedProgramId) return;
+        const prepared = await prepareImageFileForUpload(file);
+        const url = await uploadBlobToS3(prepared.file || file, null, {
+            area: 'studio/programs',
+            entityType: 'comms',
+            entityId: selectedProgramId,
+            fieldKey,
+        });
+        await persistCurrentConfig({ [patchKey]: url });
+    }
+
     async function uploadCommsQr(file, fieldKey) {
         const prepared = await prepareImageFileForUpload(file);
         return uploadBlobToS3(prepared.file || file, null, {
@@ -418,32 +638,48 @@ export async function initComms(mainEl) {
     async function saveSetup() {
         if (!canEdit || !selectedProgramId || saveBusy) return;
         const draft = readSetupFromDom();
-        if (!draft.basicId) {
-            setSaveStatus('Basic ID is required.', 'err');
+        if (!draft.groupGeneralInviteUrl) {
+            setSaveStatus('General invite URL is required.', 'err');
             return;
         }
-        if (!draft.groupInviteUrl) {
-            setSaveStatus('Group invite URL is required.', 'err');
+        if (!draft.groupAnnounceInviteUrl) {
+            setSaveStatus('Announcements invite URL is required.', 'err');
             return;
         }
         saveBusy = true;
         setSaveStatus('Generating QRs…');
         try {
-            const [friendFile, groupFile] = await Promise.all([
-                qrPngFileFromUrl(draft.addFriendUrl, 'line-friend-qr.png'),
-                qrPngFileFromUrl(draft.groupInviteUrl, 'line-group-qr.png'),
+            const [iosFile, androidFile, generalFile, announceFile] = await Promise.all([
+                qrPngFileFromUrl(draft.iosStoreUrl, 'line-ios-qr.png'),
+                qrPngFileFromUrl(draft.androidStoreUrl, 'line-android-qr.png'),
+                qrPngFileFromUrl(draft.groupGeneralInviteUrl, 'line-group-general-qr.png'),
+                qrPngFileFromUrl(draft.groupAnnounceInviteUrl, 'line-group-announce-qr.png'),
             ]);
             setSaveStatus('Uploading QRs…');
-            const [addFriendQrUrl, groupQrUrl] = await Promise.all([
-                uploadCommsQr(friendFile, 'line-friend-qr'),
-                uploadCommsQr(groupFile, 'line-group-qr'),
+            const [iosQrUrl, androidQrUrl, groupGeneralQrUrl, groupAnnounceQrUrl] = await Promise.all([
+                uploadCommsQr(iosFile, 'line-ios-qr'),
+                uploadCommsQr(androidFile, 'line-android-qr'),
+                uploadCommsQr(generalFile, 'line-group-general-qr'),
+                uploadCommsQr(announceFile, 'line-group-announce-qr'),
             ]);
             setSaveStatus('Saving…');
             const rec = {
                 ...draft,
-                addFriendQrUrl,
-                groupQrUrl,
-                memberActive: draft.memberActive && isProgramCommsMemberReady({ ...draft, addFriendQrUrl, groupQrUrl }),
+                groupGeneralName: draft.groupGeneralName || 'General',
+                groupAnnounceName: draft.groupAnnounceName || 'Announcements',
+                iosQrUrl,
+                androidQrUrl,
+                groupGeneralQrUrl,
+                groupAnnounceQrUrl,
+                memberActive:
+                    draft.memberActive &&
+                    isProgramCommsMemberReady({
+                        ...draft,
+                        iosQrUrl,
+                        androidQrUrl,
+                        groupGeneralQrUrl,
+                        groupAnnounceQrUrl,
+                    }),
                 inviteSentAtByApplicant: [],
             };
             await staffUpsertProgramCommsConfig(rec);
@@ -479,12 +715,18 @@ export async function initComms(mainEl) {
         return renderProgramCommsInviteHtml({
             programName: getProgramDisplayNameFromRow(program),
             heroImageUrl: programHero(program),
-            addFriendUrl: cfg.addFriendUrl,
-            groupInviteUrl: cfg.groupInviteUrl,
-            addFriendQrUrl: cfg.addFriendQrUrl,
-            groupQrUrl: cfg.groupQrUrl,
+            provider: cfg.provider,
+            iosStoreUrl: cfg.iosStoreUrl,
+            androidStoreUrl: cfg.androidStoreUrl,
+            iosQrUrl: cfg.iosQrUrl,
+            androidQrUrl: cfg.androidQrUrl,
+            groupGeneralName: cfg.groupGeneralName,
+            groupGeneralInviteUrl: cfg.groupGeneralInviteUrl,
+            groupGeneralQrUrl: cfg.groupGeneralQrUrl,
+            groupAnnounceName: cfg.groupAnnounceName,
+            groupAnnounceInviteUrl: cfg.groupAnnounceInviteUrl,
+            groupAnnounceQrUrl: cfg.groupAnnounceQrUrl,
             applicantName: String(row.fullName || '').trim(),
-            groupName: cfg.groupName,
             oaName: cfg.oaName,
         });
     }
@@ -493,7 +735,7 @@ export async function initComms(mainEl) {
         if (!canEdit || sendBusy || !selectedProgramId) return;
         const cfg = currentConfig();
         if (!isProgramCommsInviteReady(cfg)) {
-            setSendStatus('Save LINE setup with both QRs before sending.', 'warn');
+            setSendStatus('Save both rooms and both store QRs before sending.', 'warn');
             return;
         }
         const row = confirmedForProgram(selectedProgramId).find((r) => String(r.id) === String(applicantId));
@@ -530,7 +772,7 @@ export async function initComms(mainEl) {
         if (!canEdit || sendBusy || !selectedProgramId) return;
         const cfg = currentConfig();
         if (!isProgramCommsInviteReady(cfg)) {
-            setSendStatus('Save LINE setup with both QRs before sending.', 'warn');
+            setSendStatus('Save both rooms and both store QRs before sending.', 'warn');
             return;
         }
         sendBusy = true;
@@ -603,16 +845,33 @@ export async function initComms(mainEl) {
         }
         paintProgramCards();
         renderSetup();
+        loadLineRooms();
         renderInvitesBar();
         renderTable();
     });
 
-    setupHost?.addEventListener('input', (e) => {
-        const t = e.target instanceof HTMLInputElement ? e.target : null;
-        if (!t || t.id !== 'studio-comms-basic-id') return;
-        const derived = mainEl.querySelector('#studio-comms-add-friend-url');
-        if (derived instanceof HTMLInputElement) {
-            derived.value = addFriendUrlFromBasicId(t.value);
+    lineRoomsHost?.addEventListener('click', async (e) => {
+        const t = e.target instanceof Element ? e.target : null;
+        if (!t) return;
+        const assign = t.closest('[data-comms-line-assign]');
+        if (assign && lineRoomsHost.contains(assign)) {
+            await assignLineRoom(
+                assign.getAttribute('data-comms-line-assign') || '',
+                assign.getAttribute('data-comms-line-group') || '',
+            );
+            return;
+        }
+        const unassign = t.closest('[data-comms-line-unassign]');
+        if (unassign && lineRoomsHost.contains(unassign)) {
+            await assignLineRoom(unassign.getAttribute('data-comms-line-unassign') || '', '');
+            return;
+        }
+        if (t.id === 'studio-comms-line-send-general') {
+            await sendLineRoom('general');
+            return;
+        }
+        if (t.id === 'studio-comms-line-send-announce') {
+            await sendLineRoom('announce');
         }
     });
 
@@ -623,15 +882,27 @@ export async function initComms(mainEl) {
             await saveSetup();
             return;
         }
-        if (t.id === 'studio-comms-thumb-upload') {
-            const input = mainEl.querySelector('#studio-comms-thumb-file');
+        const fileTriggers = {
+            'studio-comms-thumb-upload': 'studio-comms-thumb-file',
+            'studio-comms-ios-thumb-upload': 'studio-comms-ios-thumb-file',
+            'studio-comms-android-thumb-upload': 'studio-comms-android-thumb-file',
+        };
+        const fileId = fileTriggers[t.id];
+        if (fileId) {
+            const input = mainEl.querySelector(`#${fileId}`);
             if (input instanceof HTMLInputElement) input.click();
             return;
         }
-        if (t.id === 'studio-comms-thumb-clear') {
+        const clearPatches = {
+            'studio-comms-thumb-clear': { providerThumbUrl: '' },
+            'studio-comms-ios-thumb-clear': { iosThumbUrl: '' },
+            'studio-comms-android-thumb-clear': { androidThumbUrl: '' },
+        };
+        const clearPatch = clearPatches[t.id];
+        if (clearPatch) {
             try {
-                await persistCurrentConfig({ providerThumbUrl: '' });
-                setSaveStatus('Using LINE default thumbnail.', 'ok');
+                await persistCurrentConfig(clearPatch);
+                setSaveStatus('Thumbnail cleared.', 'ok');
             } catch (err) {
                 setSaveStatus(err instanceof Error ? err.message : String(err), 'err');
             }
@@ -650,13 +921,20 @@ export async function initComms(mainEl) {
             }
             return;
         }
-        if (t.id !== 'studio-comms-thumb-file') return;
+        const thumbUploads = {
+            'studio-comms-thumb-file': async (file) => uploadProviderThumb(file),
+            'studio-comms-ios-thumb-file': async (file) => uploadStoreThumb(file, 'line-ios-thumb', 'iosThumbUrl'),
+            'studio-comms-android-thumb-file': async (file) =>
+                uploadStoreThumb(file, 'line-android-thumb', 'androidThumbUrl'),
+        };
+        const upload = thumbUploads[t.id];
+        if (!upload) return;
         const file = t.files?.[0];
         t.value = '';
         if (!file) return;
         try {
             setSaveStatus('Uploading thumbnail…');
-            await uploadProviderThumb(file);
+            await upload(file);
             setSaveStatus('Thumbnail saved.', 'ok');
         } catch (err) {
             setSaveStatus(err instanceof Error ? err.message : String(err), 'err');

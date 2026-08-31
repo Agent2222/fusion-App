@@ -3,7 +3,7 @@
  */
 import { getProgramDisplayNameFromRow } from '../../utils/database.js';
 import { firstNonEmptyString } from '../../utils/localeFallback.js';
-import { applicantPublicEmail, resolveProviderThumbUrl } from '../../utils/programCommsInvite.js';
+import { applicantPublicEmail, isProgramCommsInviteReady, resolveProviderThumbUrl } from '../../utils/programCommsInvite.js';
 import { escapeHtml } from '../../utils/textPreview.js';
 import { applicantProgramLifecycleFromStudioStatus } from './applicantsProgramCards.js';
 
@@ -28,6 +28,7 @@ export function buildCommsProgramCardModel(programRow, ctx = {}) {
         imageSrc: firstNonEmptyString(programRow?.jaCard?.imageSrc, programRow?.enCard?.imageSrc),
         providerThumbUrl: resolveProviderThumbUrl(cfg),
         memberActive: Boolean(cfg?.memberActive),
+        inviteReady: isProgramCommsInviteReady(cfg),
         ...lifecycle,
         totalConfirmed: confirmed.length,
         withEmail,
@@ -48,6 +49,7 @@ export function commsProgramCardHtml(item, opts = {}) {
         ? `<img class="studio-comms-program-card__provider" src="${escapeHtml(item.providerThumbUrl)}" alt="" />`
         : '';
     const live = item.memberActive;
+    const memberLabel = live ? 'On' : item.inviteReady ? 'Ready' : 'Off';
     return `<div class="studio-comms-program-card${selected ? ' is-selected' : ''}" role="listitem" data-comms-program-id="${escapeHtml(item.id)}">
         <button type="button" class="studio-comms-program-card__select" data-comms-program-select="${escapeHtml(item.id)}" aria-pressed="${selected ? 'true' : 'false'}">
             <div class="studio-comms-program-card__media">${media}${thumb}</div>
@@ -59,7 +61,7 @@ export function commsProgramCardHtml(item, opts = {}) {
                 <div class="studio-comms-program-card__metrics">
                     <p class="studio-comms-program-card__metric"><span>Confirmed</span><strong>${escapeHtml(String(item.totalConfirmed))}</strong></p>
                     <p class="studio-comms-program-card__metric"><span>Invites sent</span><strong>${escapeHtml(String(item.invitesSent))}</strong></p>
-                    <p class="studio-comms-program-card__metric"><span>Member tab</span><strong>${live ? 'On' : 'Off'}</strong></p>
+                    <p class="studio-comms-program-card__metric"><span>Member tab</span><strong>${memberLabel}</strong></p>
                 </div>
             </div>
         </button>

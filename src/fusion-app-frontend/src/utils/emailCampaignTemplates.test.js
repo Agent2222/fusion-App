@@ -107,13 +107,17 @@ describe('EMAIL_CAMPAIGN_TEMPLATES', () => {
         expect(tpl?.bodyHtml.toLowerCase()).toMatch(/special experience/);
     });
 
-    it('program comms LINE template uses Fusion layout and both CTAs', () => {
+    it('program comms template uses communications pill and two-step QRs', () => {
         const tpl = getEmailTemplateById('tpl_program_comms_line');
         expect(tpl?.templateGroup).toBe('updates');
         expect(isFusionEmailLayout(tpl?.bodyHtml || '')).toBe(true);
-        expect(tpl?.bodyHtml).toContain('ADD FUSION ON LINE');
-        expect(tpl?.bodyHtml).toContain('JOIN THE GROUP');
-        expect(tpl?.defaultSubject).toMatch(/LINE/i);
+        expect(tpl?.bodyHtml).toContain('COMMUNICATIONS');
+        expect(tpl?.bodyHtml).toContain('Official Chat Rooms');
+        expect(tpl?.bodyHtml).toContain('Step 1 — Download');
+        expect(tpl?.bodyHtml).toContain('Step 2 — Join both rooms');
+        expect(tpl?.bodyHtml).not.toContain('#a2b792');
+        expect(tpl?.bodyHtml).not.toMatch(/you are confirmed/i);
+        expect(tpl?.defaultSubject).toMatch(/Official Chat Rooms/i);
     });
 
     it('legacy tpl_artist_feature resolves to featured artist', () => {

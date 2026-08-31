@@ -13,8 +13,11 @@ import {
     filterMemberCommsRooms,
     fileFromPngDataUrl,
     isMemberCommsRoomReady,
+    isProgramCommsInviteHtml,
     isProgramCommsInviteReady,
     isProgramCommsMemberReady,
+    LINE_ANDROID_STORE_URL,
+    LINE_IOS_STORE_URL,
     normalizeProgramCommsConfig,
     resolveInviteMessage,
     resolveProviderThumbUrl,
@@ -22,6 +25,19 @@ import {
     renderProgramCommsInviteHtml,
     sampleProgramCommsInviteHtml,
 } from './programCommsInvite.js';
+
+const READY_ASSETS = {
+    iosStoreUrl: LINE_IOS_STORE_URL,
+    androidStoreUrl: LINE_ANDROID_STORE_URL,
+    iosQrUrl: 'https://cdn.example/ios.png',
+    androidQrUrl: 'https://cdn.example/android.png',
+    groupGeneralName: 'General',
+    groupGeneralInviteUrl: 'https://line.me/R/ti/g/general',
+    groupGeneralQrUrl: 'https://cdn.example/general.png',
+    groupAnnounceName: 'Announcements',
+    groupAnnounceInviteUrl: 'https://line.me/R/ti/g/announce',
+    groupAnnounceQrUrl: 'https://cdn.example/announce.png',
+};
 
 describe('addFriendUrlFromBasicId', () => {
     it('prefixes @ and builds the Official Account add-friend URL', () => {
@@ -31,24 +47,44 @@ describe('addFriendUrlFromBasicId', () => {
     });
 });
 
+describe('normalizeProgramCommsConfig', () => {
+    it('maps leftover V1 group fields onto General and defaults store URLs', () => {
+        const rec = normalizeProgramCommsConfig({
+            programId: 'p1',
+            groupName: 'Kaga Fall',
+            groupInviteUrl: 'https://line.me/R/ti/g/legacy',
+            groupQrUrl: 'https://cdn.example/legacy.png',
+        });
+        expect(rec.groupGeneralName).toBe('Kaga Fall');
+        expect(rec.groupGeneralInviteUrl).toBe('https://line.me/R/ti/g/legacy');
+        expect(rec.groupGeneralQrUrl).toBe('https://cdn.example/legacy.png');
+        expect(rec.groupAnnounceInviteUrl).toBe('');
+        expect(rec.iosStoreUrl).toBe(LINE_IOS_STORE_URL);
+        expect(rec.androidStoreUrl).toBe(LINE_ANDROID_STORE_URL);
+    });
+});
+
 describe('isProgramCommsInviteReady', () => {
-    it('requires hosted QR URLs and both join links', () => {
+    it('requires both rooms and both hosted store QRs', () => {
         expect(isProgramCommsInviteReady(emptyProgramCommsConfig('p1'))).toBe(false);
+        expect(isProgramCommsInviteReady(READY_ASSETS)).toBe(true);
         expect(
             isProgramCommsInviteReady({
-                basicId: '@fusion',
-                addFriendUrl: 'https://line.me/R/ti/p/@fusion',
-                groupInviteUrl: 'https://line.me/R/ti/g/abc',
-                addFriendQrUrl: 'https://cdn.example/friend.png',
-                groupQrUrl: 'https://cdn.example/group.png',
+                ...READY_ASSETS,
+                iosQrUrl: 'data:image/png;base64,xx',
             }),
-        ).toBe(true);
+        ).toBe(false);
         expect(
             isProgramCommsInviteReady({
-                addFriendUrl: 'https://line.me/R/ti/p/@fusion',
-                groupInviteUrl: 'https://line.me/R/ti/g/abc',
-                addFriendQrUrl: 'data:image/png;base64,xx',
-                groupQrUrl: 'https://cdn.example/group.png',
+                ...READY_ASSETS,
+                groupAnnounceInviteUrl: '',
+            }),
+        ).toBe(false);
+        expect(
+            isProgramCommsInviteReady({
+                groupName: 'Legacy',
+                groupInviteUrl: 'https://line.me/R/ti/g/legacy',
+                groupQrUrl: 'https://cdn.example/legacy.png',
             }),
         ).toBe(false);
     });
@@ -82,29 +118,49 @@ describe('applicantsReadyToEmail', () => {
 });
 
 describe('renderProgramCommsInviteHtml', () => {
-    it('uses Fusion layout with both QR images and CTAs', () => {
+    it('uses Fusion layout with communications pill, two steps, and no sage CTAs', () => {
         const html = renderProgramCommsInviteHtml({
             programName: 'Kaga City',
             applicantName: 'Sam',
-            addFriendUrl: 'https://line.me/R/ti/p/@fusion',
-            groupInviteUrl: 'https://line.me/R/ti/g/abc',
-            addFriendQrUrl: 'https://cdn.example/friend.png',
-            groupQrUrl: 'https://cdn.example/group.png',
-            groupName: 'Kaga Fall',
+            iosStoreUrl: LINE_IOS_STORE_URL,
+            androidStoreUrl: LINE_ANDROID_STORE_URL,
+            iosQrUrl: 'https://cdn.example/ios.png',
+            androidQrUrl: 'https://cdn.example/android.png',
+            groupGeneralName: 'General',
+            groupAnnounceName: 'Announcements',
+            groupGeneralInviteUrl: 'https://line.me/R/ti/g/general',
+            groupAnnounceInviteUrl: 'https://line.me/R/ti/g/announce',
+            groupGeneralQrUrl: 'https://cdn.example/general.png',
+            groupAnnounceQrUrl: 'https://cdn.example/announce.png',
         });
         expect(isFusionEmailLayout(html)).toBe(true);
-        expect(html).toContain('https://cdn.example/friend.png');
-        expect(html).toContain('https://cdn.example/group.png');
-        expect(html).toContain('https://line.me/R/ti/p/@fusion');
-        expect(html).toContain('https://line.me/R/ti/g/abc');
-        expect(html).toContain('ADD FUSION ON LINE');
-        expect(html).toContain('JOIN THE GROUP');
+        expect(isProgramCommsInviteHtml(html)).toBe(true);
+        expect(html).toContain('COMMUNICATIONS');
+        expect(html).toContain('Official Chat Rooms');
+        expect(html).toContain('Step 1 — Download');
+        expect(html).toContain('Step 2 — Join both rooms');
+        expect(html).toContain('https://cdn.example/ios.png');
+        expect(html).toContain('https://cdn.example/android.png');
+        expect(html).toContain('https://cdn.example/general.png');
+        expect(html).toContain('https://cdn.example/announce.png');
+        expect(html).toContain(LINE_IOS_STORE_URL);
+        expect(html).toContain(LINE_ANDROID_STORE_URL);
+        expect(html).toContain('Join General');
+        expect(html).toContain('Join Announcements');
         expect(html).toContain('Sam');
         expect(html).toContain('Kaga City');
+        expect(html).not.toMatch(/you are confirmed/i);
+        expect(html).not.toContain('#a2b792');
+        expect(html).not.toContain('ADD FUSION ON LINE');
+        expect(html).not.toContain('JOIN THE GROUP');
     });
 
-    it('sample template is Fusion-branded', () => {
-        expect(isFusionEmailLayout(sampleProgramCommsInviteHtml())).toBe(true);
+    it('sample template is Fusion-branded communications email', () => {
+        const html = sampleProgramCommsInviteHtml();
+        expect(isFusionEmailLayout(html)).toBe(true);
+        expect(isProgramCommsInviteHtml(html)).toBe(true);
+        expect(html).toContain('COMMUNICATIONS');
+        expect(html).not.toContain('#a2b792');
     });
 });
 
@@ -112,11 +168,7 @@ describe('collectProgramCommsInviteMessages', () => {
     it('builds one message per email and reports skips', () => {
         const cfg = normalizeProgramCommsConfig({
             programId: 'p1',
-            basicId: '@fusion',
-            addFriendUrl: 'https://line.me/R/ti/p/@fusion',
-            groupInviteUrl: 'https://line.me/R/ti/g/abc',
-            addFriendQrUrl: 'https://cdn.example/friend.png',
-            groupQrUrl: 'https://cdn.example/group.png',
+            ...READY_ASSETS,
             oaName: 'Fusion',
         });
         const { messages, skipped, subject } = collectProgramCommsInviteMessages({
@@ -128,10 +180,12 @@ describe('collectProgramCommsInviteMessages', () => {
             programName: 'Kaga City',
         });
         expect(subject).toBe(buildProgramCommsInviteSubject('Kaga City'));
+        expect(subject).toBe('The Kaga City Official Chat Rooms');
         expect(messages).toHaveLength(1);
         expect(messages[0].to).toBe('a@x.com');
         expect(messages[0].applicantId).toBe('a');
         expect(messages[0].html).toContain('Ada');
+        expect(messages[0].html).toContain('Official Chat Rooms');
         expect(skipped).toEqual([{ id: 'b', name: 'No Mail', reason: 'no public email' }]);
     });
 });
@@ -148,14 +202,14 @@ describe('member comms publish helpers', () => {
     const ready = {
         programId: 'p1',
         memberActive: true,
-        groupInviteUrl: 'https://line.me/R/ti/g/abc',
-        groupQrUrl: 'https://cdn.example/group.png',
+        ...READY_ASSETS,
         inviteMessage: '',
         provider: 'line',
     };
 
     it('uses Fusion default invite copy until staff override', () => {
         expect(resolveInviteMessage({})).toBe(DEFAULT_MEMBER_COMMS_INVITE_MESSAGE);
+        expect(DEFAULT_MEMBER_COMMS_INVITE_MESSAGE).not.toMatch(/confirmed/i);
         expect(resolveInviteMessage({ inviteMessage: '  Meet in LINE  ' })).toBe('Meet in LINE');
     });
 
@@ -170,11 +224,12 @@ describe('member comms publish helpers', () => {
         expect(defaultProviderThumbUrl('whatsapp')).toBe('');
     });
 
-    it('requires group URL + hosted QR before the member tab can publish', () => {
+    it('requires both rooms and both store QRs before the member tab can publish', () => {
         expect(isProgramCommsMemberReady(emptyProgramCommsConfig('p1'))).toBe(false);
         expect(isProgramCommsMemberReady(ready)).toBe(true);
         expect(isMemberCommsRoomReady({ ...ready, memberActive: false })).toBe(false);
         expect(isMemberCommsRoomReady(ready)).toBe(true);
+        expect(isProgramCommsMemberReady({ ...ready, androidQrUrl: '' })).toBe(false);
     });
 
     it('filters member rooms by activate + QR + slot secured', () => {
@@ -182,12 +237,14 @@ describe('member comms publish helpers', () => {
             [
                 ready,
                 { ...ready, programId: 'p2', memberActive: false },
-                { ...ready, programId: 'p3', groupQrUrl: '' },
+                { ...ready, programId: 'p3', groupAnnounceQrUrl: '' },
                 { ...ready, programId: 'p4' },
             ],
             ['p1'],
         );
         expect(rooms.map((r) => r.programId)).toEqual(['p1']);
+        expect(rooms[0].groupGeneralInviteUrl).toBe(READY_ASSETS.groupGeneralInviteUrl);
+        expect(rooms[0].iosQrUrl).toBe(READY_ASSETS.iosQrUrl);
     });
 });
 

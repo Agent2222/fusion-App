@@ -11456,17 +11456,27 @@ function mapInviteSentPairs(raw) {
 
 function mapProgramCommsConfigToJs(raw) {
     const row = raw && typeof raw === 'object' ? raw : {};
+    const leftoverGroupName = String(row.groupGeneralName ?? row.groupName ?? '');
+    const leftoverGroupInvite = String(row.groupGeneralInviteUrl ?? row.groupInviteUrl ?? '');
+    const leftoverGroupQr = String(row.groupGeneralQrUrl ?? row.groupQrUrl ?? '');
     return {
         programId: String(row.programId ?? ''),
         provider: String(row.provider ?? 'line') || 'line',
         oaName: String(row.oaName ?? ''),
         basicId: String(row.basicId ?? ''),
         channelId: String(row.channelId ?? ''),
-        addFriendUrl: String(row.addFriendUrl ?? ''),
-        groupName: String(row.groupName ?? ''),
-        groupInviteUrl: String(row.groupInviteUrl ?? ''),
-        addFriendQrUrl: String(row.addFriendQrUrl ?? ''),
-        groupQrUrl: String(row.groupQrUrl ?? ''),
+        iosStoreUrl: String(row.iosStoreUrl ?? ''),
+        androidStoreUrl: String(row.androidStoreUrl ?? ''),
+        iosThumbUrl: String(row.iosThumbUrl ?? ''),
+        androidThumbUrl: String(row.androidThumbUrl ?? ''),
+        iosQrUrl: String(row.iosQrUrl ?? ''),
+        androidQrUrl: String(row.androidQrUrl ?? ''),
+        groupGeneralName: leftoverGroupName,
+        groupGeneralInviteUrl: leftoverGroupInvite,
+        groupGeneralQrUrl: leftoverGroupQr,
+        groupAnnounceName: String(row.groupAnnounceName ?? ''),
+        groupAnnounceInviteUrl: String(row.groupAnnounceInviteUrl ?? ''),
+        groupAnnounceQrUrl: String(row.groupAnnounceQrUrl ?? ''),
         inviteSentAtByApplicant: mapInviteSentPairs(row.inviteSentAtByApplicant),
         memberActive: Boolean(row.memberActive),
         inviteMessage: String(row.inviteMessage ?? ''),
@@ -11479,11 +11489,21 @@ function mapProgramCommsMemberRoomToJs(raw) {
     const row = raw && typeof raw === 'object' ? raw : {};
     return {
         programId: String(row.programId ?? ''),
-        groupName: String(row.groupName ?? ''),
-        groupInviteUrl: String(row.groupInviteUrl ?? ''),
-        groupQrUrl: String(row.groupQrUrl ?? ''),
+        provider: String(row.provider ?? 'line') || 'line',
         inviteMessage: String(row.inviteMessage ?? ''),
         providerThumbUrl: String(row.providerThumbUrl ?? ''),
+        iosStoreUrl: String(row.iosStoreUrl ?? ''),
+        androidStoreUrl: String(row.androidStoreUrl ?? ''),
+        iosThumbUrl: String(row.iosThumbUrl ?? ''),
+        androidThumbUrl: String(row.androidThumbUrl ?? ''),
+        iosQrUrl: String(row.iosQrUrl ?? ''),
+        androidQrUrl: String(row.androidQrUrl ?? ''),
+        groupGeneralName: String(row.groupGeneralName ?? row.groupName ?? ''),
+        groupGeneralInviteUrl: String(row.groupGeneralInviteUrl ?? row.groupInviteUrl ?? ''),
+        groupGeneralQrUrl: String(row.groupGeneralQrUrl ?? row.groupQrUrl ?? ''),
+        groupAnnounceName: String(row.groupAnnounceName ?? ''),
+        groupAnnounceInviteUrl: String(row.groupAnnounceInviteUrl ?? ''),
+        groupAnnounceQrUrl: String(row.groupAnnounceQrUrl ?? ''),
     };
 }
 
@@ -11602,4 +11622,100 @@ export async function listMyProgramCommsRooms() {
     }
     const rows = await actor.listMyProgramCommsRooms();
     return Array.isArray(rows) ? rows.map(mapProgramCommsMemberRoomToJs) : [];
+}
+
+const LS_PROGRAM_COMMS_LINE_SEEN = 'studioProgramCommsLineSeen';
+const LS_PROGRAM_COMMS_LINE_BINDING = 'studioProgramCommsLineBinding';
+
+function mapProgramCommsLineSeenToJs(raw) {
+    const row = raw && typeof raw === 'object' ? raw : {};
+    return {
+        groupId: String(row.groupId ?? ''),
+        groupName: String(row.groupName ?? ''),
+        lastSeenAt: String(row.lastSeenAt ?? ''),
+    };
+}
+
+function mapProgramCommsLineBindingToJs(raw, programId = '') {
+    const row = raw && typeof raw === 'object' ? raw : {};
+    return {
+        programId: String(row.programId ?? programId ?? ''),
+        groupGeneralId: String(row.groupGeneralId ?? ''),
+        groupAnnounceId: String(row.groupAnnounceId ?? ''),
+    };
+}
+
+function emptyProgramCommsLineBinding(programId = '') {
+    return { programId: String(programId || ''), groupGeneralId: '', groupAnnounceId: '' };
+}
+
+/**
+ * @returns {Promise<object[]>}
+ */
+export async function staffListSeenLineGroups() {
+    if (getDataSource() === 'test') {
+        const rows = readStudioLs(LS_PROGRAM_COMMS_LINE_SEEN) || [];
+        return (Array.isArray(rows) ? rows : []).map(mapProgramCommsLineSeenToJs).filter((r) => r.groupId);
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffListSeenLineGroups !== 'function') {
+        throw new Error('staffListSeenLineGroups missing — run dfx generate after backend deploy.');
+    }
+    const rows = await actor.staffListSeenLineGroups();
+    return Array.isArray(rows) ? rows.map(mapProgramCommsLineSeenToJs) : [];
+}
+
+/**
+ * @param {string} programId
+ * @returns {Promise<object>}
+ */
+export async function staffGetProgramCommsLineBinding(programId) {
+    const pid = String(programId || '').trim();
+    if (!pid) return emptyProgramCommsLineBinding('');
+    if (getDataSource() === 'test') {
+        const all = readStudioLs(LS_PROGRAM_COMMS_LINE_BINDING) || {};
+        return all[pid] ? mapProgramCommsLineBindingToJs(all[pid], pid) : emptyProgramCommsLineBinding(pid);
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffGetProgramCommsLineBinding !== 'function') {
+        throw new Error('staffGetProgramCommsLineBinding missing — run dfx generate after backend deploy.');
+    }
+    const raw = await actor.staffGetProgramCommsLineBinding(pid);
+    return mapProgramCommsLineBindingToJs(raw, pid);
+}
+
+/**
+ * @param {string} programId
+ * @param {'general' | 'announce'} room
+ * @param {string} groupId
+ */
+export async function staffSetProgramCommsLineRoom(programId, room, groupId) {
+    const pid = String(programId || '').trim();
+    const key = String(room || '').trim();
+    const gid = String(groupId || '').trim();
+    if (!pid) throw new Error('programId required');
+    if (key !== 'general' && key !== 'announce') throw new Error('room must be general or announce');
+    if (getDataSource() === 'test') {
+        const all = readStudioLs(LS_PROGRAM_COMMS_LINE_BINDING) || {};
+        const next = { ...emptyProgramCommsLineBinding(pid), ...(all[pid] || {}) };
+        if (gid) {
+            for (const [otherId, row] of Object.entries(all)) {
+                const mapped = mapProgramCommsLineBindingToJs(row, otherId);
+                if (mapped.groupGeneralId === gid) mapped.groupGeneralId = '';
+                if (mapped.groupAnnounceId === gid) mapped.groupAnnounceId = '';
+                all[otherId] = mapped;
+            }
+        }
+        const current = mapProgramCommsLineBindingToJs(all[pid] || next, pid);
+        if (key === 'general') current.groupGeneralId = gid;
+        else current.groupAnnounceId = gid;
+        all[pid] = current;
+        writeStudioLs(LS_PROGRAM_COMMS_LINE_BINDING, all);
+        return;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffSetProgramCommsLineRoom !== 'function') {
+        throw new Error('staffSetProgramCommsLineRoom missing — run dfx generate after backend deploy.');
+    }
+    await actor.staffSetProgramCommsLineRoom(pid, key, gid);
 }

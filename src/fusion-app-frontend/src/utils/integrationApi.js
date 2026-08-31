@@ -1382,6 +1382,38 @@ export async function fetchPayPalPaymentReceipts(orderIds) {
 /**
  * @param {{ to: string, subject: string, html?: string, text?: string, replyTo?: string, from?: string, cc?: string | string[], attachments?: Array<{ filename?: string, content?: string, contentType?: string }> }} opts
  */
+/**
+ * Push text to a program LINE room bound in Studio Comms.
+ * @param {{ programId: string, room: 'general' | 'announce', text: string }} opts
+ */
+export async function sendLineGroupMessage(opts) {
+    const base = getIntegrationBaseUrl();
+    if (!base) {
+        throw new Error('Integration API URL not configured.');
+    }
+    const res = await fetch(`${base}/line/push`, {
+        method: 'POST',
+        headers: integrationHeadersJson(),
+        body: JSON.stringify({
+            programId: String(opts?.programId || '').trim(),
+            room: String(opts?.room || '').trim(),
+            text: String(opts?.text || ''),
+        }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(
+            typeof err.error === 'string' && err.error
+                ? err.error
+                : `LINE push failed (HTTP ${res.status}).`,
+        );
+    }
+    return res.json();
+}
+
+/**
+ * @param {{ to: string, subject: string, html?: string, text?: string, replyTo?: string, from?: string, cc?: string | string[], attachments?: Array<{ filename?: string, content?: string, contentType?: string }> }} opts
+ */
 export async function sendEmail(opts) {
     const base = getIntegrationBaseUrl();
     if (!base) {

@@ -176,13 +176,13 @@ export const EMAIL_CAMPAIGN_TEMPLATES = {
     },
     tpl_program_comms_line: {
         id: 'tpl_program_comms_line',
-        name: 'Program comms — LINE invite',
+        name: 'Program comms — official chat rooms',
         templateGroup: 'updates',
         defaultEyebrow: 'Program Comms',
-        defaultSubject: 'Join the program LINE chat',
-        defaultPreview: 'Add Fusion on LINE and join the program group.',
+        defaultSubject: 'The program Official Chat Rooms',
+        defaultPreview: 'Download the app, then join both official chat rooms.',
         bodyHtml: sampleProgramCommsInviteHtml(),
-        notes: 'Used by Studio → Comms. Includes add-friend and group-join QRs plus CTAs.',
+        notes: 'Used by Studio → Comms. Step 1 store QRs (iOS / Android) and step 2 room QRs (General / Announcements).',
     },
     tpl_featured_artist: {
         id: 'tpl_featured_artist',
