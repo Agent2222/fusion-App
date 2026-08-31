@@ -7,9 +7,14 @@ import { openStudioModal } from '../../utils/studioModal.js';
 import { SCHEDULE_TIMEZONES } from '../../utils/scheduleTimezones.js';
 import {
     addDaysToUtcIsoInZone,
+    encodeScheduledTaskWindow,
     localDateTimeToUtcIso,
+    normalizeAnnounceDay,
+    parseScheduledTaskWindow,
+    resolveAnnounceDayYmd,
     utcIsoToLocalDateTime,
 } from '../../utils/scheduledTaskSchedule.js';
+import { ANNOUNCE_SUCCESS_TEST, dayEventsForAnnounce, toAnnouncePayload } from '../../utils/scheduleAnnounce.js';
 import {
     emailRecipientsForTask,
     lineRoomsForTask,
@@ -37,6 +42,7 @@ import {
     getDataSource,
     getProgramDisplayNameFromRow,
     getPrograms,
+    listScheduleEventsStudio,
     staffDeleteScheduledTask,
     staffGetProgramCommsConfig,
     staffGetProgramCommsLineBinding,
@@ -48,7 +54,7 @@ import { getApplicantManualDepositSubmitted } from '../../utils/studioPlainForms
 import { inviteSentAtMap, normalizeProgramCommsConfig, renderProgramCommsInviteHtml } from '../../utils/programCommsInvite.js';
 import { renderFlightFollowUpHtml } from '../../utils/flightFollowUpEmail.js';
 import { renderFusionEmailFromSlots } from '../../utils/emailFusionLayout.js';
-import { fetchScheduledTasksHealth, runScheduledTaskNow, sendEmail } from '../../utils/integrationApi.js';
+import { announceScheduleOnLine, fetchScheduledTasksHealth, runScheduledTaskNow, sendEmail } from '../../utils/integrationApi.js';
 import { sortApplicantProgramRows } from './applicantsProgramCards.js';
 
 function esc(value) {
@@ -103,9 +109,23 @@ function emptyTask() {
  * @param {string} [tz]
  */
 function splitLocal(local, tz) {
-    const raw = String(local || defaultFirstRunLocal(tz));
+    const { firstRunLocal } = parseScheduledTaskWindow({ firstRunLocal: local });
+    const raw = String(firstRunLocal || defaultFirstRunLocal(tz));
     const [date, time] = raw.split('T');
     return { date: date || '', time: (time || '09:00').slice(0, 5) };
+}
+
+/**
+ * @param {object} task
+ */
+function announceDayForm(task) {
+    if (String(task?.kind || '') !== 'announce_day') {
+        return { mode: 'today', date: '' };
+    }
+    const key = normalizeAnnounceDay(task.customLineText);
+    if (key === 'tomorrow') return { mode: 'tomorrow', date: '' };
+    if (/^\d{4}-\d{2}-\d{2}$/.test(key)) return { mode: 'date', date: key };
+    return { mode: 'today', date: '' };
 }
 
 export function renderScheduledTasks() {
@@ -279,7 +299,14 @@ export async function initScheduledTasks(mainEl) {
     }
 
     function openModal(task, isNew) {
-        const { date, time } = splitLocal(task.firstRunLocal, task.timezone);
+        const taskWindow = parseScheduledTaskWindow(task);
+        const { date, time } = splitLocal(taskWindow.firstRunLocal, task.timezone);
+        const endSplit = taskWindow.endsAtLocal
+            ? splitLocal(taskWindow.endsAtLocal, task.timezone)
+            : { date: '', time: '' };
+        const announce = announceDayForm(task);
+        const customLineForForm = task.kind === 'announce_day' ? '' : task.customLineText;
+        const isAnnounce = task.kind === 'announce_day';
         const programChecks = [...state.programs]
             .sort(sortApplicantProgramRows)
             .map((p) => {
@@ -293,69 +320,104 @@ export async function initScheduledTasks(mainEl) {
         ).join('');
         const modal = openStudioModal(
             `<form class="st-modal-form" data-st-form>
-              <label class="st-field">Task name
-                <input type="text" name="name" value="${esc(task.name)}" ${canEdit ? '' : 'readonly'} />
-              </label>
-              <fieldset class="st-field"><legend>Programs</legend>
-                <div class="st-check-list">${programChecks || '<p class="st-help">No programs yet.</p>'}</div>
-              </fieldset>
-              <label class="st-field">How to send
-                <select name="channels" ${canEdit ? '' : 'disabled'}>
-                  <option value="email" ${task.channels === 'email' ? 'selected' : ''}>Email</option>
-                  <option value="line" ${task.channels === 'line' ? 'selected' : ''}>LINE chat</option>
-                  <option value="both" ${task.channels === 'both' ? 'selected' : ''}>Email and LINE</option>
-                </select>
-              </label>
-              <label class="st-field">What to send
-                <select name="kind" ${canEdit ? '' : 'disabled'}>
-                  <option value="flight_followup" ${task.kind === 'flight_followup' ? 'selected' : ''}>Remind artists to add arrival time</option>
-                  <option value="comms_invite" ${task.kind === 'comms_invite' ? 'selected' : ''}>Send chat room invite</option>
-                  <option value="custom" ${task.kind === 'custom' ? 'selected' : ''}>Write your own message</option>
-                </select>
-              </label>
-              <label class="st-field" data-st-line-rooms ${task.channels === 'email' ? 'hidden' : ''}>Which LINE chats
-                <select name="lineRooms" ${canEdit ? '' : 'disabled'}>
-                  <option value="general" ${task.lineRooms === 'general' ? 'selected' : ''}>General chat</option>
-                  <option value="announce" ${task.lineRooms === 'announce' ? 'selected' : ''}>Announcements</option>
-                  <option value="both" ${task.lineRooms === 'both' ? 'selected' : ''}>Both chats</option>
-                </select>
-              </label>
-              <div data-st-custom ${task.kind === 'custom' ? '' : 'hidden'}>
-                <label class="st-field">Email subject
-                  <input type="text" name="customSubject" value="${esc(task.customSubject)}" ${canEdit ? '' : 'readonly'} />
-                </label>
-                <label class="st-field">Email message
-                  <textarea name="customBodyText" ${canEdit ? '' : 'readonly'}>${esc(task.customBodyText)}</textarea>
-                </label>
-                <label class="st-field">LINE chat message
-                  <textarea name="customLineText" ${canEdit ? '' : 'readonly'}>${esc(task.customLineText)}</textarea>
-                </label>
+              <div class="st-modal-grid">
+                <div class="st-modal-col">
+                  <label class="st-field">Task name
+                    <input type="text" name="name" value="${esc(task.name)}" ${canEdit ? '' : 'readonly'} />
+                  </label>
+                  <fieldset class="st-field st-field--programs"><legend>Programs</legend>
+                    <div class="st-check-list">${programChecks || '<p class="st-help">No programs yet.</p>'}</div>
+                  </fieldset>
+                </div>
+                <div class="st-modal-col">
+                  <label class="st-field" data-st-how-send ${isAnnounce ? 'hidden' : ''}>How to send
+                    <select name="channels" ${canEdit ? '' : 'disabled'}>
+                      <option value="email" ${task.channels === 'email' ? 'selected' : ''}>Email</option>
+                      <option value="line" ${task.channels === 'line' ? 'selected' : ''}>LINE chat</option>
+                      <option value="both" ${task.channels === 'both' ? 'selected' : ''}>Email and LINE</option>
+                    </select>
+                  </label>
+                  <label class="st-field">What to send
+                    <select name="kind" ${canEdit ? '' : 'disabled'}>
+                      <option value="flight_followup" ${task.kind === 'flight_followup' ? 'selected' : ''}>Remind artists to add arrival time</option>
+                      <option value="comms_invite" ${task.kind === 'comms_invite' ? 'selected' : ''}>Send chat room invite</option>
+                      <option value="custom" ${task.kind === 'custom' ? 'selected' : ''}>Write your own message</option>
+                      <option value="announce_day" ${isAnnounce ? 'selected' : ''}>Announce the day’s schedule</option>
+                    </select>
+                  </label>
+                  <div data-st-announce-day ${isAnnounce ? '' : 'hidden'}>
+                    <label class="st-field">Which day’s schedule
+                      <select name="announceDay" ${canEdit ? '' : 'disabled'}>
+                        <option value="today" ${announce.mode === 'today' ? 'selected' : ''}>This day</option>
+                        <option value="tomorrow" ${announce.mode === 'tomorrow' ? 'selected' : ''}>The next day</option>
+                        <option value="date" ${announce.mode === 'date' ? 'selected' : ''}>A specific date</option>
+                      </select>
+                    </label>
+                    <label class="st-field" data-st-announce-date ${announce.mode === 'date' ? '' : 'hidden'}>Which date
+                      <input type="date" name="announceDate" value="${esc(announce.date)}" ${canEdit ? '' : 'readonly'} />
+                    </label>
+                    <p class="st-help" data-st-announce-help>Posts the day’s events in Announcements.</p>
+                  </div>
+                  <label class="st-field" data-st-line-rooms ${isAnnounce || task.channels === 'email' ? 'hidden' : ''}>Which LINE chats
+                    <select name="lineRooms" ${canEdit ? '' : 'disabled'}>
+                      <option value="general" ${task.lineRooms === 'general' ? 'selected' : ''}>General chat</option>
+                      <option value="announce" ${task.lineRooms === 'announce' ? 'selected' : ''}>Announcements</option>
+                      <option value="both" ${task.lineRooms === 'both' ? 'selected' : ''}>Both chats</option>
+                    </select>
+                  </label>
+                  <div data-st-custom ${task.kind === 'custom' ? '' : 'hidden'}>
+                    <label class="st-field">Email subject
+                      <input type="text" name="customSubject" value="${esc(task.customSubject)}" ${canEdit ? '' : 'readonly'} />
+                    </label>
+                    <label class="st-field">Email message
+                      <textarea name="customBodyText" ${canEdit ? '' : 'readonly'}>${esc(task.customBodyText)}</textarea>
+                    </label>
+                    <label class="st-field">LINE chat message
+                      <textarea name="customLineText" ${canEdit ? '' : 'readonly'}>${esc(customLineForForm)}</textarea>
+                    </label>
+                  </div>
+                  <div class="st-field-row">
+                    <label class="st-field">When to send
+                      <input type="date" name="date" value="${esc(date)}" ${canEdit ? '' : 'readonly'} />
+                    </label>
+                    <label class="st-field">Time
+                      <input type="time" name="time" value="${esc(time)}" ${canEdit ? '' : 'readonly'} />
+                    </label>
+                  </div>
+                  <div class="st-field-row">
+                    <label class="st-field">Time zone
+                      <select name="timezone" ${canEdit ? '' : 'disabled'}>${tzOpts}</select>
+                    </label>
+                    <label class="st-field">Repeat
+                      <select name="repeat" ${canEdit ? '' : 'disabled'}>
+                        <option value="once" ${task.repeat === 'once' ? 'selected' : ''}>Once</option>
+                        <option value="daily" ${task.repeat === 'daily' ? 'selected' : ''}>Every day</option>
+                        <option value="weekly" ${task.repeat === 'weekly' ? 'selected' : ''}>Every week</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div data-st-repeat-end ${task.repeat === 'once' ? 'hidden' : ''}>
+                    <div class="st-field-row">
+                      <label class="st-field">Stop repeating on
+                        <input type="date" name="endDate" value="${esc(endSplit.date)}" ${canEdit ? '' : 'readonly'} />
+                      </label>
+                      <label class="st-field">End time
+                        <input type="time" name="endTime" value="${esc(endSplit.time)}" ${canEdit ? '' : 'readonly'} />
+                      </label>
+                    </div>
+                    <p class="st-help">Leave blank to keep going.</p>
+                  </div>
+                  <label class="st-check" data-st-skip ${isAnnounce ? 'hidden' : ''}>
+                    <input type="checkbox" name="skipIfDone" ${task.skipIfDone ? 'checked' : ''} ${canEdit ? '' : 'disabled'} />
+                    Skip people who already did this
+                  </label>
+                  <p class="st-help" data-st-skip-help ${isAnnounce ? 'hidden' : ''}>Won’t email artists who already added arrival time, or who already got the chat invite.</p>
+                  <p class="st-estimate" data-st-estimate>${esc(estimateFor(task))}</p>
+                </div>
               </div>
-              <label class="st-field">When to send
-                <input type="date" name="date" value="${esc(date)}" ${canEdit ? '' : 'readonly'} />
-              </label>
-              <label class="st-field">Time
-                <input type="time" name="time" value="${esc(time)}" ${canEdit ? '' : 'readonly'} />
-              </label>
-              <label class="st-field">Time zone
-                <select name="timezone" ${canEdit ? '' : 'disabled'}>${tzOpts}</select>
-              </label>
-              <label class="st-field">Repeat
-                <select name="repeat" ${canEdit ? '' : 'disabled'}>
-                  <option value="once" ${task.repeat === 'once' ? 'selected' : ''}>Once</option>
-                  <option value="daily" ${task.repeat === 'daily' ? 'selected' : ''}>Every day</option>
-                  <option value="weekly" ${task.repeat === 'weekly' ? 'selected' : ''}>Every week</option>
-                </select>
-              </label>
-              <label class="st-check">
-                <input type="checkbox" name="skipIfDone" ${task.skipIfDone ? 'checked' : ''} ${canEdit ? '' : 'disabled'} />
-                Skip people who already did this
-              </label>
-              <p class="st-help">Won’t email artists who already added arrival time, or who already got the chat invite.</p>
-              <p class="st-estimate" data-st-estimate>${esc(estimateFor(task))}</p>
               ${canEdit
                   ? `<div class="st-modal-actions">
-                <button type="button" class="button" data-st-test>Send me a test email</button>
+                <button type="button" class="button" data-st-test>${isAnnounce ? 'Send me a test' : 'Send me a test email'}</button>
                 <button type="button" class="button" data-st-now>Send now</button>
                 ${!isNew ? `<button type="button" class="button" data-st-pause>${task.enabled ? 'Pause' : 'Turn on'}</button>` : ''}
                 ${!isNew ? '<button type="button" class="button" data-st-delete>Delete</button>' : ''}
@@ -374,10 +436,31 @@ export async function initScheduledTasks(mainEl) {
         const toggleBits = () => {
             const channels = String(form.channels.value || 'email');
             const kind = String(form.kind.value || '');
+            const repeat = String(form.repeat.value || 'once');
+            const announceMode = String(form.announceDay?.value || 'today');
+            const isAnnounceKind = kind === 'announce_day';
+            const howSend = form.querySelector('[data-st-how-send]');
             const lineWrap = form.querySelector('[data-st-line-rooms]');
             const customWrap = form.querySelector('[data-st-custom]');
-            if (lineWrap instanceof HTMLElement) lineWrap.hidden = channels === 'email';
+            const announceWrap = form.querySelector('[data-st-announce-day]');
+            const announceDateWrap = form.querySelector('[data-st-announce-date]');
+            const repeatEnd = form.querySelector('[data-st-repeat-end]');
+            const skipWrap = form.querySelector('[data-st-skip]');
+            const skipHelp = form.querySelector('[data-st-skip-help]');
+            const testBtn = form.querySelector('[data-st-test]');
+            if (howSend instanceof HTMLElement) howSend.hidden = isAnnounceKind;
+            if (lineWrap instanceof HTMLElement) lineWrap.hidden = isAnnounceKind || channels === 'email';
             if (customWrap instanceof HTMLElement) customWrap.hidden = kind !== 'custom';
+            if (announceWrap instanceof HTMLElement) announceWrap.hidden = !isAnnounceKind;
+            if (announceDateWrap instanceof HTMLElement) {
+                announceDateWrap.hidden = !isAnnounceKind || announceMode !== 'date';
+            }
+            if (repeatEnd instanceof HTMLElement) repeatEnd.hidden = repeat === 'once';
+            if (skipWrap instanceof HTMLElement) skipWrap.hidden = isAnnounceKind;
+            if (skipHelp instanceof HTMLElement) skipHelp.hidden = isAnnounceKind;
+            if (testBtn instanceof HTMLElement) {
+                testBtn.textContent = isAnnounceKind ? 'Send me a test' : 'Send me a test email';
+            }
             const draft = readForm(form, task);
             const estimate = form.querySelector('[data-st-estimate]');
             if (estimate) estimate.textContent = estimateFor(draft);
@@ -398,6 +481,16 @@ export async function initScheduledTasks(mainEl) {
                 window.alert('Choose at least one program.');
                 return;
             }
+            if (next.kind === 'announce_day' && String(form.announceDay?.value || '') === 'date' && !String(form.announceDate?.value || '').trim()) {
+                window.alert('Choose which day’s schedule to post.');
+                return;
+            }
+            const startLocal = `${form.date.value}T${form.time.value}`;
+            const { endsAtLocal } = parseScheduledTaskWindow(next);
+            if (endsAtLocal && endsAtLocal < startLocal) {
+                window.alert('Stop repeating has to be after the first send.');
+                return;
+            }
             await staffUpsertScheduledTask(next);
             modal.close();
             await reloadTasks();
@@ -405,8 +498,13 @@ export async function initScheduledTasks(mainEl) {
         });
         form?.querySelector('[data-st-test]')?.addEventListener('click', () => void sendTest(readForm(form, task)));
         form?.querySelector('[data-st-now]')?.addEventListener('click', async () => {
-            if (!window.confirm('Send this to everyone on the list right now?')) return;
-            const next = readForm(form, task);
+            const draft = readForm(form, task);
+            const confirmSend =
+                draft.kind === 'announce_day'
+                    ? 'Post the day’s schedule in Announcements right now?'
+                    : 'Send this to everyone on the list right now?';
+            if (!window.confirm(confirmSend)) return;
+            const next = draft;
             await staffUpsertScheduledTask(next);
             try {
                 if (preview || getDataSource() === 'test') {
@@ -451,28 +549,71 @@ export async function initScheduledTasks(mainEl) {
             String(el.getAttribute('data-st-program-id') || ''),
         );
         const timezone = String(form.timezone.value || 'Asia/Tokyo');
-        const firstRunLocal = `${form.date.value}T${form.time.value}`;
+        const kind = String(form.kind.value || 'flight_followup');
+        const isAnnounceKind = kind === 'announce_day';
+        const repeat = String(form.repeat.value || 'once');
+        const startLocal = `${form.date.value}T${form.time.value}`;
+        let endLocal = '';
+        if (repeat !== 'once') {
+            const endDate = String(form.endDate?.value || '').trim();
+            const endTime = String(form.endTime?.value || '').trim() || (endDate ? '23:59' : '');
+            if (endDate && endTime) endLocal = `${endDate}T${endTime}`;
+        }
+        let announceDay = 'today';
+        const announceMode = String(form.announceDay?.value || 'today');
+        if (announceMode === 'tomorrow') announceDay = 'tomorrow';
+        else if (announceMode === 'date') announceDay = String(form.announceDate?.value || '').trim();
         return {
             ...prior,
             id: prior.id || newTaskId(),
             name: String(form.name.value || '').trim(),
             enabled: prior.enabled !== false,
-            channels: String(form.channels.value || 'email'),
-            kind: String(form.kind.value || 'flight_followup'),
+            channels: isAnnounceKind ? 'line' : String(form.channels.value || 'email'),
+            kind,
             programIds,
-            lineRooms: String(form.lineRooms.value || 'both'),
+            lineRooms: isAnnounceKind ? 'announce' : String(form.lineRooms.value || 'both'),
             customSubject: String(form.customSubject.value || ''),
             customBodyText: String(form.customBodyText.value || ''),
-            customLineText: String(form.customLineText.value || ''),
+            customLineText: isAnnounceKind ? announceDay : String(form.customLineText.value || ''),
             timezone,
-            firstRunLocal,
-            repeat: String(form.repeat.value || 'once'),
-            skipIfDone: Boolean(form.skipIfDone.checked),
-            nextRunAtIso: localDateTimeToUtcIso(firstRunLocal, timezone),
+            firstRunLocal: encodeScheduledTaskWindow(startLocal, endLocal),
+            repeat,
+            skipIfDone: isAnnounceKind ? false : Boolean(form.skipIfDone?.checked),
+            nextRunAtIso: localDateTimeToUtcIso(startLocal, timezone),
         };
     }
 
     async function sendTest(task) {
+        if (task.kind === 'announce_day') {
+            const pid = String((task.programIds || [])[0] || '').trim();
+            if (!pid) {
+                window.alert('Choose at least one program.');
+                return;
+            }
+            const ymd = resolveAnnounceDayYmd(task.customLineText, task.timezone);
+            try {
+                if (preview || getDataSource() === 'test') {
+                    window.alert('Test is ready. In live mode this goes to the LINE bot admin.');
+                    return;
+                }
+                const events = dayEventsForAnnounce(await listScheduleEventsStudio(), {
+                    date: ymd,
+                    programId: pid,
+                });
+                await announceScheduleOnLine({
+                    programId: pid,
+                    test: true,
+                    mode: 'day',
+                    programName: programName(pid),
+                    date: ymd,
+                    events: events.map(toAnnouncePayload),
+                });
+                window.alert(ANNOUNCE_SUCCESS_TEST);
+            } catch (err) {
+                window.alert(err instanceof Error ? err.message : 'Could not send the test.');
+            }
+            return;
+        }
         const programNameText = programName((task.programIds || [])[0] || '');
         let html = '';
         let subject = 'Fusion scheduled task test';

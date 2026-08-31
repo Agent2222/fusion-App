@@ -11,6 +11,8 @@ export const ANNOUNCE_ROOM_UNBOUND = 'LINE chat isn’t connected for this progr
 export const ANNOUNCE_DESTINATION = 'Goes to the Announcements chat.';
 export const ANNOUNCE_SUCCESS_LIVE = 'Sent to Announcements';
 export const ANNOUNCE_SUCCESS_TEST = 'Test sent to the LINE bot admin';
+export const ANNOUNCE_EMPTY_DAY =
+    'No events on the calendar. Artists will get a note that it’s a great day to create and explore.';
 
 /**
  * @param {string} s
@@ -95,12 +97,13 @@ export function buildAnnounceConfirmCopy(opts) {
         const time = formatTimeRange(ev);
         return `${ev.title || 'Event'} · ${time}`;
     });
+    const emptyDayLine = kind === 'day' && !eventLines.length ? ANNOUNCE_EMPTY_DAY : '';
     const destinationLine = ANNOUNCE_DESTINATION;
     const unboundLine = opts?.announceBound === false ? ANNOUNCE_ROOM_UNBOUND : '';
-    const allText = [title, programLine, dateLine, ...eventLines, destinationLine, unboundLine]
+    const allText = [title, programLine, dateLine, ...eventLines, emptyDayLine, destinationLine, unboundLine]
         .filter(Boolean)
         .join('\n');
-    return { title, programLine, dateLine, eventLines, destinationLine, unboundLine, allText };
+    return { title, programLine, dateLine, eventLines, emptyDayLine, destinationLine, unboundLine, allText };
 }
 
 /**
@@ -142,7 +145,7 @@ export async function openScheduleAnnounceConfirm(opts) {
         ? `<ul class="schedule-announce-list">${copy.eventLines
               .map((line) => `<li>${escapeHtml(line)}</li>`)
               .join('')}</ul>`
-        : `<p class="studio-muted">No events to announce.</p>`;
+        : `<p class="studio-muted">${escapeHtml(copy.emptyDayLine || ANNOUNCE_EMPTY_DAY)}</p>`;
     const inner = `
         <p class="schedule-announce-meta">${escapeHtml(copy.programLine)}</p>
         ${copy.dateLine ? `<p class="schedule-announce-meta">${escapeHtml(copy.dateLine)}</p>` : ''}
@@ -169,10 +172,10 @@ export async function openScheduleAnnounceConfirm(opts) {
         });
     };
     const send = async (test) => {
-        if (!events.length) {
+        if (kind === 'event' && !events.length) {
             if (errorEl) {
                 errorEl.hidden = false;
-                errorEl.textContent = 'No events to announce.';
+                errorEl.textContent = 'This event isn’t ready to announce.';
             }
             return;
         }

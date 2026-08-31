@@ -7,7 +7,10 @@ import {
     normalizeScheduleColor,
     normalizeScheduleImportance,
     scheduleCategoryMeta,
+    scheduleInkOnHex,
     SCHEDULE_EVENT_CATEGORIES,
+    SCHEDULE_INK_DARK,
+    SCHEDULE_INK_LIGHT,
     normalizeScheduleRsvpIds,
     parseCanisterJsonText,
     scheduleEventPeopleLabel,
@@ -32,6 +35,17 @@ describe('normalizeScheduleColor', () => {
         expect(SCHEDULE_EVENT_CATEGORIES).toHaveLength(11);
         expect(scheduleCategoryMeta('meals').label).toBe('Meals');
         expect(scheduleCategoryMeta('tours').hex).toBe('#ff8a1a');
+    });
+});
+
+describe('scheduleInkOnHex', () => {
+    it('uses light text on dark category colors and dark text on light ones', () => {
+        expect(scheduleInkOnHex('#4a72c4')).toBe(SCHEDULE_INK_LIGHT);
+        expect(scheduleInkOnHex('#111827')).toBe(SCHEDULE_INK_LIGHT);
+        expect(scheduleInkOnHex('#ffe14a')).toBe(SCHEDULE_INK_DARK);
+        expect(scheduleInkOnHex('#cfe8d6')).toBe(SCHEDULE_INK_DARK);
+        expect(scheduleCategoryMeta('presentations').ink).toBe(SCHEDULE_INK_LIGHT);
+        expect(scheduleCategoryMeta('external').ink).toBe(SCHEDULE_INK_DARK);
     });
 });
 

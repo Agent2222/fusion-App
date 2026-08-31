@@ -41,6 +41,7 @@ export function shouldSkipAudienceRow(task, row) {
  * @param {object[]} applicants
  */
 export function emailRecipientsForTask(task, applicants) {
+    if (String(task?.kind || '') === 'announce_day') return [];
     return (Array.isArray(applicants) ? applicants : []).filter((row) => {
         if (!isConfirmedAudienceRow(row)) return false;
         if (!isPublicEmail(row.email)) return false;
@@ -54,6 +55,11 @@ export function emailRecipientsForTask(task, applicants) {
  * @param {{ groupGeneralId?: string, groupAnnounceId?: string }} binding
  */
 export function lineRoomsForTask(task, binding) {
+    const kind = String(task?.kind || '');
+    if (kind === 'announce_day') {
+        const announce = String(binding?.groupAnnounceId || '').trim();
+        return announce ? [{ room: 'announce', groupId: announce }] : [];
+    }
     const channels = String(task?.channels || '');
     if (channels !== 'line' && channels !== 'both') return [];
     const want = String(task?.lineRooms || 'both');
@@ -74,6 +80,9 @@ export function lineRoomsForTask(task, binding) {
  * @param {{ groupGeneralId?: string, groupAnnounceId?: string }} binding
  */
 export function lineRoomsMissing(task, binding) {
+    if (String(task?.kind || '') === 'announce_day') {
+        return String(binding?.groupAnnounceId || '').trim() ? [] : ['announce'];
+    }
     const channels = String(task?.channels || '');
     if (channels !== 'line' && channels !== 'both') return [];
     const want = String(task?.lineRooms || 'both');

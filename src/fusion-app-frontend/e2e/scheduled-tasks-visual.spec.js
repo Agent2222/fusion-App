@@ -47,8 +47,26 @@ test.describe('Scheduled Tasks visual camera', () => {
         await page.getByRole('button', { name: 'New task' }).click();
         await expect(page.getByRole('heading', { name: 'New scheduled task' })).toBeVisible();
         await expect(page.locator('.studio-st-modal select[name="kind"]')).toHaveValue('flight_followup');
+        await expect(page.locator('.studio-st-modal select[name="kind"] option[value="announce_day"]')).toHaveCount(1);
         await expect(page.getByText('Skip people who already did this')).toBeVisible();
         await expect(page.getByText(/Will go to/)).toBeVisible();
+        const layout = await page.locator('.studio-st-modal').evaluate((panel) => {
+            const form = panel.querySelector('[data-st-form]');
+            const grid = panel.querySelector('.st-modal-grid');
+            const cols = [...panel.querySelectorAll('.st-modal-col')];
+            const formBox = form?.getBoundingClientRect();
+            const panelBox = panel.getBoundingClientRect();
+            const colBoxes = cols.map((col) => col.getBoundingClientRect());
+            return {
+                formWidth: formBox?.width || 0,
+                panelWidth: panelBox.width,
+                colCount: cols.length,
+                sideBySide: colBoxes.length === 2 && Math.abs(colBoxes[0].top - colBoxes[1].top) < 8,
+            };
+        });
+        expect(layout.colCount).toBe(2);
+        expect(layout.sideBySide).toBe(true);
+        expect(layout.formWidth / layout.panelWidth).toBeGreaterThan(0.85);
         const modalHtml = await page.locator('.studio-st-modal').innerHTML();
         expect(modalHtml).not.toMatch(/cron/i);
         expect(modalHtml).not.toMatch(/\btick\b/i);

@@ -9,7 +9,7 @@ import {
     formatMonthYear,
     formatTime12,
     parseYmd,
-    SCHEDULE_DOT_HEX,
+    scheduleChipCssVars,
 } from '../../utils/scheduleModel.js';
 import {
     buildMultiEventIcs,
@@ -575,8 +575,7 @@ function monthHtml(state, events) {
             const chips = list
                 .slice(0, 3)
                 .map((e) => {
-                    const hex = SCHEDULE_DOT_HEX[e.color] || SCHEDULE_DOT_HEX.creating;
-                    return `<span class="event-chip" role="button" tabindex="0" data-mpc-open-event="${esc(e.id)}" style="background:${hex}" title="${esc(e.title)}">${esc(e.title)}</span>`;
+                    return `<span class="event-chip" role="button" tabindex="0" data-mpc-open-event="${esc(e.id)}" style="${esc(scheduleChipCssVars(e.color))}" title="${esc(e.title)}">${esc(e.title)}</span>`;
                 })
                 .join('');
             const selected = cell.date === state.selectedDate ? ' calendar-day--selected' : '';
@@ -599,8 +598,8 @@ function agendaHtml(date, dayEvents) {
         .map((e) => {
             const time = e.allDay ? 'All day' : `${formatTime12(e.startTime)} – ${formatTime12(e.endTime)}`;
             return `<li class="agenda-item">
-        <button type="button" class="agenda-item__content" data-mpc-open-event="${esc(e.id)}" style="display:block;width:100%;text-align:left;border:0;background:transparent;padding:0;cursor:pointer;color:inherit;font:inherit">
-          <strong>${esc(e.title)}</strong>
+        <button type="button" class="agenda-item__content" data-mpc-open-event="${esc(e.id)}" title="${esc(e.title)}">
+          <strong class="agenda-item__title">${esc(e.title || 'Untitled event')}</strong>
           <span>${esc(time)} · ${esc(e.locationName || '')}</span>
         </button>
       </li>`;

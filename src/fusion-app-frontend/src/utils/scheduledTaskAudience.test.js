@@ -57,6 +57,15 @@ describe('scheduledTaskAudience', () => {
         expect(lineRoomsMissing(task, { groupGeneralId: 'G1', groupAnnounceId: '' })).toEqual(['announce']);
     });
 
+    it('posts announce-day only to Announcements and never emails', () => {
+        const task = { kind: 'announce_day', channels: 'line', lineRooms: 'announce' };
+        expect(emailRecipientsForTask(task, [confirmed])).toEqual([]);
+        expect(lineRoomsForTask(task, { groupGeneralId: 'G1', groupAnnounceId: 'A1' })).toEqual([
+            { room: 'announce', groupId: 'A1' },
+        ]);
+        expect(lineRoomsMissing(task, { groupGeneralId: 'G1', groupAnnounceId: '' })).toEqual(['announce']);
+    });
+
     it('writes a staff-readable recipient estimate', () => {
         expect(recipientEstimateLabel(12, 2)).toBe('Will go to ~12 people by email and 2 LINE chats');
         expect(recipientEstimateLabel(0, 0)).toBe('Will go to no one yet');

@@ -8,24 +8,74 @@ import { scheduleTimezoneButtonLabel } from './scheduleTimezones.js';
 /** @typedef {string} CalendarEventColor */
 /** @typedef {'optional' | 'suggested' | 'general'} ScheduleEventImportance */
 
+export const SCHEDULE_INK_LIGHT = '#ffffff';
+export const SCHEDULE_INK_DARK = '#111827';
+
+/**
+ * @param {unknown} hex
+ */
+function parseHexRgb(hex) {
+    const raw = String(hex || '')
+        .trim()
+        .replace(/^#/, '');
+    const full = raw.length === 3 ? raw.split('').map((c) => c + c).join('') : raw;
+    if (!/^[0-9a-fA-F]{6}$/.test(full)) return null;
+    const n = Number.parseInt(full, 16);
+    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+
+/**
+ * Relative luminance (WCAG 2).
+ * @param {{ r: number, g: number, b: number }} rgb
+ */
+function relativeLuminance(rgb) {
+    const channel = (c) => {
+        const s = c / 255;
+        return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+    };
+    return 0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b);
+}
+
+/**
+ * Pick light or dark text so the label stays readable on a category color.
+ * @param {unknown} hex
+ */
+export function scheduleInkOnHex(hex) {
+    const rgb = parseHexRgb(hex);
+    if (!rgb) return SCHEDULE_INK_DARK;
+    const L = relativeLuminance(rgb);
+    const contrastWhite = (1.0 + 0.05) / (L + 0.05);
+    const contrastBlack = (L + 0.05) / (0.05);
+    return contrastWhite >= contrastBlack ? SCHEDULE_INK_LIGHT : SCHEDULE_INK_DARK;
+}
+
 /**
  * Schedule event categories — stored in the existing `color` field.
- * Hex values follow the staff category color sheet.
+ * Hex values follow the staff category color sheet. Ink is computed for contrast.
  * @type {ReadonlyArray<{ id: string, label: string, hex: string, ink: string }>}
  */
 export const SCHEDULE_EVENT_CATEGORIES = [
-    { id: 'traveling', label: 'Traveling', hex: '#f4c2c8', ink: '#5c2a32' },
-    { id: 'creating', label: 'Creating', hex: '#cfe8d6', ink: '#2a4d38' },
-    { id: 'exploration', label: 'Exploration', hex: '#f3e6c0', ink: '#5c4d1f' },
-    { id: 'setup', label: 'Setup / clean up', hex: '#9caf88', ink: '#2a3824' },
-    { id: 'flights', label: 'Flights', hex: '#c5dff8', ink: '#23415c' },
-    { id: 'presentations', label: 'Misc presentations', hex: '#4a72c4', ink: '#ffffff' },
-    { id: 'meals', label: 'Meals', hex: '#e0b322', ink: '#3d2e00' },
-    { id: 'external', label: 'External event', hex: '#ffe14a', ink: '#3d3400' },
-    { id: 'workshop', label: 'Workshop / onsen event', hex: '#2ec8c8', ink: '#0b3d3d' },
-    { id: 'filming', label: 'Filming', hex: '#8ef04a', ink: '#1a3d0a' },
-    { id: 'tours', label: 'Tours', hex: '#ff8a1a', ink: '#3d1f00' },
-];
+    { id: 'traveling', label: 'Traveling', hex: '#f4c2c8' },
+    { id: 'creating', label: 'Creating', hex: '#cfe8d6' },
+    { id: 'exploration', label: 'Exploration', hex: '#f3e6c0' },
+    { id: 'setup', label: 'Setup / clean up', hex: '#9caf88' },
+    { id: 'flights', label: 'Flights', hex: '#c5dff8' },
+    { id: 'presentations', label: 'Misc presentations', hex: '#4a72c4' },
+    { id: 'meals', label: 'Meals', hex: '#e0b322' },
+    { id: 'external', label: 'External event', hex: '#ffe14a' },
+    { id: 'workshop', label: 'Workshop / onsen event', hex: '#2ec8c8' },
+    { id: 'filming', label: 'Filming', hex: '#8ef04a' },
+    { id: 'tours', label: 'Tours', hex: '#ff8a1a' },
+].map((c) => ({ ...c, ink: scheduleInkOnHex(c.hex) }));
+
+/**
+ * CSS variables for a calendar chip (defeats global `button { color: white }`).
+ * @param {unknown} raw
+ */
+export function scheduleChipCssVars(raw) {
+    const meta = scheduleCategoryMeta(raw);
+    return `--chip-bg:${meta.hex};--chip-ink:${meta.ink}`;
+}
 
 const LEGACY_SCHEDULE_COLOR_TO_CATEGORY = {
     sage: 'setup',

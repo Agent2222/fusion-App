@@ -114,23 +114,95 @@ export function isScheduledTaskLocked(lockedUntilIso, now = Date.now()) {
 export function isScheduledTaskRunnable(task, now = Date.now()) {
     if (!task || !task.enabled) return false;
     if (isScheduledTaskLocked(task.lockedUntilIso, now)) return false;
+    if (isAfterRepeatEnd(task, task.nextRunAtIso)) return false;
     return isScheduledTaskDue(task.nextRunAtIso, now);
 }
 
 /**
+ * Start / stop window. Stop time is stored after `~` on firstRunLocal so older canisters keep working.
  * @param {object} task
- * @param {string} [finishedAtIso]
  */
+export function parseScheduledTaskWindow(task) {
+    const storedEnd = String(task?.endsAtLocal || '').trim();
+    const raw = String(task?.firstRunLocal || '').trim();
+    const tilde = raw.indexOf('~');
+    const start = tilde >= 0 ? raw.slice(0, tilde) : raw;
+    const encodedEnd = tilde >= 0 ? raw.slice(tilde + 1).trim() : '';
+    return {
+        firstRunLocal: start,
+        endsAtLocal: storedEnd || encodedEnd,
+    };
+}
+
+/**
+ * @param {string} startLocal
+ * @param {string} [endLocal]
+ */
+export function encodeScheduledTaskWindow(startLocal, endLocal) {
+    const start = String(startLocal || '').trim();
+    const end = String(endLocal || '').trim();
+    return end ? `${start}~${end}` : start;
+}
+
+/**
+ * @param {unknown} raw
+ */
+export function normalizeAnnounceDay(raw) {
+    const t = String(raw || '')
+        .trim()
+        .toLowerCase();
+    if (t === 'tomorrow') return 'tomorrow';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+    return 'today';
+}
+
+/**
+ * @param {string} announceDay
+ * @param {string} timeZone
+ * @param {string | number | Date} [now]
+ */
+export function resolveAnnounceDayYmd(announceDay, timeZone, now = Date.now()) {
+    const key = normalizeAnnounceDay(announceDay);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(key)) return key;
+    const n = typeof now === 'number' ? now : Date.parse(String(now)) || Date.now();
+    const local = utcIsoToLocalDateTime(new Date(n).toISOString(), timeZone);
+    const today = local.slice(0, 10);
+    if (key === 'tomorrow') {
+        const next = addDaysToUtcIsoInZone(new Date(n).toISOString(), timeZone, 1);
+        return utcIsoToLocalDateTime(next, timeZone).slice(0, 10);
+    }
+    return today;
+}
+
+/**
+ * @param {object} task
+ * @param {string} nextRunAtIso
+ */
+export function isAfterRepeatEnd(task, nextRunAtIso) {
+    const { endsAtLocal } = parseScheduledTaskWindow(task);
+    if (!endsAtLocal) return false;
+    const tz = String(task?.timezone || 'Asia/Tokyo').trim() || 'Asia/Tokyo';
+    const endIso = localDateTimeToUtcIso(endsAtLocal, tz);
+    if (!endIso) return false;
+    return String(nextRunAtIso || '') > endIso;
+}
+
 export function nextRunAfterComplete(task, finishedAtIso) {
     const tz = String(task?.timezone || 'Asia/Tokyo').trim() || 'Asia/Tokyo';
     const repeat = String(task?.repeat || 'once').trim();
+    let nextRunAtIso = String(task?.nextRunAtIso || finishedAtIso || '');
+    let enabled = false;
     if (repeat === 'daily') {
-        return { enabled: true, nextRunAtIso: addDaysToUtcIsoInZone(task.nextRunAtIso || finishedAtIso, tz, 1) };
+        enabled = true;
+        nextRunAtIso = addDaysToUtcIsoInZone(task.nextRunAtIso || finishedAtIso, tz, 1);
+    } else if (repeat === 'weekly') {
+        enabled = true;
+        nextRunAtIso = addDaysToUtcIsoInZone(task.nextRunAtIso || finishedAtIso, tz, 7);
     }
-    if (repeat === 'weekly') {
-        return { enabled: true, nextRunAtIso: addDaysToUtcIsoInZone(task.nextRunAtIso || finishedAtIso, tz, 7) };
+    if (enabled && isAfterRepeatEnd(task, nextRunAtIso)) {
+        return { enabled: false, nextRunAtIso };
     }
-    return { enabled: false, nextRunAtIso: String(task?.nextRunAtIso || finishedAtIso || '') };
+    return { enabled, nextRunAtIso };
 }
 
 /**

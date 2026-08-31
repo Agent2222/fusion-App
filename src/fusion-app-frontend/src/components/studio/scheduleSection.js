@@ -5,12 +5,13 @@ import '../../styles/studioSchedule.css';
 import { studioFeatureAccess } from '../../utils/studioShellState.js';
 import {
     SCHEDULE_DOT_HEX,
+    formatTime12,
     normalizeScheduleColor,
+    scheduleChipCssVars,
     buildMonthCells,
     eventDurationLabel,
     formatAgendaHeading,
     formatMonthYear,
-    formatTime12,
     parseYmd,
     weekRangeContaining,
     addDaysYmd,
@@ -385,7 +386,7 @@ function monthHtml(state, events) {
             const chips = shown
                 .map(
                     (e) =>
-                        `<button type="button" class="event-chip event-chip--${esc(normalizeScheduleColor(e.color))}" data-sch-event="${esc(e.id)}" title="${esc(e.title)}">${esc(e.allDay ? e.title : `${formatTime12(e.startTime).replace(' ', '')} ${e.title}`)}</button>`,
+                        `<button type="button" class="event-chip event-chip--${esc(normalizeScheduleColor(e.color))}" style="${esc(scheduleChipCssVars(e.color))}" data-sch-event="${esc(e.id)}" title="${esc(e.title)}">${esc(e.allDay ? e.title : `${formatTime12(e.startTime).replace(' ', '')} ${e.title}`)}</button>`,
                 )
                 .join('');
             return `<div class="calendar-day ${cell.inMonth ? '' : 'calendar-day--outside'} ${isToday ? 'calendar-day--today' : ''} ${isSelected ? 'calendar-day--selected' : ''}" data-sch-day="${esc(cell.date)}" role="button" tabindex="0" aria-label="${esc(cell.date)}">
@@ -415,7 +416,7 @@ function weekHtml(state, events) {
         const chips = list
             .map(
                 (e) =>
-                    `<button type="button" class="event-chip event-chip--${esc(normalizeScheduleColor(e.color))}" data-sch-event="${esc(e.id)}">${esc(e.title)}</button>`,
+                    `<button type="button" class="event-chip event-chip--${esc(normalizeScheduleColor(e.color))}" style="${esc(scheduleChipCssVars(e.color))}" data-sch-event="${esc(e.id)}">${esc(e.title)}</button>`,
             )
             .join('');
         const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -440,7 +441,7 @@ function timelineHtml(state, events) {
             const chips = list
                 .map(
                     (e) =>
-                        `<button type="button" class="event-chip event-chip--${esc(normalizeScheduleColor(e.color))}" data-sch-event="${esc(e.id)}">${esc(e.allDay ? e.title : `${e.startTime} ${e.title}`)}</button>`,
+                        `<button type="button" class="event-chip event-chip--${esc(normalizeScheduleColor(e.color))}" style="${esc(scheduleChipCssVars(e.color))}" data-sch-event="${esc(e.id)}">${esc(e.allDay ? e.title : `${e.startTime} ${e.title}`)}</button>`,
                 )
                 .join('');
             return `<div class="timeline-day" data-sch-day="${esc(cell.date)}">
@@ -463,14 +464,14 @@ function agendaHtml(date, dayEvents, opts = {}) {
         .map((e) => {
             const staff = e.assignedStaff[0];
             const initials = staff?.initials || '—';
-            const time = e.allDay ? 'All day' : e.startTime;
+            const time = e.allDay ? 'All day' : formatTime12(e.startTime);
             const dur = eventDurationLabel(e);
             return `<li class="agenda-item" data-sch-event-row="${esc(e.id)}">
         <div class="agenda-item__time"><strong>${esc(time)}</strong><span>${esc(dur)}</span></div>
         <div class="agenda-item__track"><span class="agenda-item__dot" style="--dot:${SCHEDULE_DOT_HEX[normalizeScheduleColor(e.color)] || '#cfe8d6'}"></span></div>
-        <button type="button" class="agenda-item__content" data-sch-event="${esc(e.id)}" style="border:0;background:transparent;padding:0;text-align:left;cursor:pointer">
-          <strong>${esc(e.title)}</strong>
-          <span>${esc(e.locationName)}</span>
+        <button type="button" class="agenda-item__content" data-sch-event="${esc(e.id)}" title="${esc(e.title)}">
+          <strong class="agenda-item__title">${esc(e.title || 'Untitled event')}</strong>
+          <span>${esc(e.locationName || '')}</span>
         </button>
         <span class="avatar" title="${esc(staff?.name || '')}">${esc(initials)}</span>
         <div class="agenda-item__menu-wrap">

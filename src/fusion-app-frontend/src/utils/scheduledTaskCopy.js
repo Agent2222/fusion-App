@@ -17,6 +17,7 @@ export const KIND_LABELS = {
     flight_followup: 'Remind artists to add arrival time',
     comms_invite: 'Send chat room invite',
     custom: 'Write your own message',
+    announce_day: 'Announce the day’s schedule',
 };
 
 export const CHANNEL_LABELS = {
@@ -136,8 +137,13 @@ export function filterScheduledTasks(tasks, filters = {}) {
         if (tab === 'paused' && task.enabled) return false;
         if (tab === 'failed' && !isFailedTask(task)) return false;
         if (programId && !(Array.isArray(task.programIds) && task.programIds.includes(programId))) return false;
-        if (channel === 'email' && task.channels !== 'email' && task.channels !== 'both') return false;
-        if (channel === 'line' && task.channels !== 'line' && task.channels !== 'both') return false;
+        if (channel === 'email') {
+            if (task.kind === 'announce_day') return false;
+            if (task.channels !== 'email' && task.channels !== 'both') return false;
+        }
+        if (channel === 'line') {
+            if (task.kind !== 'announce_day' && task.channels !== 'line' && task.channels !== 'both') return false;
+        }
         if (!query) return true;
         const hay = [task.name, kindLabel(task.kind), channelLabel(task.channels), lastResultLabel(task)]
             .join(' ')

@@ -35,6 +35,7 @@ describe('scheduledTaskCopy', () => {
         expect(KIND_LABELS.flight_followup).toBe('Remind artists to add arrival time');
         expect(KIND_LABELS.comms_invite).toBe('Send chat room invite');
         expect(KIND_LABELS.custom).toBe('Write your own message');
+        expect(KIND_LABELS.announce_day).toBe('Announce the day’s schedule');
         expect(CHANNEL_LABELS.both).toBe('Email and LINE');
         expect(REPEAT_LABELS.daily).toBe('Every day');
         expect(REPEAT_LABELS.weekly).toBe('Every week');
@@ -80,5 +81,8 @@ describe('scheduledTaskCopy', () => {
         expect(filterScheduledTasks([sampleTask, paused, failed], { tab: 'failed' })).toHaveLength(1);
         expect(lastResultLabel(sentOnce)).toBe('Sent · won’t repeat');
         expect(scheduledTaskStats([sampleTask, failed]).failed).toBe(1);
+        const announce = { ...sampleTask, id: 'ad', kind: 'announce_day', channels: 'line' };
+        expect(filterScheduledTasks([announce], { channel: 'line' })).toHaveLength(1);
+        expect(filterScheduledTasks([announce], { channel: 'email' })).toHaveLength(0);
     });
 });

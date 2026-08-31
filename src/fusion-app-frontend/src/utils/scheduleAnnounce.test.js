@@ -3,6 +3,7 @@ import {
     ANNOUNCE_DAY_CHOOSE_PROGRAM,
     ANNOUNCE_DESTINATION,
     ANNOUNCE_ROOM_UNBOUND,
+    ANNOUNCE_EMPTY_DAY,
     ANNOUNCE_SUCCESS_LIVE,
     ANNOUNCE_SUCCESS_TEST,
     announceDayButtonState,
@@ -79,6 +80,21 @@ describe('buildAnnounceConfirmCopy', () => {
         expect(staffCopyHasForbiddenTerms(copy.title)).toBe(false);
         expect(staffCopyHasForbiddenTerms(ANNOUNCE_SUCCESS_LIVE)).toBe(false);
         expect(staffCopyHasForbiddenTerms(ANNOUNCE_SUCCESS_TEST)).toBe(false);
+    });
+
+    it('lets staff announce a day with no events', () => {
+        const copy = buildAnnounceConfirmCopy({
+            kind: 'day',
+            programName: dinner.programName,
+            date: dinner.date,
+            events: [],
+            announceBound: true,
+        });
+        expect(copy.emptyDayLine).toBe(ANNOUNCE_EMPTY_DAY);
+        expect(copy.eventLines).toEqual([]);
+        expect(staffCopyHasForbiddenTerms(copy.allText)).toBe(false);
+        expect(copy.allText).toMatch(/create/);
+        expect(copy.allText).toMatch(/explore/);
     });
 
     it('titles a single-event confirm as Announce this event', () => {
