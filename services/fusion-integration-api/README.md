@@ -64,15 +64,20 @@ stripe listen --forward-to localhost:8787/webhooks/stripe
 | `S3_FUSION_MEDIA_PUBLIC_PREFIX` | no | Prefix for community public media (default `fusionMedia/uploads/`) |
 | `S3_PRIVATE_VIDEO_PREFIX` | no | Prefix for gated private video (default `fusionMedia/private-video/`) |
 | `FUSION_SIGNATURE_LOGO_URL` | no | If set, integration server rewrites `https://…/email/Fusion-X-logo-02.png` (and legacy `Fusion-Logo-Sig-1.png`) in HTML email bodies to this URL (e.g. CDN) for test/batch send |
+| `LINE_CHANNEL_SECRET` | for LINE webhook | Channel secret — HMAC for `x-line-signature`. Never store on the canister. |
+| `LINE_CHANNEL_ACCESS_TOKEN` | for LINE push | Long-lived **channel access token** (Messaging API → Issue), not the numeric Channel ID. |
 
 ## Scripts
 
 - `npm run dev` — run with `--watch`
 - `npm start` — production
+- `npm test` — LINE webhook signature / event parse + push helpers
 
 ## Routes
 
-- `GET /health` — status flags (no secrets); includes `stripePrice`, `fusionCanister`, `stripeWebhook`, `storageBackend`, nested `storage: { active, aws, r2 }`, and legacy `s3` (active backend configured)
+- `GET /health` — status flags (no secrets); includes `stripePrice`, `fusionCanister`, `line`, `stripeWebhook`, `storageBackend`, nested `storage: { active, aws, r2 }`, and legacy `s3` (active backend configured)
+- `POST /webhooks/line` — LINE Messaging API webhook (raw JSON, `x-line-signature`); records seen group ids on the canister. URL: `https://<your-api-host>/webhooks/line`
+- `POST /line/push` — body `{ programId, room: "general" | "announce", text }` — push text to the bound LINE group (API key required)
 - `GET /payments/config` — PayPal mode + `planMonthly` / `planQuarterly` / `planAnnual` / `planBimonthlyLegacy`
 - `POST /payments/subscription` — PayPal membership create (`subscriptionTier`: `monthly` | `quarterly` | `annual`)
 - `POST /payments/subscription/link` — bind pay-first subscription to principal after II

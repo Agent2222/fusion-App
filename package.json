@@ -12,6 +12,7 @@
     "pretest": "npm run prebuild --workspaces --if-present",
     "start": "npm start --workspaces --if-present",
     "test": "npm test --workspaces --if-present",
+    "test:backend": "vitest run --config tests/backend/vitest.config.js",
     "s": "npm run dev --workspace=fusion-integration-api",
     "integration-api:start": "npm start --workspace=fusion-integration-api"
   },
@@ -22,5 +23,8 @@
   ],
   "dependencies": {
     "gsap": "^3.14.2"
+  },
+  "devDependencies": {
+    "@dfinity/pic": "^0.23.0"
   }
 }

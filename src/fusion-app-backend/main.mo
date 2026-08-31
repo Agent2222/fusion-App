@@ -98,6 +98,14 @@ persistent actor {
   stable var scheduleEventImageUrlStable : [(Text, Text)] = [];
   /// Event id → show on public site / journal (CMS events + layout).
   stable var scheduleEventPublicOnSiteStable : [(Text, Bool)] = [];
+  /// Event id → importance (optional|suggested|general).
+  stable var scheduleEventImportanceStable : [(Text, Text)] = [];
+  /// Event id → accept member RSVP.
+  stable var scheduleEventAcceptRsvpStable : [(Text, Bool)] = [];
+  /// Event id → RSVP capacity (1–200 when accept RSVP is on).
+  stable var scheduleEventAvailabilityStable : [(Text, Nat)] = [];
+  /// Event id → RSVP artist ids (or principal text fallback).
+  stable var scheduleEventRsvpIdsStable : [(Text, [Text])] = [];
   /// Studio Finance → Program team members (disbursements / expenses).
   stable var programTeamMembersStable : [(Text, Types.ProgramTeamMember)] = [];
   stable var programTeamOwedEntriesStable : [(Text, Types.ProgramTeamOwedEntry)] = [];
@@ -249,8 +257,15 @@ persistent actor {
 
   /// Studio Travel: flight bookings keyed by applicant id.
   stable var applicantFlightBookingsStable : [(Text, Types.ApplicantFlightBooking)] = [];
-  /// Studio Travel: per-program travel prep links keyed by program id.
-  stable var programTravelPrepLinksStable : [(Text, [Types.TravelPrepLink])] = [];
+  /// Studio Travel: per-program travel prep links keyed by program id (V0 = no imageUrl).
+  stable var programTravelPrepLinksStable : [(Text, [Types.TravelPrepLinkV0])] = [];
+  stable var programTravelPrepLinksStableV1 : [(Text, [Types.TravelPrepLink])] = [];
+  /// Studio Comms: per-program LINE / room setup (no secrets). V0 = first shape; V1 = one group; V2 = two rooms + stores.
+  stable var programCommsConfigStable : [(Text, Types.ProgramCommsConfigV0)] = [];
+  stable var programCommsConfigStableV1 : [(Text, Types.ProgramCommsConfigV1)] = [];
+  stable var programCommsConfigStableV2 : [(Text, Types.ProgramCommsConfig)] = [];
+  stable var programCommsLineSeenStable : [(Text, Types.ProgramCommsLineSeenGroup)] = [];
+  stable var programCommsLineBindingStable : [(Text, Types.ProgramCommsLineBinding)] = [];
 
   // In-memory hashmap for fast lookups/updates.
   transient var subscribersByEmail : _HashMap.HashMap<Text, Types.Subscriber> =
@@ -353,6 +368,15 @@ persistent actor {
   transient var programTravelPrepLinksById : _HashMap.HashMap<Text, [Types.TravelPrepLink]> =
     _HashMap.HashMap<Text, [Types.TravelPrepLink]>(0, Text.equal, Text.hash);
 
+  transient var programCommsConfigById : _HashMap.HashMap<Text, Types.ProgramCommsConfig> =
+    _HashMap.HashMap<Text, Types.ProgramCommsConfig>(0, Text.equal, Text.hash);
+
+  transient var programCommsLineSeenById : _HashMap.HashMap<Text, Types.ProgramCommsLineSeenGroup> =
+    _HashMap.HashMap<Text, Types.ProgramCommsLineSeenGroup>(0, Text.equal, Text.hash);
+
+  transient var programCommsLineBindingByProgramId : _HashMap.HashMap<Text, Types.ProgramCommsLineBinding> =
+    _HashMap.HashMap<Text, Types.ProgramCommsLineBinding>(0, Text.equal, Text.hash);
+
   /// slug -> artist id
   transient var artistSlugToId : _HashMap.HashMap<Text, Text> =
     _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
@@ -425,6 +449,18 @@ persistent actor {
 
   transient var scheduleEventPublicOnSiteById : _HashMap.HashMap<Text, Bool> =
     _HashMap.HashMap<Text, Bool>(0, Text.equal, Text.hash);
+
+  transient var scheduleEventImportanceById : _HashMap.HashMap<Text, Text> =
+    _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
+
+  transient var scheduleEventAcceptRsvpById : _HashMap.HashMap<Text, Bool> =
+    _HashMap.HashMap<Text, Bool>(0, Text.equal, Text.hash);
+
+  transient var scheduleEventAvailabilityById : _HashMap.HashMap<Text, Nat> =
+    _HashMap.HashMap<Text, Nat>(0, Text.equal, Text.hash);
+
+  transient var scheduleEventRsvpIdsById : _HashMap.HashMap<Text, [Text]> =
+    _HashMap.HashMap<Text, [Text]>(0, Text.equal, Text.hash);
 
   transient var programTeamMembersById : _HashMap.HashMap<Text, Types.ProgramTeamMember> =
     _HashMap.HashMap<Text, Types.ProgramTeamMember>(0, Text.equal, Text.hash);
@@ -919,6 +955,7 @@ persistent actor {
       "financeProducts",
       "financePromotions",
       "travel",
+      "comms",
       "radar",
       "pending-approval",
       "broadcasts",
@@ -2126,6 +2163,10 @@ persistent actor {
     scheduleEventKindStable := _Iter.toArray(scheduleEventKindById.entries());
     scheduleEventImageUrlStable := _Iter.toArray(scheduleEventImageUrlById.entries());
     scheduleEventPublicOnSiteStable := _Iter.toArray(scheduleEventPublicOnSiteById.entries());
+    scheduleEventImportanceStable := _Iter.toArray(scheduleEventImportanceById.entries());
+    scheduleEventAcceptRsvpStable := _Iter.toArray(scheduleEventAcceptRsvpById.entries());
+    scheduleEventAvailabilityStable := _Iter.toArray(scheduleEventAvailabilityById.entries());
+    scheduleEventRsvpIdsStable := _Iter.toArray(scheduleEventRsvpIdsById.entries());
     programTeamMembersStable := _Iter.toArray(programTeamMembersById.entries());
     programTeamOwedEntriesStable := _Iter.toArray(programTeamOwedEntriesById.entries());
     programTeamPaidEntriesStable := _Iter.toArray(programTeamPaidEntriesById.entries());
@@ -2183,7 +2224,25 @@ persistent actor {
     emailOutboundRecordsStable := _Iter.toArray(emailOutboundRecordsById.entries());
     applicantEmailOutreachStable := _Iter.toArray(applicantEmailOutreachById.entries());
     applicantFlightBookingsStable := _Iter.toArray(applicantFlightBookingsById.entries());
-    programTravelPrepLinksStable := _Iter.toArray(programTravelPrepLinksById.entries());
+    let travelPrepEntries = _Iter.toArray(programTravelPrepLinksById.entries());
+    programTravelPrepLinksStableV1 := travelPrepEntries;
+    programTravelPrepLinksStable := travelPrepLinksToV0Entries(travelPrepEntries);
+    let commsEntries = _Iter.toArray(programCommsConfigById.entries());
+    programCommsConfigStableV2 := commsEntries;
+    programCommsConfigStableV1 := Array.map<(Text, Types.ProgramCommsConfig), (Text, Types.ProgramCommsConfigV1)>(
+      commsEntries,
+      func(entry : (Text, Types.ProgramCommsConfig)) : (Text, Types.ProgramCommsConfigV1) {
+        (entry.0, Types.programCommsConfigToV1(entry.1));
+      },
+    );
+    programCommsConfigStable := Array.map<(Text, Types.ProgramCommsConfig), (Text, Types.ProgramCommsConfigV0)>(
+      commsEntries,
+      func(entry : (Text, Types.ProgramCommsConfig)) : (Text, Types.ProgramCommsConfigV0) {
+        (entry.0, Types.programCommsConfigToV0(entry.1));
+      },
+    );
+    programCommsLineSeenStable := _Iter.toArray(programCommsLineSeenById.entries());
+    programCommsLineBindingStable := _Iter.toArray(programCommsLineBindingByProgramId.entries());
   };
 
   system func postupgrade() {
@@ -2534,15 +2593,17 @@ persistent actor {
     };
     applicantFlightBookingsStable := [];
 
-    programTravelPrepLinksById := _HashMap.HashMap<Text, [Types.TravelPrepLink]>(
-      programTravelPrepLinksStable.size(),
-      Text.equal,
-      Text.hash,
-    );
-    for (entry in programTravelPrepLinksStable.vals()) {
-      programTravelPrepLinksById.put(entry.0, entry.1);
-    };
+    hydrateTravelPrepLinksFromStables();
     programTravelPrepLinksStable := [];
+    programTravelPrepLinksStableV1 := [];
+
+    hydrateProgramCommsConfigFromStables();
+    programCommsConfigStable := [];
+    programCommsConfigStableV1 := [];
+    programCommsConfigStableV2 := [];
+    hydrateProgramCommsLineFromStables();
+    programCommsLineSeenStable := [];
+    programCommsLineBindingStable := [];
 
     programPaymentSummariesByKey := _HashMap.HashMap<Text, Types.ProgramPaymentSummary>(0, Text.equal, Text.hash);
     for (entry in programPaymentSummariesStable.vals()) {
@@ -2655,6 +2716,46 @@ persistent actor {
       scheduleEventPublicOnSiteById.put(entry.0, entry.1);
     };
     scheduleEventPublicOnSiteStable := [];
+
+    scheduleEventImportanceById := _HashMap.HashMap<Text, Text>(
+      scheduleEventImportanceStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in scheduleEventImportanceStable.vals()) {
+      scheduleEventImportanceById.put(entry.0, entry.1);
+    };
+    scheduleEventImportanceStable := [];
+
+    scheduleEventAcceptRsvpById := _HashMap.HashMap<Text, Bool>(
+      scheduleEventAcceptRsvpStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in scheduleEventAcceptRsvpStable.vals()) {
+      scheduleEventAcceptRsvpById.put(entry.0, entry.1);
+    };
+    scheduleEventAcceptRsvpStable := [];
+
+    scheduleEventAvailabilityById := _HashMap.HashMap<Text, Nat>(
+      scheduleEventAvailabilityStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in scheduleEventAvailabilityStable.vals()) {
+      scheduleEventAvailabilityById.put(entry.0, entry.1);
+    };
+    scheduleEventAvailabilityStable := [];
+
+    scheduleEventRsvpIdsById := _HashMap.HashMap<Text, [Text]>(
+      scheduleEventRsvpIdsStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in scheduleEventRsvpIdsStable.vals()) {
+      scheduleEventRsvpIdsById.put(entry.0, entry.1);
+    };
+    scheduleEventRsvpIdsStable := [];
 
     programTeamMembersById := _HashMap.HashMap<Text, Types.ProgramTeamMember>(
       programTeamMembersStable.size(),
@@ -3092,12 +3193,10 @@ persistent actor {
       applicantFlightBookingsById.put(entry.0, entry.1);
     };
 
-    programTravelPrepLinksById := _HashMap.HashMap<Text, [Types.TravelPrepLink]>(
-      programTravelPrepLinksStable.size(), Text.equal, Text.hash
-    );
-    for (entry in programTravelPrepLinksStable.vals()) {
-      programTravelPrepLinksById.put(entry.0, entry.1);
-    };
+    hydrateTravelPrepLinksFromStables();
+
+    hydrateProgramCommsConfigFromStables();
+    hydrateProgramCommsLineFromStables();
 
     programPaymentSummariesByKey := _HashMap.HashMap<Text, Types.ProgramPaymentSummary>(0, Text.equal, Text.hash);
     for (entry in programPaymentSummariesStable.vals()) {
@@ -3271,7 +3370,17 @@ persistent actor {
       artistDrawRecipientsStable = ?(_Iter.toArray(artistDrawRecipientById.entries()));
       artistDrawStoryVideoStable = ?(_Iter.toArray(artistDrawStoryVideoById.entries()));
       applicantFlightBookingsStable = ?(_Iter.toArray(applicantFlightBookingsById.entries()));
-      programTravelPrepLinksStable = ?(_Iter.toArray(programTravelPrepLinksById.entries()));
+      programTravelPrepLinksStable = ?travelPrepLinksToV0Entries(_Iter.toArray(programTravelPrepLinksById.entries()));
+      programTravelPrepLinksStableV1 = ?(_Iter.toArray(programTravelPrepLinksById.entries()));
+      programCommsConfigStable = ?Array.map<(Text, Types.ProgramCommsConfig), (Text, Types.ProgramCommsConfigV1)>(
+        _Iter.toArray(programCommsConfigById.entries()),
+        func(entry : (Text, Types.ProgramCommsConfig)) : (Text, Types.ProgramCommsConfigV1) {
+          (entry.0, Types.programCommsConfigToV1(entry.1));
+        },
+      );
+      programCommsConfigStableV2 = ?(_Iter.toArray(programCommsConfigById.entries()));
+      programCommsLineSeenStable = ?(_Iter.toArray(programCommsLineSeenById.entries()));
+      programCommsLineBindingStable = ?(_Iter.toArray(programCommsLineBindingByProgramId.entries()));
       joinInvitesStable = _Iter.toArray(joinInvitesByCode.entries());
       joinInviteTrialMonthsStable = ?(_Iter.toArray(joinInviteTrialMonthsByCode.entries()));
       accountRecoveryCodesStable = ?(_Iter.toArray(accountRecoveryCodesByCode.entries()));
@@ -3425,7 +3534,39 @@ persistent actor {
       case null { [] };
       case (?rows) { rows };
     };
-    programTravelPrepLinksStable := switch (snapshot.programTravelPrepLinksStable) {
+    switch (snapshot.programTravelPrepLinksStableV1) {
+      case (?rows) {
+        programTravelPrepLinksStableV1 := rows;
+        programTravelPrepLinksStable := [];
+      };
+      case null {
+        programTravelPrepLinksStableV1 := [];
+        programTravelPrepLinksStable := switch (snapshot.programTravelPrepLinksStable) {
+          case null { [] };
+          case (?rows) { rows };
+        };
+      };
+    };
+    switch (snapshot.programCommsConfigStableV2) {
+      case (?rows) {
+        programCommsConfigStableV2 := rows;
+        programCommsConfigStableV1 := [];
+        programCommsConfigStable := [];
+      };
+      case null {
+        programCommsConfigStableV2 := [];
+        programCommsConfigStableV1 := switch (snapshot.programCommsConfigStable) {
+          case null { [] };
+          case (?rows) { rows };
+        };
+        programCommsConfigStable := [];
+      };
+    };
+    programCommsLineSeenStable := switch (snapshot.programCommsLineSeenStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    programCommsLineBindingStable := switch (snapshot.programCommsLineBindingStable) {
       case null { [] };
       case (?rows) { rows };
     };
@@ -5080,7 +5221,11 @@ persistent actor {
 
   private func jsonText(v : Text) : Text {
     let slashEscaped = Text.replace(v, #char('\\'), "\\\\");
-    "\"" # Text.replace(slashEscaped, #char('\"'), "\\\"") # "\"";
+    let quoteEscaped = Text.replace(slashEscaped, #char('\"'), "\\\"");
+    let nlEscaped = Text.replace(quoteEscaped, #char('\n'), "\\n");
+    let crEscaped = Text.replace(nlEscaped, #char('\r'), "\\r");
+    let tabEscaped = Text.replace(crEscaped, #char('\t'), "\\t");
+    "\"" # tabEscaped # "\"";
   };
 
   private func optJsonText(v : ?Text) : Text {
@@ -6187,6 +6332,20 @@ persistent actor {
     out # "]"
   };
 
+  /// Staff/admin: activate or retire a promo / invite / partner code.
+  public shared (msg) func staffSetPromoCodeActive(code : Text, active : Bool) : async Bool {
+    assertStaffOrAdmin(msg.caller);
+    let norm = normalizePromoCode(code);
+    switch (promoCodesByCode.get(norm)) {
+      case null { false };
+      case (?pc) {
+        let updated : Types.PromoCode = { pc with active = active };
+        promoCodesByCode.put(norm, updated);
+        true;
+      };
+    };
+  };
+
   // ——— Member invite management ———
 
   public shared query (msg) func getMyInviteCodes() : async [Types.PromoCode] {
@@ -6531,6 +6690,10 @@ persistent actor {
     ignore scheduleEventKindById.remove(eventId);
     ignore scheduleEventImageUrlById.remove(eventId);
     ignore scheduleEventPublicOnSiteById.remove(eventId);
+    ignore scheduleEventImportanceById.remove(eventId);
+    ignore scheduleEventAcceptRsvpById.remove(eventId);
+    ignore scheduleEventAvailabilityById.remove(eventId);
+    ignore scheduleEventRsvpIdsById.remove(eventId);
   };
 
   private func truncateScheduleImageUrl(raw : Text) : Text {
@@ -6588,6 +6751,90 @@ persistent actor {
       case (?k) { k };
       case null { "standard" };
     }
+  };
+
+  private func normalizeScheduleImportance(raw : Text) : Text {
+    let t = Text.trim(raw, #char ' ');
+    if (t == "optional" or t == "suggested" or t == "general") { t } else { "general" }
+  };
+
+  private func normalizeScheduleAvailability(acceptRsvp : Bool, raw : Nat) : Nat {
+    if (not acceptRsvp) { return 0 };
+    if (raw == 0) { return 20 };
+    if (raw > 200) { return 200 };
+    raw
+  };
+
+  private func scheduleEventImportanceOf(eventId : Text) : Text {
+    switch (scheduleEventImportanceById.get(eventId)) {
+      case (?v) { normalizeScheduleImportance(v) };
+      case null { "general" };
+    }
+  };
+
+  private func scheduleEventAcceptRsvpOf(eventId : Text) : Bool {
+    switch (scheduleEventAcceptRsvpById.get(eventId)) {
+      case (?v) { v };
+      case null { false };
+    }
+  };
+
+  private func scheduleEventAvailabilityOf(eventId : Text) : Nat {
+    let accept = scheduleEventAcceptRsvpOf(eventId);
+    switch (scheduleEventAvailabilityById.get(eventId)) {
+      case (?n) { normalizeScheduleAvailability(accept, n) };
+      case null { normalizeScheduleAvailability(accept, 0) };
+    }
+  };
+
+  private func scheduleEventRsvpIdsOf(eventId : Text) : [Text] {
+    switch (scheduleEventRsvpIdsById.get(eventId)) {
+      case (?ids) { ids };
+      case null { [] };
+    }
+  };
+
+  private func putScheduleEventRsvpMeta(
+    eventId : Text,
+    importance : Text,
+    acceptRsvp : Bool,
+    availability : Nat,
+  ) {
+    let imp = normalizeScheduleImportance(importance);
+    if (imp == "general") {
+      ignore scheduleEventImportanceById.remove(eventId);
+    } else {
+      scheduleEventImportanceById.put(eventId, imp);
+    };
+    if (acceptRsvp) {
+      scheduleEventAcceptRsvpById.put(eventId, true);
+    } else {
+      ignore scheduleEventAcceptRsvpById.remove(eventId);
+    };
+    let cap = normalizeScheduleAvailability(acceptRsvp, availability);
+    if (cap == 0) {
+      ignore scheduleEventAvailabilityById.remove(eventId);
+    } else {
+      scheduleEventAvailabilityById.put(eventId, cap);
+    };
+  };
+
+  private func scheduleRsvpIdentity(p : Principal) : Text {
+    switch (accountLinkedArtistId(p)) {
+      case (?id) { if (id.size() > 0) { id } else { Principal.toText(p) } };
+      case null { Principal.toText(p) };
+    }
+  };
+
+  private func textListContains(ids : [Text], id : Text) : Bool {
+    for (x in ids.vals()) {
+      if (x == id) { return true };
+    };
+    false
+  };
+
+  private func rsvpIdsWithout(ids : [Text], id : Text) : [Text] {
+    Array.filter<Text>(ids, func(x : Text) : Bool { x != id })
   };
 
   private func isProgramScheduleLive(programId : Text) : Bool {
@@ -6704,6 +6951,10 @@ persistent actor {
   };
 
   private func calendarEventJson(e : Types.CalendarEvent) : Text {
+    calendarEventJsonForViewer(e, null)
+  };
+
+  private func calendarEventJsonForViewer(e : Types.CalendarEvent, viewer : ?Principal) : Text {
     let reminderSentAt = switch (scheduleReminderSentById.get(e.id)) {
       case (?t) { t };
       case null { "" };
@@ -6713,6 +6964,14 @@ persistent actor {
     let eventKind = scheduleEventKindOf(e.id);
     let imageUrl = scheduleEventImageUrlOf(e.id);
     let publicOnSite = scheduleEventPublicOnSiteOf(e.id);
+    let importance = scheduleEventImportanceOf(e.id);
+    let acceptRsvp = scheduleEventAcceptRsvpOf(e.id);
+    let availability = scheduleEventAvailabilityOf(e.id);
+    let rsvpIds = scheduleEventRsvpIdsOf(e.id);
+    let myRsvp = switch (viewer) {
+      case (?p) { textListContains(rsvpIds, scheduleRsvpIdentity(p)) };
+      case null { false };
+    };
     "{"
       # "\"id\":" # jsonText(e.id)
       # ",\"title\":" # jsonText(e.title)
@@ -6739,6 +6998,12 @@ persistent actor {
       # ",\"eventKind\":" # jsonText(eventKind)
       # ",\"imageUrl\":" # jsonText(imageUrl)
       # ",\"publicOnSite\":" # jsonBool(publicOnSite)
+      # ",\"importance\":" # jsonText(importance)
+      # ",\"acceptRsvp\":" # jsonBool(acceptRsvp)
+      # ",\"availability\":" # Nat.toText(availability)
+      # ",\"rsvpIds\":" # calendarParticipantIdsJson(rsvpIds)
+      # ",\"rsvpCount\":" # Nat.toText(rsvpIds.size())
+      # ",\"myRsvp\":" # jsonBool(myRsvp)
       # ",\"conflicts\":[]"
       # ",\"createdAt\":" # jsonText(e.createdAt)
       # ",\"updatedAt\":" # jsonText(e.updatedAt)
@@ -6822,6 +7087,9 @@ persistent actor {
     eventKind : Text,
     imageUrl : Text,
     publicOnSite : Bool,
+    importance : Text,
+    acceptRsvp : Bool,
+    availability : Nat,
   ) : async Text {
     assertStaffOrAdmin(msg.caller);
     assertStudioFeatureEdit(msg.caller, "schedule");
@@ -6921,6 +7189,7 @@ persistent actor {
     putScheduleEventRelationMeta(rowId, relKind, effectiveRelationProgramId, kindNorm);
     let publicOnSiteEffective = if (relKind == "staff") { false } else { publicOnSite };
     putScheduleEventPublicMeta(rowId, imageUrl, publicOnSiteEffective);
+    putScheduleEventRsvpMeta(rowId, importance, acceptRsvp, availability);
     rowId
   };
 
@@ -7009,6 +7278,12 @@ persistent actor {
         );
         // Copy flier; do not auto-publish the duplicate.
         putScheduleEventPublicMeta(newId, scheduleEventImageUrlOf(src.id), false);
+        putScheduleEventRsvpMeta(
+          newId,
+          scheduleEventImportanceOf(src.id),
+          scheduleEventAcceptRsvpOf(src.id),
+          scheduleEventAvailabilityOf(src.id),
+        );
         newId
       };
     }
@@ -7077,7 +7352,7 @@ persistent actor {
       if (memberMaySeeScheduleEvent(msg.caller, e)) {
         if (not first) { out := out # "," };
         first := false;
-        out := out # calendarEventJson(e);
+        out := out # calendarEventJsonForViewer(e, ?msg.caller);
       };
     };
     out # "]"
@@ -7175,6 +7450,56 @@ persistent actor {
     scheduleEventsById.put(rowId, row);
     putScheduleEventRelationMeta(rowId, "program", pid, kindNorm);
     rowId
+  };
+
+  /// Member: RSVP or cancel RSVP for a confirmed program event that accepts RSVPs.
+  public shared (msg) func memberRsvpScheduleEvent(eventId : Text, attending : Bool) : async Text {
+    if (Principal.equal(msg.caller, anonPrincipal)) {
+      Debug.trap("authentication required");
+    };
+    let rowId = Text.trim(eventId, #char ' ');
+    if (rowId.size() == 0) { Debug.trap("id required") };
+    switch (scheduleEventsById.get(rowId)) {
+      case null { Debug.trap("Event not found") };
+      case (?e) {
+        if (not memberMaySeeScheduleEvent(msg.caller, e)) {
+          Debug.trap("Event not available");
+        };
+        if (e.status != "confirmed") { Debug.trap("Event is not open for RSVP") };
+        if (not scheduleEventAcceptRsvpOf(rowId)) { Debug.trap("Event does not accept RSVP") };
+        let identity = scheduleRsvpIdentity(msg.caller);
+        let current = scheduleEventRsvpIdsOf(rowId);
+        let already = textListContains(current, identity);
+        var nextIds : [Text] = current;
+        if (attending) {
+          if (not already) {
+            let cap = scheduleEventAvailabilityOf(rowId);
+            if (current.size() >= cap) {
+              Debug.trap("Event is full");
+            };
+            nextIds := Array.append(current, [identity]);
+          };
+        } else {
+          nextIds := rsvpIdsWithout(current, identity);
+        };
+        if (nextIds.size() == 0) {
+          ignore scheduleEventRsvpIdsById.remove(rowId);
+        } else {
+          scheduleEventRsvpIdsById.put(rowId, nextIds);
+        };
+        let now = Int.toText(Time.now());
+        let activityText = if (attending) { "RSVP added" } else { "RSVP cancelled" };
+        let activity = prependScheduleActivity(e.activity, now, activityText);
+        let updated : Types.CalendarEvent = {
+          e with
+          updatedAt = now;
+          version = e.version + 1;
+          activity = activity;
+        };
+        scheduleEventsById.put(rowId, updated);
+        calendarEventJsonForViewer(updated, ?msg.caller)
+      };
+    }
   };
 
   /// Authenticated members: active schedule locations (no staff gate).
@@ -7280,7 +7605,7 @@ persistent actor {
   };
 
   /// Retired: no longer seeds calendar events or locations.
-  /// Frontend purges leftover fixture events (prog-kaga / createdBy=seed) on schedule load.
+  /// Frontend only purges leftover fixture ids / createdBy=seed — never staff-created rows.
   public shared (msg) func staffSeedScheduleDemoIfEmpty() : async Nat {
     assertAdmin(msg.caller);
     0
@@ -8399,11 +8724,12 @@ persistent actor {
     putProgramPaymentSummaryFromLedger(row, effectiveTotalDue, depositAmountCents, refundedCents);
   };
 
-  /// Integration: batch-patch feeCents on existing program payment ledger rows.
+  /// Staff Finance: batch-patch feeCents on existing program payment ledger rows.
   public shared (msg) func integrationBatchPatchProgramPaymentFees(
     patches : [(Text, Nat)]
   ) : async Nat {
-    assertIntegrationCaller(msg.caller);
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "financePrograms");
     var count : Nat = 0;
     for ((paymentId, feeCents) in patches.vals()) {
       switch (programPaymentLedgerById.get(paymentId)) {
@@ -11413,6 +11739,58 @@ persistent actor {
     };
   };
 
+  private func travelPrepLinkFromV0(l : Types.TravelPrepLinkV0) : Types.TravelPrepLink {
+    {
+      id = l.id;
+      programId = l.programId;
+      title = l.title;
+      url = l.url;
+      description = l.description;
+      imageUrl = "";
+      sortOrder = l.sortOrder;
+      updatedAt = l.updatedAt;
+    }
+  };
+
+  private func travelPrepLinkToV0(l : Types.TravelPrepLink) : Types.TravelPrepLinkV0 {
+    {
+      id = l.id;
+      programId = l.programId;
+      title = l.title;
+      url = l.url;
+      description = l.description;
+      sortOrder = l.sortOrder;
+      updatedAt = l.updatedAt;
+    }
+  };
+
+  private func travelPrepLinksToV0Entries(entries : [(Text, [Types.TravelPrepLink])]) : [(Text, [Types.TravelPrepLinkV0])] {
+    Array.map<(Text, [Types.TravelPrepLink]), (Text, [Types.TravelPrepLinkV0])>(
+      entries,
+      func(entry : (Text, [Types.TravelPrepLink])) : (Text, [Types.TravelPrepLinkV0]) {
+        (entry.0, Array.map<Types.TravelPrepLink, Types.TravelPrepLinkV0>(entry.1, travelPrepLinkToV0));
+      },
+    );
+  };
+
+  private func hydrateTravelPrepLinksFromStables() {
+    let preferV1 = programTravelPrepLinksStableV1.size() > 0;
+    let n = if (preferV1) { programTravelPrepLinksStableV1.size() } else { programTravelPrepLinksStable.size() };
+    programTravelPrepLinksById := _HashMap.HashMap<Text, [Types.TravelPrepLink]>(n, Text.equal, Text.hash);
+    if (preferV1) {
+      for (entry in programTravelPrepLinksStableV1.vals()) {
+        programTravelPrepLinksById.put(entry.0, entry.1);
+      };
+    } else {
+      for (entry in programTravelPrepLinksStable.vals()) {
+        programTravelPrepLinksById.put(
+          entry.0,
+          Array.map<Types.TravelPrepLinkV0, Types.TravelPrepLink>(entry.1, travelPrepLinkFromV0),
+        );
+      };
+    };
+  };
+
   public shared (msg) func staffUpsertTravelPrepLinks(programId : Text, links : [Types.TravelPrepLink]) : async () {
     assertStaffOrAdmin(msg.caller);
     assertStudioFeatureEdit(msg.caller, "travel");
@@ -11429,6 +11807,245 @@ persistent actor {
       case null { [] };
       case (?links) { links };
     };
+  };
+
+  public shared query (msg) func staffListTravelPrepImages() : async [Text] {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "travel");
+    let seen = _HashMap.HashMap<Text, Bool>(0, Text.equal, Text.hash);
+    let buf = Buffer.Buffer<Text>(0);
+    for (entry in programTravelPrepLinksById.entries()) {
+      for (l in entry.1.vals()) {
+        if (Text.size(l.imageUrl) > 0) {
+          switch (seen.get(l.imageUrl)) {
+            case (?_) {};
+            case null {
+              seen.put(l.imageUrl, true);
+              buf.add(l.imageUrl);
+            };
+          };
+        };
+      };
+    };
+    Buffer.toArray(buf);
+  };
+
+  private func hydrateProgramCommsConfigFromStables() {
+    let preferV2 = programCommsConfigStableV2.size() > 0;
+    let preferV1 = not preferV2 and programCommsConfigStableV1.size() > 0;
+    let n = if (preferV2) { programCommsConfigStableV2.size() } else if (preferV1) {
+      programCommsConfigStableV1.size()
+    } else { programCommsConfigStable.size() };
+    programCommsConfigById := _HashMap.HashMap<Text, Types.ProgramCommsConfig>(n, Text.equal, Text.hash);
+    if (preferV2) {
+      for (entry in programCommsConfigStableV2.vals()) {
+        programCommsConfigById.put(entry.0, entry.1);
+      };
+    } else if (preferV1) {
+      for (entry in programCommsConfigStableV1.vals()) {
+        programCommsConfigById.put(entry.0, Types.programCommsConfigFromV1(entry.1));
+      };
+    } else {
+      for (entry in programCommsConfigStable.vals()) {
+        programCommsConfigById.put(entry.0, Types.programCommsConfigFromV0(entry.1));
+      };
+    };
+  };
+
+  private func hydrateProgramCommsLineFromStables() {
+    programCommsLineSeenById := _HashMap.HashMap<Text, Types.ProgramCommsLineSeenGroup>(
+      programCommsLineSeenStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in programCommsLineSeenStable.vals()) {
+      programCommsLineSeenById.put(entry.0, entry.1);
+    };
+    programCommsLineBindingByProgramId := _HashMap.HashMap<Text, Types.ProgramCommsLineBinding>(
+      programCommsLineBindingStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in programCommsLineBindingStable.vals()) {
+      programCommsLineBindingByProgramId.put(entry.0, entry.1);
+    };
+  };
+
+  private func emptyProgramCommsLineBinding(programId : Text) : Types.ProgramCommsLineBinding {
+    { programId = programId; groupGeneralId = ""; groupAnnounceId = "" };
+  };
+
+  private func programCommsLineBindingOrEmpty(programId : Text) : Types.ProgramCommsLineBinding {
+    switch (programCommsLineBindingByProgramId.get(programId)) {
+      case (?b) { b };
+      case null { emptyProgramCommsLineBinding(programId) };
+    };
+  };
+
+  private func clearGroupIdFromLineBindings(groupId : Text) {
+    if (Text.size(groupId) == 0) { return };
+    let updates = Buffer.Buffer<(Text, Types.ProgramCommsLineBinding)>(0);
+    for (entry in programCommsLineBindingByProgramId.entries()) {
+      let b = entry.1;
+      let nextGeneral = if (Text.equal(b.groupGeneralId, groupId)) { "" } else { b.groupGeneralId };
+      let nextAnnounce = if (Text.equal(b.groupAnnounceId, groupId)) { "" } else { b.groupAnnounceId };
+      if (not Text.equal(nextGeneral, b.groupGeneralId) or not Text.equal(nextAnnounce, b.groupAnnounceId)) {
+        updates.add((
+          entry.0,
+          { programId = b.programId; groupGeneralId = nextGeneral; groupAnnounceId = nextAnnounce },
+        ));
+      };
+    };
+    for (u in updates.vals()) {
+      programCommsLineBindingByProgramId.put(u.0, u.1);
+    };
+  };
+
+  private func programCommsConfigIsMemberReady(cfg : Types.ProgramCommsConfig) : Bool {
+    Text.size(cfg.groupGeneralInviteUrl) > 0
+    and Text.size(cfg.groupGeneralQrUrl) > 0
+    and Text.size(cfg.groupAnnounceInviteUrl) > 0
+    and Text.size(cfg.groupAnnounceQrUrl) > 0
+    and Text.size(cfg.iosQrUrl) > 0
+    and Text.size(cfg.androidQrUrl) > 0
+  };
+
+  public shared (msg) func staffUpsertProgramCommsConfig(rec : Types.ProgramCommsConfig) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "comms");
+    if (Text.size(rec.programId) == 0) { Debug.trap("programId required") };
+    let nowT = Int.toText(Time.now());
+    let priorSends = switch (programCommsConfigById.get(rec.programId)) {
+      case null { rec.inviteSentAtByApplicant };
+      case (?prev) {
+        if (rec.inviteSentAtByApplicant.size() == 0) { prev.inviteSentAtByApplicant } else { rec.inviteSentAtByApplicant };
+      };
+    };
+    programCommsConfigById.put(
+      rec.programId,
+      { rec with programId = rec.programId; updatedAt = nowT; inviteSentAtByApplicant = priorSends },
+    );
+  };
+
+  public shared query (msg) func staffGetProgramCommsConfig(programId : Text) : async ?Types.ProgramCommsConfig {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "comms");
+    if (Text.size(programId) == 0) { return null };
+    programCommsConfigById.get(programId);
+  };
+
+  public shared (msg) func staffRecordProgramCommsInvites(programId : Text, applicantIds : [Text]) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "comms");
+    if (Text.size(programId) == 0) { Debug.trap("programId required") };
+    switch (programCommsConfigById.get(programId)) {
+      case null { Debug.trap("Comms config not found") };
+      case (?cfg) {
+        let nowT = Int.toText(Time.now());
+        let map = _HashMap.HashMap<Text, Text>(cfg.inviteSentAtByApplicant.size() + applicantIds.size(), Text.equal, Text.hash);
+        for (entry in cfg.inviteSentAtByApplicant.vals()) {
+          map.put(entry.0, entry.1);
+        };
+        for (id in applicantIds.vals()) {
+          if (Text.size(id) > 0) {
+            map.put(id, nowT);
+          };
+        };
+        programCommsConfigById.put(
+          programId,
+          { cfg with inviteSentAtByApplicant = _Iter.toArray(map.entries()); updatedAt = nowT },
+        );
+      };
+    };
+  };
+
+  public shared query (msg) func listMyProgramCommsRooms() : async [Types.ProgramCommsMemberRoom] {
+    if (Principal.equal(msg.caller, anonPrincipal)) { return [] };
+    let buf = Buffer.Buffer<Types.ProgramCommsMemberRoom>(0);
+    for (entry in programCommsConfigById.entries()) {
+      let cfg = entry.1;
+      if (
+        cfg.memberActive
+        and programCommsConfigIsMemberReady(cfg)
+        and callerHasSlotSecuredProgram(msg.caller, cfg.programId)
+      ) {
+        buf.add({
+          programId = cfg.programId;
+          provider = cfg.provider;
+          inviteMessage = cfg.inviteMessage;
+          providerThumbUrl = cfg.providerThumbUrl;
+          iosStoreUrl = cfg.iosStoreUrl;
+          androidStoreUrl = cfg.androidStoreUrl;
+          iosThumbUrl = cfg.iosThumbUrl;
+          androidThumbUrl = cfg.androidThumbUrl;
+          iosQrUrl = cfg.iosQrUrl;
+          androidQrUrl = cfg.androidQrUrl;
+          groupGeneralName = cfg.groupGeneralName;
+          groupGeneralInviteUrl = cfg.groupGeneralInviteUrl;
+          groupGeneralQrUrl = cfg.groupGeneralQrUrl;
+          groupAnnounceName = cfg.groupAnnounceName;
+          groupAnnounceInviteUrl = cfg.groupAnnounceInviteUrl;
+          groupAnnounceQrUrl = cfg.groupAnnounceQrUrl;
+        });
+      };
+    };
+    Buffer.toArray(buf);
+  };
+
+  public shared (msg) func integrationUpsertSeenLineGroup(groupId : Text, groupName : Text) : async () {
+    assertIntegrationCaller(msg.caller);
+    if (Text.size(groupId) == 0) { Debug.trap("groupId required") };
+    let nowT = Int.toText(Time.now());
+    let name = if (Text.size(groupName) > 0) { groupName } else {
+      switch (programCommsLineSeenById.get(groupId)) {
+        case (?prev) { prev.groupName };
+        case null { "" };
+      };
+    };
+    programCommsLineSeenById.put(groupId, { groupId = groupId; groupName = name; lastSeenAt = nowT });
+  };
+
+  public shared (msg) func integrationClearSeenLineGroup(groupId : Text) : async () {
+    assertIntegrationCaller(msg.caller);
+    if (Text.size(groupId) == 0) { return };
+    ignore programCommsLineSeenById.remove(groupId);
+    clearGroupIdFromLineBindings(groupId);
+  };
+
+  public shared query (msg) func integrationGetProgramCommsLineBinding(programId : Text) : async Types.ProgramCommsLineBinding {
+    assertIntegrationCaller(msg.caller);
+    programCommsLineBindingOrEmpty(programId);
+  };
+
+  public shared query (msg) func staffListSeenLineGroups() : async [Types.ProgramCommsLineSeenGroup] {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "comms");
+    _Iter.toArray(programCommsLineSeenById.vals());
+  };
+
+  public shared query (msg) func staffGetProgramCommsLineBinding(programId : Text) : async Types.ProgramCommsLineBinding {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureVisible(msg.caller, "comms");
+    programCommsLineBindingOrEmpty(programId);
+  };
+
+  public shared (msg) func staffSetProgramCommsLineRoom(programId : Text, room : Text, groupId : Text) : async () {
+    assertStaffOrAdmin(msg.caller);
+    assertStudioFeatureEdit(msg.caller, "comms");
+    if (Text.size(programId) == 0) { Debug.trap("programId required") };
+    if (not Text.equal(room, "general") and not Text.equal(room, "announce")) {
+      Debug.trap("room must be general or announce");
+    };
+    if (Text.size(groupId) > 0) {
+      clearGroupIdFromLineBindings(groupId);
+    };
+    let prior = programCommsLineBindingOrEmpty(programId);
+    let next : Types.ProgramCommsLineBinding = if (Text.equal(room, "general")) {
+      { programId = programId; groupGeneralId = groupId; groupAnnounceId = prior.groupAnnounceId };
+    } else {
+      { programId = programId; groupGeneralId = prior.groupGeneralId; groupAnnounceId = groupId };
+    };
+    programCommsLineBindingByProgramId.put(programId, next);
   };
 
   public shared (msg) func staffDeleteTravelPrepLink(programId : Text, linkId : Text) : async () {

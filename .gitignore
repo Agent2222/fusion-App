@@ -34,3 +34,8 @@ dist/
 .env
 
 .mops
+
+# Playwright
+src/fusion-app-frontend/test-results/
+src/fusion-app-frontend/playwright-report/
+src/fusion-app-frontend/e2e/radar-visual-review/

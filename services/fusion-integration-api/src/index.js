@@ -17,6 +17,14 @@ import { registerAccountReconnectRoutes } from './accountReconnect.js';
 import { registerRadarRoutes } from './radarRoutes.js';
 import { isPayPalConfigured, getPayPalClientId, getPayPalMode } from './payments/paypalClient.js';
 import { handlePayPalWebhookEvent } from './webhooks/paypal.js';
+import { lineGroupIdsFromWebhookBody, verifyLineSignature } from './webhooks/line.js';
+import {
+    fetchLineGroupSummaryName,
+    isLinePushRoom,
+    normalizeLinePushRoom,
+    pushLineTextToGroup,
+    resolveBoundGroupId,
+} from './line/push.js';
 import { getIntegrationActor, pushSubscriptionToCanister } from './canisterActor.js';
 import {
     getActiveStorage,
@@ -67,6 +75,9 @@ const resendApiKey = process.env.RESEND_API_KEY || '';
 const resend = resendApiKey ? new Resend(resendApiKey) : null;
 const resendFrom = process.env.RESEND_FROM || '';
 const resendBroadcastSegmentId = (process.env.RESEND_BROADCAST_SEGMENT_ID || '').trim();
+const lineChannelSecret = (process.env.LINE_CHANNEL_SECRET || '').trim();
+const lineChannelAccessToken = (process.env.LINE_CHANNEL_ACCESS_TOKEN || '').trim();
+const lineConfigured = Boolean(lineChannelSecret && lineChannelAccessToken);
 /** Optional absolute URL to replace the default site logo in HTML (staff can also paste full URLs in the Studio modal). */
 const fusionSignatureLogoUrl = (process.env.FUSION_SIGNATURE_LOGO_URL || '').trim();
 const RESEND_API_BASE = 'https://api.resend.com';
@@ -122,6 +133,35 @@ function normalizeEmailCcList(raw, opts = {}) {
         for (const item of raw) push(item);
     }
     push(STUDIO_EMAIL_ALWAYS_CC);
+    return out;
+}
+
+/**
+ * Allow a small .ics attachment (base64) for calendar emails.
+ * @param {unknown} raw
+ * @returns {Array<{ filename: string, content: string, contentType: string }>}
+ */
+function normalizeEmailAttachments(raw) {
+    if (!Array.isArray(raw) || !raw.length) return [];
+    /** @type {Array<{ filename: string, content: string, contentType: string }>} */
+    const out = [];
+    for (const item of raw.slice(0, 3)) {
+        if (!item || typeof item !== 'object') continue;
+        const rec = /** @type {Record<string, unknown>} */ (item);
+        const filename = String(rec.filename || '')
+            .trim()
+            .replace(/[/\\]/g, '')
+            .slice(0, 180);
+        const content = String(rec.content || '').replace(/\s+/g, '');
+        if (!filename || !/\.ics$/i.test(filename)) continue;
+        if (!content || content.length > 400_000) continue;
+        if (!/^[A-Za-z0-9+/=]+$/.test(content)) continue;
+        out.push({
+            filename,
+            content,
+            contentType: 'text/calendar; charset=utf-8',
+        });
+    }
     return out;
 }
 
@@ -244,6 +284,52 @@ app.post('/webhooks/paypal', express.raw({ type: 'application/json' }), async (r
         } catch (e) {
             console.error('[paypal webhook] handler', e);
             return res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+        }
+        return res.json({ received: true });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return res.status(500).json({ error: msg });
+    }
+});
+
+app.post('/webhooks/line', express.raw({ type: 'application/json' }), async (req, res) => {
+    try {
+        if (!lineChannelSecret) {
+            return res.status(503).json({ error: 'LINE webhook not configured' });
+        }
+        const sig = req.headers['x-line-signature'];
+        if (!verifyLineSignature(req.body, typeof sig === 'string' ? sig : '', lineChannelSecret)) {
+            return res.status(400).json({ error: 'Invalid LINE signature' });
+        }
+        let parsed = {};
+        try {
+            parsed = JSON.parse(req.body.toString('utf8') || '{}');
+        } catch {
+            return res.json({ received: true });
+        }
+        const { seen, left } = lineGroupIdsFromWebhookBody(parsed);
+        try {
+            const actor = await getIntegrationActor();
+            if (actor) {
+                for (const groupId of seen) {
+                    let groupName = '';
+                    try {
+                        groupName = await fetchLineGroupSummaryName(groupId, lineChannelAccessToken);
+                    } catch (err) {
+                        console.warn('[line webhook] group summary failed:', err?.message || err);
+                    }
+                    if (typeof actor.integrationUpsertSeenLineGroup === 'function') {
+                        await actor.integrationUpsertSeenLineGroup(groupId, groupName);
+                    }
+                }
+                for (const groupId of left) {
+                    if (typeof actor.integrationClearSeenLineGroup === 'function') {
+                        await actor.integrationClearSeenLineGroup(groupId);
+                    }
+                }
+            }
+        } catch (err) {
+            console.error('[line webhook] canister write failed:', err?.message || err);
         }
         return res.json({ received: true });
     } catch (e) {
@@ -426,6 +512,7 @@ app.get('/health', (_req, res) => {
         stripePrice: process.env.STRIPE_PRICE_ID ? 'configured' : 'missing',
         stripeAnnualPrice: process.env.STRIPE_ANNUAL_PRICE_ID ? 'configured' : 'missing',
         fusionCanister: integrationIdentityConfigured ? 'configured' : 'missing',
+        line: lineConfigured ? 'configured' : 'missing',
         resend: resendApiKey ? 'configured' : 'missing',
         storageBackend: storageHealth.storageBackend,
         storage: {
@@ -2347,6 +2434,44 @@ app.post('/stripe/cancel-subscription-at-period-end', requireApiKey, async (req,
     }
 });
 
+app.post('/line/push', requireApiKey, async (req, res) => {
+    try {
+        if (!lineChannelAccessToken) {
+            return res.status(503).json({ error: 'LINE_CHANNEL_ACCESS_TOKEN is not configured' });
+        }
+        const programId = String(req.body?.programId || '').trim();
+        const room = normalizeLinePushRoom(req.body?.room);
+        if (!programId) {
+            return res.status(400).json({ error: 'programId required' });
+        }
+        if (!isLinePushRoom(req.body?.room) || !room) {
+            return res.status(400).json({ error: 'room must be general or announce' });
+        }
+        const actor = await getIntegrationActor();
+        if (!actor || typeof actor.integrationGetProgramCommsLineBinding !== 'function') {
+            return res.status(503).json({ error: 'LINE room binding unavailable — check integration canister identity' });
+        }
+        const binding = await actor.integrationGetProgramCommsLineBinding(programId);
+        const groupId = resolveBoundGroupId(binding, room);
+        if (!groupId) {
+            return res.status(400).json({ error: 'LINE room is not linked' });
+        }
+        await pushLineTextToGroup({
+            groupId,
+            text: req.body?.text,
+            accessToken: lineChannelAccessToken,
+        });
+        return res.json({ ok: true, programId, room, groupId });
+    } catch (e) {
+        const code = e && typeof e === 'object' ? e.code : '';
+        const msg = e instanceof Error ? e.message : String(e);
+        const status = code === 'LINE_ROOM_UNBOUND' || code === 'LINE_TEXT_REQUIRED' || code === 'LINE_TEXT_TOO_LONG'
+            ? 400
+            : 500;
+        return res.status(status).json({ error: msg });
+    }
+});
+
 app.post('/email/send', requireApiKey, async (req, res) => {
     try {
         if (!resend) {
@@ -2390,6 +2515,10 @@ app.post('/email/send', requireApiKey, async (req, res) => {
         if (ccList.length) {
             payload.cc = ccList;
         }
+        const attachments = normalizeEmailAttachments(req.body?.attachments);
+        if (attachments.length) {
+            payload.attachments = attachments;
+        }
         const { data, error } = await resend.emails.send(payload);
         if (error) {
             console.error('[email/send] Resend rejected:', error);
@@ -2426,6 +2555,7 @@ app.post('/email/batch', requireApiKey, async (req, res) => {
                 ? req.body.replyTo.trim()
                 : undefined;
         const ccList = normalizeEmailCcList(req.body?.cc);
+        const attachments = normalizeEmailAttachments(req.body?.attachments);
 
         /** @type {Array<{ to: string, subject: string, html?: string, text?: string }>} */
         const normalized = [];
@@ -2471,10 +2601,11 @@ app.post('/email/batch', requireApiKey, async (req, res) => {
                 else if (m.text) p.text = m.text;
                 if (replyTo) p.reply_to = replyTo;
                 if (ccList.length) p.cc = ccList;
+                if (attachments.length) p.attachments = attachments;
                 return p;
             });
 
-            if (resend.batch && typeof resend.batch.send === 'function') {
+            if (!attachments.length && resend.batch && typeof resend.batch.send === 'function') {
                 const { data, error } = await resend.batch.send(/** @type {unknown} */ (payloads));
                 if (error) {
                     for (const m of chunk) {

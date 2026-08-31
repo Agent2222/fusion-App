@@ -135,6 +135,19 @@ export const idlFactory = ({ IDL }) => {
             [],
             [],
         ),
+        integrationUpsertSeenLineGroup: IDL.Func([IDL.Text, IDL.Text], [], []),
+        integrationClearSeenLineGroup: IDL.Func([IDL.Text], [], []),
+        integrationGetProgramCommsLineBinding: IDL.Func(
+            [IDL.Text],
+            [
+                IDL.Record({
+                    programId: IDL.Text,
+                    groupGeneralId: IDL.Text,
+                    groupAnnounceId: IDL.Text,
+                }),
+            ],
+            ['query'],
+        ),
         integrationReconnectMemberPrincipal: IDL.Func(
             [IDL.Principal, IDL.Principal],
             [

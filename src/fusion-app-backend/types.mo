@@ -1021,8 +1021,8 @@ module {
         updatedBy : Text;
     };
 
-    /// Per-program travel preparation link (Studio Travel → staff-curated, member-visible).
-    public type TravelPrepLink = {
+    /// Pre-image travel prep link (stable / backup V0).
+    public type TravelPrepLinkV0 = {
         id : Text;
         programId : Text;
         title : Text;
@@ -1030,6 +1030,202 @@ module {
         description : Text;
         sortOrder : Nat;
         updatedAt : Text;
+    };
+
+    /// Per-program travel preparation link (Studio Travel → staff-curated, member-visible).
+    public type TravelPrepLink = {
+        id : Text;
+        programId : Text;
+        title : Text;
+        url : Text;
+        description : Text;
+        imageUrl : Text;
+        sortOrder : Nat;
+        updatedAt : Text;
+    };
+
+    /// First comms config shape (no member-room fields) — stable upgrade source only.
+    public type ProgramCommsConfigV0 = {
+        programId : Text;
+        provider : Text;
+        oaName : Text;
+        basicId : Text;
+        channelId : Text;
+        addFriendUrl : Text;
+        groupName : Text;
+        groupInviteUrl : Text;
+        addFriendQrUrl : Text;
+        groupQrUrl : Text;
+        inviteSentAtByApplicant : [(Text, Text)];
+        updatedAt : Text;
+    };
+
+    /// Member-room fields, still one group + add-friend (stable / backup V1).
+    public type ProgramCommsConfigV1 = {
+        programId : Text;
+        provider : Text;
+        oaName : Text;
+        basicId : Text;
+        channelId : Text;
+        addFriendUrl : Text;
+        groupName : Text;
+        groupInviteUrl : Text;
+        addFriendQrUrl : Text;
+        groupQrUrl : Text;
+        inviteSentAtByApplicant : [(Text, Text)];
+        memberActive : Bool;
+        inviteMessage : Text;
+        providerThumbUrl : Text;
+        updatedAt : Text;
+    };
+
+    /// Per-program comms: two rooms + iOS/Android store downloads. No LINE secrets.
+    public type ProgramCommsConfig = {
+        programId : Text;
+        provider : Text;
+        oaName : Text;
+        basicId : Text;
+        channelId : Text;
+        iosStoreUrl : Text;
+        androidStoreUrl : Text;
+        iosThumbUrl : Text;
+        androidThumbUrl : Text;
+        iosQrUrl : Text;
+        androidQrUrl : Text;
+        groupGeneralName : Text;
+        groupGeneralInviteUrl : Text;
+        groupGeneralQrUrl : Text;
+        groupAnnounceName : Text;
+        groupAnnounceInviteUrl : Text;
+        groupAnnounceQrUrl : Text;
+        inviteSentAtByApplicant : [(Text, Text)];
+        memberActive : Bool;
+        inviteMessage : Text;
+        providerThumbUrl : Text;
+        updatedAt : Text;
+    };
+
+    public func programCommsConfigV0ToV1(row : ProgramCommsConfigV0) : ProgramCommsConfigV1 {
+        {
+            programId = row.programId;
+            provider = row.provider;
+            oaName = row.oaName;
+            basicId = row.basicId;
+            channelId = row.channelId;
+            addFriendUrl = row.addFriendUrl;
+            groupName = row.groupName;
+            groupInviteUrl = row.groupInviteUrl;
+            addFriendQrUrl = row.addFriendQrUrl;
+            groupQrUrl = row.groupQrUrl;
+            inviteSentAtByApplicant = row.inviteSentAtByApplicant;
+            memberActive = false;
+            inviteMessage = "";
+            providerThumbUrl = "";
+            updatedAt = row.updatedAt;
+        };
+    };
+
+    public func programCommsConfigFromV1(row : ProgramCommsConfigV1) : ProgramCommsConfig {
+        {
+            programId = row.programId;
+            provider = row.provider;
+            oaName = row.oaName;
+            basicId = row.basicId;
+            channelId = row.channelId;
+            iosStoreUrl = "";
+            androidStoreUrl = "";
+            iosThumbUrl = "";
+            androidThumbUrl = "";
+            iosQrUrl = "";
+            androidQrUrl = "";
+            groupGeneralName = row.groupName;
+            groupGeneralInviteUrl = row.groupInviteUrl;
+            groupGeneralQrUrl = row.groupQrUrl;
+            groupAnnounceName = "";
+            groupAnnounceInviteUrl = "";
+            groupAnnounceQrUrl = "";
+            inviteSentAtByApplicant = row.inviteSentAtByApplicant;
+            memberActive = row.memberActive;
+            inviteMessage = row.inviteMessage;
+            providerThumbUrl = row.providerThumbUrl;
+            updatedAt = row.updatedAt;
+        };
+    };
+
+    public func programCommsConfigToV1(row : ProgramCommsConfig) : ProgramCommsConfigV1 {
+        {
+            programId = row.programId;
+            provider = row.provider;
+            oaName = row.oaName;
+            basicId = row.basicId;
+            channelId = row.channelId;
+            addFriendUrl = "";
+            groupName = row.groupGeneralName;
+            groupInviteUrl = row.groupGeneralInviteUrl;
+            addFriendQrUrl = "";
+            groupQrUrl = row.groupGeneralQrUrl;
+            inviteSentAtByApplicant = row.inviteSentAtByApplicant;
+            memberActive = row.memberActive;
+            inviteMessage = row.inviteMessage;
+            providerThumbUrl = row.providerThumbUrl;
+            updatedAt = row.updatedAt;
+        };
+    };
+
+    public func programCommsConfigFromV0(row : ProgramCommsConfigV0) : ProgramCommsConfig {
+        programCommsConfigFromV1(programCommsConfigV0ToV1(row));
+    };
+
+    public func programCommsConfigToV0(row : ProgramCommsConfig) : ProgramCommsConfigV0 {
+        let v1 = programCommsConfigToV1(row);
+        {
+            programId = v1.programId;
+            provider = v1.provider;
+            oaName = v1.oaName;
+            basicId = v1.basicId;
+            channelId = v1.channelId;
+            addFriendUrl = v1.addFriendUrl;
+            groupName = v1.groupName;
+            groupInviteUrl = v1.groupInviteUrl;
+            addFriendQrUrl = v1.addFriendQrUrl;
+            groupQrUrl = v1.groupQrUrl;
+            inviteSentAtByApplicant = v1.inviteSentAtByApplicant;
+            updatedAt = v1.updatedAt;
+        };
+    };
+
+    /// Confirmed-member view of an activated program (two rooms + store downloads).
+    public type ProgramCommsMemberRoom = {
+        programId : Text;
+        provider : Text;
+        inviteMessage : Text;
+        providerThumbUrl : Text;
+        iosStoreUrl : Text;
+        androidStoreUrl : Text;
+        iosThumbUrl : Text;
+        androidThumbUrl : Text;
+        iosQrUrl : Text;
+        androidQrUrl : Text;
+        groupGeneralName : Text;
+        groupGeneralInviteUrl : Text;
+        groupGeneralQrUrl : Text;
+        groupAnnounceName : Text;
+        groupAnnounceInviteUrl : Text;
+        groupAnnounceQrUrl : Text;
+    };
+
+    /// LINE group the webhook has seen (inbox for Studio assign).
+    public type ProgramCommsLineSeenGroup = {
+        groupId : Text;
+        groupName : Text;
+        lastSeenAt : Text;
+    };
+
+    /// Per-program LINE group ids for API push (sidecar; not on ProgramCommsConfig).
+    public type ProgramCommsLineBinding = {
+        programId : Text;
+        groupGeneralId : Text;
+        groupAnnounceId : Text;
     };
 
     /// One Studio sidebar / workspace feature (id aligns with frontend section ids, e.g. `artists`, `settings`).
@@ -1171,8 +1367,10 @@ module {
         artistDrawStoryVideoStable : ?[(Text, Text)];
         /// Applicant flight bookings (Studio Travel / Finance Tickets); optional for older backups.
         applicantFlightBookingsStable : ?[(Text, ApplicantFlightBooking)];
-        /// Per-program travel prep links; optional for older backups.
-        programTravelPrepLinksStable : ?[(Text, [TravelPrepLink])];
+        /// Per-program travel prep links without images (backups before imageUrl).
+        programTravelPrepLinksStable : ?[(Text, [TravelPrepLinkV0])];
+        /// Per-program travel prep links including imageUrl; optional for older backups.
+        programTravelPrepLinksStableV1 : ?[(Text, [TravelPrepLink])];
         /// Promo / invite / partner codes; optional for older backups.
         promoCodesStable : ?[(Text, PromoCode)];
         /// Promo code redemptions; optional for older backups.
@@ -1183,5 +1381,13 @@ module {
         broadcastCreditsStable : ?[(Principal, BroadcastCreditRecord)];
         /// Broadcast credit redemptions; optional for older backups.
         broadcastRedemptionsStable : ?[(Text, BroadcastRedemption)];
+        /// Per-program comms (V1: one group + add-friend); optional for older backups.
+        programCommsConfigStable : ?[(Text, ProgramCommsConfigV1)];
+        /// Per-program comms (two rooms + store downloads); optional for older backups.
+        programCommsConfigStableV2 : ?[(Text, ProgramCommsConfig)];
+        /// LINE groups seen via webhook; optional for older backups.
+        programCommsLineSeenStable : ?[(Text, ProgramCommsLineSeenGroup)];
+        /// Per-program LINE room bindings; optional for older backups.
+        programCommsLineBindingStable : ?[(Text, ProgramCommsLineBinding)];
     };
 };
