@@ -261,6 +261,11 @@ export const idlFactory = ({ IDL }) => {
             [StudioScheduledTaskAudience],
             ['query'],
         ),
+        integrationListScheduleEventsForDay: IDL.Func(
+            [IDL.Text, IDL.Text],
+            [IDL.Text],
+            ['query'],
+        ),
         integrationReconnectMemberPrincipal: IDL.Func(
             [IDL.Principal, IDL.Principal],
             [

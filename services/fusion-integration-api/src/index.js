@@ -2488,6 +2488,13 @@ function scheduledTaskPushLine(opts) {
     if (!lineChannelAccessToken) {
         return Promise.reject(new Error('LINE_CHANNEL_ACCESS_TOKEN is not configured'));
     }
+    if (Array.isArray(opts?.messages) && opts.messages.length) {
+        return pushLineMessages({
+            to: opts.groupId,
+            messages: opts.messages,
+            accessToken: lineChannelAccessToken,
+        });
+    }
     return pushLineTextToGroup({
         groupId: opts.groupId,
         text: opts.text,
@@ -2523,6 +2530,7 @@ app.post('/scheduled-tasks/tick', requireApiKey, async (_req, res) => {
             actor,
             sendEmailBatch: sendScheduledTaskEmailBatch,
             pushLine: scheduledTaskPushLine,
+            rsvpUrl: calendarRsvpUrl(fusionPublicSiteOrigin),
         });
         return res.json({ ok: true, ...out });
     } catch (e) {
@@ -2546,6 +2554,7 @@ app.post('/scheduled-tasks/run', requireApiKey, async (req, res) => {
             taskId,
             sendEmailBatch: sendScheduledTaskEmailBatch,
             pushLine: scheduledTaskPushLine,
+            rsvpUrl: calendarRsvpUrl(fusionPublicSiteOrigin),
         });
         return res.json({ ok: true, ...out });
     } catch (e) {
@@ -2603,8 +2612,13 @@ app.post('/line/announce-schedule', requireApiKey, async (req, res) => {
             return res.status(400).json({ error: 'programId required' });
         }
         const events = normalizeAnnounceEvents(req.body?.events);
-        if (!events.length) {
+        const mode = String(req.body?.mode || '').trim() === 'day' ? 'day' : 'event';
+        const date = String(req.body?.date || events[0]?.date || '').trim();
+        if (mode === 'event' && !events.length) {
             return res.status(400).json({ error: 'events required' });
+        }
+        if (mode === 'day' && !date) {
+            return res.status(400).json({ error: 'date required' });
         }
         const test = Boolean(req.body?.test);
         let announceGroupId = '';
@@ -2630,9 +2644,7 @@ app.post('/line/announce-schedule', requireApiKey, async (req, res) => {
             return res.status(status).json({ error: msg });
         }
         const rsvpUrl = calendarRsvpUrl(fusionPublicSiteOrigin);
-        const mode = String(req.body?.mode || '').trim() === 'day' ? 'day' : 'event';
         const programName = String(req.body?.programName || '').trim();
-        const date = String(req.body?.date || events[0]?.date || '');
         const messages =
             mode === 'day'
                 ? buildDayFlexMessages({ programName, date, events, rsvpUrl })

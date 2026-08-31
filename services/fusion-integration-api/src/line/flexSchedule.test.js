@@ -1,11 +1,16 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+    EMPTY_DAY_BODY,
+    EMPTY_DAY_HEADLINE,
     LINE_CAROUSEL_MAX,
     buildDayFlexMessages,
+    buildDayHeaderBubble,
+    buildEmptyDayBubble,
     buildEventBubble,
     buildEventFlexMessages,
     chunkFlexBubbles,
+    eventCountLabel,
     lineHttpsImageUrl,
     normalizeAnnounceEvents,
     resolveScheduleAnnounceDestination,
@@ -72,6 +77,33 @@ describe('chunkFlexBubbles', () => {
     });
 });
 
+describe('buildDayHeaderBubble', () => {
+    it('leads with the date and event count, program as the small label', () => {
+        const bubble = buildDayHeaderBubble('Kaga City Artist Residency', '2026-09-02', 2);
+        const texts = bubble.body.contents.map((c) => c.text);
+        assert.equal(texts[0], 'Kaga City Artist Residency');
+        assert.equal(bubble.body.contents[0].size, 'xs');
+        assert.match(texts[1], /Sep/);
+        assert.equal(bubble.body.contents[1].size, 'xl');
+        assert.equal(texts[2], '2 events');
+        assert.equal(texts.includes('TODAY'), false);
+    });
+});
+
+describe('buildEmptyDayBubble', () => {
+    it('is a single inspiring open-day card', () => {
+        const bubble = buildEmptyDayBubble('Kaga', '2026-09-02');
+        const texts = bubble.body.contents.map((c) => c.text).join('\n');
+        assert.match(texts, /Kaga/);
+        assert.match(texts, /Sep/);
+        assert.match(texts, new RegExp(EMPTY_DAY_HEADLINE));
+        assert.match(texts, /create/);
+        assert.match(texts, /explore|wander/);
+        assert.equal(eventCountLabel(0), '0 events');
+        assert.equal(eventCountLabel(1), '1 event');
+    });
+});
+
 describe('buildDayFlexMessages', () => {
     it('starts with a header bubble then one per event', () => {
         const messages = buildDayFlexMessages({
@@ -83,6 +115,24 @@ describe('buildDayFlexMessages', () => {
         assert.equal(messages.length, 1);
         assert.equal(messages[0].contents.type, 'carousel');
         assert.equal(messages[0].contents.contents.length, 3);
+        const header = messages[0].contents.contents[0];
+        assert.equal(header.body.contents[0].text, 'Kaga');
+        assert.equal(header.body.contents[2].text, '2 events');
+    });
+
+    it('sends one open-day card when nothing is scheduled', () => {
+        const messages = buildDayFlexMessages({
+            programName: 'Kaga',
+            date: '2026-09-02',
+            events: [],
+            rsvpUrl: 'https://www.fusionart.world/settings/profile#calendar',
+        });
+        assert.equal(messages.length, 1);
+        assert.equal(messages[0].type, 'flex');
+        assert.equal(messages[0].contents.type, 'bubble');
+        const texts = messages[0].contents.body.contents.map((c) => c.text).join(' ');
+        assert.match(texts, new RegExp(EMPTY_DAY_HEADLINE));
+        assert.match(texts, new RegExp(EMPTY_DAY_BODY.slice(0, 20)));
     });
 });
 

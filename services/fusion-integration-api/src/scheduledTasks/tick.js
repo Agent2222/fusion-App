@@ -12,6 +12,7 @@ import {
     lockWindowIso,
     MAX_TASKS_PER_TICK,
     nextRunAfterComplete,
+    resolveAnnounceDayYmd,
 } from './schedule.js';
 import {
     commsInviteSubject,
@@ -23,6 +24,7 @@ import {
     renderCustomEmail,
     renderFlightFollowUpEmail,
 } from './templates.js';
+import { buildDayFlexMessages, calendarRsvpUrl, normalizeAnnounceEvents } from '../line/flexSchedule.js';
 
 /**
  * @param {unknown} opt
@@ -85,6 +87,63 @@ export function buildEmailForRecipient(task, audience, recipient) {
 }
 
 /**
+ * @param {unknown} raw
+ */
+export function parseScheduleEventsJson(raw) {
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === 'string' && raw.trim()) {
+        try {
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch {
+            return [];
+        }
+    }
+    return [];
+}
+
+/**
+ * @param {object} opts
+ */
+async function sendAnnounceDayLine(opts) {
+    const task = opts.task;
+    const actor = opts.actor;
+    const audience = opts.audience;
+    const programId = opts.programId;
+    const tz = String(task?.timezone || 'Asia/Tokyo');
+    const ymd = resolveAnnounceDayYmd(task?.customLineText, tz, opts.startedAt);
+    const rooms = lineRoomsForTask(task, audience?.lineBinding || {});
+    if (!rooms.length) {
+        return { lineOk: 0, lineFail: 1, notes: [`LINE chat isn’t connected for this program (${programId}).`] };
+    }
+    if (typeof actor.integrationListScheduleEventsForDay !== 'function') {
+        return { lineOk: 0, lineFail: 1, notes: [`Couldn’t load the day’s schedule for ${programId}.`] };
+    }
+    const raw = await actor.integrationListScheduleEventsForDay(programId, ymd);
+    const events = normalizeAnnounceEvents(parseScheduleEventsJson(raw));
+    const programName = programNameFromLocalesJson(audience?.localesJson, audience?.programId);
+    const messages = buildDayFlexMessages({
+        programName,
+        date: ymd,
+        events,
+        rsvpUrl: opts.rsvpUrl || calendarRsvpUrl(),
+    });
+    let lineOk = 0;
+    let lineFail = 0;
+    const notes = events.length ? [] : ['No events on the calendar — posted the open-day note.'];
+    for (const room of rooms) {
+        try {
+            await opts.pushLine({ groupId: room.groupId, messages });
+            lineOk += 1;
+        } catch (err) {
+            lineFail += 1;
+            notes.push(err instanceof Error ? err.message : String(err));
+        }
+    }
+    return { lineOk, lineFail, notes };
+}
+
+/**
  * @param {object} opts
  */
 export async function executeScheduledTask(opts) {
@@ -98,7 +157,8 @@ export async function executeScheduledTask(opts) {
     let skipped = 0;
     const notes = [];
     const inviteIds = [];
-    const channels = String(task.channels || 'email');
+    const isAnnounceDay = String(task.kind || '') === 'announce_day';
+    const channels = isAnnounceDay ? 'line' : String(task.channels || 'email');
 
     for (const programId of Array.isArray(task.programIds) ? task.programIds : []) {
         const pid = String(programId || '').trim();
@@ -116,7 +176,7 @@ export async function executeScheduledTask(opts) {
         );
         skipped += Math.max(0, allConfirmed.length - recipients.length);
 
-        if (channels === 'email' || channels === 'both') {
+        if (!isAnnounceDay && (channels === 'email' || channels === 'both')) {
             const messages = recipients.map((row) => buildEmailForRecipient(task, audience, row));
             if (messages.length && typeof opts.sendEmailBatch === 'function') {
                 const batch = await opts.sendEmailBatch(messages);
@@ -136,7 +196,22 @@ export async function executeScheduledTask(opts) {
             }
         }
 
-        if (channels === 'line' || channels === 'both') {
+        if (isAnnounceDay) {
+            if (!missing.length) {
+                const out = await sendAnnounceDayLine({
+                    task,
+                    actor,
+                    audience,
+                    programId: pid,
+                    pushLine: opts.pushLine,
+                    rsvpUrl: opts.rsvpUrl,
+                    startedAt,
+                });
+                lineOk += out.lineOk;
+                lineFail += out.lineFail;
+                notes.push(...out.notes);
+            }
+        } else if (channels === 'line' || channels === 'both') {
             const text = lineTextForTask(task);
             const rooms = lineRoomsForTask(task, binding);
             if (!text) {
@@ -214,6 +289,7 @@ export async function processDueScheduledTasks(opts) {
             actor,
             sendEmailBatch: opts.sendEmailBatch,
             pushLine: opts.pushLine,
+            rsvpUrl: opts.rsvpUrl,
         });
         results.push(out);
     }
@@ -237,5 +313,6 @@ export async function processOneScheduledTask(opts) {
         actor,
         sendEmailBatch: opts.sendEmailBatch,
         pushLine: opts.pushLine,
+        rsvpUrl: opts.rsvpUrl,
     });
 }

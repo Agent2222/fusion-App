@@ -126,4 +126,97 @@ describe('scheduled task tick', () => {
         assert.match(run.summary, /LINE chat isn’t connected/i);
         assert.equal(run.lineOk, 0);
     });
+
+    it('posts the day’s schedule as LINE Flex and does not email', async () => {
+        const tasks = [
+            taskFixture({
+                kind: 'announce_day',
+                channels: 'line',
+                lineRooms: 'announce',
+                customLineText: 'today',
+                timezone: 'Asia/Tokyo',
+            }),
+        ];
+        const pushed = [];
+        let run;
+        const actor = {
+            integrationListEnabledScheduledTasks: async () => tasks,
+            integrationClaimScheduledTask: async () => [tasks[0]],
+            integrationGetScheduledTaskAudience: async () => audienceFixture(),
+            integrationListScheduleEventsForDay: async (programId, date) =>
+                JSON.stringify([
+                    {
+                        id: 'ev-1',
+                        title: 'Studio visit',
+                        date,
+                        startTime: '10:00',
+                        endTime: '12:00',
+                        programId,
+                        acceptRsvp: true,
+                    },
+                ]),
+            integrationCompleteScheduledTaskRun: async (_id, recorded) => {
+                run = recorded;
+            },
+        };
+        await processOneScheduledTask({
+            actor,
+            taskId: 't1',
+            now: Date.parse('2026-09-15T00:00:00.000Z'),
+            sendEmailBatch: async () => {
+                throw new Error('should not email');
+            },
+            pushLine: async (opts) => {
+                pushed.push(opts);
+            },
+        });
+        assert.equal(run.status, 'ok');
+        assert.equal(run.emailOk, 0);
+        assert.equal(run.lineOk, 1);
+        assert.equal(pushed.length, 1);
+        assert.equal(pushed[0].groupId, 'A1');
+        assert.ok(Array.isArray(pushed[0].messages));
+        assert.ok(pushed[0].messages.length >= 1);
+        assert.equal(pushed[0].text, undefined);
+    });
+
+    it('posts an open-day card when nothing is scheduled', async () => {
+        const tasks = [
+            taskFixture({
+                kind: 'announce_day',
+                channels: 'line',
+                customLineText: 'today',
+            }),
+        ];
+        const pushed = [];
+        let run;
+        const actor = {
+            integrationListEnabledScheduledTasks: async () => tasks,
+            integrationClaimScheduledTask: async () => [tasks[0]],
+            integrationGetScheduledTaskAudience: async () => audienceFixture(),
+            integrationListScheduleEventsForDay: async () => '[]',
+            integrationCompleteScheduledTaskRun: async (_id, recorded) => {
+                run = recorded;
+            },
+        };
+        await processOneScheduledTask({
+            actor,
+            taskId: 't1',
+            now: Date.parse('2026-09-15T00:00:00.000Z'),
+            sendEmailBatch: async () => ({ ok: true, results: [] }),
+            pushLine: async (opts) => {
+                pushed.push(opts);
+            },
+        });
+        assert.equal(run.status, 'ok');
+        assert.equal(run.lineOk, 1);
+        assert.equal(run.lineFail, 0);
+        assert.match(run.summary, /open-day/i);
+        assert.equal(pushed.length, 1);
+        assert.equal(pushed[0].messages.length, 1);
+        assert.equal(pushed[0].messages[0].contents.type, 'bubble');
+        const texts = pushed[0].messages[0].contents.body.contents.map((c) => c.text).join(' ');
+        assert.match(texts, /No events scheduled/);
+        assert.match(texts, /create/);
+    });
 });

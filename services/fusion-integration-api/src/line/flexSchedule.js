@@ -215,11 +215,76 @@ export function buildEventBubble(ev, opts) {
 }
 
 /**
+ * @param {unknown} n
+ */
+export function eventCountLabel(n) {
+    const count = Math.max(0, Number(n) || 0);
+    return count === 1 ? '1 event' : `${count} events`;
+}
+
+export const EMPTY_DAY_HEADLINE = 'No events scheduled';
+export const EMPTY_DAY_BODY = 'A wide-open day — a great one to create, wander, and see where it leads.';
+
+/**
+ * @param {string} programName
+ */
+function dayProgramLabel(programName) {
+    return String(programName || 'Program').slice(0, 80);
+}
+
+/**
+ * @param {string} programName
+ * @param {string} date
+ * @param {number} [eventCount]
+ */
+export function buildDayHeaderBubble(programName, date, eventCount) {
+    const program = dayProgramLabel(programName);
+    const dateLabel = formatAnnounceDateLabel(date);
+    const count = Math.max(0, Number(eventCount) || 0);
+    return {
+        type: 'bubble',
+        size: 'kilo',
+        body: {
+            type: 'box',
+            layout: 'vertical',
+            spacing: 'sm',
+            paddingAll: '20px',
+            contents: [
+                {
+                    type: 'text',
+                    text: program,
+                    size: 'xs',
+                    weight: 'bold',
+                    color: '#888888',
+                    wrap: true,
+                },
+                {
+                    type: 'text',
+                    text: dateLabel,
+                    weight: 'bold',
+                    size: 'xl',
+                    wrap: true,
+                    color: '#111111',
+                },
+                {
+                    type: 'text',
+                    text: eventCountLabel(count),
+                    size: 'sm',
+                    color: '#666666',
+                    wrap: true,
+                },
+            ],
+        },
+    };
+}
+
+/**
+ * Single card when the day has nothing on the calendar.
  * @param {string} programName
  * @param {string} date
  */
-export function buildDayHeaderBubble(programName, date) {
-    const program = String(programName || 'Program').slice(0, 80);
+export function buildEmptyDayBubble(programName, date) {
+    const program = dayProgramLabel(programName);
     const dateLabel = formatAnnounceDateLabel(date);
     return {
         type: 'bubble',
@@ -232,14 +297,15 @@ export function buildDayHeaderBubble(programName, date) {
             contents: [
                 {
                     type: 'text',
-                    text: 'TODAY',
+                    text: program,
                     size: 'xs',
                     weight: 'bold',
                     color: '#888888',
+                    wrap: true,
                 },
                 {
                     type: 'text',
-                    text: program,
+                    text: dateLabel,
                     weight: 'bold',
                     size: 'xl',
                     wrap: true,
@@ -247,10 +313,17 @@ export function buildDayHeaderBubble(programName, date) {
                 },
                 {
                     type: 'text',
-                    text: dateLabel,
+                    text: EMPTY_DAY_HEADLINE,
                     size: 'sm',
                     color: '#666666',
                     wrap: true,
+                },
+                {
+                    type: 'text',
+                    text: EMPTY_DAY_BODY,
+                    size: 'sm',
+                    wrap: true,
+                    color: '#111111',
                 },
             ],
         },
@@ -300,8 +373,15 @@ export function buildDayFlexMessages(opts) {
     const events = Array.isArray(opts?.events) ? opts.events : [];
     const programName = String(opts?.programName || 'Program');
     const date = String(opts?.date || events[0]?.date || '');
-    const bubbles = [buildDayHeaderBubble(programName, date), ...events.map((ev) => buildEventBubble(ev, opts))];
-    const alt = `${programName} · ${formatAnnounceDateLabel(date)}`;
+    if (!events.length) {
+        const alt = `${formatAnnounceDateLabel(date)} · ${EMPTY_DAY_HEADLINE}`;
+        return chunkFlexBubbles([buildEmptyDayBubble(programName, date)], alt);
+    }
+    const bubbles = [
+        buildDayHeaderBubble(programName, date, events.length),
+        ...events.map((ev) => buildEventBubble(ev, opts)),
+    ];
+    const alt = `${formatAnnounceDateLabel(date)} · ${eventCountLabel(events.length)}`;
     return chunkFlexBubbles(bubbles, alt);
 }
 

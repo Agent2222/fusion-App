@@ -49,4 +49,13 @@ describe('scheduled task audience', () => {
         assert.deepEqual(rooms, [{ room: 'general', groupId: 'G1' }]);
         assert.deepEqual(lineRoomsMissing(task, { groupGeneralId: 'G1', groupAnnounceId: '' }), ['announce']);
     });
+
+    it('posts announce-day only to Announcements and never emails', () => {
+        const task = { kind: 'announce_day', channels: 'line', lineRooms: 'announce' };
+        assert.deepEqual(emailRecipientsForTask(task, [confirmed]), []);
+        assert.deepEqual(lineRoomsForTask(task, { groupGeneralId: 'G1', groupAnnounceId: 'A1' }), [
+            { room: 'announce', groupId: 'A1' },
+        ]);
+        assert.deepEqual(lineRoomsMissing(task, { groupGeneralId: 'G1', groupAnnounceId: '' }), ['announce']);
+    });
 });
