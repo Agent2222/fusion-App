@@ -3,7 +3,7 @@
  */
 
 import { withSeoImageAlt } from './mediaAltSeo.js';
-import { DRAW_SLOT_GOAL_DEFAULT } from './applicantsDrawModel.js';
+import { DRAW_SLOT_GOAL_DEFAULT, isProgramDrawGoalReached } from './applicantsDrawModel.js';
 
 /** Default Program Draw sidecar when no config is stored yet. */
 export const DEFAULT_PROGRAM_DRAW_CONFIG = Object.freeze({
@@ -764,15 +764,19 @@ function renderFaqTab(escapeHtml, en, ja) {
 /**
  * Program-level Draw tab (not EN/JA localized).
  * @param {(s: string) => string} escapeHtml
- * @param {{ active?: boolean, totalSlots?: number } | null | undefined} drawCfg
+ * @param {{ active?: boolean, totalSlots?: number, closed?: boolean, enteredCount?: number } | null | undefined} drawCfg
  */
 function renderDrawTab(escapeHtml, drawCfg) {
     const active = Boolean(drawCfg?.active);
+    const closed = Boolean(drawCfg?.closed);
     const slotsRaw = Number(drawCfg?.totalSlots);
     const totalSlots =
         Number.isFinite(slotsRaw) && slotsRaw > 0
             ? Math.floor(slotsRaw)
             : DEFAULT_PROGRAM_DRAW_CONFIG.totalSlots;
+    const enteredRaw = Number(drawCfg?.enteredCount);
+    const enteredCount = Number.isFinite(enteredRaw) && enteredRaw > 0 ? Math.floor(enteredRaw) : 0;
+    const goalReached = isProgramDrawGoalReached(enteredCount, totalSlots);
     return `${panelSectionHeadHtml(escapeHtml, 'draw', { localeToggle: false })}
   <div class="studio-prog-editor-fields studio-prog-editor-fields--program-level">
   <h4 class="studio-prog-subhead">Award cycle</h4>
@@ -809,31 +813,80 @@ function renderDrawTab(escapeHtml, drawCfg) {
     </div>
     <span class="studio-prog-field-row__translate-spacer" aria-hidden="true"></span>
   </div>
+  <div class="studio-prog-field-row studio-prog-field-row--check">
+    <div class="studio-prog-field-row__meta">
+      <span class="studio-prog-field-row__label">Goal reached</span>
+      <span class="studio-prog-field-row__helper">Checks automatically when claimed entries reach Total award slots.</span>
+    </div>
+    <div class="studio-prog-field-row__control">
+      <label class="studio-prog-field-row__check">
+        <input type="checkbox" data-prog-draw="goalReached" disabled ${goalReached ? 'checked' : ''} />
+        <span>Reached</span>
+      </label>
+    </div>
+    <span class="studio-prog-field-row__translate-spacer" aria-hidden="true"></span>
+  </div>
+  <div class="studio-prog-field-row studio-prog-field-row--check">
+    <div class="studio-prog-field-row__meta">
+      <span class="studio-prog-field-row__label">End program</span>
+      <span class="studio-prog-field-row__helper">Closes the live draw and shows subscribe-for-next-opening.</span>
+    </div>
+    <div class="studio-prog-field-row__control">
+      <label class="studio-prog-field-row__check">
+        <input type="checkbox" data-prog-draw="closed" ${closed ? 'checked' : ''} />
+        <span>Closed</span>
+      </label>
+    </div>
+    <span class="studio-prog-field-row__translate-spacer" aria-hidden="true"></span>
+  </div>
   </div>`;
 }
 
 /**
- * Read program-level draw fields from the editor form.
+ * Keep the read-only Goal reached checkbox in sync with Total award slots.
  * @param {ParentNode} root
- * @returns {{ active: boolean, totalSlots: number }}
+ * @param {unknown} enteredCount
+ */
+export function bindProgramDrawGoalReached(root, enteredCount) {
+    const slotsEl = root.querySelector('[data-prog-draw="totalSlots"]');
+    const goalEl = root.querySelector('[data-prog-draw="goalReached"]');
+    if (!(slotsEl instanceof HTMLInputElement) || !(goalEl instanceof HTMLInputElement)) return;
+    const sync = () => {
+        goalEl.checked = isProgramDrawGoalReached(enteredCount, slotsEl.value);
+    };
+    slotsEl.addEventListener('input', sync);
+    slotsEl.addEventListener('change', sync);
+    sync();
+}
+
+/**
+ * Read program-level draw fields from the editor form.
+ * Goal reached is derived and is not returned.
+ * @param {ParentNode} root
+ * @returns {{ active: boolean, totalSlots: number, closed: boolean }}
  */
 export function collectProgramDrawFromForm(root) {
     const activeEl = root.querySelector('[data-prog-draw="active"]');
     const slotsEl = root.querySelector('[data-prog-draw="totalSlots"]');
-    const active = activeEl instanceof HTMLInputElement ? activeEl.checked : false;
-    const slotsRaw = slotsEl instanceof HTMLInputElement ? Number(slotsEl.value) : NaN;
+    const closedEl = root.querySelector('[data-prog-draw="closed"]');
+    const active = Boolean(activeEl && typeof activeEl === 'object' && 'checked' in activeEl && activeEl.checked);
+    const closed = Boolean(closedEl && typeof closedEl === 'object' && 'checked' in closedEl && closedEl.checked);
+    const slotsRaw =
+        slotsEl && typeof slotsEl === 'object' && 'value' in slotsEl
+            ? Number(/** @type {{ value: unknown }} */ (slotsEl).value)
+            : NaN;
     const totalSlots =
         Number.isFinite(slotsRaw) && slotsRaw > 0
             ? Math.floor(slotsRaw)
             : DEFAULT_PROGRAM_DRAW_CONFIG.totalSlots;
-    return { active, totalSlots };
+    return { active, totalSlots, closed };
 }
 
 /**
  * @param {(s: string) => string} escapeHtml
  * @param {unknown} enRaw
  * @param {unknown} jaRaw
- * @param {{ active?: boolean, totalSlots?: number } | null} [drawCfg]
+ * @param {{ active?: boolean, totalSlots?: number, closed?: boolean, enteredCount?: number } | null} [drawCfg]
  * @returns {string} Tab panels HTML only (shell provides nav chrome)
  */
 export function renderProgramLocaleFormHtml(escapeHtml, enRaw, jaRaw, drawCfg = null) {

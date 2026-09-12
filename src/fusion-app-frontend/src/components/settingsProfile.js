@@ -141,6 +141,8 @@ import {
   buildApplicantJoinUnlockModel,
   wireApplicantJoinUnlock,
 } from "../utils/applicantStudioJoinUnlock.js";
+import { parseProgramDrawClosed } from "../utils/applicantsDrawModel.js";
+import { trialAccessCodeFromSearch } from "../utils/trialAccessCode.js";
 import { studioIconHref } from "../utils/studioIconRegistry.js";
 import { syncMembershipAfterAccountRecovery } from "../utils/integrationApi.js";
 import {
@@ -4407,6 +4409,21 @@ function wireMpdResidencyComingSoonModal() {
 }
 
 /**
+ * @param {string} pid
+ * @param {object[]} programs
+ * @param {{ forceClosed?: boolean }} [opts]
+ */
+function mpdDrawStatusWrapHtml(pid, programs, opts = {}) {
+  const row = Array.isArray(programs)
+    ? programs.find((x) => String(x?.id) === String(pid))
+    : null;
+  const closed = Boolean(opts.forceClosed) || parseProgramDrawClosed(row);
+  return `<div class="mpd-draw-status-wrap" data-mpd-draw-for="${escapeHtmlMpd(pid)}">
+          <app-program-draw-status data-program-id="${escapeHtmlMpd(pid)}" data-fixture="false" data-draw-closed="${closed ? "true" : "false"}"></app-program-draw-status>
+        </div>`;
+}
+
+/**
  * @param {Record<string, unknown>} rec
  * @param {Record<string, unknown>} locales
  * @param {'en'|'ja'} active
@@ -4496,9 +4513,7 @@ async function hydrateProgramsPanel(rec, locales, active) {
       blocks.push({
         type: "draw",
         programId: pid,
-        html: `<div class="mpd-draw-status-wrap" data-mpd-draw-for="${escapeHtmlMpd(pid)}">
-          <app-program-draw-status data-program-id="${escapeHtmlMpd(pid)}" data-fixture="false"></app-program-draw-status>
-        </div>`,
+        html: mpdDrawStatusWrapHtml(pid, programs, { forceClosed: showTesterFixture }),
       });
     }
   }
@@ -4509,9 +4524,7 @@ async function hydrateProgramsPanel(rec, locales, active) {
     blocks.push({
       type: "draw",
       programId: pid,
-      html: `<div class="mpd-draw-status-wrap" data-mpd-draw-for="${escapeHtmlMpd(pid)}">
-        <app-program-draw-status data-program-id="${escapeHtmlMpd(pid)}" data-fixture="false"></app-program-draw-status>
-      </div>`,
+      html: mpdDrawStatusWrapHtml(pid, programs, { forceClosed: showTesterFixture }),
     });
   }
   if (showTesterFixture && !blocks.some((b) => b.type === "draw")) {
@@ -4519,7 +4532,7 @@ async function hydrateProgramsPanel(rec, locales, active) {
       type: "draw",
       programId: "fixture",
       html: `<div class="mpd-draw-status-wrap mpd-draw-status-wrap--fixture" data-mpd-draw-fixture="true">
-        <app-program-draw-status data-fixture="true" data-program-id="fixture"></app-program-draw-status>
+        <app-program-draw-status data-fixture="true" data-program-id="fixture" data-draw-closed="true"></app-program-draw-status>
       </div>`,
     });
   }
@@ -6868,6 +6881,7 @@ export default function initSettingsProfile() {
     mount.innerHTML = applicantJoinUnlockHtml(model);
     joinUnlockCleanup = wireApplicantJoinUnlock(mount, {
       defaultTier: "quarterly",
+      locale: loc,
       getBillingEmail: () => {
         const fromKnown = String(mpdKnownContactEmail || "").trim();
         if (fromKnown.includes("@")) return fromKnown;
@@ -8597,7 +8611,10 @@ export default function initSettingsProfile() {
         void hydrateProgramsPanel(/** @type {Record<string, unknown>} */ ({}), localesState, "en");
         setMpdProgramsTab("my-programs");
         const hashKey = panelKeyFromHash();
-        showMpdPanel(hashKey === "join-unlock" ? "join-unlock" : "programs");
+        const pendingTrialCode = trialAccessCodeFromSearch();
+        showMpdPanel(
+          hashKey === "join-unlock" || pendingTrialCode ? "join-unlock" : "programs",
+        );
         applySettingsProfileDocumentSeo(dashTitle);
         return;
       }
@@ -8786,7 +8803,10 @@ export default function initSettingsProfile() {
       showMpdPanel("join-unlock");
     } else if (applicantStudioActive) {
       const hashKey = panelKeyFromHash();
-      showMpdPanel(hashKey === "join-unlock" ? "join-unlock" : "programs");
+      const pendingTrialCode = trialAccessCodeFromSearch();
+      showMpdPanel(
+        hashKey === "join-unlock" || pendingTrialCode ? "join-unlock" : "programs",
+      );
     } else {
     showMpdPanel(panelKeyFromHash());
     }
@@ -8832,6 +8852,9 @@ export default function initSettingsProfile() {
       );
     });
   document.getElementById("mpd_become_member")?.addEventListener("click", () => {
+    showMpdPanel("join-unlock");
+  });
+  document.getElementById("mpd_root")?.addEventListener("fusion-draw-status-redeem", () => {
     showMpdPanel("join-unlock");
   });
   document.getElementById("mpdApplicationOnlyToggle")?.addEventListener("change", (ev) => {

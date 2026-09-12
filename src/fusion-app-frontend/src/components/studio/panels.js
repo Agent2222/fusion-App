@@ -21,6 +21,7 @@ import { renderPermissions, initPermissions } from './permissionsSection.js';
 import { renderTravel, initTravel } from './travelSection.js';
 import { renderComms, initComms } from './commsSection.js';
 import { renderScheduledTasks, initScheduledTasks } from './scheduledTasksSection.js';
+import { renderLinks, initLinks } from './linksSection.js';
 import {
     APPLICANTS_PROGRAM_SELECT_STORAGE_KEY,
     aggregateApplicantsByProgram,
@@ -119,6 +120,7 @@ import {
     upsertEditionStudio,
     upsertProgramStudio,
     getProgramDrawConfigStudio,
+    getProgramDrawProgressPublic,
     listProgramDrawConfigsStudio,
     upsertProgramDrawConfigStudio,
     getProgramScheduleLiveStudio,
@@ -136,7 +138,13 @@ import {
     generateAndUpsertArtistWorldFromBio,
     adminGenerateAccountRecoveryCodeStudio,
 } from '../../utils/database.js';
-import { computeMemberProgramTotalDueCents } from '../../utils/programPaymentMoney.js';
+import {
+    centsToUsdFieldValue,
+    computeMemberProgramTotalDueCents,
+    parseProgramFinancePartnerDefaults,
+    parseUsdDisplayToCents,
+} from '../../utils/programPaymentMoney.js';
+import { parseProgramDrawClosed } from '../../utils/applicantsDrawModel.js';
 import { renderTeamSection, initTeamSection } from './teamSection.js';
 import { STUDIO_WORLD_BATCH_MAX, buildMergedLocalesWithGeneratedWorldFromIdentity, hasUsableIdentityLlmSourceInput, translateManageFormWorldToNewWorld } from '../../utils/studioArtistWorldLlm.js';
 import { setStudioArtistManageBusy } from '../../utils/studioArtistManageBusy.js';
@@ -230,6 +238,7 @@ import {
     bindProgramLocaleTranslate,
     bindProgramModalTabs,
     bindStudioProgGalleryUrlPreviews,
+    bindProgramDrawGoalReached,
     collectProgramDrawFromForm,
     collectProgramLocalesFromForm,
     DEFAULT_PROGRAM_DRAW_CONFIG,
@@ -371,6 +380,7 @@ export const STUDIO_NAV_GROUPS = [
             { id: 'users', label: 'Users' },
             { id: 'services', label: 'Services' },
             { id: 'scheduled-tasks', label: 'Scheduled Tasks' },
+            { id: 'links', label: 'Links' },
             { id: 'settings', label: 'Settings' },
         ],
     },
@@ -468,6 +478,8 @@ export function renderStudioMain(sectionId) {
             return renderServices();
         case 'scheduled-tasks':
             return renderScheduledTasks();
+        case 'links':
+            return renderLinks();
         case 'settings':
             return renderSettings();
         case 'permissions':
@@ -3092,6 +3104,7 @@ const STUDIO_INIT = {
     users: initUsers,
     services: initServices,
     'scheduled-tasks': initScheduledTasks,
+    links: initLinks,
     settings: initSettings,
     permissions: initPermissions,
     team: initTeamSection,
@@ -5544,7 +5557,7 @@ ${urlHelp}
                     banner.className = 'studio-banner studio-banner--ok';
                     banner.textContent = t.checked
                         ? `Random featured: up to ${MAX_MANUAL_FEATURED} featurable artists per home load.`
-                        : 'Manual featured list drives the home strip (max 8).';
+                        : 'Manual featured list drives the home / artists strip.';
                 }
             } catch (err) {
                 t.checked = !t.checked;
@@ -6890,21 +6903,35 @@ async function initPrograms(mainEl) {
             if (o?.ja && typeof o.ja === 'object' && !Array.isArray(o.ja)) {
                 jaObj = /** @type {Record<string, unknown>} */ (o.ja);
             }
+            const finance = parseProgramFinancePartnerDefaults(o);
+            p.partner1Amount = centsToUsdFieldValue(finance.partner1Cents);
+            p.partner2Amount = centsToUsdFieldValue(finance.partner2Cents);
+            p.partner3Amount = centsToUsdFieldValue(finance.partner3Cents);
         } catch {
             /* keep blank */
         }
-        let drawCfg = { ...DEFAULT_PROGRAM_DRAW_CONFIG };
+        let drawCfg = { ...DEFAULT_PROGRAM_DRAW_CONFIG, closed: false, enteredCount: 0 };
         if (existing?.id) {
+            drawCfg.closed = parseProgramDrawClosed(p.localesJson);
             try {
                 const stored = await getProgramDrawConfigStudio(String(existing.id));
                 if (stored) {
                     drawCfg = {
+                        ...drawCfg,
                         active: Boolean(stored.active),
                         totalSlots: stored.totalSlots || DEFAULT_PROGRAM_DRAW_CONFIG.totalSlots,
                     };
                 }
             } catch {
                 /* defaults */
+            }
+            try {
+                const progress = await getProgramDrawProgressPublic(String(existing.id));
+                const enteredRaw = Number(progress?.enteredCount);
+                drawCfg.enteredCount =
+                    Number.isFinite(enteredRaw) && enteredRaw > 0 ? Math.floor(enteredRaw) : 0;
+            } catch {
+                drawCfg.enteredCount = 0;
             }
             try {
                 p.scheduleLive = await getProgramScheduleLiveStudio(String(existing.id));
@@ -6963,6 +6990,7 @@ async function initPrograms(mainEl) {
             routeLinkSeed: String(p.routeLink || ''),
         });
         bindProgramKeyDatesRepeater(root, mergeKeyDatesSeed(enObj, jaObj), escapeHtml);
+        bindProgramDrawGoalReached(localeFormRoot || root, drawCfg.enteredCount);
         bindProgramLocaleTranslate(root, studioTranslateEnToJa, { setStatus: setProgModalStatus });
         bindStudioProgGalleryUrlPreviews(localeFormRoot);
         root.querySelectorAll('input.studio-prog-cover-file[data-upload-target-locale]').forEach((fileEl) => {
@@ -7064,8 +7092,18 @@ async function initPrograms(mainEl) {
             };
             setDepositInLocale(en);
             setDepositInLocale(ja);
-            const localesJson = JSON.stringify({ en, ja });
+            const finance = {
+                partner1Cents: parseUsdDisplayToCents(fd.get('partner1Amount') || ''),
+                partner2Cents: parseUsdDisplayToCents(fd.get('partner2Amount') || ''),
+                partner3Cents: parseUsdDisplayToCents(fd.get('partner3Amount') || ''),
+            };
             const drawFields = collectProgramDrawFromForm(localeFormRoot);
+            const localesJson = JSON.stringify({
+                en,
+                ja,
+                finance,
+                draw: { closed: Boolean(drawFields.closed) },
+            });
             const programId = String(fd.get('id') || '').trim();
             try {
                 await upsertProgramStudio({

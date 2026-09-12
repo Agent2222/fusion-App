@@ -8,10 +8,12 @@ import { SCHEDULE_TIMEZONES } from '../../utils/scheduleTimezones.js';
 import {
     addDaysToUtcIsoInZone,
     encodeScheduledTaskWindow,
+    formatNextSendLabel,
     localDateTimeToUtcIso,
     normalizeAnnounceDay,
     parseScheduledTaskWindow,
     resolveAnnounceDayYmd,
+    scheduledTaskTimezoneId,
     utcIsoToLocalDateTime,
 } from '../../utils/scheduledTaskSchedule.js';
 import { ANNOUNCE_SUCCESS_TEST, dayEventsForAnnounce, toAnnouncePayload } from '../../utils/scheduleAnnounce.js';
@@ -85,7 +87,7 @@ function emptyTask() {
         channels: 'email',
         kind: 'flight_followup',
         programIds: [],
-        lineRooms: 'both',
+        lineRooms: 'announce',
         customSubject: '',
         customBodyText: '',
         customLineText: '',
@@ -315,9 +317,14 @@ export async function initScheduledTasks(mainEl) {
                 return `<label class="st-check"><input type="checkbox" data-st-program-id="${esc(id)}" ${checked} ${canEdit ? '' : 'disabled'} /> ${esc(programName(id))}</label>`;
             })
             .join('');
-        const tzOpts = SCHEDULE_TIMEZONES.map(
-            (z) => `<option value="${esc(z.id)}" ${task.timezone === z.id ? 'selected' : ''}>${esc(z.label)} time</option>`,
-        ).join('');
+        const taskTz = scheduledTaskTimezoneId(task.timezone);
+        const tzOpts = [...SCHEDULE_TIMEZONES]
+            .sort((a, b) => Number(b.id === 'Asia/Tokyo') - Number(a.id === 'Asia/Tokyo'))
+            .map(
+                (z) =>
+                    `<option value="${esc(z.id)}" ${taskTz === z.id ? 'selected' : ''}>${esc(z.label)} time</option>`,
+            )
+            .join('');
         const modal = openStudioModal(
             `<form class="st-modal-form" data-st-form>
               <div class="st-modal-grid">
@@ -412,6 +419,8 @@ export async function initScheduledTasks(mainEl) {
                     Skip people who already did this
                   </label>
                   <p class="st-help" data-st-skip-help ${isAnnounce ? 'hidden' : ''}>Won’t email artists who already added arrival time, or who already got the chat invite.</p>
+                  <p class="st-help" data-st-tz-help>Clock time uses this zone. Japan is 13 hours ahead of New York — not US time.</p>
+                  <p class="st-estimate" data-st-next-send></p>
                   <p class="st-estimate" data-st-estimate>${esc(estimateFor(task))}</p>
                 </div>
               </div>
@@ -464,6 +473,12 @@ export async function initScheduledTasks(mainEl) {
             const draft = readForm(form, task);
             const estimate = form.querySelector('[data-st-estimate]');
             if (estimate) estimate.textContent = estimateFor(draft);
+            const nextSend = form.querySelector('[data-st-next-send]');
+            if (nextSend) {
+                nextSend.textContent = draft.nextRunAtIso
+                    ? `Sends ${formatNextSendLabel(draft.nextRunAtIso, draft.timezone)}`
+                    : '';
+            }
         };
         form?.addEventListener('change', toggleBits);
         form?.addEventListener('input', toggleBits);
@@ -548,7 +563,7 @@ export async function initScheduledTasks(mainEl) {
         const programIds = [...form.querySelectorAll('[data-st-program-id]:checked')].map((el) =>
             String(el.getAttribute('data-st-program-id') || ''),
         );
-        const timezone = String(form.timezone.value || 'Asia/Tokyo');
+        const timezone = scheduledTaskTimezoneId(form.timezone.value);
         const kind = String(form.kind.value || 'flight_followup');
         const isAnnounceKind = kind === 'announce_day';
         const repeat = String(form.repeat.value || 'once');
@@ -571,7 +586,7 @@ export async function initScheduledTasks(mainEl) {
             channels: isAnnounceKind ? 'line' : String(form.channels.value || 'email'),
             kind,
             programIds,
-            lineRooms: isAnnounceKind ? 'announce' : String(form.lineRooms.value || 'both'),
+            lineRooms: isAnnounceKind ? 'announce' : String(form.lineRooms.value || 'announce'),
             customSubject: String(form.customSubject.value || ''),
             customBodyText: String(form.customBodyText.value || ''),
             customLineText: isAnnounceKind ? announceDay : String(form.customLineText.value || ''),

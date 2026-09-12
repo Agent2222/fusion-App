@@ -114,7 +114,7 @@
   justify-content: center;
   border: 1px solid var(--event-border-strong);
   border-radius: 8px;
-  color: var(--event-ink) !important;
+  color: var(--event-ink, #111827) !important;
   background: #fff !important;
   background-color: #fff !important;
   transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
@@ -140,7 +140,7 @@
   background: #f8f5f4 !important;
   background-color: #f8f5f4 !important;
   border-color: #bcb5b2;
-  color: var(--event-ink) !important;
+  color: var(--event-ink, #111827) !important;
 }
 .event-dialog__button:active,
 .event-dialog__icon-button:active { transform: translateY(1px); }
@@ -344,9 +344,9 @@
 .event-dialog__button--primary:focus-visible,
 .event-dialog__button--primary:active {
   color: #fff !important;
-  background: var(--event-ink) !important;
-  background-color: var(--event-ink) !important;
-  border-color: var(--event-ink) !important;
+  background: var(--event-ink, #111827) !important;
+  background-color: var(--event-ink, #111827) !important;
+  border-color: var(--event-ink, #111827) !important;
 }
 .event-dialog__button--primary:hover,
 .event-dialog__button--primary:focus,
@@ -430,12 +430,12 @@
   border-radius: 8px;
   background: #fff !important;
   background-color: #fff !important;
-  color: var(--event-ink) !important;
+  color: var(--event-ink, #111827) !important;
   font-size: 12px;
   cursor: pointer;
 }
 .event-participants-panel .event-field__control {
-  color: var(--event-ink) !important;
+  color: var(--event-ink, #111827) !important;
 }
 .event-participants-list button:hover {
   background: #f8f5f4 !important;
@@ -542,31 +542,33 @@
 }
 
 .event-dialog__importance {
-  margin-left: 4px;
-  padding: 3px 8px;
+  margin-left: 6px;
+  padding: 6px 14px;
   border-radius: 999px;
-  font-size: 9px;
-  font-weight: 680;
-  letter-spacing: 0.04em;
+  border: 2px solid transparent;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .event-dialog__importance--optional {
-  background: #f5c542;
-  color: #1a1400;
-  border: 1px solid #d4a017;
+  background: #ffbf00;
+  color: #1a1200;
+  border-color: #8a6500;
+  box-shadow: 0 0 0 3px rgba(255, 191, 0, 0.38);
 }
 
 .event-dialog__importance--suggested {
   background: #2f6f4e;
   color: #ffffff;
-  border: 1px solid #245a3f;
+  border-color: #245a3f;
 }
 
 .event-dialog__importance--general {
   background: #000000;
   color: #ffffff;
-  border: 1px solid #000000;
+  border-color: #000000;
 }
 
 .event-dialog--view .event-dialog__title {
@@ -891,6 +893,32 @@
   accent-color: var(--event-ink);
 }
 
+.event-cost-amount {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.event-cost-amount[hidden] {
+  display: none;
+}
+
+.event-cost-amount__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.event-cost-currency {
+  flex: 0 0 5.5rem;
+}
+
+.event-cost-amount__field {
+  flex: 1 1 8rem;
+  min-width: 7rem;
+}
+
 .event-flier-view {
   margin: 14px 4px 0;
   padding: 18px 24px;
@@ -939,6 +967,20 @@
   font-size: 12px;
   line-height: 1.55;
   white-space: pre-wrap;
+}
+
+.event-notes__text--pending {
+  color: var(--event-muted, #6b7280);
+  font-style: italic;
+}
+
+.event-refine-backdrop,
+.event-refine-dialog {
+  --event-ink: #111827;
+  --event-ink-soft: #45413e;
+  --event-muted: #716d69;
+  --event-border: #e7e2e1;
+  --event-border-strong: #d7d1cf;
 }
 
 .event-refine-backdrop {
@@ -1012,6 +1054,21 @@
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.event-refine-dialog__actions .event-dialog__button {
+  color: var(--event-ink, #111827) !important;
+}
+
+.event-refine-dialog__actions .event-dialog__button--primary,
+.event-refine-dialog__actions .event-dialog__button--primary:hover,
+.event-refine-dialog__actions .event-dialog__button--primary:focus,
+.event-refine-dialog__actions .event-dialog__button--primary:focus-visible,
+.event-refine-dialog__actions .event-dialog__button--primary:active {
+  color: #fff !important;
+  background: #111827 !important;
+  background-color: #111827 !important;
+  border-color: #111827 !important;
 }
 
 .event-refine-dialog__actions .event-dialog__button:disabled {

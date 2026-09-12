@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "backup": "bash ../../scripts/backup.sh",
     "setup": "npm i && dfx canister create fusion-app-backend && env NO_COLOR=1 dfx generate fusion-app-backend && dfx deploy",
     "start": "vite --port 3000",
     "prebuild": "env NO_COLOR=1 dfx generate fusion-app-backend && env NO_COLOR=1 dfx generate fusion-radar",

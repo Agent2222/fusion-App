@@ -15,6 +15,37 @@ export const ANNOUNCE_EMPTY_DAY =
     'No events on the calendar. Artists will get a note that it’s a great day to create and explore.';
 
 /**
+ * @param {unknown} name
+ * @returns {'' | 'general' | 'announce'}
+ */
+export function lineRoomRoleFromName(name) {
+    const n = String(name || '').trim().toLowerCase();
+    if (!n) return '';
+    if (/announce|announcement|お知らせ|告知/.test(n)) return 'announce';
+    if (/general|メインチャット|雑談/.test(n)) return 'general';
+    return '';
+}
+
+/**
+ * @param {{ groupGeneralId?: string, groupAnnounceId?: string }} binding
+ * @param {{ announceName?: string, generalName?: string }} [names]
+ */
+export function pickAnnounceGroupId(binding, names = {}) {
+    const announceId = String(binding?.groupAnnounceId || '').trim();
+    const generalId = String(binding?.groupGeneralId || '').trim();
+    if (
+        announceId &&
+        generalId &&
+        announceId !== generalId &&
+        lineRoomRoleFromName(names.announceName) === 'general' &&
+        lineRoomRoleFromName(names.generalName) === 'announce'
+    ) {
+        return generalId;
+    }
+    return announceId;
+}
+
+/**
  * @param {string} s
  */
 function escapeHtml(s) {
@@ -124,13 +155,30 @@ export async function openScheduleAnnounceConfirm(opts) {
     });
     const date = String(opts?.date || events[0]?.date || '').trim();
     const programName = String(opts?.programName || events[0]?.programName || '').trim();
-    const { staffGetProgramCommsLineBinding } = await import('./database.js');
+    const { staffGetProgramCommsLineBinding, staffListSeenLineGroups } = await import('./database.js');
     const { announceScheduleOnLine } = await import('./integrationApi.js');
     const { openStudioModal, openStudioNoticeDialog } = await import('./studioModal.js');
     let announceBound = false;
+    let destinationDetail = ANNOUNCE_DESTINATION;
     try {
-        const binding = await staffGetProgramCommsLineBinding(programId);
-        announceBound = Boolean(String(binding?.groupAnnounceId || '').trim());
+        const [binding, seen] = await Promise.all([
+            staffGetProgramCommsLineBinding(programId),
+            staffListSeenLineGroups().catch(() => []),
+        ]);
+        const announceId = String(binding?.groupAnnounceId || '').trim();
+        const generalId = String(binding?.groupGeneralId || '').trim();
+        announceBound = Boolean(announceId);
+        const list = Array.isArray(seen) ? seen : [];
+        const nameOf = (id) =>
+            String(list.find((g) => String(g?.groupId || '') === id)?.groupName || '').trim();
+        const picked = pickAnnounceGroupId(binding, {
+            announceName: nameOf(announceId),
+            generalName: nameOf(generalId),
+        });
+        const seenName = nameOf(picked);
+        if (seenName) {
+            destinationDetail = `${ANNOUNCE_DESTINATION} Linked group: ${seenName}.`;
+        }
     } catch {
         announceBound = false;
     }
@@ -150,7 +198,7 @@ export async function openScheduleAnnounceConfirm(opts) {
         <p class="schedule-announce-meta">${escapeHtml(copy.programLine)}</p>
         ${copy.dateLine ? `<p class="schedule-announce-meta">${escapeHtml(copy.dateLine)}</p>` : ''}
         ${listHtml}
-        <p class="studio-muted">${escapeHtml(copy.destinationLine)}</p>
+        <p class="studio-muted">${escapeHtml(destinationDetail)}</p>
         ${copy.unboundLine ? `<p class="schedule-announce-warn">${escapeHtml(copy.unboundLine)}</p>` : ''}
         <p class="schedule-announce-error" data-announce-error hidden></p>
         <div class="studio-modal-actions" style="margin-top:1rem;padding-top:0.75rem;border-top:1px solid #e2e8f0;display:flex;gap:0.5rem;justify-content:flex-end;flex-wrap:wrap">

@@ -4,7 +4,7 @@
  * - **Live:** canonical state from the canister (`getArtistFeaturedGalleryPublic` + staff setters).
  */
 
-export const MAX_MANUAL_FEATURED = 8;
+export const MAX_MANUAL_FEATURED = 24;
 
 const STORAGE_KEY = 'fusionArtistFeaturedMeta';
 
@@ -190,7 +190,7 @@ function shuffleInPlace(arr) {
 }
 
 /**
- * Featured strip for home / artists page (max 8).
+ * Featured strip for home / artists page.
  * @param {object[]} allArtists — rows already passed through {@link mergeArtistFeaturedExtension}
  * @param {ArtistFeaturedMeta} [metaOverride] — when omitted, uses localStorage (test / legacy).
  * @returns {object[]}
@@ -216,13 +216,12 @@ export function resolveFeaturedArtistsForPublic(allArtists, metaOverride) {
         .filter((a) => {
             if (!a || typeof a !== 'object') return false;
             const fo = Number(/** @type {{ featuredOrder?: unknown }} */ (a).featuredOrder);
-            return Number.isFinite(fo) && fo > 0 && fo <= MAX_MANUAL_FEATURED;
+            return Number.isFinite(fo) && fo > 0;
         })
         .sort(
             (a, b) =>
                 Number(/** @type {{ featuredOrder?: unknown }} */ (a).featuredOrder) -
                 Number(/** @type {{ featuredOrder?: unknown }} */ (b).featuredOrder),
-        )
-        .slice(0, MAX_MANUAL_FEATURED);
+        );
     return fromOrder;
 }

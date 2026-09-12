@@ -2,6 +2,29 @@
  * Next-send math for scheduled tasks (UTC ISO + IANA time zone).
  * Keep in sync with services/fusion-integration-api/src/scheduledTasks/schedule.js
  */
+/**
+ * Scheduled tasks default to Japan. Unknown labels must not fall back to US Eastern.
+ * @param {unknown} raw
+ * @returns {string}
+ */
+export function scheduledTaskTimezoneId(raw) {
+    const t = String(raw || '').trim() || 'Asia/Tokyo';
+    if (
+        t === 'Asia/Tokyo' ||
+        t === 'America/New_York' ||
+        t === 'America/Los_Angeles' ||
+        t === 'America/Chicago' ||
+        t === 'Etc/GMT'
+    ) {
+        return t;
+    }
+    if (/tokyo|jst|japan/i.test(t)) return 'Asia/Tokyo';
+    if (/new york|edt|est|eastern/i.test(t)) return 'America/New_York';
+    if (/los angeles|pdt|pst|pacific/i.test(t)) return 'America/Los_Angeles';
+    if (/chicago|cdt|cst|central/i.test(t)) return 'America/Chicago';
+    if (/^gmt$|etc\/gmt|utc/i.test(t)) return 'Etc/GMT';
+    return 'Asia/Tokyo';
+}
 
 const LOCK_MS = 10 * 60 * 1000;
 const MAX_TASKS_PER_TICK = 10;
@@ -11,7 +34,7 @@ const MAX_TASKS_PER_TICK = 10;
  * @param {number} utcMs
  */
 function tzOffsetMs(timeZone, utcMs) {
-    const tz = String(timeZone || 'Asia/Tokyo').trim() || 'Asia/Tokyo';
+    const tz = scheduledTaskTimezoneId(timeZone);
     const fmt = new Intl.DateTimeFormat('en-US', {
         timeZone: tz,
         year: 'numeric',
@@ -55,7 +78,7 @@ export function localDateTimeToUtcIso(localYmdHm, timeZone) {
 export function utcIsoToLocalDateTime(isoUtc, timeZone) {
     const ms = Date.parse(isoUtc);
     if (!Number.isFinite(ms)) return '';
-    const tz = String(timeZone || 'Asia/Tokyo').trim() || 'Asia/Tokyo';
+    const tz = scheduledTaskTimezoneId(timeZone);
     const fmt = new Intl.DateTimeFormat('en-CA', {
         timeZone: tz,
         year: 'numeric',
@@ -181,14 +204,14 @@ export function resolveAnnounceDayYmd(announceDay, timeZone, now = Date.now()) {
 export function isAfterRepeatEnd(task, nextRunAtIso) {
     const { endsAtLocal } = parseScheduledTaskWindow(task);
     if (!endsAtLocal) return false;
-    const tz = String(task?.timezone || 'Asia/Tokyo').trim() || 'Asia/Tokyo';
+    const tz = scheduledTaskTimezoneId(task?.timezone);
     const endIso = localDateTimeToUtcIso(endsAtLocal, tz);
     if (!endIso) return false;
     return String(nextRunAtIso || '') > endIso;
 }
 
 export function nextRunAfterComplete(task, finishedAtIso) {
-    const tz = String(task?.timezone || 'Asia/Tokyo').trim() || 'Asia/Tokyo';
+    const tz = scheduledTaskTimezoneId(task?.timezone);
     const repeat = String(task?.repeat || 'once').trim();
     let nextRunAtIso = String(task?.nextRunAtIso || finishedAtIso || '');
     let enabled = false;
@@ -212,7 +235,7 @@ export function nextRunAfterComplete(task, finishedAtIso) {
 export function formatNextSendLabel(isoUtc, timeZone) {
     const ms = Date.parse(isoUtc);
     if (!Number.isFinite(ms)) return 'No send time set';
-    const tz = String(timeZone || 'Asia/Tokyo').trim() || 'Asia/Tokyo';
+    const tz = scheduledTaskTimezoneId(timeZone);
     const date = new Intl.DateTimeFormat('en-US', {
         timeZone: tz,
         weekday: 'short',

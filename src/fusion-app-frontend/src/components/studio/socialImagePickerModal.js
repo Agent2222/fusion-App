@@ -1,6 +1,7 @@
 /**
  * Studio Social — pick a still image from site content (tabbed by type).
  */
+import '../../styles/studioEmailCampaign.css';
 import { openStudioModal } from '../../utils/studioModal.js';
 import {
     collectStudioSocialMedia,

@@ -6,6 +6,7 @@ import { openStudioModal } from '../../utils/studioModal.js';
 import { uploadBlobToS3 } from '../../utils/studioS3Upload.js';
 import { getStudioShellGate, studioFeatureAccess } from '../../utils/studioShellState.js';
 import {
+    adminCreateTrialJoinInviteCodeWithCreditsStudio,
     appendSubscriberResendAudienceForStudio,
     duplicateEmailCampaign,
     deleteEmailCampaign,
@@ -28,6 +29,7 @@ import {
     COHORT_DRAW,
     COHORT_DRAW_PREFIX,
     EMAIL_COHORT_OPTIONS,
+    cleanCurrentProgramAudienceConfirmedLists,
     drawCohortValue,
     invalidateEmailCohortContextCache,
     isEmailCohortAudience,
@@ -45,7 +47,13 @@ import {
     sendEmailBatch,
 } from '../../utils/integrationApi.js';
 import { formatStudioDate } from '../../utils/studioDateFormat.js';
-import { EMAIL_CAMPAIGN_TEMPLATES, getEmailTemplateById, renderEmailTemplateSelectHtml, wrapEmailHtml } from '../../utils/emailCampaignTemplates.js';
+import { EMAIL_CAMPAIGN_TEMPLATES, getEmailTemplateById, renderEmailTemplateSelectHtml, templateRequiresTrialAccessPlaceholders, wrapEmailHtml } from '../../utils/emailCampaignTemplates.js';
+import {
+    interpolateTrialAccessHtml,
+    joinUrlForTrialAccessCode,
+    TRIAL_ACCESS_CODE_CREDITS,
+    TRIAL_ACCESS_CODE_MONTHS,
+} from '../../utils/trialAccessCode.js';
 import { extractEmailDraftForQuickDesign, isFusionEmailLayout, renderFusionEmailFromSlots } from '../../utils/emailFusionLayout.js';
 import {
     buildQuickDesignContext,
@@ -59,6 +67,7 @@ import {
     serializeCampaignMeta,
 } from '../../utils/emailCampaignContentSources.js';
 import { FLIGHT_FOLLOWUP_TEMPLATE_ID } from '../../utils/flightFollowUpEmail.js';
+import { PROGRAM_ARTISTS_ANNOUNCE_TEMPLATE_ID } from '../../utils/programArtistsAnnounceEmail.js';
 import { consumeEmailCampaignPrefill, PROGRAM_CALENDAR_TEMPLATE_ID } from '../../utils/scheduleCalendarEmail.js';
 import { listEvents, loadScheduleEvents } from '../../utils/scheduleStore.js';
 import {
@@ -650,8 +659,10 @@ export function renderEmailCampaignStudio() {
                 </select>
                 <input type="text" class="studio-input" id="studio-ec-segment" placeholder="Segment UUID" autocomplete="off" />
                 <button type="button" class="studio-resend-sync studio-resend-sync--ready" id="studio-ec-sync-audience">READY</button>
+                <button type="button" class="studio-resend-sync studio-resend-sync--clean" id="studio-ec-clean-audience">Clean Audience</button>
               </div>
               <p class="studio-muted" id="studio-ec-sync-hint" style="margin:0.35rem 0 0;font-size:0.85rem"></p>
+              <p class="studio-muted" id="studio-ec-clean-hint" style="margin:0.35rem 0 0;font-size:0.85rem">Removes pulled-out and deleted artists from the current program recipient list.</p>
             </label>
           </div>
         </div>
@@ -874,7 +885,9 @@ export async function initEmailCampaignStudio(mainEl) {
     const segmentInp = root.querySelector('#studio-ec-segment');
     const segmentPreset = root.querySelector('#studio-ec-segment-preset');
     const syncAudienceBtn = root.querySelector('#studio-ec-sync-audience');
+    const cleanAudienceBtn = root.querySelector('#studio-ec-clean-audience');
     const syncHint = root.querySelector('#studio-ec-sync-hint');
+    const cleanHint = root.querySelector('#studio-ec-clean-hint');
     const notesTa = root.querySelector('#studio-ec-notes');
     const testTo = root.querySelector('#studio-ec-test-to');
 
@@ -1996,6 +2009,15 @@ export async function initEmailCampaignStudio(mainEl) {
     };
 
     const recomputeSyncButton = () => {
+        if (cleanAudienceBtn instanceof HTMLButtonElement) {
+            const canClean = getDataSource() === 'live';
+            cleanAudienceBtn.disabled = !canClean;
+            if (cleanHint) {
+                cleanHint.textContent = canClean
+                    ? 'Removes pulled-out and deleted artists from the current program recipient list.'
+                    : 'Clean Audience requires Live data.';
+            }
+        }
         if (!(syncAudienceBtn instanceof HTMLButtonElement)) return;
         const live = getDataSource() === 'live';
         const integ = Boolean(getIntegrationBaseUrl());
@@ -2155,6 +2177,15 @@ export async function initEmailCampaignStudio(mainEl) {
         const types = tpl?.contentSourceTypes || [];
         const show = types.length > 0;
         if (sourcePanel instanceof HTMLElement) sourcePanel.hidden = !show;
+        const sourceKicker = sourcePanel instanceof HTMLElement
+            ? sourcePanel.querySelector('.studio-ec__kicker')
+            : null;
+        if (sourceKicker instanceof HTMLElement) {
+            sourceKicker.innerHTML =
+                tplId === PROGRAM_ARTISTS_ANNOUNCE_TEMPLATE_ID
+                    ? 'Content source <span class="studio-muted">(select a program)</span>'
+                    : 'Content source <span class="studio-muted">(optional)</span>';
+        }
         const qdWrap = root.querySelector('#studio-ec-qd-prompt-wrap');
         if (qdWrap instanceof HTMLElement) qdWrap.hidden = tplId !== 'tpl_onboarding';
         if (sourceTypeSel instanceof HTMLSelectElement) {
@@ -2450,7 +2481,9 @@ export async function initEmailCampaignStudio(mainEl) {
         markDirty();
         const tplId = templateSel instanceof HTMLSelectElement ? templateSel.value : '';
         if (
-            (tplId === PROGRAM_CALENDAR_TEMPLATE_ID || tplId === FLIGHT_FOLLOWUP_TEMPLATE_ID) &&
+            (tplId === PROGRAM_CALENDAR_TEMPLATE_ID ||
+                tplId === FLIGHT_FOLLOWUP_TEMPLATE_ID ||
+                tplId === PROGRAM_ARTISTS_ANNOUNCE_TEMPLATE_ID) &&
             source?.type === 'program'
         ) {
             void applyContentSourceToForm(true);
@@ -2964,6 +2997,15 @@ export async function initEmailCampaignStudio(mainEl) {
             await patchStatus(rec, { pendingSend: null });
             const cc = buildStudioEmailCcList(readStudioEmailCcTeamEmail(root, 'studio-ec-cc-team'));
             const teamEmail = readStudioEmailCcTeamEmail(root, 'studio-ec-cc-team');
+            const tplId = campaignMeta.templateId || unwrapOpt(rec.templateId) || '';
+            const needsTrialCodes = templateRequiresTrialAccessPlaceholders(tplId, html);
+            if (audVal === 'all' && needsTrialCodes) {
+                setMsg(
+                    'error',
+                    'This message includes a unique trial code per person. Choose a batch audience (Current draw applicants) instead of sending to everyone.',
+                );
+                return;
+            }
             if (audVal === 'all') {
                 const out = await resendCreateBroadcast({
                     segmentId: seg,
@@ -2997,22 +3039,66 @@ export async function initEmailCampaignStudio(mainEl) {
                     campaignId: String(currentId),
                 });
             } else {
-                const messages = batchEmails.map((to) => ({ to, subject: subj, html }));
+                const messages = [];
+                let skippedMint = 0;
+                if (needsTrialCodes) {
+                    for (const to of batchEmails) {
+                        try {
+                            const code = await adminCreateTrialJoinInviteCodeWithCreditsStudio(
+                                { artist: null },
+                                TRIAL_ACCESS_CODE_MONTHS,
+                                TRIAL_ACCESS_CODE_CREDITS,
+                            );
+                            const minted = String(code || '').replace(/\D/g, '');
+                            if (minted.length !== 8) {
+                                skippedMint += 1;
+                                continue;
+                            }
+                            messages.push({
+                                to,
+                                subject: subj,
+                                html: interpolateTrialAccessHtml(html, {
+                                    code: minted,
+                                    joinUrl: joinUrlForTrialAccessCode(minted),
+                                }),
+                            });
+                        } catch {
+                            skippedMint += 1;
+                        }
+                    }
+                    if (!messages.length) {
+                        setMsg('error', 'Could not mint trial codes for any recipient. Nothing was sent.');
+                        return;
+                    }
+                } else {
+                    for (const to of batchEmails) {
+                        messages.push({ to, subject: subj, html });
+                    }
+                }
                 await sendEmailBatch(messages, { cc });
                 await markEmailCampaignSent(String(currentId), 'batch', null);
                 const kind = audVal.startsWith('cat:') ? 'category' : 'category';
                 const toSummary = audVal.startsWith('cat:')
-                    ? `Category ${audVal.slice(4)} (${batchEmails.length})`
-                    : `Cohort (${batchEmails.length})`;
+                    ? `Category ${audVal.slice(4)} (${messages.length})`
+                    : `Cohort (${messages.length})`;
                 await recordStudioEmailOutbound({
                     kind,
                     subject: subj,
-                    htmlBody: html,
+                    htmlBody: messages[0]?.html || html,
                     toSummary,
-                    recipientCount: batchEmails.length,
+                    recipientCount: messages.length,
                     cc,
                     campaignId: String(currentId),
                 });
+                if (needsTrialCodes && skippedMint) {
+                    setMsg(
+                        'ok',
+                        `Send completed. ${messages.length} sent. ${skippedMint} recipient${skippedMint === 1 ? '' : 's'} skipped — could not mint a trial code.`,
+                    );
+                    const freshPartial = await getEmailCampaign(String(currentId));
+                    if (freshPartial) applyRecordToForm(freshPartial);
+                    return;
+                }
             }
             setMsg('ok', 'Send completed.');
             const fresh = await getEmailCampaign(String(currentId));
@@ -3179,6 +3265,44 @@ export async function initEmailCampaignStudio(mainEl) {
         }
         recomputeSyncButton();
         setMsg('ok', `SYNC done: ${ok} updated, ${fail} failed.`);
+    });
+
+    cleanAudienceBtn?.addEventListener('click', async () => {
+        if (getDataSource() !== 'live') {
+            setMsg('error', 'Clean Audience requires Live data.');
+            return;
+        }
+        if (
+            !confirm(
+                'Remove pulled-out and deleted artists from the current program recipient list?\n\nThis updates the program roster.',
+            )
+        ) {
+            return;
+        }
+        if (cleanAudienceBtn instanceof HTMLButtonElement) cleanAudienceBtn.disabled = true;
+        setMsg('info', 'Cleaning audience…');
+        try {
+            const { removed, failed, stale } = await cleanCurrentProgramAudienceConfirmedLists();
+            invalidateEmailCohortContextCache();
+            updateRecipientEst();
+            if (!stale.length) {
+                setMsg('ok', 'Audience already clean — no pulled-out or deleted artists on the current program list.');
+            } else if (failed) {
+                setMsg(
+                    'error',
+                    `Cleaned ${removed} of ${stale.length} leftover artist${stale.length === 1 ? '' : 's'}; ${failed} failed.`,
+                );
+            } else {
+                setMsg(
+                    'ok',
+                    `Removed ${removed} pulled-out or deleted artist${removed === 1 ? '' : 's'} from the current program list.`,
+                );
+            }
+        } catch (e) {
+            setMsg('error', e instanceof Error ? e.message : String(e));
+        } finally {
+            recomputeSyncButton();
+        }
     });
 
     const onDeleteCampaignClick = async () => {

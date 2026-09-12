@@ -19,6 +19,7 @@ describe('scheduled task schedule', () => {
     it('converts Japan morning to the previous UTC evening', () => {
         const iso = localDateTimeToUtcIso('2026-09-15T09:00', 'Asia/Tokyo');
         assert.equal(iso, '2026-09-15T00:00:00.000Z');
+        assert.equal(localDateTimeToUtcIso('2026-09-15T09:00', 'Japan'), '2026-09-15T00:00:00.000Z');
     });
 
     it('marks due when next send is in the past', () => {

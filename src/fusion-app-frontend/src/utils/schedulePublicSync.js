@@ -3,7 +3,7 @@
  * Schedule remains source of truth; public id = schedule event id.
  */
 
-import { formatTimeRange, parseYmd } from './scheduleModel.js';
+import { formatScheduleEventCostLabel, formatTimeRange, parseYmd } from './scheduleModel.js';
 import {
     adminGetJournalLayoutStudio,
     adminSetJournalLayoutStudio,
@@ -48,6 +48,10 @@ export function scheduleEventToCmsPublicEvent(event) {
     const time = formatTimeRange(event);
     const image = String(event?.imageUrl || '').trim();
     const cancelled = String(event?.status || '') === 'cancelled';
+    const costCents = Math.max(0, Math.round(Number(event?.costCents) || 0));
+    const costCurrency = String(event?.costCurrency || 'USD').trim() || 'USD';
+    const costTba = Boolean(event?.costTba);
+    const cost = formatScheduleEventCostLabel(event);
     const locale = {
         category,
         title,
@@ -57,6 +61,10 @@ export function scheduleEventToCmsPublicEvent(event) {
         address: location,
         description: notes,
         cta: 'RSVP',
+        cost,
+        costCents,
+        costCurrency,
+        costTba,
     };
     const localeJa = {
         ...locale,
@@ -66,6 +74,10 @@ export function scheduleEventToCmsPublicEvent(event) {
         id,
         image,
         status: cancelled ? 'past' : 'upcoming',
+        cost,
+        costCents,
+        costCurrency,
+        costTba,
         en: locale,
         ja: localeJa,
     };

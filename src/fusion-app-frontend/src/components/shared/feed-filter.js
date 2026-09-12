@@ -5,6 +5,12 @@
 import { navigate } from '../../router.js';
 import { artistEnglishBlock } from '../../utils/artistSlug.js';
 import {
+    applyProfileCardModeForCohortPath,
+    buildArtistCohortFilterOptions,
+    matchArtistCohortOption,
+    parseArtistsCohortPath,
+} from '../../utils/artistCohortRoutes.js';
+import {
     ARTIST_LOCATION_OPTIONS,
     DISCIPLINE_OPTIONS,
     EDITION_CATEGORY_OPTIONS,
@@ -231,6 +237,16 @@ function chipButton(id, label, active = false) {
     return `<div class="filterButton${active ? ' active' : ''}" id="${escHtml(id)}">${escHtml(label)}</div>`;
 }
 
+/**
+ * @param {string} id
+ * @param {string} label
+ * @param {string} href
+ * @param {boolean} [active]
+ */
+function chipLink(id, label, href, active = false) {
+    return `<a class="filterButton${active ? ' active' : ''}" id="${escHtml(id)}" href="${escHtml(href)}">${escHtml(label)}</a>`;
+}
+
 function templateArtistsSkeleton() {
     return `
         <div id="filterSystem" class="feed-filter-system active">
@@ -417,7 +433,9 @@ function wireFilterLogic(host, state) {
         if (state === 'artists') {
             host._artistLocationKey = 'all';
             updateArtistLocationsBtn();
-            activateOnlyChip(host.querySelector('#connectionFilter'), 'allConnection');
+            if (!parseArtistsCohortPath(window.location.pathname)) {
+                activateOnlyChip(host.querySelector('#connectionFilter'), 'allConnection');
+            }
             activateOnlyChip(host.querySelector('#disciplineFilter'), 'allDiscipline');
         } else if (state === 'editions') {
             activateOnlyChip(host.querySelector('#editionCategoryFilter'), 'allEditionCategories');
@@ -639,6 +657,17 @@ function wireFilterLogic(host, state) {
         if (btn && host.contains(btn)) {
             e.stopPropagation();
             closeDropdownsOnly();
+            const href = btn instanceof HTMLAnchorElement ? btn.getAttribute('href') || '' : '';
+            if (href.startsWith('/artists')) {
+                e.preventDefault();
+                applyProfileCardModeForCohortPath(href.split('?')[0] || href);
+                const nextUrl = href;
+                const curUrl = `${window.location.pathname || '/'}${window.location.search || ''}`;
+                if (nextUrl !== curUrl) {
+                    navigate(href);
+                    return;
+                }
+            }
             const block = btn.closest('.filterButtonBlock');
             if (block?.dataset.multi === 'true') {
                 applyMultiSelect(block, btn, block.dataset.allId || 'allDiscipline');
@@ -716,6 +745,7 @@ function wireFilterLogic(host, state) {
                 disciplineKeys: collectDisciplineKeys(),
                 locationKey: host._artistLocationKey ?? 'all',
                 nameQuery: searchQuery,
+                cohortOptions: host._cohortOptions || [],
             });
         } else if (state === 'editions') {
             dispatch({
@@ -756,18 +786,26 @@ function wireFilterLogic(host, state) {
 /** @param {object[]} artists */
 function renderArtistFilterChips(host, artists) {
     const avail = buildArtistFilterAvailability(artists);
+    const programs = Array.isArray(host._rosterPrograms) ? host._rosterPrograms : [];
+    const cohortOptions = buildArtistCohortFilterOptions({ programs, artists });
+    host._cohortOptions = cohortOptions;
+    const selected = matchArtistCohortOption(cohortOptions, window.location.pathname);
 
     const conn = host.querySelector('#connectionFilter');
     if (conn) {
         /** @type {string[]} */
-        const chips = [chipButton('allConnection', 'All', true)];
-        if (avail.connectionIds.includes('alumniConnection')) chips.push(chipButton('alumniConnection', 'Alumni'));
-        if (avail.connectionIds.includes('userConnection')) chips.push(chipButton('userConnection', 'Artists'));
-        if (avail.connectionIds.includes('drawRecipientsConnection')) {
-            chips.push(chipButton('drawRecipientsConnection', 'Draw Recipients'));
+        const chips = [chipLink('allConnection', 'All', '/artists', !selected)];
+        if (avail.connectionIds.includes('alumniConnection')) {
+            chips.push(chipLink('alumniConnection', 'Alumni', '/artists?connection=alumni'));
         }
-        for (const y of avail.cohortYears) {
-            chips.push(chipButton(`${y}CohortConnection`, String(y)));
+        if (avail.connectionIds.includes('userConnection')) {
+            chips.push(chipLink('userConnection', 'Artists', '/artists?connection=artists'));
+        }
+        if (avail.connectionIds.includes('drawRecipientsConnection')) {
+            chips.push(chipLink('drawRecipientsConnection', 'Draw Recipients', '/artists?connection=drawRecipients'));
+        }
+        for (const opt of cohortOptions) {
+            chips.push(chipLink(opt.chipId, opt.label, opt.href, selected?.slug === opt.slug));
         }
         conn.innerHTML = chips.join('');
     }
@@ -888,6 +926,10 @@ class FeedFilterComponent extends HTMLElement {
         /** @type {object[] | null} */
         this._rosterArtists = null;
         /** @type {object[] | null} */
+        this._rosterPrograms = null;
+        /** @type {object[]} */
+        this._cohortOptions = [];
+        /** @type {object[] | null} */
         this._rosterEditions = null;
     }
 
@@ -908,22 +950,31 @@ class FeedFilterComponent extends HTMLElement {
     }
 
     /**
-     * @param {{ state?: string, artists?: object[], editions?: object[] }} detail
+     * @param {{ state?: string, artists?: object[], editions?: object[], programs?: object[] }} detail
      */
     hydrateFilterData(detail) {
         const state = (detail?.state || this.getAttribute('state') || 'artists').trim();
         if (state === 'artists' && Array.isArray(detail?.artists)) {
             this._rosterArtists = detail.artists;
+            if (Array.isArray(detail?.programs)) this._rosterPrograms = detail.programs;
             renderArtistFilterChips(this, detail.artists);
             try {
                 const params = new URLSearchParams(window.location.search || '');
                 const connection = String(params.get('connection') || '').trim();
-                if (connection === 'drawRecipients') {
+                const connectionChipId =
+                    connection === 'drawRecipients'
+                        ? 'drawRecipientsConnection'
+                        : connection === 'alumni'
+                          ? 'alumniConnection'
+                          : connection === 'artists'
+                            ? 'userConnection'
+                            : '';
+                if (connectionChipId && !parseArtistsCohortPath(window.location.pathname)) {
                     const conn = this.querySelector('#connectionFilter');
-                    const chip = conn?.querySelector('#drawRecipientsConnection');
+                    const chip = conn?.querySelector(`#${CSS.escape(connectionChipId)}`);
                     if (chip instanceof HTMLElement) {
                         conn?.querySelectorAll('.filterButton').forEach((b) => {
-                            b.classList.toggle('active', b.id === 'drawRecipientsConnection');
+                            b.classList.toggle('active', b.id === connectionChipId);
                         });
                     }
                 }

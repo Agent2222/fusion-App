@@ -8,6 +8,7 @@ import {
     keyDateRowIsEmpty,
     mergeKeyDatesSeed,
     PROGRAM_FIELD_HELPERS,
+    collectProgramDrawFromForm,
     renderProgramLocaleFormHtml,
 } from './studioProgramLocaleForm.js';
 
@@ -34,6 +35,10 @@ describe('studioProgramLocaleForm', () => {
         expect(html).toContain('data-prog-panel="draw"');
         expect(html).toContain('data-prog-draw="active"');
         expect(html).toContain('data-prog-draw="totalSlots"');
+        expect(html).toContain('data-prog-draw="goalReached"');
+        expect(html).toContain('data-prog-draw="closed"');
+        expect(html).toContain('Goal reached');
+        expect(html).toContain('End program');
         expect(html).toContain('studio-prog-field-row');
         expect(html).toContain('studio-prog-editor-lang-toggle');
         expect(html).toContain('data-prog-key-dates');
@@ -41,6 +46,17 @@ describe('studioProgramLocaleForm', () => {
         expect(html).toContain('data-prog-translatable="1"');
         expect(html).toContain(PROGRAM_FIELD_HELPERS.id);
         expect(html).toContain('Card ID');
+    });
+
+    it('renderProgramLocaleFormHtml auto-checks Goal reached at the slot boundary', () => {
+        const html = renderProgramLocaleFormHtml(esc, {}, {}, {
+            active: true,
+            totalSlots: 100,
+            enteredCount: 100,
+            closed: true,
+        });
+        expect(html).toMatch(/data-prog-draw="goalReached"[^>]*checked/);
+        expect(html).toMatch(/data-prog-draw="closed"[^>]*checked/);
     });
 
     it('mergeKeyDatesSeed merges en and ja rows by index', () => {
@@ -133,5 +149,36 @@ describe('studioProgramLocaleForm', () => {
             { date: 'July 5', description: 'Application Deadline' },
         ]);
         expect(ja).toEqual([{ sectionTitle: 'プログラム日程' }, { date: '7月5日', description: '締切' }]);
+    });
+
+    it('collectProgramDrawFromForm returns closed from the End program checkbox', () => {
+        const root = {
+            querySelector(sel) {
+                if (sel === '[data-prog-draw="active"]') return { checked: true };
+                if (sel === '[data-prog-draw="totalSlots"]') return { value: '80' };
+                if (sel === '[data-prog-draw="closed"]') return { checked: true };
+                return null;
+            },
+        };
+        expect(collectProgramDrawFromForm(root)).toEqual({
+            active: true,
+            totalSlots: 80,
+            closed: true,
+        });
+    });
+
+    it('collectProgramDrawFromForm defaults closed to false when the checkbox is missing', () => {
+        const root = {
+            querySelector(sel) {
+                if (sel === '[data-prog-draw="active"]') return { checked: false };
+                if (sel === '[data-prog-draw="totalSlots"]') return { value: '' };
+                return null;
+            },
+        };
+        expect(collectProgramDrawFromForm(root)).toEqual({
+            active: false,
+            totalSlots: 100,
+            closed: false,
+        });
     });
 });

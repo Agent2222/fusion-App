@@ -9,10 +9,18 @@ import {
     getPrograms,
     getProgramRecordForStudio,
     listProgramAwardEntriesStudio,
+    setArtistMostRecentProgram,
     unwrapOpt,
     upsertProgramStudio,
 } from './database.js';
+import { normalizeProgramId } from './programAlumniEligibility.js';
 import { getStudioAuthenticatedActor } from './studioAuth.js';
+import {
+    listArtistEnrolledProgramIds,
+    removeEnrolledProgramFromArtist,
+} from './studioArtistEnrolledPrograms.js';
+
+export { listArtistEnrolledProgramIds, removeEnrolledProgramFromArtist };
 
 /**
  * English name string used for `programPage.confirmedArtists` (matches public program page matching).
@@ -393,6 +401,76 @@ async function fillArtistProgramDrawTable(root, programs, principalText, esc) {
 }
 
 /**
+ * @param {HTMLElement} root
+ * @param {object} full
+ * @param {object[]} programs
+ * @param {(s: unknown) => string} esc
+ * @param {(msg: string, isErr?: boolean) => void} setStatus
+ */
+async function fillArtistEnrolledProgramsList(root, full, programs, esc, setStatus) {
+    const host = root.querySelector('#studio-art-enrolled-programs');
+    if (!(host instanceof HTMLElement)) return;
+
+    const ids = listArtistEnrolledProgramIds(full);
+    if (!ids.length) {
+        host.innerHTML = `<p class="studio-muted">No programs tagged on this artist.</p>`;
+        return;
+    }
+
+    const byId = new Map(
+        (Array.isArray(programs) ? programs : [])
+            .filter((p) => p && typeof p === 'object')
+            .map((p) => [normalizeProgramId(String(/** @type {Record<string, unknown>} */ (p).id ?? '')), p]),
+    );
+
+    host.innerHTML = `<ul class="studio-art-enrolled-list">${ids
+        .map((id) => {
+            const row = byId.get(id);
+            const title = row ? programRowDisplayTitle(row) || id : id;
+            return `<li class="studio-art-enrolled-item" data-program-id="${esc(id)}">
+                <span class="studio-art-enrolled-name">${esc(title)}</span>
+                <code class="studio-art-enrolled-id">${esc(id)}</code>
+                <button type="button" class="studio-btn-ghost studio-art-enrolled-remove" data-remove-program="${esc(id)}">Remove</button>
+            </li>`;
+        })
+        .join('')}</ul>`;
+
+    host.querySelectorAll('[data-remove-program]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+            const pid = String(btn.getAttribute('data-remove-program') || '').trim();
+            if (!pid) return;
+            if (!window.confirm(`Remove ${pid} from this artist’s program list?`)) return;
+            if (btn instanceof HTMLButtonElement) btn.disabled = true;
+            try {
+                const next = removeEnrolledProgramFromArtist(full, pid);
+                full.locales = next.locales;
+                full.mostRecentProgram = next.mostRecentProgram;
+                const { collectArtistRecordFromForm } = await import('./studioArtistForm.js');
+                const { collectAccessCodesFromArtists, normalizeArtistImportRow } = await import(
+                    './studioBatchImport.js'
+                );
+                const {
+                    bulkUpsertArtistsStudio,
+                    getArtistsForStudio,
+                } = await import('./database.js');
+                const raw = collectArtistRecordFromForm(root, full);
+                delete raw._featuredFlags;
+                delete raw._drawRecipientFlags;
+                const pool = collectAccessCodesFromArtists(await getArtistsForStudio());
+                const rec = normalizeArtistImportRow(raw, pool, { forceImported: false });
+                await bulkUpsertArtistsStudio([rec]);
+                await setArtistMostRecentProgram(String(full.id || ''), next.mostRecentProgram);
+                setStatus('Removed program from artist.', false);
+                await fillArtistEnrolledProgramsList(root, full, programs, esc, setStatus);
+            } catch (e) {
+                setStatus(e instanceof Error ? e.message : String(e), true);
+                if (btn instanceof HTMLButtonElement) btn.disabled = false;
+            }
+        });
+    });
+}
+
+/**
  * Fill Programs tab table and wire Reserved toggles.
  * @param {HTMLElement} root — modal root
  * @param {object} full — loaded artist row
@@ -435,6 +513,7 @@ export async function initArtistProgramsTab(root, full) {
             tr.innerHTML = `<td colspan="5" class="studio-muted">No programs in the roster.</td>`;
             tbody.appendChild(tr);
             await fillArtistProgramDrawTable(root, [], principalText, esc);
+            await fillArtistEnrolledProgramsList(root, full, [], esc, setStatus);
             return;
         }
         for (const p of programs) {
@@ -491,6 +570,7 @@ export async function initArtistProgramsTab(root, full) {
         }
 
         await fillArtistProgramDrawTable(root, programs, principalText, esc);
+        await fillArtistEnrolledProgramsList(root, full, programs, esc, setStatus);
     } catch (e) {
         setStatus(e instanceof Error ? e.message : String(e), true);
         const drawTbody = root.querySelector('#studio-art-draw-tbody');

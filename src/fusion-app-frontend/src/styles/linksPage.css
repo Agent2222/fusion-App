@@ -1,0 +1,278 @@
+/* Public /links — full-row color buttons + two-column image cards. Not in the header menu. */
+
+html[data-fusion-page="links"] #mainContent .page-content.links-page,
+.page-content.links-page,
+.links-page {
+  --links-ink: var(--c2, #000000);
+  --links-paper: var(--bg, #faf3f4);
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 36rem;
+  height: auto !important;
+  min-height: min-content;
+  overflow: visible;
+  margin: 0 auto;
+  padding:
+    calc(var(--fusion-header-chrome-height, 145px) + clamp(1.5rem, 4vw, 2.5rem))
+    1.25rem
+    0;
+  color: var(--links-ink);
+  font-family: 'momochidori-variable', 'momochidori', system-ui, sans-serif;
+  font-variation-settings: var(--fv-body);
+}
+
+.links-page *,
+.links-page *::before,
+.links-page *::after {
+  box-sizing: border-box;
+}
+
+html[data-fusion-page="links"] #mainContent {
+  background: var(--bg, #faf3f4);
+}
+
+.links-page__stack {
+  container-type: inline-size;
+  --links-gap: 0.75rem;
+  /* Half the grid width. `100%` here would resolve as height and collapse the cards. */
+  --links-row: calc((100cqi - var(--links-gap)) / 2);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-auto-flow: dense;
+  gap: var(--links-gap);
+  width: 100%;
+  margin-bottom: 0;
+}
+
+.links-page__tail {
+  display: block;
+  width: 100%;
+  height: max(50vh, 50dvh);
+  min-height: max(50vh, 50dvh);
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.links-page__btn {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 3.25rem;
+  padding: 1.05rem 1rem;
+  border: 1.5px solid var(--links-ink);
+  border-radius: 0;
+  background: var(--c5, #d9ceb8);
+  color: var(--links-ink);
+  text-decoration: none;
+  text-align: center;
+  font-family: inherit;
+  font-size: 0.98rem;
+  font-variation-settings: var(--fv-nav-active);
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+}
+
+.links-page__btn[data-color="c1"] {
+  background: var(--c1);
+  color: #fff;
+  border-color: var(--c1);
+}
+
+.links-page__btn[data-color="c2"] {
+  background: var(--c2);
+  color: #fff;
+  border-color: var(--c2);
+}
+
+.links-page__btn[data-color="c3"] {
+  background: var(--c3);
+  color: var(--links-ink);
+}
+
+.links-page__btn[data-color="c4"] {
+  background: var(--c4);
+  color: var(--links-ink);
+}
+
+.links-page__btn[data-color="c5"] {
+  background: var(--c5);
+  color: var(--links-ink);
+}
+
+.links-page__btn[data-color="bg"] {
+  background: var(--bg);
+  color: var(--links-ink);
+}
+
+.links-page__btn:hover,
+.links-page__card:hover {
+  opacity: 0.88;
+}
+
+.links-page__btn:focus-visible,
+.links-page__card:focus-visible {
+  outline: 2px solid var(--links-ink);
+  outline-offset: 2px;
+}
+
+.links-page__card {
+  position: relative;
+  display: block;
+  min-width: 0;
+  width: 100%;
+  aspect-ratio: 1;
+  height: var(--links-row);
+  overflow: hidden;
+  border: 0;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--links-ink) 10%, var(--bg));
+  color: #fff;
+  text-decoration: none;
+}
+
+.links-page__card--wide {
+  grid-column: 1 / -1;
+  aspect-ratio: 2 / 1;
+}
+
+.links-page__card--tall {
+  grid-row: span 2;
+  aspect-ratio: 1 / 2;
+  height: calc(var(--links-row) * 2 + var(--links-gap));
+}
+
+.links-page__card--wide.links-page__card--tall {
+  aspect-ratio: 1;
+}
+
+.links-page__card-img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-width: 100%;
+  min-height: 100%;
+  object-fit: cover;
+  object-position: center;
+  border: 0;
+}
+
+.links-page__card-copy {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.28rem;
+  padding: 2.4rem 1rem 0.95rem;
+  background: linear-gradient(180deg, transparent 8%, rgba(0, 0, 0, 0.62) 78%);
+  color: #fff;
+  text-align: left;
+}
+
+.links-page__card-eyebrow {
+  font-size: 0.62rem;
+  font-variation-settings: var(--fv-label);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+
+.links-page__card-title {
+  max-width: 18ch;
+  font-size: clamp(1.15rem, 5.4cqi, 1.9rem);
+  font-variation-settings: var(--fv-headline);
+  letter-spacing: 0.01em;
+  line-height: 1.12;
+}
+
+.links-page__card-sub {
+  max-width: 28ch;
+  font-size: clamp(0.72rem, 2.6cqi, 0.9rem);
+  font-variation-settings: var(--fv-body);
+  letter-spacing: 0.01em;
+  line-height: 1.35;
+  opacity: 0.92;
+}
+
+.links-page__card-cta {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 0.45rem;
+  min-height: 2.05rem;
+  padding: 0.38rem 0.72rem;
+  border: 1px solid #fff;
+  border-radius: 0;
+  font-size: 0.62rem;
+  font-variation-settings: var(--fv-cta);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+.links-page__card-cta--outline {
+  background: transparent;
+  color: #fff;
+}
+
+.links-page__card-cta--solid {
+  background: var(--c5, #d9ceb8);
+  color: var(--c2, #000);
+  border-color: var(--c5, #d9ceb8);
+}
+
+.links-page__card-meta {
+  align-self: flex-end;
+  margin-top: 0.35rem;
+  padding-top: 0.28rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.55);
+  font-size: 0.54rem;
+  font-variation-settings: var(--fv-caption);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  line-height: 1.25;
+  text-align: right;
+}
+
+.links-page__card:not(.links-page__card--wide):not(.links-page__card--tall) .links-page__card-sub {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.links-page__card:not(.links-page__card--wide):not(.links-page__card--tall) .links-page__card-meta {
+  display: none;
+}
+
+.links-page__card--wide .links-page__card-title,
+.links-page__card--tall .links-page__card-title {
+  max-width: 16ch;
+}
+
+.links-page__card--wide .links-page__card-copy,
+.links-page__card--tall .links-page__card-copy {
+  padding: 2.8rem 1.15rem 1.1rem;
+  gap: 0.38rem;
+}
+
+.links-page__empty {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: color-mix(in srgb, var(--links-ink) 62%, transparent);
+  font-size: 0.95rem;
+  text-align: center;
+}
+
+@media (min-width: 720px) {
+  .links-page {
+    max-width: 40rem;
+  }
+}

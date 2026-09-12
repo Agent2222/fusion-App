@@ -88,3 +88,95 @@ export function buildApplicantDrawDetailModel(args) {
         progressPct,
     };
 }
+
+/**
+ * True when claimed entries meet or exceed Total award slots.
+ * Empty / invalid slots use the 100-slot default.
+ * @param {unknown} enteredCount
+ * @param {unknown} totalSlots
+ * @returns {boolean}
+ */
+export function isProgramDrawGoalReached(enteredCount, totalSlots) {
+    const slotsRaw = Number(totalSlots);
+    const slots =
+        Number.isFinite(slotsRaw) && slotsRaw > 0 ? Math.floor(slotsRaw) : DRAW_SLOT_GOAL_DEFAULT;
+    const enteredRaw = Number(enteredCount);
+    const entered = Number.isFinite(enteredRaw) && enteredRaw > 0 ? Math.floor(enteredRaw) : 0;
+    return entered >= slots;
+}
+
+/**
+ * Staff “End program” flag stored on `localesJson.draw.closed`.
+ * Accepts a JSON string, a parsed locales object, or a program row with `localesJson`.
+ * @param {unknown} localesJsonOrRow
+ * @returns {boolean}
+ */
+export function parseProgramDrawClosed(localesJsonOrRow) {
+    /** @type {object[]} */
+    const draws = [];
+    /**
+     * @param {unknown} draw
+     */
+    const consider = (draw) => {
+        if (draw && typeof draw === 'object' && !Array.isArray(draw)) draws.push(draw);
+    };
+    /**
+     * @param {unknown} parsed
+     */
+    const fromParsed = (parsed) => {
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            consider(/** @type {Record<string, unknown>} */ (parsed).draw);
+        }
+    };
+
+    if (localesJsonOrRow && typeof localesJsonOrRow === 'object' && !Array.isArray(localesJsonOrRow)) {
+        const rec = /** @type {Record<string, unknown>} */ (localesJsonOrRow);
+        consider(rec.draw);
+        if (typeof rec.localesJson === 'string') {
+            try {
+                fromParsed(JSON.parse(rec.localesJson));
+            } catch {
+                /* ignore */
+            }
+        } else {
+            fromParsed(rec.localesJson);
+        }
+    } else if (typeof localesJsonOrRow === 'string') {
+        try {
+            fromParsed(JSON.parse(localesJsonOrRow));
+        } catch {
+            /* ignore */
+        }
+    }
+    return draws.some((d) => Boolean(/** @type {Record<string, unknown>} */ (d).closed));
+}
+
+/**
+ * `data-draw-closed="false"` from the EN card must not hide a closed flag on the program row.
+ * @param {unknown} attr
+ * @param {unknown} [programRow]
+ */
+export function resolveDrawClosedFlag(attr, programRow) {
+    return String(attr || '') === 'true' || parseProgramDrawClosed(programRow);
+}
+
+/**
+ * Public live-draw surface. Closed wins even when Program Award is still active.
+ * @param {{ closed?: boolean, active?: boolean } | null | undefined} opts
+ * @returns {'closed' | 'inactive' | 'open'}
+ */
+export function resolveProgramDrawLiveState(opts) {
+    if (opts?.closed) return 'closed';
+    if (opts?.active === false) return 'inactive';
+    return 'open';
+}
+
+/**
+ * Progress/recipient enrichment packs default `drawClosed: false`.
+ * Never let that default downgrade a closed flag already parsed from the program row.
+ * @param {boolean} current
+ * @param {boolean} incoming
+ */
+export function keepProgramDrawClosed(current, incoming) {
+    return Boolean(current) || Boolean(incoming);
+}

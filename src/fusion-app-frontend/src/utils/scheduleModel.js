@@ -147,6 +147,9 @@ export function scheduleCategoryMeta(raw) {
  *   imageUrl?: string,
  *   publicOnSite?: boolean,
  *   importance?: ScheduleEventImportance,
+ *   costCents?: number,
+ *   costCurrency?: 'USD' | 'JPY' | string,
+ *   costTba?: boolean,
  *   acceptRsvp?: boolean,
  *   availability?: number,
  *   rsvpIds?: string[],
@@ -455,6 +458,137 @@ export function clampScheduleAvailability(raw, acceptRsvp = true) {
  */
 export function scheduleImportancePillClass(importance) {
     return `event-dialog__importance event-dialog__importance--${normalizeScheduleImportance(importance)}`;
+}
+
+/**
+ * Optional event cost in minor units. 0 / invalid = no priced amount.
+ * USD = cents; JPY = yen.
+ * @param {unknown} raw
+ * @returns {number}
+ */
+export function normalizeScheduleEventCostCents(raw) {
+    const n = Math.round(Number(raw) || 0);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return Math.min(n, 10_000_000);
+}
+
+/** @type {ReadonlyArray<{ value: 'USD' | 'JPY', symbol: string, label: string }>} */
+export const SCHEDULE_EVENT_COST_CURRENCIES = Object.freeze([
+    { value: 'USD', symbol: '$', label: '$' },
+    { value: 'JPY', symbol: '¥', label: '¥' },
+]);
+
+/**
+ * @param {unknown} raw
+ * @returns {'USD' | 'JPY'}
+ */
+export function normalizeScheduleEventCostCurrency(raw) {
+    const s = String(raw || '')
+        .trim()
+        .toUpperCase();
+    if (s === 'JPY' || s === 'YEN' || s === '¥' || s === '￥') return 'JPY';
+    return 'USD';
+}
+
+/**
+ * @param {unknown} raw
+ */
+export function normalizeScheduleEventCostTba(raw) {
+    if (raw === true || raw === 1 || raw === '1') return true;
+    const s = String(raw ?? '')
+        .trim()
+        .toLowerCase();
+    return s === 'true' || s === 'tba' || s === 'yes';
+}
+
+/**
+ * @param {unknown} currency
+ */
+export function scheduleEventCostSymbol(currency) {
+    return normalizeScheduleEventCostCurrency(currency) === 'JPY' ? '¥' : '$';
+}
+
+/**
+ * @param {unknown} raw
+ */
+export function isScheduleEventCostTbaInput(raw) {
+    const s = String(raw ?? '').trim().toLowerCase();
+    return !s || s === 'tba';
+}
+
+/**
+ * Parse an amount field into stored minor units. Empty / TBA / invalid = 0.
+ * @param {unknown} raw
+ * @param {unknown} [currency]
+ * @returns {number}
+ */
+export function parseScheduleEventCostAmountToMinor(raw, currency) {
+    if (isScheduleEventCostTbaInput(raw)) return 0;
+    const s = String(raw ?? '')
+        .trim()
+        .replace(/[$,¥￥,\s]/g, '');
+    if (!s) return 0;
+    const n = Number(s);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    if (normalizeScheduleEventCostCurrency(currency) === 'JPY') {
+        return normalizeScheduleEventCostCents(Math.round(n));
+    }
+    return normalizeScheduleEventCostCents(Math.round(n * 100));
+}
+
+/**
+ * Parse a USD field (`25`, `$25.00`) into cents. Empty / invalid = 0.
+ * @param {unknown} raw
+ * @returns {number}
+ */
+export function parseScheduleEventCostUsdToCents(raw) {
+    return parseScheduleEventCostAmountToMinor(raw, 'USD');
+}
+
+/**
+ * @param {unknown} costCents
+ * @param {unknown} [currency]
+ */
+export function formatScheduleEventCostInputValue(costCents, currency) {
+    const cents = normalizeScheduleEventCostCents(costCents);
+    if (!cents) return '';
+    if (normalizeScheduleEventCostCurrency(currency) === 'JPY') return String(cents);
+    const dollars = cents / 100;
+    return Number.isInteger(dollars) ? String(dollars) : dollars.toFixed(2);
+}
+
+/**
+ * @param {unknown} costCentsOrEvent
+ * @param {unknown} [currency]
+ * @param {unknown} [tba]
+ * @returns {string} `TBA`, `$25`, `¥3000`, or empty when no cost
+ */
+export function formatScheduleEventCostLabel(costCentsOrEvent, currency, tba) {
+    let centsRaw = costCentsOrEvent;
+    let currencyRaw = currency;
+    let tbaRaw = tba;
+    if (costCentsOrEvent && typeof costCentsOrEvent === 'object' && !Array.isArray(costCentsOrEvent)) {
+        const ev = /** @type {Record<string, unknown>} */ (costCentsOrEvent);
+        centsRaw = ev.costCents;
+        currencyRaw = ev.costCurrency ?? currency;
+        tbaRaw = ev.costTba ?? ev.tba ?? tba;
+    }
+    if (normalizeScheduleEventCostTba(tbaRaw)) return 'TBA';
+    const cents = normalizeScheduleEventCostCents(centsRaw);
+    if (!cents) return '';
+    const cur = normalizeScheduleEventCostCurrency(currencyRaw);
+    if (cur === 'JPY') return `¥${cents}`;
+    const dollars = cents / 100;
+    const text = Number.isInteger(dollars) ? String(dollars) : dollars.toFixed(2);
+    return `$${text}`;
+}
+
+/**
+ * @param {unknown} costCents
+ * @param {unknown} [tba]
+ */
+export function scheduleEventShowsCost(costCents, tba) {
+    return normalizeScheduleEventCostTba(tba) || normalizeScheduleEventCostCents(costCents) > 0;
 }
 
 /**

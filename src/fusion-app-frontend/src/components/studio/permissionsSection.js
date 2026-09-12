@@ -6,6 +6,7 @@ import {
     STUDIO_PERMISSION_FEATURE_ROWS,
     STUDIO_PERMISSION_ROLE_TABS,
     isStaleCanisterPermissionKeyList,
+    studioPermissionGroupLabel,
     mergeStudioPermissionMap,
     parseStudioPermissionMatrixTuples,
     studioPermissionMapsEqual,
@@ -49,9 +50,7 @@ function matrixTableHtml(map, supportedKeys = null) {
         let groupRow = '';
         if (group && group !== lastGroup) {
             lastGroup = group;
-            const groupLabel =
-                group === 'finance' ? 'Finance (parent + category scopes)' : group;
-            groupRow = `<tr class="studio-perm-matrix__group"><td colspan="3">${escapeHtml(groupLabel)}</td></tr>`;
+            groupRow = `<tr class="studio-perm-matrix__group"><td colspan="3">${escapeHtml(studioPermissionGroupLabel(group))}</td></tr>`;
         }
         return `${groupRow}
             <tr data-perm-row="${escapeHtml(row.id)}" class="${rowClass.trim()}">

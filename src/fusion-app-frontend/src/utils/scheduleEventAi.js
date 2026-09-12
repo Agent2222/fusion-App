@@ -42,7 +42,11 @@ export function buildScheduleEventRefinePrompt(draft) {
         `Date: ${date}.`,
         `Location: ${location}.`,
         'Keep factual meaning. Title should be short and specific.',
+        'The program name is context only — never put it in the title. Title the activity itself (for example “Studio visit”, not “Fusion Kaga — Studio visit”).',
+        'Do not repeat season, year, or residency branding in the title.',
         'Description should be 1–3 member-facing sentences (no staff-only notes).',
+        'Do not start the description with “Join us”, “Come join us”, “You’re invited”, or similar invitation openers. Start with what happens.',
+        'Write as if artists already belong here — no marketing slogans.',
         'If a field is empty, write a fitting one from the other field and program context.',
         'Reply with JSON only, no markdown fences, exactly this shape:',
         '{"title":"...","description":"..."}',
@@ -74,6 +78,83 @@ export function parseScheduleEventRefineJson(raw) {
         }
     }
     return null;
+}
+
+/**
+ * @param {string} s
+ */
+function escapeRegExp(s) {
+    return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Longer program-name chunks to strip from a title (avoid short place names like “Kaga”).
+ * @param {string} programName
+ */
+export function programNameTitleVariants(programName) {
+    const program = String(programName || '').trim();
+    if (program.length < 4) return [];
+    const variants = [program];
+    for (const part of program.split(/\s*[-–—|:]\s*/)) {
+        const p = String(part || '').trim();
+        if (p.length >= 8) variants.push(p);
+    }
+    const fusionBrand = program.match(/^Fusion\s+[A-Za-z]{3,}/i);
+    if (fusionBrand?.[0] && fusionBrand[0].length >= 8) variants.push(fusionBrand[0].trim());
+    return [...new Set(variants)].sort((a, b) => b.length - a.length);
+}
+
+/**
+ * Event titles should name the activity, not the program.
+ * @param {string} title
+ * @param {string} [programName]
+ */
+export function stripProgramNameFromEventTitle(title, programName) {
+    let out = String(title || '').trim();
+    const variants = programNameTitleVariants(programName);
+    if (!out || !variants.length) return out;
+    for (const v of variants) {
+        out = out.replace(new RegExp(escapeRegExp(v), 'gi'), ' ');
+    }
+    out = out
+        .replace(/^[(\[{'"\s]*[-–—|:]+/g, '')
+        .replace(/[-–—|:]+[)\]}'"\s]*$/g, '')
+        .replace(/\(\s*\)/g, '')
+        .replace(/\s*[-–—|:]\s*/g, ' ')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+    return out;
+}
+
+/**
+ * Drop formulaic invitation openers the model leans on.
+ * @param {string} description
+ */
+export function stripJoinUsOpener(description) {
+    let out = String(description || '').trim();
+    if (!out) return out;
+    const prior = out;
+    out = out.replace(
+        /^(please\s+)?(come\s+)?join us(?:\s+(?:for|as we|to|in|at|on))?\s+/i,
+        '',
+    );
+    out = out.replace(/^(you(?:['’])re invited(?:\s+to)?|we invite you to)\s+/i, '');
+    out = out.replace(/^[,;:\-–—]\s*/, '').trim();
+    if (!out) return prior;
+    return out.charAt(0).toUpperCase() + out.slice(1);
+}
+
+/**
+ * @param {{ title?: string, description?: string } | null} parsed
+ * @param {{ programName?: string }} [draft]
+ */
+export function applyScheduleEventRefineSuggestion(parsed, draft) {
+    if (!parsed || typeof parsed !== 'object') return null;
+    const programName = String(draft?.programName || '').trim();
+    return {
+        title: stripProgramNameFromEventTitle(parsed.title, programName),
+        description: stripJoinUsOpener(parsed.description),
+    };
 }
 
 /**

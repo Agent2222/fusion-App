@@ -282,6 +282,15 @@ module {
         #inviteInactive;
     };
 
+    /// Result of `redeemTrialJoinInviteForCaller` (existing account; trial invite only).
+    public type RedeemTrialJoinInviteResult = {
+        #ok;
+        #invalidCode;
+        #inviteInactive;
+        #notTrialInvite;
+        #noAccount;
+    };
+
     /// ---------- Promo / invite / partner code system ----------
 
     public type PromoCodeType = {
@@ -1402,6 +1411,8 @@ module {
         accountContactStable : ?[(Principal, AccountContact)];
         membershipTrialWindowStable : ?[(Principal, TrialMembershipWindow)];
         joinInviteTrialMonthsStable : ?[(Text, Nat)];
+        /// Join invite code → application credits granted on redeem; optional for older backups.
+        joinInviteAppCreditsStable : ?[(Text, Nat)];
         programPaymentSummariesStable : ?[(Text, ProgramPaymentSummary)];
         programPaymentLedgerStable : ?[(Text, ProgramPaymentLedgerRow)];
         programPaymentPlansStable : ?[(Text, ProgramPaymentPlan)];

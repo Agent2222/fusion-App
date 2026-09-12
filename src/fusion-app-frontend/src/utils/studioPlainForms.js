@@ -402,6 +402,24 @@ export function getApplicantLocalTravelCostCents(payloadJson) {
 }
 
 /**
+ * Per-applicant Partner 1–3 override. `null` means use the program default.
+ * An explicit `0` is a real override (not the same as unset).
+ *
+ * @param {string} payloadJson
+ * @param {1 | 2 | 3} slot
+ * @returns {number | null}
+ */
+export function getApplicantPartnerOverrideCents(payloadJson, slot) {
+    const n = Number(slot);
+    if (n !== 1 && n !== 2 && n !== 3) return null;
+    const { other } = parseApplicantPayload(payloadJson);
+    const key = `staffApplicantPartner${n}Cents`;
+    if (!other || !Object.prototype.hasOwnProperty.call(other, key)) return null;
+    const raw = Number(other[key]);
+    return Number.isFinite(raw) ? Math.max(0, Math.round(raw)) : 0;
+}
+
+/**
  * @param {string} category
  * @param {(s: string) => string} escapeHtml
  * @returns {string}
@@ -567,7 +585,7 @@ export function getApplicantSponsoredCreditInputMode(payloadJson) {
 }
 
 /**
- * @param {{ internalNotes: string, manualDepositSubmitted: boolean, applicantCategory?: ApplicantCategory, isTester?: boolean, flightCostCents?: number, localTravelCostCents?: number, specialProgramTotalCents?: number | null, sponsorshipMode?: 'none' | 'partial' | 'full', sponsoredCreditCents?: number, sponsoredPercent?: number | null, sponsoredCreditInputMode?: 'usd' | 'percent' }} fields
+ * @param {{ internalNotes: string, manualDepositSubmitted: boolean, applicantCategory?: ApplicantCategory, isTester?: boolean, flightCostCents?: number, localTravelCostCents?: number, partner1Cents?: number | null, partner2Cents?: number | null, partner3Cents?: number | null, specialProgramTotalCents?: number | null, sponsorshipMode?: 'none' | 'partial' | 'full', sponsoredCreditCents?: number, sponsoredPercent?: number | null, sponsoredCreditInputMode?: 'usd' | 'percent' }} fields
  * @param {string} previousPayloadJson
  * @returns {string} JSON string for `payloadJson` on applicant record
  */
@@ -624,6 +642,21 @@ export function mergeApplicantStaffFields(fields, previousPayloadJson) {
         } else {
             delete next.staffApplicantLocalTravelCostCents;
         }
+    }
+    /** @type {Array<[1 | 2 | 3, unknown]>} */
+    const partnerSlots = [
+        [1, fields.partner1Cents],
+        [2, fields.partner2Cents],
+        [3, fields.partner3Cents],
+    ];
+    for (const [slot, value] of partnerSlots) {
+        if (value === undefined) continue;
+        const payloadKey = `staffApplicantPartner${slot}Cents`;
+        if (value === null) {
+            delete next[payloadKey];
+            continue;
+        }
+        next[payloadKey] = Math.max(0, Math.round(Number(value) || 0));
     }
     if (fields.specialProgramTotalCents !== undefined) {
         const special = Math.max(0, Math.round(Number(fields.specialProgramTotalCents) || 0));

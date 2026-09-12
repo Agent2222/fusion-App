@@ -16,6 +16,7 @@ import {
     revealProgramDrawInactivePanel,
 } from '../../utils/scrollAnchorToViewportGap.js';
 import { formatMonthlyFromRemainingAndMonths, splitTextLinesForBullets } from '../../utils/programDeadlineParse.js';
+import { keepProgramDrawClosed, parseProgramDrawClosed } from '../../utils/applicantsDrawModel.js';
 
 /**
  * Program residency details: timeline (key dates) + sidebar (location, facilities, cost).
@@ -28,12 +29,12 @@ class ProgramDetailsComponent extends HTMLElement {
         /** @type {'apply' | 'draw'} */
         this._formMode = 'apply';
         this.shadow = this.attachShadow({ mode: 'open' });
-        /** @type {null | { programId?: string, applicationsOpen?: boolean, headline: string, keyDates: Array<{ date?: string, description?: string, sectionTitle?: string }>, locations?: string[], facilities?: string[], costText: string, totalProgramFeeLine?: string, applicationFeeLine?: string, useStructuredCost?: boolean, depositLine?: string, remainingBalanceLine?: string, maxPlanMonths?: number, japanResidencyNotice?: string, availableSlots?: number | null, totalSlots?: number | null, residences?: Array<{ name?: string, href?: string }>, included?: string[], notIncluded?: string[], platform?: string, additionalInfo?: object | null, sidebarRunDates?: { start?: string, end?: string } | null }} */
+        /** @type {null | { programId?: string, applicationsOpen?: boolean, drawClosed?: boolean, headline: string, keyDates: Array<{ date?: string, description?: string, sectionTitle?: string }>, locations?: string[], facilities?: string[], costText: string, totalProgramFeeLine?: string, applicationFeeLine?: string, useStructuredCost?: boolean, depositLine?: string, remainingBalanceLine?: string, maxPlanMonths?: number, japanResidencyNotice?: string, availableSlots?: number | null, totalSlots?: number | null, residences?: Array<{ name?: string, href?: string }>, included?: string[], notIncluded?: string[], platform?: string, additionalInfo?: object | null, sidebarRunDates?: { start?: string, end?: string } | null }} */
         this._data = null;
     }
 
     /**
-     * @param {{ programId?: string, applicationsOpen?: boolean, headline: string, keyDates: Array<{ date?: string, description?: string, sectionTitle?: string }>, locations?: string[], facilities?: string[], costText: string, totalProgramFeeLine?: string, applicationFeeLine?: string, useStructuredCost?: boolean, depositLine?: string, remainingBalanceLine?: string, maxPlanMonths?: number, japanResidencyNotice?: string, availableSlots?: number | null, totalSlots?: number | null, residences?: Array<{ name?: string, href?: string }>, included?: string[], notIncluded?: string[], platform?: string, additionalInfo?: { applicationFee?: string, aboutProgram?: string, faq?: object[], programNotes?: object[], refundPolicy?: object[] } | null, sidebarRunDates?: { start?: string, end?: string } | null }} payload
+     * @param {{ programId?: string, applicationsOpen?: boolean, drawClosed?: boolean, headline: string, keyDates: Array<{ date?: string, description?: string, sectionTitle?: string }>, locations?: string[], facilities?: string[], costText: string, totalProgramFeeLine?: string, applicationFeeLine?: string, useStructuredCost?: boolean, depositLine?: string, remainingBalanceLine?: string, maxPlanMonths?: number, japanResidencyNotice?: string, availableSlots?: number | null, totalSlots?: number | null, residences?: Array<{ name?: string, href?: string }>, included?: string[], notIncluded?: string[], platform?: string, additionalInfo?: { applicationFee?: string, aboutProgram?: string, faq?: object[], programNotes?: object[], refundPolicy?: object[] } | null, sidebarRunDates?: { start?: string, end?: string } | null }} payload
      */
     setProgramDetails(payload) {
         this._formMode = 'apply';
@@ -1027,18 +1028,20 @@ class ProgramDetailsComponent extends HTMLElement {
             drawCell.hidden = !hasMain;
         }
         const pid = String(this._data.programId || '').trim();
+        let drawClosed = Boolean(this._data.drawClosed);
         if (hasMain && drawCell instanceof HTMLElement && drawBtn instanceof HTMLButtonElement) {
             // Active defaults until config loads (avoids “Get notified” flash when draw is open).
             drawCell.hidden = false;
-            drawBtn.textContent = programDrawCtaLabel(true);
+            drawBtn.textContent = programDrawCtaLabel(true, false, drawClosed);
             if (drawSubEl) {
                 drawSubEl.dataset.drawSlots = '100';
-                drawSubEl.dataset.drawActive = '1';
+                drawSubEl.dataset.drawActive = drawClosed ? '0' : '1';
                 drawSubEl.dataset.drawEntered = '0';
-                drawSubEl.textContent = programDrawCtaSubLabel(100, true);
+                drawSubEl.textContent = programDrawCtaSubLabel(100, true, drawClosed);
             }
             drawBtn.onclick = () => {
-                void revealProgramDrawFormOrOpenJoin();
+                if (drawClosed) void revealProgramDrawInactivePanel();
+                else void revealProgramDrawFormOrOpenJoin();
             };
             if (pid) {
                 void Promise.all([
@@ -1056,34 +1059,46 @@ class ProgramDetailsComponent extends HTMLElement {
                             return false;
                         }
                     }),
+                    import('../../utils/database.js').then(async ({ getPrograms }) => {
+                        try {
+                            const programs = await getPrograms();
+                            const row = (programs || []).find((p) => String(p?.id || '') === pid);
+                            return parseProgramDrawClosed(row);
+                        } catch {
+                            return false;
+                        }
+                    }),
                 ])
-                    .then(([cfg, entered]) => {
+                    .then(([cfg, entered, closedFromPrograms]) => {
+                        drawClosed = keepProgramDrawClosed(drawClosed, closedFromPrograms);
+                        this._data = { ...this._data, drawClosed };
                         const active = cfg == null ? true : Boolean(cfg.active);
                         drawCell.hidden = false;
                         const slots = Math.max(1, Number(cfg?.totalSlots) || 100);
                         const userEntered = Boolean(entered);
-                        drawBtn.textContent = programDrawCtaLabel(active, userEntered);
+                        drawBtn.textContent = programDrawCtaLabel(active, userEntered, drawClosed);
                         if (drawSubEl) {
                             drawSubEl.dataset.drawSlots = String(slots);
-                            drawSubEl.dataset.drawActive = active ? '1' : '0';
+                            drawSubEl.dataset.drawActive = !drawClosed && active ? '1' : '0';
                             drawSubEl.dataset.drawEntered = userEntered ? '1' : '0';
-                            drawSubEl.textContent = programDrawCtaSubLabel(slots, active);
+                            drawSubEl.textContent = programDrawCtaSubLabel(slots, active, drawClosed);
                         }
                         drawBtn.onclick = () => {
-                            if (active) void revealProgramDrawFormOrOpenJoin();
-                            else void revealProgramDrawInactivePanel();
+                            if (drawClosed || !active) void revealProgramDrawInactivePanel();
+                            else void revealProgramDrawFormOrOpenJoin();
                         };
                     })
                     .catch(() => {
                         drawCell.hidden = false;
-                        drawBtn.textContent = programDrawCtaLabel(true);
+                        drawBtn.textContent = programDrawCtaLabel(true, false, drawClosed);
                         if (drawSubEl) {
-                            drawSubEl.dataset.drawActive = '1';
+                            drawSubEl.dataset.drawActive = drawClosed ? '0' : '1';
                             drawSubEl.dataset.drawEntered = '0';
-                            drawSubEl.textContent = programDrawCtaSubLabel(100, true);
+                            drawSubEl.textContent = programDrawCtaSubLabel(100, true, drawClosed);
                         }
                         drawBtn.onclick = () => {
-                            void revealProgramDrawFormOrOpenJoin();
+                            if (drawClosed) void revealProgramDrawInactivePanel();
+                            else void revealProgramDrawFormOrOpenJoin();
                         };
                     });
             }
@@ -1276,8 +1291,9 @@ class ProgramDetailsComponent extends HTMLElement {
             }
         }
         if (drawSubEl) drawSubEl.dataset.drawEntered = entered ? '1' : '0';
-        drawBtn.textContent = programDrawCtaLabel(active, entered);
-        if (drawSubEl) drawSubEl.textContent = programDrawCtaSubLabel(slots, active);
+        const drawClosed = Boolean(this._data?.drawClosed);
+        drawBtn.textContent = programDrawCtaLabel(active, entered, drawClosed);
+        if (drawSubEl) drawSubEl.textContent = programDrawCtaSubLabel(slots, active, drawClosed);
     }
 
     connectedCallback() {

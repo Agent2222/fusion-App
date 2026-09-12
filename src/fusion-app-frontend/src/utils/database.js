@@ -59,6 +59,9 @@ import {
     clampScheduleAvailability,
     formatScheduleCanisterError,
     normalizeScheduleColor,
+    normalizeScheduleEventCostCents,
+    normalizeScheduleEventCostCurrency,
+    normalizeScheduleEventCostTba,
     normalizeScheduleImportance,
     normalizeScheduleRsvpIds,
     parseCanisterJsonText,
@@ -133,6 +136,12 @@ const LS_APPLICATION_PAYMENT_GLOBAL = 'fusion-test-application-payment-global';
 
 /** Test-mode overlay for `platformUpdateBanner` site JSON. */
 const LS_PLATFORM_UPDATE_BANNER = 'fusion-test-platform-update-banner';
+
+/** Site setting key: JSON array for the public `/links` page. */
+export const SITE_SETTING_PUBLIC_LINKS = 'publicLinksJson';
+
+/** Test-mode overlay for `publicLinksJson`. */
+const LS_PUBLIC_LINKS = 'fusion-test-public-links';
 
 /**
  * @returns {{ enabled: boolean, messageEn: string, messageJa: string }}
@@ -242,6 +251,71 @@ export async function setPlatformUpdateBanner(value) {
             new CustomEvent('fusion-platform-update-banner-change', { detail: normalized }),
         );
     }
+}
+
+/**
+ * Public `/links` destinations (site setting `publicLinksJson`).
+ * Live: `getSiteSetting`; test: localStorage overlay.
+ * @returns {Promise<import('./publicLinksModel.js').PublicLink[]>}
+ */
+export async function getPublicLinks() {
+    const { normalizePublicLinks } = await import('./publicLinksModel.js');
+    if (getDataSource() === 'test') {
+        try {
+            if (typeof window !== 'undefined' && window.localStorage) {
+                const v = window.localStorage.getItem(LS_PUBLIC_LINKS);
+                if (v != null && String(v).trim() !== '') {
+                    return normalizePublicLinks(v);
+                }
+            }
+        } catch {
+            /* ignore */
+        }
+        return [];
+    }
+    try {
+        const actor = await getFusionBackendActor();
+        if (typeof actor.getSiteSetting !== 'function') return [];
+        const opt = await actor.getSiteSetting(SITE_SETTING_PUBLIC_LINKS);
+        const raw = unwrapOpt(opt);
+        if (raw == null || String(raw).trim() === '') return [];
+        return normalizePublicLinks(String(raw));
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Persist public `/links` destinations (admin). Uses `setSiteSetting('publicLinksJson', json)`.
+ * @param {unknown} value
+ * @returns {Promise<import('./publicLinksModel.js').PublicLink[]>}
+ */
+export async function setPublicLinks(value) {
+    const { normalizePublicLinks, sortPublicLinks } = await import('./publicLinksModel.js');
+    const normalized = sortPublicLinks(normalizePublicLinks(value));
+    const json = JSON.stringify(normalized);
+    if (getDataSource() === 'test') {
+        try {
+            if (typeof window !== 'undefined' && window.localStorage) {
+                window.localStorage.setItem(LS_PUBLIC_LINKS, json);
+            }
+        } catch {
+            /* ignore */
+        }
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('fusion-public-links-change', { detail: normalized }));
+        }
+        return normalized;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.setSiteSetting !== 'function') {
+        throw new Error('setSiteSetting unavailable — deploy backend and run dfx generate.');
+    }
+    await actor.setSiteSetting(SITE_SETTING_PUBLIC_LINKS, json);
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('fusion-public-links-change', { detail: normalized }));
+    }
+    return normalized;
 }
 
 /**
@@ -3866,6 +3940,16 @@ export async function adminCreateProgramApplicationAccessCodeStudio() {
     return await adminCreateJoinInviteCodeStudio({ artist: null });
 }
 
+/** @type {Array<{ code: string, trialMonths: number, appCredits: number, active: boolean }>} */
+let testTrialJoinInvites = [];
+
+function nextTestTrialJoinCode() {
+    let s = '';
+    for (let i = 0; i < 8; i += 1) s += String(Math.floor(Math.random() * 10));
+    if (testTrialJoinInvites.some((row) => row.code === s)) return nextTestTrialJoinCode();
+    return s;
+}
+
 /**
  * Admin: create a single-use trial join invite code with role + month duration.
  * @param {Record<string, null>} role
@@ -3873,9 +3957,10 @@ export async function adminCreateProgramApplicationAccessCodeStudio() {
  * @returns {Promise<string>}
  */
 export async function adminCreateTrialJoinInviteCodeStudio(role, trialMonths = 2) {
+    const months = Number.isFinite(trialMonths) ? Math.max(1, Math.round(trialMonths)) : 2;
     if (getDataSource() === 'test') {
-        let s = '';
-        for (let i = 0; i < 8; i += 1) s += String(Math.floor(Math.random() * 10));
+        const s = nextTestTrialJoinCode();
+        testTrialJoinInvites.push({ code: s, trialMonths: months, appCredits: 0, active: true });
         return s;
     }
     const actor = await getStudioAuthenticatedActor();
@@ -3884,8 +3969,101 @@ export async function adminCreateTrialJoinInviteCodeStudio(role, trialMonths = 2
             'adminCreateTrialJoinInviteCode unavailable — run dfx generate fusion-app-backend from the project root.'
         );
     }
-    const months = Number.isFinite(trialMonths) ? Math.max(1, Math.round(trialMonths)) : 2;
     return String(await actor.adminCreateTrialJoinInviteCode(role, months));
+}
+
+/**
+ * Staff: create a trial join invite that also grants application credits on redeem.
+ * @param {Record<string, null>} role
+ * @param {number} [trialMonths]
+ * @param {number} [appCredits]
+ * @returns {Promise<string>}
+ */
+export async function adminCreateTrialJoinInviteCodeWithCreditsStudio(role, trialMonths = 3, appCredits = 1) {
+    const months = Number.isFinite(trialMonths) ? Math.max(1, Math.round(trialMonths)) : 3;
+    const credits = Number.isFinite(appCredits) ? Math.max(0, Math.round(appCredits)) : 1;
+    if (getDataSource() === 'test') {
+        const s = nextTestTrialJoinCode();
+        testTrialJoinInvites.push({ code: s, trialMonths: months, appCredits: credits, active: true });
+        return s;
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (typeof actor.adminCreateTrialJoinInviteCodeWithCredits !== 'function') {
+        throw new Error(
+            'adminCreateTrialJoinInviteCodeWithCredits unavailable — run dfx generate fusion-app-backend from the project root.'
+        );
+    }
+    return String(await actor.adminCreateTrialJoinInviteCodeWithCredits(role, months, credits));
+}
+
+/**
+ * Staff: trial invite rows — unused codes still have `active: true`.
+ * @returns {Promise<Array<{ code: string, trialMonths: number, appCredits: number, active: boolean }>>}
+ */
+export async function staffListTrialJoinInvitesStudio() {
+    if (getDataSource() === 'test') {
+        return testTrialJoinInvites.filter((row) => row.active);
+    }
+    const actor = await getStudioAuthenticatedActor();
+    if (!actor || typeof actor.staffListTrialJoinInvites !== 'function') {
+        return [];
+    }
+    const rows = await actor.staffListTrialJoinInvites();
+    if (!Array.isArray(rows)) return [];
+    return rows.map((row) => {
+        if (Array.isArray(row) && row.length >= 4) {
+            return {
+                code: String(row[0] ?? ''),
+                trialMonths: Number(row[1] ?? 0),
+                appCredits: Number(row[2] ?? 0),
+                active: Boolean(row[3]),
+            };
+        }
+        return {
+            code: String(row?.code ?? ''),
+            trialMonths: Number(row?.trialMonths ?? 0),
+            appCredits: Number(row?.appCredits ?? 0),
+            active: Boolean(row?.active),
+        };
+    });
+}
+
+/**
+ * Decode `redeemTrialJoinInviteForCaller` variant from the generated actor.
+ * @param {unknown} raw
+ * @returns {'ok' | 'invalidCode' | 'inviteInactive' | 'notTrialInvite' | 'noAccount' | 'unknown'}
+ */
+export function interpretRedeemTrialJoinInviteResult(raw) {
+    if (!raw || typeof raw !== 'object') return 'unknown';
+    const o = /** @type {Record<string, unknown>} */ (raw);
+    if ('ok' in o) return 'ok';
+    if ('invalidCode' in o) return 'invalidCode';
+    if ('inviteInactive' in o) return 'inviteInactive';
+    if ('notTrialInvite' in o) return 'notTrialInvite';
+    if ('noAccount' in o) return 'noAccount';
+    return 'unknown';
+}
+
+/**
+ * Existing member: apply trial window + grant sidecar credits.
+ * @param {string} codeRaw
+ * @returns {Promise<ReturnType<typeof interpretRedeemTrialJoinInviteResult>>}
+ */
+export async function redeemTrialJoinInviteForCaller(codeRaw) {
+    const code = String(codeRaw || '').replace(/\D/g, '');
+    if (getDataSource() === 'test') {
+        const row = testTrialJoinInvites.find((r) => r.code === code && r.active && r.trialMonths > 0);
+        if (!row) return code.length === 8 ? 'invalidCode' : 'invalidCode';
+        row.active = false;
+        return 'ok';
+    }
+    const { getAuthenticatedFusionBackendActor } = await import('./earlyAccessSubscribe.js');
+    const actor = await getAuthenticatedFusionBackendActor();
+    if (!actor || typeof actor.redeemTrialJoinInviteForCaller !== 'function') {
+        throw new Error('redeemTrialJoinInviteForCaller unavailable — sign in and run dfx generate fusion-app-backend.');
+    }
+    const fn = /** @type {(c: string) => Promise<unknown>} */ (actor.redeemTrialJoinInviteForCaller);
+    return interpretRedeemTrialJoinInviteResult(await fn(code));
 }
 
 /**
@@ -6074,6 +6252,7 @@ export async function getAllProgramsBlock() {
                     visibility: vis,
                     studioStatus: o.studioStatus,
                     depositAmountDisplay: dep,
+                    localesJson: o.localesJson,
                 });
             }
             if (o.jaCard) {
@@ -6082,6 +6261,7 @@ export async function getAllProgramsBlock() {
                     visibility: vis,
                     studioStatus: o.studioStatus,
                     depositAmountDisplay: dep,
+                    localesJson: o.localesJson,
                 });
             }
         }
@@ -10390,6 +10570,9 @@ function normalizeScheduleEventRow(raw) {
         imageUrl: String(raw.imageUrl || '').trim(),
         publicOnSite: Boolean(raw.publicOnSite),
         importance: normalizeScheduleImportance(raw.importance),
+        costCents: normalizeScheduleEventCostCents(raw.costCents),
+        costCurrency: normalizeScheduleEventCostCurrency(raw.costCurrency),
+        costTba: normalizeScheduleEventCostTba(raw.costTba),
         acceptRsvp: Boolean(raw.acceptRsvp),
         availability: clampScheduleAvailability(raw.availability, Boolean(raw.acceptRsvp)),
         rsvpIds: normalizeScheduleRsvpIds(raw.rsvpIds),
@@ -10487,6 +10670,9 @@ export async function upsertScheduleEventStudio(opts) {
     const imageUrl = String(opts?.imageUrl || '').trim();
     const publicOnSite = Boolean(opts?.publicOnSite);
     const importance = normalizeScheduleImportance(opts?.importance);
+    const costCents = normalizeScheduleEventCostCents(opts?.costCents);
+    const costTba = normalizeScheduleEventCostTba(opts?.costTba);
+    const costCurrency = normalizeScheduleEventCostCurrency(opts?.costCurrency);
     const acceptRsvp = Boolean(opts?.acceptRsvp);
     const availability = clampScheduleAvailability(opts?.availability, acceptRsvp);
     const id = String(opts?.id || '').trim();
@@ -10550,6 +10736,9 @@ export async function upsertScheduleEventStudio(opts) {
                 imageUrl,
                 publicOnSite,
                 importance,
+                costCents,
+                costCurrency,
+                costTba,
                 acceptRsvp,
                 availability,
                 rsvpIds: normalizeScheduleRsvpIds(prev.rsvpIds),
@@ -10593,6 +10782,9 @@ export async function upsertScheduleEventStudio(opts) {
             imageUrl,
             publicOnSite,
             importance,
+            costCents,
+            costCurrency,
+            costTba,
             acceptRsvp,
             availability,
             rsvpIds: [],
@@ -10613,7 +10805,7 @@ export async function upsertScheduleEventStudio(opts) {
     if (!actor || typeof actor.staffUpsertScheduleEvent !== 'function') {
         throw new Error('staffUpsertScheduleEvent missing — run dfx generate fusion-app-backend from the project root.');
     }
-    // Motoko signature includes imageUrl + publicOnSite — regenerate bindings after backend deploy:
+    // Motoko signature includes costCents, costCurrency, costTba — regenerate bindings after backend deploy:
     // `dfx generate fusion-app-backend` (or frontend `prebuild`).
     try {
         return String(
@@ -10646,6 +10838,9 @@ export async function upsertScheduleEventStudio(opts) {
                 importance,
                 acceptRsvp,
                 BigInt(availability),
+                BigInt(costCents),
+                costCurrency,
+                costTba,
             ),
         );
     } catch (err) {
@@ -11638,11 +11833,24 @@ function mapProgramCommsLineSeenToJs(raw) {
 }
 
 function mapProgramCommsLineBindingToJs(raw, programId = '') {
-    const row = raw && typeof raw === 'object' ? raw : {};
+    let row = raw && typeof raw === 'object' ? raw : {};
+    if (Array.isArray(raw)) {
+        if (raw.length === 1 && raw[0] && typeof raw[0] === 'object' && !Array.isArray(raw[0])) {
+            row = raw[0];
+        } else if (raw.length >= 3) {
+            row = { programId: raw[0], groupGeneralId: raw[1], groupAnnounceId: raw[2] };
+        }
+    }
+    const text = (val) => {
+        if (val == null) return '';
+        if (typeof val === 'string') return val.trim();
+        if (Array.isArray(val)) return text(val[0]);
+        return String(val ?? '').trim();
+    };
     return {
-        programId: String(row.programId ?? programId ?? ''),
-        groupGeneralId: String(row.groupGeneralId ?? ''),
-        groupAnnounceId: String(row.groupAnnounceId ?? ''),
+        programId: text(row.programId) || String(programId || ''),
+        groupGeneralId: text(row.groupGeneralId),
+        groupAnnounceId: text(row.groupAnnounceId),
     };
 }
 
@@ -11724,6 +11932,19 @@ export async function staffSetProgramCommsLineRoom(programId, room, groupId) {
 const LS_SCHEDULED_TASKS = 'scheduledTasks';
 const LS_SCHEDULED_TASK_RUNS = 'scheduledTaskRuns';
 
+function mapScheduledTaskTimezone(raw) {
+    const t = String(raw ?? '').trim() || 'Asia/Tokyo';
+    if (t === 'Asia/Tokyo' || t === 'America/New_York' || t === 'America/Los_Angeles' || t === 'America/Chicago' || t === 'Etc/GMT') {
+        return t;
+    }
+    if (/tokyo|jst|japan/i.test(t)) return 'Asia/Tokyo';
+    if (/new york|edt|est|eastern/i.test(t)) return 'America/New_York';
+    if (/los angeles|pdt|pst|pacific/i.test(t)) return 'America/Los_Angeles';
+    if (/chicago|cdt|cst|central/i.test(t)) return 'America/Chicago';
+    if (/^gmt$|etc\/gmt|utc/i.test(t)) return 'Etc/GMT';
+    return 'Asia/Tokyo';
+}
+
 function mapScheduledTaskToJs(raw) {
     const row = raw && typeof raw === 'object' ? raw : {};
     return {
@@ -11733,11 +11954,11 @@ function mapScheduledTaskToJs(raw) {
         channels: String(row.channels ?? 'email') || 'email',
         kind: String(row.kind ?? 'custom') || 'custom',
         programIds: Array.isArray(row.programIds) ? row.programIds.map((id) => String(id || '')).filter(Boolean) : [],
-        lineRooms: String(row.lineRooms ?? 'both') || 'both',
+        lineRooms: String(row.lineRooms ?? 'announce') || 'announce',
         customSubject: String(row.customSubject ?? ''),
         customBodyText: String(row.customBodyText ?? ''),
         customLineText: String(row.customLineText ?? ''),
-        timezone: String(row.timezone ?? 'Asia/Tokyo') || 'Asia/Tokyo',
+        timezone: mapScheduledTaskTimezone(row.timezone),
         firstRunLocal: String(row.firstRunLocal ?? ''),
         repeat: String(row.repeat ?? 'once') || 'once',
         skipIfDone: row.skipIfDone !== false,

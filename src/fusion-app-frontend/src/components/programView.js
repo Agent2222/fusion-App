@@ -11,11 +11,14 @@ import {
   getMyArtistRecord,
   getMyProgramAwardEntryDetailed,
   getProgramDrawConfigPublic,
+  getProgramDrawProgressPublic,
+  getPrograms,
 } from "../utils/database.js";
 import { buildResidencyAlumniEntries } from "../utils/residencyAlumniEntries.js";
 import { getAuthSnapshot } from "../utils/icAuth.js";
 import posthog from "posthog-js";
 import {
+  programApplicationClosedCtaLabel,
   programApplicationCtaLabelForAuth,
   programApplicationCtaSubLabel,
   programApplicationReviewLabel,
@@ -34,6 +37,8 @@ import { mergeLocaleDeep } from "../utils/localeFallback.js";
 import { getPublicSiteOrigin } from "../config.js";
 import { applyDocumentSeo } from "../utils/documentSeo.js";
 import { buildProgramApplicationFormContext } from "../utils/programApplicationFormContext.js";
+import { parseProgramDrawClosed } from "../utils/applicantsDrawModel.js";
+import { programCohortHeadline } from "../utils/programCohortHeadline.js";
 import {
   countCalendarMonthsFromNowToDeadline,
   resolveProgramApplicationDeadlineDate,
@@ -365,8 +370,15 @@ function hasAppliedForProgram(record, programId) {
 /**
  * @param {string} programId
  * @param {boolean} [applicationsOpen] When false (e.g. studioStatus `comingUp`), hide apply CTAs and form — no “Begin application”.
+ * @param {boolean} [drawClosed] localesJson.draw.closed — notify layout, not enter.
+ * @param {string} [studioStatus]
  */
-function wireProgramApplicationSection(programId, applicationsOpen = true) {
+function wireProgramApplicationSection(
+  programId,
+  applicationsOpen = true,
+  drawClosed = false,
+  studioStatus = "",
+) {
   const wrap = document.getElementById("programApplicationWrap");
   const formEl = document.getElementById("programApplicationSection");
   const drawFormEl = document.getElementById("programDrawFormSection");
@@ -375,6 +387,8 @@ function wireProgramApplicationSection(programId, applicationsOpen = true) {
   }
   if (drawFormEl && programId) {
     drawFormEl.setAttribute("data-program-id", programId);
+    drawFormEl.setAttribute("data-draw-closed", drawClosed ? "true" : "false");
+    drawFormEl.setAttribute("data-applications-open", applicationsOpen ? "true" : "false");
   }
 
   if (programCtaWireAbort) {
@@ -423,7 +437,7 @@ function wireProgramApplicationSection(programId, applicationsOpen = true) {
   };
 
   const setApplySubCopy = () => {
-    const sub = programApplicationCtaSubLabel();
+    const sub = programApplicationCtaSubLabel(studioStatus, applicationsOpen);
     applySubEls.forEach((el) => {
       el.textContent = sub;
     });
@@ -436,6 +450,23 @@ function wireProgramApplicationSection(programId, applicationsOpen = true) {
   let drawTotalSlots = 100;
   /** @type {boolean} */
   let drawUserEntered = false;
+  /** @type {boolean} */
+  let drawConfigClosed = Boolean(drawClosed);
+
+  const syncDrawClosedFromPrograms = async () => {
+    if (drawConfigClosed) return;
+    try {
+      const programs = await getPrograms();
+      const row = (programs || []).find(
+        (p) => String(p?.id || "") === String(programId || ""),
+      );
+      if (row && parseProgramDrawClosed(row)) {
+        drawConfigClosed = true;
+      }
+    } catch {
+      /* keep initial flag */
+    }
+  };
 
   /**
    * @returns {Promise<boolean>}
@@ -469,8 +500,8 @@ function wireProgramApplicationSection(programId, applicationsOpen = true) {
     for (const pair of ctaPairs) {
       pair.classList.add("program-intro-cta-pair--with-draw");
     }
-    const label = programDrawCtaLabel(drawConfigActive, drawUserEntered);
-    const sub = programDrawCtaSubLabel(drawTotalSlots, drawConfigActive);
+    const label = programDrawCtaLabel(drawConfigActive, drawUserEntered, drawConfigClosed);
+    const sub = programDrawCtaSubLabel(drawTotalSlots, drawConfigActive, drawConfigClosed);
     for (const el of drawCtAs) {
       el.textContent = label;
     }
@@ -484,14 +515,26 @@ function wireProgramApplicationSection(programId, applicationsOpen = true) {
    * @param {number} [totalSlots]
    */
   const refreshDrawCta = async (awardActive = drawConfigActive, totalSlots = drawTotalSlots) => {
+    await syncDrawClosedFromPrograms();
     const entered = await resolveDrawEntered();
     setDrawCtaVisibility(awardActive, totalSlots, entered);
   };
 
-  // Show active defaults immediately; flip to inactive only after config says so.
+  // Show active defaults immediately; flip to inactive/closed after config + program row load.
   setDrawCtaVisibility(true);
-  void getProgramDrawConfigPublic(programId)
-    .then(async (cfg) => {
+  void syncDrawClosedFromPrograms().then(() => {
+    setDrawCtaVisibility(drawConfigActive, drawTotalSlots, drawUserEntered);
+  });
+  void getProgramDrawProgressPublic(programId)
+    .then(async (row) => {
+      if (row) {
+        const active = Boolean(row.active);
+        const slots = Math.max(1, Number(row?.totalSlots) || 100);
+        await refreshDrawCta(active, slots);
+        return;
+      }
+      // Fallback to static config when bindings lag.
+      const cfg = await getProgramDrawConfigPublic(programId);
       const active = cfg == null ? true : Boolean(cfg.active);
       const slots = Math.max(1, Number(cfg?.totalSlots) || 100);
       await refreshDrawCta(active, slots);
@@ -503,10 +546,10 @@ function wireProgramApplicationSection(programId, applicationsOpen = true) {
   setApplySubCopy();
 
   const onDrawCta = () => {
-    if (drawConfigActive) {
-      void revealProgramDrawFormOrOpenJoin();
-    } else {
+    if (drawConfigClosed || !drawConfigActive) {
       void revealProgramDrawInactivePanel();
+    } else {
+      void revealProgramDrawFormOrOpenJoin();
     }
   };
 
@@ -515,7 +558,7 @@ function wireProgramApplicationSection(programId, applicationsOpen = true) {
       el.removeAttribute("hidden");
       el.classList.remove("program-application-cta--review");
       el.classList.add("program-intro-cta--closed-soon");
-      el.textContent = "Coming soon";
+      el.textContent = programApplicationClosedCtaLabel(studioStatus);
       el.setAttribute("aria-hidden", "false");
       el.setAttribute("aria-disabled", "true");
       el.removeAttribute("role");
@@ -547,12 +590,26 @@ function wireProgramApplicationSection(programId, applicationsOpen = true) {
       "fusion-localechange",
       () => {
         setApplySubCopy();
-        void getProgramDrawConfigPublic(programId)
-          .then((cfg) => {
+        for (const el of primaryApplyCtAs) {
+          el.textContent = programApplicationClosedCtaLabel(studioStatus);
+        }
+        void getProgramDrawProgressPublic(programId)
+          .then(async (row) => {
+            await syncDrawClosedFromPrograms();
+            if (row) {
+              const active = Boolean(row.active);
+              setDrawCtaVisibility(active, Math.max(1, Number(row?.totalSlots) || 100));
+              return;
+            }
+            // Fallback to static config when progress bindings lag.
+            const cfg = await getProgramDrawConfigPublic(programId);
             const active = cfg == null ? true : Boolean(cfg.active);
-            setDrawCtaVisibility(active, Number(cfg?.totalSlots) || 100);
+            setDrawCtaVisibility(active, Math.max(1, Number(cfg?.totalSlots) || 100));
           })
-          .catch(() => setDrawCtaVisibility(true));
+          .catch(async () => {
+            await syncDrawClosedFromPrograms();
+            setDrawCtaVisibility(true);
+          });
       },
       { signal },
     );
@@ -630,10 +687,16 @@ function wireProgramApplicationSection(programId, applicationsOpen = true) {
     "fusion-localechange",
     () => {
       void refreshAuthUi();
-      void getProgramDrawConfigPublic(programId)
-        .then((cfg) => {
+      void getProgramDrawProgressPublic(programId)
+        .then(async (row) => {
+          if (row) {
+            const active = Boolean(row.active);
+            void refreshDrawCta(active, Math.max(1, Number(row?.totalSlots) || 100));
+            return;
+          }
+          const cfg = await getProgramDrawConfigPublic(programId);
           const active = cfg == null ? true : Boolean(cfg.active);
-          void refreshDrawCta(active, Number(cfg?.totalSlots) || 100);
+          void refreshDrawCta(active, Math.max(1, Number(cfg?.totalSlots) || 100));
         })
         .catch(() => void refreshDrawCta(true, 100));
     },
@@ -810,6 +873,7 @@ async function applyProgramToDom(programPair) {
 
   const programId = current?.id != null ? String(current.id) : "";
   let applicationsOpen = true;
+  let studioStatus = "";
   if (programId) {
     // `studioStatus` is already on cards from the same `listPrograms` data as
     // `findProgramPairByPathname` — do not call `getPrograms()` again (avoids a second canister round-trip).
@@ -824,11 +888,15 @@ async function applyProgramToDom(programPair) {
     } else if (current && "acceptingApplications" in current) {
       applicationsOpen = Boolean(current.acceptingApplications);
     }
+    studioStatus = statusFromCard;
   }
 
   const { availableSlots, totalSlots } = slotsFromEnglishProgramCard(
     programPair.en,
   );
+  // `parseProgramDrawClosed` needs the wrapper/row that includes `draw.closed`.
+  // Passing only `localesJson` may miss the nested shape (e.g. `{ en: {...}, ja: {...} }`).
+  const drawClosed = parseProgramDrawClosed(programPair.en);
 
   const formEl = document.getElementById("programApplicationSection");
   const drawFormEl = document.getElementById("programDrawFormSection");
@@ -837,10 +905,12 @@ async function applyProgramToDom(programPair) {
   }
   if (drawFormEl && programId) {
     drawFormEl.setAttribute("data-program-id", programId);
+    drawFormEl.setAttribute("data-draw-closed", drawClosed ? "true" : "false");
+    drawFormEl.setAttribute("data-applications-open", applicationsOpen ? "true" : "false");
   }
   // Wire draw/apply CTAs immediately — do not wait for join CMS, artists, or alumni fetches.
   if (programId) {
-    wireProgramApplicationSection(programId, applicationsOpen);
+    wireProgramApplicationSection(programId, applicationsOpen, drawClosed, studioStatus);
   }
   {
     const locale =
@@ -1009,6 +1079,7 @@ async function applyProgramToDom(programPair) {
     programDetailsSection.setProgramDetails({
       programId,
       applicationsOpen,
+      drawClosed,
       headline: programPage?.detailsHeadline || "",
       keyDates,
       locations: locationsToSidebarList(current?.location, details?.locations),
@@ -1059,7 +1130,14 @@ async function applyProgramToDom(programPair) {
     confirmedArtistsFeed &&
     typeof confirmedArtistsFeed.setConfirmedArtistsFeed === "function"
   ) {
-    const headline = programPage?.confirmedHeadline || "";
+    // Program “confirmed artists” strip headline should show the current cohort.
+    const headline = programCohortHeadline({
+      programId,
+      year: current?.year,
+      startDate: current?.startDate,
+      headlineFallback: programPage?.headline || titleText,
+      confirmedHeadlineFallback: programPage?.confirmedHeadline,
+    });
     const pool = artistPool || [];
     const resolved = artists.map((name) => {
       const label = typeof name === "string" ? name : name?.name || "";

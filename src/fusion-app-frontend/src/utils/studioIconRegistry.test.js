@@ -15,6 +15,7 @@ describe('studio scheduled-tasks icons', () => {
         expect(ICON_KEYS.nav).toContain('nav-broadcasts');
         expect(ICON_KEYS.groups).toContain('group-moderation');
         expect(STUDIO_NAV_ICON_ALIASES['audio-files']).toBe('nav-sound');
+        expect(STUDIO_NAV_ICON_ALIASES.links).toBe('nav-content');
         expect(STUDIO_NAV_ICON_ALIASES['scheduled-tasks']).toBeUndefined();
     });
 
@@ -39,6 +40,7 @@ describe('studio scheduled-tasks icons', () => {
         expect(studioNavIconHref('profile-images')).toMatch(/ic-nav-profile-images/);
         expect(studioNavIconHref('broadcasts')).toMatch(/ic-nav-broadcasts/);
         expect(studioNavIconHref('audio-files')).toMatch(/ic-nav-sound/);
+        expect(studioNavIconHref('links')).toMatch(/ic-nav-content/);
         expect(studioGroupIconHref('Moderation')).toMatch(/ic-group-moderation/);
     });
 });

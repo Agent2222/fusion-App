@@ -5,12 +5,41 @@
 const LOCK_MS = 10 * 60 * 1000;
 const MAX_TASKS_PER_TICK = 10;
 
+const TZ_ALIASES = [
+    [/tokyo|jst|japan/i, 'Asia/Tokyo'],
+    [/new york|edt|est|eastern/i, 'America/New_York'],
+    [/los angeles|pdt|pst|pacific/i, 'America/Los_Angeles'],
+    [/chicago|cdt|cst|central/i, 'America/Chicago'],
+    [/^gmt$|etc\/gmt|utc/i, 'Etc/GMT'],
+];
+
+/**
+ * @param {unknown} raw
+ * @returns {string}
+ */
+export function scheduledTaskTimezoneId(raw) {
+    const t = String(raw || '').trim() || 'Asia/Tokyo';
+    if (
+        t === 'Asia/Tokyo' ||
+        t === 'America/New_York' ||
+        t === 'America/Los_Angeles' ||
+        t === 'America/Chicago' ||
+        t === 'Etc/GMT'
+    ) {
+        return t;
+    }
+    for (const [re, id] of TZ_ALIASES) {
+        if (re.test(t)) return id;
+    }
+    return 'Asia/Tokyo';
+}
+
 /**
  * @param {string} timeZone
  * @param {number} utcMs
  */
 function tzOffsetMs(timeZone, utcMs) {
-    const tz = String(timeZone || 'Asia/Tokyo').trim() || 'Asia/Tokyo';
+    const tz = scheduledTaskTimezoneId(timeZone);
     const fmt = new Intl.DateTimeFormat('en-US', {
         timeZone: tz,
         year: 'numeric',
@@ -59,7 +88,7 @@ export function localDateTimeToUtcIso(localYmdHm, timeZone) {
 export function utcIsoToLocalDateTime(isoUtc, timeZone) {
     const ms = Date.parse(isoUtc);
     if (!Number.isFinite(ms)) return '';
-    const tz = String(timeZone || 'Asia/Tokyo').trim() || 'Asia/Tokyo';
+    const tz = scheduledTaskTimezoneId(timeZone);
     const fmt = new Intl.DateTimeFormat('en-CA', {
         timeZone: tz,
         year: 'numeric',
@@ -184,7 +213,7 @@ export function resolveAnnounceDayYmd(announceDay, timeZone, now = Date.now()) {
 export function isAfterRepeatEnd(task, nextRunAtIso) {
     const { endsAtLocal } = parseScheduledTaskWindow(task);
     if (!endsAtLocal) return false;
-    const tz = String(task?.timezone || 'Asia/Tokyo').trim() || 'Asia/Tokyo';
+    const tz = scheduledTaskTimezoneId(task?.timezone);
     const endIso = localDateTimeToUtcIso(endsAtLocal, tz);
     if (!endIso) return false;
     return String(nextRunAtIso || '') > endIso;
@@ -195,7 +224,7 @@ export function isAfterRepeatEnd(task, nextRunAtIso) {
  * @param {string} [finishedAtIso]
  */
 export function nextRunAfterComplete(task, finishedAtIso) {
-    const tz = String(task?.timezone || 'Asia/Tokyo').trim() || 'Asia/Tokyo';
+    const tz = scheduledTaskTimezoneId(task?.timezone);
     const repeat = String(task?.repeat || 'once').trim();
     let nextRunAtIso = String(task?.nextRunAtIso || finishedAtIso || '');
     let enabled = false;

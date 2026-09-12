@@ -64,6 +64,7 @@ export const STUDIO_NAV_ICON_ALIASES = {
     comms: 'nav-email',
     radar: 'nav-ai',
     'join-network': 'nav-gallery-access',
+    links: 'nav-content',
     'audio-files': 'nav-sound',
 };
 

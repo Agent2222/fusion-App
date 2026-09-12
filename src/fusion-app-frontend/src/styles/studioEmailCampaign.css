@@ -1988,6 +1988,17 @@
   border-color: color-mix(in srgb, var(--c4, #a2b792) 75%, #0f172a 25%);
 }
 
+.studio-ec .studio-resend-sync--clean {
+  background: #fff;
+  color: #111111;
+  border-color: #111111;
+}
+
+.studio-ec .studio-resend-sync--clean:hover,
+.studio-ec .studio-resend-sync--clean:focus-visible {
+  background: #f2efed;
+}
+
 /* Templates tab — content source + actions */
 .studio-ec .studio-ec__source-panel {
   margin-top: 0.75rem;

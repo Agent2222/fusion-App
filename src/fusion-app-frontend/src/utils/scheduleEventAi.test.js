@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+    applyScheduleEventRefineSuggestion,
     assignAllScheduleParticipantIds,
     assignAllScheduleStaff,
     buildScheduleEventRefinePrompt,
     buildScheduleEventRefineSource,
     parseScheduleEventRefineJson,
     scheduleEventRefineHasContext,
+    stripProgramNameFromEventTitle,
+    stripJoinUsOpener,
 } from './scheduleEventAi.js';
 
 describe('scheduleEventRefineHasContext', () => {
@@ -35,6 +38,9 @@ describe('buildScheduleEventRefinePrompt', () => {
         expect(prompt).toContain('Workshop');
         expect(prompt).toContain('"title"');
         expect(prompt).toContain('"description"');
+        expect(prompt).toMatch(/never put it in the title/i);
+        expect(prompt).toMatch(/Join us/i);
+        expect(prompt).toMatch(/invitation openers/i);
     });
 });
 
@@ -72,6 +78,53 @@ describe('parseScheduleEventRefineJson', () => {
     it('returns null when neither title nor description is present', () => {
         expect(parseScheduleEventRefineJson('not json')).toBeNull();
         expect(parseScheduleEventRefineJson('{"foo":1}')).toBeNull();
+    });
+});
+
+describe('stripProgramNameFromEventTitle', () => {
+    const program = 'Fusion Kaga - Fall 2026 Artist Residency';
+
+    it('removes the program name from a refined title', () => {
+        expect(stripProgramNameFromEventTitle('Fusion Kaga - Fall 2026 Artist Residency — Studio visit', program)).toBe(
+            'Studio visit',
+        );
+        expect(stripProgramNameFromEventTitle('Fusion Kaga: Opening dinner', program)).toBe('Opening dinner');
+        expect(stripProgramNameFromEventTitle('Studio visit', program)).toBe('Studio visit');
+    });
+
+    it('does not strip a short place name out of an activity title', () => {
+        expect(
+            stripProgramNameFromEventTitle('Kaga walking tour', 'Kaga City Artist Residency'),
+        ).toBe('Kaga walking tour');
+    });
+});
+
+describe('applyScheduleEventRefineSuggestion', () => {
+    it('strips the program name from the suggested title', () => {
+        expect(
+            applyScheduleEventRefineSuggestion(
+                { title: 'Fusion Kaga — Kiln tour', description: 'Meet at the studio.' },
+                { programName: 'Fusion Kaga - Fall 2026 Artist Residency' },
+            ),
+        ).toEqual({ title: 'Kiln tour', description: 'Meet at the studio.' });
+    });
+
+    it('strips a Join us opener from the suggested description', () => {
+        expect(
+            applyScheduleEventRefineSuggestion(
+                { title: 'Kiln tour', description: 'Join us for a walk through the firing room at noon.' },
+                { programName: 'Fusion Kaga - Fall 2026 Artist Residency' },
+            ),
+        ).toEqual({ title: 'Kiln tour', description: 'A walk through the firing room at noon.' });
+    });
+});
+
+describe('stripJoinUsOpener', () => {
+    it('drops Join us / Come join us / You’re invited prefixes', () => {
+        expect(stripJoinUsOpener('Join us for a studio visit at 10.')).toBe('A studio visit at 10.');
+        expect(stripJoinUsOpener('Come join us as we tour the kiln.')).toBe('Tour the kiln.');
+        expect(stripJoinUsOpener('You’re invited to gather in the lounge.')).toBe('Gather in the lounge.');
+        expect(stripJoinUsOpener('Meet at the studio at 10.')).toBe('Meet at the studio at 10.');
     });
 });
 

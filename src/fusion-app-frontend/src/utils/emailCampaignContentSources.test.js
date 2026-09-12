@@ -267,6 +267,53 @@ describe('emailCampaignContentSources', () => {
         expect(draft?.bodyHtml).toContain('Week 1');
     });
 
+    it('meet the artists template binds program roster and cohort page', () => {
+        const draft = buildTemplateDraftFromSource(
+            'tpl_program_artists',
+            { type: 'program', id: 'fusionKaga' },
+            {
+                programs: [
+                    {
+                        id: 'fusionKaga',
+                        year: '2026',
+                        visibility: 'public',
+                        routeLink: '/program/kaga-ishikawa',
+                        enCard: {
+                            headline: 'Fusion Kaga - Fall 2026 Artist Residency',
+                            location: 'Kaga City, Ishikawa',
+                            year: '2026',
+                            startDate: 'September 2026',
+                            imageSrc: 'https://cdn.example/kaga-hero.jpg',
+                        },
+                    },
+                ],
+                artists: [
+                    {
+                        id: 'a1',
+                        slug: 'ada-west',
+                        heroProfileImage: 'https://cdn.example/ada.jpg',
+                        locales: { en: { name: 'Ada West', programs: ['fusionKaga'] } },
+                    },
+                    {
+                        id: 'z9',
+                        slug: 'other',
+                        image: 'https://cdn.example/other.jpg',
+                        locales: { en: { name: 'Other', programs: ['fusionTokyo'] } },
+                    },
+                ],
+            },
+        );
+        expect(draft).not.toBeNull();
+        expect(draft?.subject).toBe('Meet the artists — Kaga Fall 2026');
+        expect(draft?.bodyHtml).toContain('Ada West');
+        expect(draft?.bodyHtml).toContain('https://cdn.example/ada.jpg');
+        expect(draft?.bodyHtml).not.toContain('Other');
+        expect(draft?.bodyHtml).toContain('/artists/kaga-ishikawa-2026');
+        expect(draft?.bodyHtml).not.toMatch(/link in bio/i);
+        expect(draft?.bodyHtml).toMatch(/Meet The/i);
+        expect(draft?.bodyHtml).toContain('MEET THE ARTISTS');
+    });
+
     it('flight follow-up template binds program name, hero, and travel prep cards', () => {
         const draft = buildTemplateDraftFromSource(
             'tpl_flight_followup',

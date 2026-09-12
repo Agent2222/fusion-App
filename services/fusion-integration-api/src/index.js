@@ -22,6 +22,7 @@ import {
     fetchLineGroupSummaryName,
     isLinePushRoom,
     normalizeLinePushRoom,
+    pickAnnounceGroupId,
     pushLineMessages,
     pushLineTextToGroup,
     resolveBoundGroupId,
@@ -2502,6 +2503,44 @@ function scheduledTaskPushLine(opts) {
     });
 }
 
+function scheduledTaskFetchGroupName(groupId) {
+    return fetchLineGroupSummaryName(groupId, lineChannelAccessToken);
+}
+
+const SCHEDULED_TASKS_TICK_MS = Number(process.env.SCHEDULED_TASKS_TICK_MS ?? 5 * 60 * 1000);
+let scheduledTasksTickInFlight = false;
+let scheduledTasksLastTickAt = '';
+let scheduledTasksLastTickError = '';
+
+async function runScheduledTasksTick() {
+    if (scheduledTasksTickInFlight) return { skipped: true };
+    scheduledTasksTickInFlight = true;
+    try {
+        const actor = await getIntegrationActor();
+        if (!actor || typeof actor.integrationListEnabledScheduledTasks !== 'function') {
+            scheduledTasksLastTickError = 'unavailable';
+            const err = new Error('Scheduled tasks unavailable — check integration canister identity');
+            err.status = 503;
+            throw err;
+        }
+        const out = await processDueScheduledTasks({
+            actor,
+            sendEmailBatch: sendScheduledTaskEmailBatch,
+            pushLine: scheduledTaskPushLine,
+            fetchLineGroupName: scheduledTaskFetchGroupName,
+            rsvpUrl: calendarRsvpUrl(fusionPublicSiteOrigin),
+        });
+        scheduledTasksLastTickAt = new Date().toISOString();
+        scheduledTasksLastTickError = '';
+        return { ok: true, ...out };
+    } catch (e) {
+        if (!e?.status) scheduledTasksLastTickError = e instanceof Error ? e.message : String(e);
+        throw e;
+    } finally {
+        scheduledTasksTickInFlight = false;
+    }
+}
+
 app.get('/scheduled-tasks/health', requireApiKey, async (_req, res) => {
     try {
         const actor = await getIntegrationActor();
@@ -2513,7 +2552,14 @@ app.get('/scheduled-tasks/health', requireApiKey, async (_req, res) => {
         const dueEstimate = (Array.isArray(listed) ? listed : []).filter((t) =>
             isScheduledTaskDue(t.nextRunAtIso, now),
         ).length;
-        return res.json({ ok: true, dueEstimate, enabled: Array.isArray(listed) ? listed.length : 0 });
+        return res.json({
+            ok: true,
+            dueEstimate,
+            enabled: Array.isArray(listed) ? listed.length : 0,
+            lastTickAt: scheduledTasksLastTickAt,
+            schedulerMs: Number.isFinite(SCHEDULED_TASKS_TICK_MS) ? SCHEDULED_TASKS_TICK_MS : 0,
+            lastTickError: scheduledTasksLastTickError,
+        });
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         return res.status(500).json({ error: msg });
@@ -2522,20 +2568,12 @@ app.get('/scheduled-tasks/health', requireApiKey, async (_req, res) => {
 
 app.post('/scheduled-tasks/tick', requireApiKey, async (_req, res) => {
     try {
-        const actor = await getIntegrationActor();
-        if (!actor || typeof actor.integrationListEnabledScheduledTasks !== 'function') {
-            return res.status(503).json({ error: 'Scheduled tasks unavailable — check integration canister identity' });
-        }
-        const out = await processDueScheduledTasks({
-            actor,
-            sendEmailBatch: sendScheduledTaskEmailBatch,
-            pushLine: scheduledTaskPushLine,
-            rsvpUrl: calendarRsvpUrl(fusionPublicSiteOrigin),
-        });
-        return res.json({ ok: true, ...out });
+        const out = await runScheduledTasksTick();
+        return res.json(out);
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        return res.status(500).json({ error: msg });
+        const status = e && typeof e === 'object' && Number(e.status) ? Number(e.status) : 500;
+        return res.status(status).json({ error: msg });
     }
 });
 
@@ -2554,6 +2592,7 @@ app.post('/scheduled-tasks/run', requireApiKey, async (req, res) => {
             taskId,
             sendEmailBatch: sendScheduledTaskEmailBatch,
             pushLine: scheduledTaskPushLine,
+            fetchLineGroupName: scheduledTaskFetchGroupName,
             rsvpUrl: calendarRsvpUrl(fusionPublicSiteOrigin),
         });
         return res.json({ ok: true, ...out });
@@ -2628,7 +2667,15 @@ app.post('/line/announce-schedule', requireApiKey, async (req, res) => {
                 return res.status(503).json({ error: 'LINE room binding unavailable — check integration canister identity' });
             }
             const binding = await actor.integrationGetProgramCommsLineBinding(programId);
-            announceGroupId = resolveBoundGroupId(binding, 'announce');
+            const announceName = await fetchLineGroupSummaryName(
+                resolveBoundGroupId(binding, 'announce'),
+                lineChannelAccessToken,
+            );
+            const generalName = await fetchLineGroupSummaryName(
+                resolveBoundGroupId(binding, 'general'),
+                lineChannelAccessToken,
+            );
+            announceGroupId = pickAnnounceGroupId(binding, { announceName, generalName });
         }
         let dest;
         try {
@@ -2654,7 +2701,13 @@ app.post('/line/announce-schedule', requireApiKey, async (req, res) => {
             messages,
             accessToken: lineChannelAccessToken,
         });
-        return res.json({ ok: true, programId, mode: dest.mode, messageCount: messages.length });
+        return res.json({
+            ok: true,
+            programId,
+            mode: dest.mode,
+            room: dest.mode === 'live' ? 'announce' : 'test',
+            messageCount: messages.length,
+        });
     } catch (e) {
         const code = e && typeof e === 'object' ? e.code : '';
         const msg = e instanceof Error ? e.message : String(e);
@@ -3395,4 +3448,14 @@ app.use((_req, res) => {
 
 app.listen(PORT, () => {
     console.log(`fusion-integration-api listening on ${PORT}`);
+    const ms = Number.isFinite(SCHEDULED_TASKS_TICK_MS) ? SCHEDULED_TASKS_TICK_MS : 0;
+    if (ms > 0) {
+        const start = () => {
+            runScheduledTasksTick().catch((err) => {
+                console.warn('scheduled-tasks tick failed', err instanceof Error ? err.message : err);
+            });
+        };
+        setTimeout(start, 30_000);
+        setInterval(start, ms);
+    }
 });

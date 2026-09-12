@@ -8,10 +8,17 @@ import {
     getContentBundleForStudio,
     getProgramDrawConfigPublic,
     getProgramDrawProgressPublic,
+    getPrograms,
     listArtistDrawRecipientsPublic,
     listProgramAwardApplicantNamesPublic,
 } from '../../utils/database.js';
-import { DRAW_SLOT_GOAL_DEFAULT } from '../../utils/applicantsDrawModel.js';
+import {
+    DRAW_SLOT_GOAL_DEFAULT,
+    keepProgramDrawClosed,
+    parseProgramDrawClosed,
+    resolveProgramDrawLiveState,
+} from '../../utils/applicantsDrawModel.js';
+import { programApplicationsAreOpen } from '../../utils/programApplicationCta.js';
 import {
     defaultProgramDrawLocaleEn,
     formatProgramDrawCopyTemplate,
@@ -59,6 +66,8 @@ function pddIconHtml(iconUrl) {
  *   applicantNames: string[],
  *   programLabel: string,
  *   drawActive: boolean,
+ *   drawClosed?: boolean,
+ *   applicationsOpen?: boolean,
  * }} ProgramDrawDisplayCache
  */
 
@@ -85,6 +94,16 @@ function escapeHtml(s) {
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
+}
+
+/** Escape copy and turn info@fusionart.world into a mailto link. */
+function formatEngagementAwardLineHtml(text) {
+    const escaped = escapeHtml(text);
+    if (!escaped) return '';
+    return escaped.replace(
+        /info@fusionart\.world/gi,
+        '<a class="pdd__mail" href="mailto:info@fusionart.world">info@fusionart.world</a>',
+    );
 }
 
 /** @param {number} t 0..1 */
@@ -162,13 +181,14 @@ function notifyDisplayDataEnriched(key) {
 function enrichProgramDrawDisplayData(pid, key, locale, base) {
     void (async () => {
         try {
-            const [progress, rows, artists, applicantNamesRaw] = await Promise.all([
+            const [progress, rows, artists, applicantNamesRaw, programs] = await Promise.all([
                 pid ? getProgramDrawProgressPublic(pid).catch(() => null) : Promise.resolve(null),
                 listArtistDrawRecipientsPublic().catch(() => []),
                 getArtists().catch(() => []),
                 pid
                     ? listProgramAwardApplicantNamesPublic(pid).catch(() => [])
                     : Promise.resolve([]),
+                pid ? getPrograms().catch(() => []) : Promise.resolve([]),
             ]);
             if (displayDataCache?.key !== key) return;
 
@@ -214,6 +234,11 @@ function enrichProgramDrawDisplayData(pid, key, locale, base) {
                 .filter(Boolean)
                 .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 
+            const programRow = Array.isArray(programs)
+                ? programs.find((p) => String(p?.id) === pid)
+                : null;
+            const closedFromProgram = parseProgramDrawClosed(programRow);
+
             /** @type {ProgramDrawDisplayCache} */
             const packed = {
                 ...base,
@@ -223,6 +248,14 @@ function enrichProgramDrawDisplayData(pid, key, locale, base) {
                 applicantNames,
                 drawActive:
                     progress != null ? Boolean(progress.active) : base.drawActive !== false,
+                drawClosed: keepProgramDrawClosed(base.drawClosed, closedFromProgram),
+                applicationsOpen:
+                    base.applicationsOpen === false
+                        ? false
+                        : programApplicationsAreOpen(
+                              programRow?.studioStatus,
+                              programRow?.acceptingApplications,
+                          ),
             };
             displayDataCache = packed;
             notifyDisplayDataEnriched(key);
@@ -271,6 +304,8 @@ export function preloadProgramDrawDisplayData(programId = '') {
             applicantNames: [],
             programLabel: programDrawBrandLabel(pid),
             drawActive: cfg == null ? true : Boolean(cfg.active),
+            drawClosed: false,
+            applicationsOpen: true,
         };
         displayDataCache = packed;
         enrichProgramDrawDisplayData(pid, key, locale, packed);
@@ -307,9 +342,13 @@ class ProgramDrawDisplayComponent extends HTMLElement {
         this._programLabel = 'FUSION';
         /** @type {boolean} */
         this._drawActiveFromConfig = true;
+        /** @type {boolean} */
+        this._drawClosedFromPayload = false;
+        /** @type {boolean} */
+        this._applicationsOpenFromPayload = true;
         /** @type {string} */
         this._loadedKey = '';
-        /** @type {{ pastRecipientsLabel: string, pastRecipientsHideLabel: string, moreDetailsLabel: string, moreDetailsHideLabel: string, learnHowLabel: string, applicantsLabel: string, applicantsHideLabel: string, drawActive: boolean } | null} */
+        /** @type {{ pastRecipientsLabel: string, pastRecipientsHideLabel: string, moreDetailsLabel: string, moreDetailsHideLabel: string, learnHowLabel: string, applicantsLabel: string, applicantsHideLabel: string, drawActive: boolean, notifyLayout: boolean } | null} */
         this._toggleLabels = null;
         /** @type {string} */
         this._progressAnimDoneKey = '';
@@ -333,7 +372,13 @@ class ProgramDrawDisplayComponent extends HTMLElement {
     }
 
     static get observedAttributes() {
-        return ['data-program-id', 'data-draw-active', 'data-user-entered'];
+        return [
+            'data-program-id',
+            'data-draw-active',
+            'data-draw-closed',
+            'data-applications-open',
+            'data-user-entered',
+        ];
     }
 
     attributeChangedCallback(prop, oldVal, newVal) {
@@ -342,7 +387,12 @@ class ProgramDrawDisplayComponent extends HTMLElement {
             this._loadedKey = '';
             this._progressAnimDoneKey = '';
             void this.render();
-        } else if (prop === 'data-draw-active' || prop === 'data-user-entered') {
+        } else if (
+            prop === 'data-draw-active' ||
+            prop === 'data-draw-closed' ||
+            prop === 'data-applications-open' ||
+            prop === 'data-user-entered'
+        ) {
             void this.render();
         }
     }
@@ -357,6 +407,30 @@ class ProgramDrawDisplayComponent extends HTMLElement {
         if (attr === 'true') return true;
         if (attr === 'false') return false;
         return this._drawActiveFromConfig !== false;
+    }
+
+    /** Prefer `data-draw-closed` attribute; else program payload. */
+    _isDrawClosed() {
+        const attr = this.getAttribute('data-draw-closed');
+        if (attr === 'true') return true;
+        if (attr === 'false') return false;
+        return this._drawClosedFromPayload === true;
+    }
+
+    /** Formal apply CTA — hide when the program is full, coming soon, completed, etc. */
+    _canShowApplyToProgram() {
+        const attr = this.getAttribute('data-applications-open');
+        if (attr === 'true') return true;
+        if (attr === 'false') return false;
+        return this._applicationsOpenFromPayload !== false;
+    }
+
+    /** @returns {'closed' | 'inactive' | 'open'} */
+    _liveState() {
+        return resolveProgramDrawLiveState({
+            closed: this._isDrawClosed(),
+            active: this._isDrawActive(),
+        });
     }
 
     connectedCallback() {
@@ -531,6 +605,14 @@ class ProgramDrawDisplayComponent extends HTMLElement {
         this._applicantNames = Array.isArray(packed.applicantNames) ? packed.applicantNames : [];
         this._programLabel = packed.programLabel || programDrawBrandLabel(this._programId());
         this._drawActiveFromConfig = packed.drawActive !== false;
+        this._drawClosedFromPayload = keepProgramDrawClosed(
+            this._drawClosedFromPayload,
+            packed.drawClosed,
+        );
+        this._applicationsOpenFromPayload =
+            this._applicationsOpenFromPayload === false || packed.applicationsOpen === false
+                ? false
+                : packed.applicationsOpen !== false;
         this._loadedKey = packed.key;
     }
 
@@ -543,6 +625,39 @@ class ProgramDrawDisplayComponent extends HTMLElement {
         }
         const packed = await preloadProgramDrawDisplayData(this._programId());
         this._applyPacked(packed);
+        if (this._programId()) {
+            try {
+                const rows = await getPrograms();
+                const row = Array.isArray(rows)
+                    ? rows.find((p) => String(p.id) === this._programId())
+                    : null;
+                const closedAttr = this.getAttribute('data-draw-closed');
+                if (closedAttr !== 'true' && closedAttr !== 'false') {
+                    this._drawClosedFromPayload = keepProgramDrawClosed(
+                        this._drawClosedFromPayload,
+                        parseProgramDrawClosed(row),
+                    );
+                }
+                const appsAttr = this.getAttribute('data-applications-open');
+                if (appsAttr !== 'true' && appsAttr !== 'false') {
+                    const open = programApplicationsAreOpen(row?.studioStatus, row?.acceptingApplications);
+                    this._applicationsOpenFromPayload =
+                        this._applicationsOpenFromPayload === false ? false : open;
+                }
+                if (displayDataCache?.key === key) {
+                    displayDataCache.drawClosed = keepProgramDrawClosed(
+                        displayDataCache.drawClosed,
+                        this._drawClosedFromPayload,
+                    );
+                    displayDataCache.applicationsOpen =
+                        displayDataCache.applicationsOpen === false
+                            ? false
+                            : this._applicationsOpenFromPayload;
+                }
+            } catch {
+                /* keep payload default */
+            }
+        }
     }
 
     _syncExpandUi() {
@@ -571,7 +686,7 @@ class ProgramDrawDisplayComponent extends HTMLElement {
         }
         if (aboutBtn instanceof HTMLButtonElement) {
             aboutBtn.setAttribute('aria-expanded', this._aboutOpen ? 'true' : 'false');
-            if (L.drawActive === false) {
+            if (L.notifyLayout || L.drawActive === false) {
                 aboutBtn.textContent = this._aboutOpen ? L.moreDetailsHideLabel : L.learnHowLabel;
             } else {
                 aboutBtn.textContent = this._aboutOpen ? L.moreDetailsHideLabel : L.moreDetailsLabel;
@@ -600,7 +715,9 @@ class ProgramDrawDisplayComponent extends HTMLElement {
         const copy = resolveProgramDrawLocale(this._cmsBundle, locale);
         const L = copy.display;
         const about = copy.about;
-        const drawActive = this._isDrawActive();
+        const liveState = this._liveState();
+        const drawActive = liveState === 'open';
+        const drawClosed = liveState === 'closed';
         this._toggleLabels = {
             pastRecipientsLabel: L.pastRecipientsLabel,
             pastRecipientsHideLabel: L.pastRecipientsHideLabel,
@@ -610,6 +727,7 @@ class ProgramDrawDisplayComponent extends HTMLElement {
             applicantsLabel: L.applicantsLabel || 'Applicants',
             applicantsHideLabel: L.applicantsHideLabel || 'Hide applicants',
             drawActive,
+            notifyLayout: !drawActive,
         };
         const { claimed, total, cycle } = this._cycle;
         const remaining = Math.max(0, total - claimed);
@@ -636,16 +754,29 @@ class ProgramDrawDisplayComponent extends HTMLElement {
         const awardBody = formatProgramDrawCopyTemplate(L.awardDate, copyVars);
         const awardNote = formatProgramDrawCopyTemplate(L.awardNote || '', copyVars).trim();
 
-        const badge = drawActive ? L.badge : L.badgeInactive || L.badge;
-        const sub = drawActive ? L.sub : L.subInactive || L.sub;
+        const badge = drawClosed
+            ? L.badgeClosed || L.badgeInactive || L.badge
+            : drawActive
+              ? L.badge
+              : L.badgeInactive || L.badge;
+        const headline = drawClosed ? L.headlineClosed || L.headline : L.headline;
+        const sub = drawClosed
+            ? L.subClosed || L.subInactive || L.sub
+            : drawActive
+              ? L.sub
+              : L.subInactive || L.sub;
         const userEntered = drawActive && this._isUserEntered();
+        const showApplyToProgram = this._canShowApplyToProgram();
+        const applyToProgramBtn = showApplyToProgram
+            ? `<button type="button" class="pdd__submit pdd__submit--ghost" data-pdd-apply>${escapeHtml(L.applyToProgramLabel)}</button>`
+            : '';
         const primaryActiveCta = userEntered
             ? `<button type="button" class="pdd__submit pdd__submit--entered" data-pdd-entered disabled aria-disabled="true">${escapeHtml(L.enteredLabel || "You're entered")}</button>`
             : `<button type="button" class="pdd__submit" data-pdd-submit>${escapeHtml(L.submitLabel)}</button>`;
         const ctaActionsHtml = drawActive
             ? `<div class="pdd__cta-btn-row">
                 ${primaryActiveCta}
-                <button type="button" class="pdd__submit pdd__submit--ghost" data-pdd-apply>${escapeHtml(L.applyToProgramLabel)}</button>
+                ${applyToProgramBtn}
               </div>
               <div class="pdd__link-row">
                 <button type="button" class="pdd__text-link" data-pdd-past-toggle aria-expanded="${recipientsOpen ? 'true' : 'false'}" aria-controls="pdd-recipients">
@@ -658,7 +789,7 @@ class ProgramDrawDisplayComponent extends HTMLElement {
               </div>`
             : `<div class="pdd__cta-btn-row">
                 <button type="button" class="pdd__submit" data-pdd-get-notified>${escapeHtml(L.getNotifiedLabel)}</button>
-                <button type="button" class="pdd__submit pdd__submit--ghost" data-pdd-apply>${escapeHtml(L.applyToProgramLabel)}</button>
+                ${applyToProgramBtn}
               </div>
               <div class="pdd__link-row">
                 <button type="button" class="pdd__text-link" data-pdd-about-toggle aria-expanded="${aboutOpen ? 'true' : 'false'}" aria-controls="pdd-about">
@@ -686,8 +817,8 @@ class ProgramDrawDisplayComponent extends HTMLElement {
             ${pddIconHtml(calendarSlotsIcon)}
             <p class="pdd__eyebrow">${escapeHtml(L.currentStatusLabel)}</p>
             <div class="pdd__col-body">
-              <p class="pdd__cycle-title">${escapeHtml(L.statusNotActive)}</p>
-              <p class="pdd__col-copy">${escapeHtml(L.statusNotScheduledBody)}</p>
+              <p class="pdd__cycle-title">${escapeHtml(drawClosed ? L.statusClosed || L.statusNotActive : L.statusNotActive)}</p>
+              <p class="pdd__col-copy">${escapeHtml(drawClosed ? L.statusClosedBody || L.statusNotScheduledBody : L.statusNotScheduledBody)}</p>
             </div>
           </div>`;
 
@@ -774,17 +905,25 @@ class ProgramDrawDisplayComponent extends HTMLElement {
         this.shadowRoot.innerHTML = `
       <style>${this._styles()}</style>
       <section class="pdd" aria-label="${escapeHtml(badge || 'Program Draw')}">
-        <div class="pdd__top">
+        <div class="pdd__top${drawClosed ? ' pdd__top--closed' : ''}">
           <div class="pdd__cta">
             <span class="pdd__badge">${escapeHtml(badge)}</span>
-            <h3 class="pdd__headline">${escapeHtml(L.headline)}</h3>
+            <h3 class="pdd__headline">${escapeHtml(headline)}</h3>
             <p class="pdd__sub">${escapeHtml(sub)}</p>
+            ${
+                drawClosed && String(L.engagementAwardLine || '').trim()
+                    ? `<p class="pdd__sub pdd__sub--award">${formatEngagementAwardLineHtml(L.engagementAwardLine)}</p>`
+                    : ''
+            }
             <div class="pdd__cta-actions">
               ${ctaActionsHtml}
             </div>
           </div>
           ${statusColumnHtml}
-          <div class="pdd__col">
+          ${
+              drawClosed
+                  ? ''
+                  : `<div class="pdd__col">
             ${pddIconHtml(entryTicketIcon)}
             <p class="pdd__eyebrow">${escapeHtml(L.howTitle)}</p>
             <div class="pdd__col-body">
@@ -805,7 +944,8 @@ class ProgramDrawDisplayComponent extends HTMLElement {
               <p class="pdd__col-copy">${escapeHtml(awardBody)}</p>
               ${awardNote ? `<p class="pdd__col-note">${escapeHtml(awardNote)}</p>` : ''}
             </div>
-          </div>
+          </div>`
+          }
         </div>
         <div class="pdd__applicants" id="pdd-applicants" ${applicantsOpen ? '' : 'hidden'}>
           <h4 class="pdd__applicants-title">${escapeHtml(L.applicantsLabel || 'Applicants')}</h4>
@@ -952,6 +1092,10 @@ class ProgramDrawDisplayComponent extends HTMLElement {
         background: var(--bg, #f8f4f0);
       }
 
+      .pdd__top--closed {
+        grid-template-columns: 1.8fr 1.1fr;
+      }
+
       .pdd__cta,
       .pdd__col {
         position: relative;
@@ -1057,6 +1201,16 @@ class ProgramDrawDisplayComponent extends HTMLElement {
         line-height: 1.45;
         color: var(--c2, #111);
         font-variation-settings: var(--fv-body);
+      }
+
+      .pdd__sub--award {
+        margin-top: -0.45rem;
+      }
+
+      .pdd__mail {
+        color: inherit;
+        text-decoration: underline;
+        text-underline-offset: 0.12em;
       }
 
       .pdd__cta-actions {
@@ -1633,6 +1787,9 @@ class ProgramDrawDisplayComponent extends HTMLElement {
         .pdd__top {
           grid-template-columns: 1.5fr 1fr 1fr 1fr 0.95fr;
         }
+        .pdd__top--closed {
+          grid-template-columns: 1.5fr 1fr;
+        }
         .pdd__cta,
         .pdd__col {
           padding: 1.25rem 1.1rem;
@@ -1643,6 +1800,9 @@ class ProgramDrawDisplayComponent extends HTMLElement {
         .pdd__top {
           grid-template-columns: 1.2fr 1fr;
           grid-template-rows: none;
+        }
+        .pdd__top--closed {
+          grid-template-columns: 1.2fr 1fr;
         }
         .pdd__cta,
         .pdd__col {
@@ -1660,6 +1820,10 @@ class ProgramDrawDisplayComponent extends HTMLElement {
         .pdd__cta {
           grid-column: 1 / -1;
           border-bottom: 1px solid color-mix(in srgb, var(--c2, #111) 22%, transparent);
+        }
+        .pdd__top--closed .pdd__cta {
+          grid-column: auto;
+          border-bottom: 0;
         }
         .pdd__col:nth-child(2) {
           border-bottom: 1px solid color-mix(in srgb, var(--c2, #111) 22%, transparent);

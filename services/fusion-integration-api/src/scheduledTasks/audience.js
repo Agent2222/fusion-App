@@ -1,6 +1,7 @@
 /**
  * Who should receive a scheduled task (email list + LINE rooms).
  */
+import { normalizeLineBinding, pickAnnounceGroupId } from '../line/push.js';
 
 const SKIP_STATUS = new Set(['withdrawn', 'pulledOut']);
 
@@ -50,47 +51,72 @@ export function emailRecipientsForTask(task, applicants) {
 }
 
 /**
+ * LINE destinations for a task. Announcements always uses the Comms Announcements room
+ * (same pick as Studio → Comms schedule posts), including when the two slots were swapped.
  * @param {object} task
- * @param {{ groupGeneralId?: string, groupAnnounceId?: string }} binding
+ * @param {unknown} binding
+ * @param {{ announceName?: string, generalName?: string }} [names]
  */
-export function lineRoomsForTask(task, binding) {
+export function lineRoomsForTask(task, binding, names = {}) {
+    const rec = normalizeLineBinding(binding);
     const kind = String(task?.kind || '');
-    if (kind === 'announce_day') {
-        const announce = String(binding?.groupAnnounceId || '').trim();
-        return announce ? [{ room: 'announce', groupId: announce }] : [];
-    }
     const channels = String(task?.channels || '');
-    if (channels !== 'line' && channels !== 'both') return [];
-    const want = String(task?.lineRooms || 'both');
+    const wantLine = kind === 'announce_day' || channels === 'line' || channels === 'both';
+    if (!wantLine) return [];
+    const want = String(task?.lineRooms || 'announce');
+    const announceId = pickAnnounceGroupId(binding, names);
     const rooms = [];
-    const general = String(binding?.groupGeneralId || '').trim();
-    const announce = String(binding?.groupAnnounceId || '').trim();
-    if ((want === 'general' || want === 'both') && general) {
-        rooms.push({ room: 'general', groupId: general });
-    }
-    if ((want === 'announce' || want === 'both') && announce) {
-        rooms.push({ room: 'announce', groupId: announce });
+    if (announceId) rooms.push({ room: 'announce', groupId: announceId });
+    if (kind !== 'announce_day' && (want === 'general' || want === 'both')) {
+        if (rec.groupGeneralId && rec.groupGeneralId !== announceId) {
+            rooms.push({ room: 'general', groupId: rec.groupGeneralId });
+        }
     }
     return rooms;
 }
 
 /**
  * @param {object} task
- * @param {{ groupGeneralId?: string, groupAnnounceId?: string }} binding
+ * @param {unknown} binding
+ * @param {{ announceName?: string, generalName?: string }} [names]
  */
-export function lineRoomsMissing(task, binding) {
-    if (String(task?.kind || '') === 'announce_day') {
-        return String(binding?.groupAnnounceId || '').trim() ? [] : ['announce'];
-    }
+export function lineRoomsMissing(task, binding, names = {}) {
+    const rec = normalizeLineBinding(binding);
+    const kind = String(task?.kind || '');
     const channels = String(task?.channels || '');
-    if (channels !== 'line' && channels !== 'both') return [];
-    const want = String(task?.lineRooms || 'both');
+    const wantLine = kind === 'announce_day' || channels === 'line' || channels === 'both';
+    if (!wantLine) return [];
+    const announceId = pickAnnounceGroupId(binding, names);
     const missing = [];
-    if ((want === 'general' || want === 'both') && !String(binding?.groupGeneralId || '').trim()) {
+    if (!announceId) missing.push('announce');
+    const want = String(task?.lineRooms || 'announce');
+    if (kind !== 'announce_day' && (want === 'general' || want === 'both') && !rec.groupGeneralId) {
         missing.push('general');
     }
-    if ((want === 'announce' || want === 'both') && !String(binding?.groupAnnounceId || '').trim()) {
-        missing.push('announce');
-    }
     return missing;
+}
+
+/**
+ * Load live LINE group titles, then resolve rooms the same way Comms does.
+ * @param {object} task
+ * @param {unknown} binding
+ * @param {(groupId: string) => Promise<string>} [fetchLineGroupName]
+ */
+export async function resolveLineRoomsForTask(task, binding, fetchLineGroupName) {
+    const rec = normalizeLineBinding(binding);
+    /** @type {{ announceName?: string, generalName?: string }} */
+    const names = {};
+    if (typeof fetchLineGroupName === 'function') {
+        const [announceName, generalName] = await Promise.all([
+            rec.groupAnnounceId ? fetchLineGroupName(rec.groupAnnounceId) : '',
+            rec.groupGeneralId ? fetchLineGroupName(rec.groupGeneralId) : '',
+        ]);
+        names.announceName = announceName || '';
+        names.generalName = generalName || '';
+    }
+    return {
+        rooms: lineRoomsForTask(task, binding, names),
+        missing: lineRoomsMissing(task, binding, names),
+        names,
+    };
 }

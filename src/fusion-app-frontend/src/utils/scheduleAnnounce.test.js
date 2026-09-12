@@ -10,6 +10,8 @@ import {
     buildAnnounceConfirmCopy,
     dayEventsForAnnounce,
     staffCopyHasForbiddenTerms,
+    pickAnnounceGroupId,
+    lineRoomRoleFromName,
     toAnnouncePayload,
 } from './scheduleAnnounce.js';
 
@@ -107,6 +109,22 @@ describe('buildAnnounceConfirmCopy', () => {
         });
         expect(copy.title).toBe('Announce this event');
         expect(copy.unboundLine).toBe('');
+    });
+});
+
+describe('pickAnnounceGroupId', () => {
+    it('uses the Announcements slot unless Comms assigned the two groups backwards', () => {
+        const binding = { groupGeneralId: 'Cgen', groupAnnounceId: 'Cann' };
+        expect(pickAnnounceGroupId(binding, { announceName: 'Announcements', generalName: 'General' })).toBe(
+            'Cann',
+        );
+        expect(
+            pickAnnounceGroupId(
+                { groupGeneralId: 'Cann', groupAnnounceId: 'Cgen' },
+                { announceName: 'Kaga General', generalName: 'Kaga Announcements' },
+            ),
+        ).toBe('Cann');
+        expect(lineRoomRoleFromName('お知らせ')).toBe('announce');
     });
 });
 

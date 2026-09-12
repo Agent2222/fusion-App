@@ -56,21 +56,16 @@ export function emailRecipientsForTask(task, applicants) {
  */
 export function lineRoomsForTask(task, binding) {
     const kind = String(task?.kind || '');
-    if (kind === 'announce_day') {
-        const announce = String(binding?.groupAnnounceId || '').trim();
-        return announce ? [{ room: 'announce', groupId: announce }] : [];
-    }
     const channels = String(task?.channels || '');
-    if (channels !== 'line' && channels !== 'both') return [];
-    const want = String(task?.lineRooms || 'both');
-    const rooms = [];
+    const wantLine = kind === 'announce_day' || channels === 'line' || channels === 'both';
+    if (!wantLine) return [];
+    const want = String(task?.lineRooms || 'announce');
     const general = String(binding?.groupGeneralId || '').trim();
     const announce = String(binding?.groupAnnounceId || '').trim();
-    if ((want === 'general' || want === 'both') && general) {
+    const rooms = [];
+    if (announce) rooms.push({ room: 'announce', groupId: announce });
+    if (kind !== 'announce_day' && (want === 'general' || want === 'both') && general && general !== announce) {
         rooms.push({ room: 'general', groupId: general });
-    }
-    if ((want === 'announce' || want === 'both') && announce) {
-        rooms.push({ room: 'announce', groupId: announce });
     }
     return rooms;
 }
@@ -80,18 +75,17 @@ export function lineRoomsForTask(task, binding) {
  * @param {{ groupGeneralId?: string, groupAnnounceId?: string }} binding
  */
 export function lineRoomsMissing(task, binding) {
-    if (String(task?.kind || '') === 'announce_day') {
-        return String(binding?.groupAnnounceId || '').trim() ? [] : ['announce'];
-    }
+    const kind = String(task?.kind || '');
     const channels = String(task?.channels || '');
-    if (channels !== 'line' && channels !== 'both') return [];
-    const want = String(task?.lineRooms || 'both');
+    const wantLine = kind === 'announce_day' || channels === 'line' || channels === 'both';
+    if (!wantLine) return [];
+    const announce = String(binding?.groupAnnounceId || '').trim();
+    const general = String(binding?.groupGeneralId || '').trim();
     const missing = [];
-    if ((want === 'general' || want === 'both') && !String(binding?.groupGeneralId || '').trim()) {
+    if (!announce) missing.push('announce');
+    const want = String(task?.lineRooms || 'announce');
+    if (kind !== 'announce_day' && (want === 'general' || want === 'both') && !general) {
         missing.push('general');
-    }
-    if ((want === 'announce' || want === 'both') && !String(binding?.groupAnnounceId || '').trim()) {
-        missing.push('announce');
     }
     return missing;
 }

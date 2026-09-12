@@ -1,51 +1,75 @@
 /**
  * Studio permission matrix rows — ids must match Motoko `studioFeatureKeys` in `main.mo`
  * and sidebar section ids (`STUDIO_NAV` + `dashboard`).
+ * `group` labels match sidebar groups so Content / Moderation / Operations can be managed together.
  */
 export const STUDIO_PERMISSION_FEATURE_ROWS = [
-    { id: 'dashboard', label: 'Dashboard' },
-    { id: 'home', label: 'Home' },
-    { id: 'subscribers', label: 'Subscribers' },
-    { id: 'applicants', label: 'Applicants' },
-    { id: 'schedule', label: 'Schedule' },
+    { id: 'dashboard', label: 'Dashboard', group: 'overview' },
+    { id: 'home', label: 'Home', group: 'overview' },
+    { id: 'subscribers', label: 'Subscribers', group: 'overview' },
+    { id: 'applicants', label: 'Applicants', group: 'management' },
+    { id: 'schedule', label: 'Schedule', group: 'management' },
+    { id: 'travel', label: 'Travel', group: 'management' },
+    { id: 'comms', label: 'Comms', group: 'management' },
+    { id: 'radar', label: 'Radar', group: 'management' },
     { id: 'finance', label: 'Finance', group: 'finance' },
     { id: 'financePrograms', label: 'Finance — Programs', group: 'finance' },
     { id: 'financeUsers', label: 'Finance — Users (membership)', group: 'finance' },
     { id: 'financeProducts', label: 'Finance — Products', group: 'finance' },
     { id: 'financePromotions', label: 'Finance — Promotions', group: 'finance' },
-    { id: 'travel', label: 'Travel' },
-    { id: 'comms', label: 'Comms' },
-    { id: 'radar', label: 'Radar' },
-    // Moderation group: Status, Profile Images, Audio Files
-    { id: 'pending-approval', label: 'Status' },
-    { id: 'profile-images', label: 'Profile Images' },
-    { id: 'audio-files', label: 'Audio Files' },
-    { id: 'broadcasts', label: 'Broadcasts' },
-    { id: 'artists', label: 'Artists' },
-    { id: 'programs', label: 'Programs' },
-    { id: 'products', label: 'Products' },
-    { id: 'gallery-access', label: 'Gallery Access' },
-    { id: 'join-network', label: 'Join Network' },
-    { id: 'journal', label: 'Journal' },
-    { id: 'sound', label: 'Sound' },
-    { id: 'community', label: 'Community' },
-    { id: 'content', label: 'Content' },
-    { id: 'email', label: 'Email' },
-    { id: 'ai', label: 'Ai' },
-    { id: 'galleries', label: 'Galleries' },
-    { id: 'collectors', label: 'Collectors' },
-    { id: 'curators', label: 'Curators' },
-    { id: 'users', label: 'Users' },
-    { id: 'services', label: 'Services' },
-    { id: 'settings', label: 'Settings' },
-    { id: 'scheduled-tasks', label: 'Scheduled Tasks' },
-    { id: 'team', label: 'Team' },
+    { id: 'programs', label: 'Programs', group: 'content' },
+    { id: 'products', label: 'Products', group: 'content' },
+    { id: 'journal', label: 'Journal', group: 'content' },
+    { id: 'sound', label: 'Sound', group: 'content' },
+    { id: 'community', label: 'Community', group: 'content' },
+    { id: 'videos', label: 'Videos', group: 'content' },
+    { id: 'content', label: 'Content', group: 'content' },
+    { id: 'user-studio', label: 'User Studio', group: 'content' },
+    { id: 'email', label: 'Email', group: 'content' },
+    { id: 'ai', label: 'Assistance', group: 'content' },
+    { id: 'pending-approval', label: 'Status', group: 'moderation' },
+    { id: 'profile-images', label: 'Profile Images', group: 'moderation' },
+    { id: 'audio-files', label: 'Audio Files', group: 'moderation' },
+    { id: 'broadcasts', label: 'Broadcasts', group: 'moderation' },
+    { id: 'artists', label: 'Artists', group: 'accounts' },
+    { id: 'curators', label: 'Curators', group: 'accounts' },
+    { id: 'collectors', label: 'Collectors', group: 'accounts' },
+    { id: 'galleries', label: 'Galleries', group: 'accounts' },
+    { id: 'gallery-access', label: 'Gallery Access', group: 'operations' },
+    { id: 'join-network', label: 'Join Network', group: 'operations' },
+    { id: 'users', label: 'Users', group: 'operations' },
+    { id: 'services', label: 'Services', group: 'operations' },
+    { id: 'scheduled-tasks', label: 'Scheduled Tasks', group: 'operations' },
+    { id: 'links', label: 'Links', group: 'operations' },
+    { id: 'settings', label: 'Settings', group: 'operations' },
+    { id: 'team', label: 'Team', group: 'admin' },
 ];
+
+/** @type {Record<string, string>} */
+export const STUDIO_PERMISSION_GROUP_LABELS = {
+    overview: 'Overview',
+    management: 'Management',
+    finance: 'Finance (parent + category scopes)',
+    content: 'Content',
+    moderation: 'Moderation',
+    accounts: 'Accounts',
+    operations: 'Operations',
+    admin: 'Admin',
+};
+
+/**
+ * @param {string} group
+ * @returns {string}
+ */
+export function studioPermissionGroupLabel(group) {
+    const key = String(group || '').trim();
+    return STUDIO_PERMISSION_GROUP_LABELS[key] || key;
+}
 
 const DEFAULT_STUDIO_FEATURE_ACCESS = { visible: true, canEdit: true };
 
 /** Present in current Motoko `studioFeatureKeys`; missing from older deployed wasm. */
-const CANISTER_PERMISSION_SENTINEL_KEYS = ['schedule', 'finance'];
+const CANISTER_PERMISSION_SENTINEL_KEYS = ['schedule', 'finance', 'videos', 'join-network', 'links'];
 
 /**
  * Older IC builds may still answer `listStudioPermissionFeatureKeys` with a short legacy list

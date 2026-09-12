@@ -38,6 +38,10 @@ import {
     buildProgramCalendarLayoutSlots,
     eventsForProgramCalendar,
 } from './scheduleCalendarEmail.js';
+import {
+    PROGRAM_ARTISTS_ANNOUNCE_TEMPLATE_ID,
+    buildProgramArtistsAnnounceLayoutSlots,
+} from './programArtistsAnnounceEmail.js';
 
 const META_PREFIX = 'FUSION_EC_META=';
 const JOIN_NETWORK_CTA_HREF = 'https://fusionart.world/join-network';
@@ -732,6 +736,22 @@ export function buildTemplateDraftFromSource(templateId, source, caches = {}) {
             bodyHtml: renderFusionEmailFromSlots(slots),
         };
     }
+    if (templateId === PROGRAM_ARTISTS_ANNOUNCE_TEMPLATE_ID && source.type === 'program') {
+        const program = (caches.programs || []).find((p) => String(p?.id ?? '') === String(source.id || ''));
+        if (!program) return null;
+        const slots = buildProgramArtistsAnnounceLayoutSlots({
+            program,
+            artists: caches.artists || [],
+            programs: caches.programs || [],
+        });
+        return {
+            subject: String(slots.subject || '').trim(),
+            previewText: String(slots.previewText || '')
+                .trim()
+                .slice(0, 200),
+            bodyHtml: renderFusionEmailFromSlots(slots),
+        };
+    }
     if (templateId === FLIGHT_FOLLOWUP_TEMPLATE_ID && source.type === 'program') {
         const program = (caches.programs || []).find((p) => String(p?.id ?? '') === String(source.id || ''));
         if (!program) return null;
@@ -1010,6 +1030,7 @@ export function buildQuickDesignContext(templateId, source, userPrompt, caches =
     const bodyHtml = String(editorDraft.rawBodyHtml ?? '').trim();
     const isOnboarding = templateId === 'tpl_onboarding';
     const isReminder = templateId === 'tpl_reminder';
+    const isProgramArtists = templateId === PROGRAM_ARTISTS_ANNOUNCE_TEMPLATE_ID;
     return {
         templateId,
         templateName: tpl?.name ?? '',
@@ -1019,7 +1040,9 @@ export function buildQuickDesignContext(templateId, source, userPrompt, caches =
             ? 'Write onboarding email copy inviting readers to join the FUSION membership network (Japan-rooted programs). Reformat existingDraft into layout JSON slots. CTA href must remain https://fusionart.world/join-network. Return text slots only; app applies the Fusion shell.'
             : isReminder
               ? 'Write a last-chance program application reminder. Keep urgency and invite readers to apply before the deadline. Use sourceFacts only for program name, hero image, dates, and apply URL — do not rewrite as a generic Program Update. Preserve reminder tone from existingDraft when present. Return text slots only; app applies the Fusion shell.'
-              : 'Reformat existingDraft into layout JSON slots. The app applies the Fusion email shell (logo, hero, borders, footer) using styleGuide — return text slots only. Preserve factual names, dates, and URLs from sourceFacts when present.',
+              : isProgramArtists
+                ? 'Write a Meet the Artists program announcement. Keep the Meet The Artists headline and a 3-up artist portrait grid if present in existingDraft. CTA must stay the cohort artists page (/artists/...), never “link in bio”. Return text slots only; app applies the Fusion shell.'
+                : 'Reformat existingDraft into layout JSON slots. The app applies the Fusion email shell (logo, hero, borders, footer) using styleGuide — return text slots only. Preserve factual names, dates, and URLs from sourceFacts when present.',
         styleGuide: {
             canvas: FUSION_EMAIL_STYLES.canvas,
             textColor: FUSION_EMAIL_STYLES.text,

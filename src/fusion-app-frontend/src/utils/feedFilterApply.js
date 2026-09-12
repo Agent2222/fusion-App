@@ -3,6 +3,10 @@
  * and optional `filter` / `galleryFilter` objects on testData; otherwise derives
  * stable values from artist id + English locale fields.
  */
+import {
+    artistMatchesCohortOption,
+    cohortOptionFromConnectionId,
+} from './artistCohortRoutes.js';
 import { artistEnglishBlock, artistSlugFromName, publicSlugFromEnglishFirstLast } from './artistSlug.js';
 
 /** @param {string} id */
@@ -325,13 +329,16 @@ export function deriveArtistFilterRow(artist) {
 
 /**
  * @param {object[]} artists
- * @param {{ connectionId: string, disciplineKeys?: string[], disciplineId?: string, locationKey: string, nameQuery?: string }} c
+ * @param {{ connectionId: string, disciplineKeys?: string[], disciplineId?: string, locationKey: string, nameQuery?: string, cohortOptions?: object[] }} c
  */
 export function applyArtistFilters(artists, c) {
     if (!Array.isArray(artists)) return [];
     const connectionId = c.connectionId || 'allConnection';
     const locationKey = c.locationKey || 'all';
     const nameQuery = c.nameQuery || '';
+    const cohortOption =
+        c.cohortOption ||
+        cohortOptionFromConnectionId(connectionId, Array.isArray(c.cohortOptions) ? c.cohortOptions : []);
 
     /** @type {string[]} */
     let disciplineKeys = Array.isArray(c.disciplineKeys) ? c.disciplineKeys.filter(Boolean) : [];
@@ -357,6 +364,9 @@ export function applyArtistFilters(artists, c) {
             }
             if (connectionId === 'alumniConnection' && m.connection !== 'alumni') return false;
             if (connectionId === 'userConnection' && m.connection !== 'artist') return false;
+            if (cohortOption) {
+                return artistMatchesCohortOption(a, cohortOption);
+            }
             const cm = /^(\d{4})CohortConnection$/.exec(connectionId);
             if (cm) {
                 const y = Number(cm[1]);

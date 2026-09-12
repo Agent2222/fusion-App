@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
+    DRAW_GOAL_NOT_REACHED_TEMPLATE_ID,
     EMAIL_CAMPAIGN_TEMPLATES,
     getEmailTemplateById,
     interpolateRosterBlastTemplate,
     renderRadarTemplateHtml,
     ROSTER_OPEN_CALL_TEMPLATE_ID,
+    templateRequiresTrialAccessPlaceholders,
 } from './emailCampaignTemplates.js';
 import { isFusionEmailLayout } from './emailFusionLayout.js';
 
@@ -81,11 +83,38 @@ describe('EMAIL_CAMPAIGN_TEMPLATES', () => {
         expect(tpl?.bodyHtml.toLowerCase()).toMatch(/voice/);
     });
 
+    it('draw goal not reached uses General layout and trial placeholders', () => {
+        const tpl = getEmailTemplateById(DRAW_GOAL_NOT_REACHED_TEMPLATE_ID);
+        expect(tpl?.templateGroup).toBe('campaigns');
+        expect(tpl?.requiresTrialAccessPlaceholders).toBe(true);
+        expect(tpl?.bodyHtml).toContain('{{TRIAL_ACCESS_CODE}}');
+        expect(tpl?.bodyHtml).toContain('{{TRIAL_JOIN_URL}}');
+        expect(tpl?.bodyHtml.toLowerCase()).toMatch(/application credit/);
+        expect(tpl?.bodyHtml.toLowerCase()).toMatch(/3-month/);
+        expect(isFusionEmailLayout(tpl?.bodyHtml || '')).toBe(true);
+        expect(templateRequiresTrialAccessPlaceholders(DRAW_GOAL_NOT_REACHED_TEMPLATE_ID, '')).toBe(true);
+        expect(templateRequiresTrialAccessPlaceholders('', '<p>{{TRIAL_ACCESS_CODE}}</p>')).toBe(true);
+        expect(templateRequiresTrialAccessPlaceholders('tpl_general', '<p>hello</p>')).toBe(false);
+    });
+
     it('roster blast template keeps placeholders inside branded shell', () => {
         const tpl = EMAIL_CAMPAIGN_TEMPLATES[ROSTER_OPEN_CALL_TEMPLATE_ID];
         expect(tpl.bodyHtml).toContain('{{ARTIST_FIRST_NAME}}');
         expect(tpl.bodyHtml).toContain('{{ACCESS_CODE}}');
         expect(isFusionEmailLayout(tpl.bodyHtml)).toBe(true);
+    });
+
+    it('meet the artists template binds a program and links to the cohort page', () => {
+        const tpl = getEmailTemplateById('tpl_program_artists');
+        expect(tpl?.templateGroup).toBe('updates');
+        expect(tpl?.contentSourceTypes).toContain('program');
+        expect(isFusionEmailLayout(tpl?.bodyHtml || '')).toBe(true);
+        expect(tpl?.bodyHtml).toMatch(/Meet The/i);
+        expect(tpl?.bodyHtml).toContain('MEET THE ARTISTS');
+        expect(tpl?.bodyHtml).toContain('/artists/');
+        expect(tpl?.bodyHtml).not.toMatch(/link in bio/i);
+        expect(tpl?.bodyHtml.toLowerCase()).toMatch(/interdisciplinary/);
+        expect(tpl?.notes?.toLowerCase()).toMatch(/program/);
     });
 
     it('program calendar template binds a program source and uses the Kaga hero', () => {

@@ -10,6 +10,18 @@ import {
     joinPlanCardToPaymentOption,
 } from './resolveApplicationPaymentOptions.js';
 import { startJoinCollageRotation } from './joinCollageRotate.js';
+import { normalizeTrialAccessCode, trialAccessCodeFromSearch } from './trialAccessCode.js';
+import {
+    applicantJoinUnlockAccessCopy,
+    applicantJoinUnlockAccessHtml,
+    applicantJoinUnlockRedeemingLabel,
+    applicantJoinUnlockRedeemMessage,
+} from './applicantStudioJoinUnlockAccess.js';
+
+export {
+    applicantJoinUnlockRedeemingLabel,
+    applicantJoinUnlockRedeemMessage,
+} from './applicantStudioJoinUnlockAccess.js';
 
 /**
  * @param {string} s
@@ -269,6 +281,7 @@ export function buildApplicantJoinUnlockModel(joinPageBundle, joinFlowBundle, lo
                   cta: 'Continue to secure checkout',
                   foot: 'Secure payment · Cancel anytime',
               };
+    const accessCopy = applicantJoinUnlockAccessCopy(loc);
 
     return {
         eyebrow: copyDefaults.eyebrow,
@@ -277,6 +290,7 @@ export function buildApplicantJoinUnlockModel(joinPageBundle, joinFlowBundle, lo
         notice: copyDefaults.notice,
         ctaLabel: String(page.ctaLabel ?? '').trim() || copyDefaults.cta,
         foot: copyDefaults.foot,
+        ...accessCopy,
         collage,
         plans: {
             monthly: {
@@ -351,6 +365,7 @@ export function applicantJoinUnlockHtml(model) {
         </div>
         <div class="mpd-join-unlock__collage">${collageHtml}</div>
       </div>
+      ${applicantJoinUnlockAccessHtml(model)}
       <div class="mpd-join-unlock__plans" id="mpdJoinUnlockPlans" role="radiogroup" aria-label="Membership plans">
         ${cardHtml(model.plans.monthly)}
         ${cardHtml(model.plans.quarterly)}
@@ -366,6 +381,8 @@ export function applicantJoinUnlockHtml(model) {
  * @param {{
  *   defaultTier?: 'monthly'|'quarterly'|'annual',
  *   getBillingEmail?: () => string,
+ *   locale?: 'en'|'ja',
+ *   search?: string,
  * }} [opts]
  * @returns {() => void} cleanup
  */
@@ -408,8 +425,116 @@ export function wireApplicantJoinUnlock(root, opts = {}) {
             }),
         );
     };
+    const locale = opts.locale === 'ja' ? 'ja' : 'en';
+    const accessToggle = /** @type {HTMLButtonElement | null} */ (
+        root.querySelector('#mpdJoinUnlockAccessToggle')
+    );
+    const accessPanel = /** @type {HTMLElement | null} */ (
+        root.querySelector('#mpdJoinUnlockAccessPanel')
+    );
+    const accessInput = /** @type {HTMLInputElement | null} */ (
+        root.querySelector('#mpdJoinUnlockAccessCode')
+    );
+    const accessRedeem = /** @type {HTMLButtonElement | null} */ (
+        root.querySelector('#mpdJoinUnlockAccessRedeem')
+    );
+    const accessMsg = /** @type {HTMLElement | null} */ (
+        root.querySelector('#mpdJoinUnlockAccessMsg')
+    );
+    const setAccessOpen = (open) => {
+        if (!accessPanel || !accessToggle) return;
+        if (open) {
+            accessPanel.removeAttribute('hidden');
+            accessToggle.setAttribute('aria-expanded', 'true');
+            accessToggle.classList.add('is-open');
+        } else {
+            accessPanel.setAttribute('hidden', '');
+            accessToggle.setAttribute('aria-expanded', 'false');
+            accessToggle.classList.remove('is-open');
+        }
+    };
+    const setAccessMsg = (text, kind) => {
+        if (!(accessMsg instanceof HTMLElement)) return;
+        const t = String(text || '').trim();
+        accessMsg.hidden = !t;
+        accessMsg.textContent = t;
+        accessMsg.classList.toggle('is-ok', kind === 'ok');
+        accessMsg.classList.toggle('is-err', kind === 'err');
+    };
+    const prefilledCode = trialAccessCodeFromSearch(opts.search);
+    if (prefilledCode && accessInput) {
+        accessInput.value = prefilledCode;
+        setAccessOpen(true);
+    }
+    const onAccessToggle = () => {
+        if (!accessPanel) return;
+        const open = accessPanel.hasAttribute('hidden');
+        setAccessOpen(open);
+        if (open) accessInput?.focus();
+    };
+    let redeeming = false;
+    const onAccessRedeem = async () => {
+        if (redeeming) return;
+        const code = normalizeTrialAccessCode(accessInput?.value);
+        if (code.length !== 8) {
+            setAccessMsg(applicantJoinUnlockRedeemMessage('invalidCode', locale), 'err');
+            return;
+        }
+        redeeming = true;
+        const prevLabel = accessRedeem?.textContent || '';
+        if (accessRedeem) {
+            accessRedeem.disabled = true;
+            accessRedeem.textContent = applicantJoinUnlockRedeemingLabel(locale);
+        }
+        setAccessMsg('', '');
+        try {
+            const { redeemTrialJoinInviteForCaller } = await import('./database.js');
+            const outcome = await redeemTrialJoinInviteForCaller(code);
+            if (outcome === 'ok') {
+                setAccessMsg(applicantJoinUnlockRedeemMessage('ok', locale), 'ok');
+                try {
+                    const { clearAuthenticatedFusionBackendActorCache } = await import(
+                        './earlyAccessSubscribe.js'
+                    );
+                    const { dispatchFusionAuthChange } = await import('./icAuth.js');
+                    clearAuthenticatedFusionBackendActorCache();
+                    await dispatchFusionAuthChange();
+                } catch {
+                    /* membership refresh is best-effort */
+                }
+                return;
+            }
+            setAccessMsg(applicantJoinUnlockRedeemMessage(outcome, locale), 'err');
+        } catch (e) {
+            setAccessMsg(
+                e instanceof Error ? e.message : applicantJoinUnlockRedeemMessage('unknown', locale),
+                'err',
+            );
+        } finally {
+            redeeming = false;
+            if (accessRedeem) {
+                accessRedeem.disabled = false;
+                accessRedeem.textContent = prevLabel;
+            }
+        }
+    };
+    const onAccessInput = () => {
+        if (!(accessInput instanceof HTMLInputElement)) return;
+        const next = normalizeTrialAccessCode(accessInput.value);
+        if (accessInput.value !== next) accessInput.value = next;
+    };
     plans?.addEventListener('click', onPlanClick);
     root.querySelector('#mpdJoinUnlockCta')?.addEventListener('click', onCta);
+    accessToggle?.addEventListener('click', onAccessToggle);
+    accessRedeem?.addEventListener('click', onAccessRedeem);
+    const onAccessKeydown = (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            void onAccessRedeem();
+        }
+    };
+    accessInput?.addEventListener('input', onAccessInput);
+    accessInput?.addEventListener('keydown', onAccessKeydown);
     sync();
     const stopCollage = startJoinCollageRotation(root, {
         attrName: 'data-mpd-join-collage',
@@ -419,5 +544,9 @@ export function wireApplicantJoinUnlock(root, opts = {}) {
         stopCollage();
         plans?.removeEventListener('click', onPlanClick);
         root.querySelector('#mpdJoinUnlockCta')?.removeEventListener('click', onCta);
+        accessToggle?.removeEventListener('click', onAccessToggle);
+        accessRedeem?.removeEventListener('click', onAccessRedeem);
+        accessInput?.removeEventListener('input', onAccessInput);
+        accessInput?.removeEventListener('keydown', onAccessKeydown);
     };
 }

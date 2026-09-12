@@ -271,13 +271,118 @@ button.studio-wordmark-btn:hover {
   color: #94a3b8;
 }
 
-.studio-sidebar-footer {
-  padding: 1rem 1.25rem 0;
+.studio-sidebar-footer-wrap {
+  position: relative;
+  flex-shrink: 0;
+  margin-top: 0.25rem;
+  padding: 0 0.5rem;
   border-top: 1px solid var(--studio-sidebar-border);
+}
+
+.studio-sidebar-footer {
   display: flex;
   align-items: center;
   gap: 0.65rem;
-  margin-top: 0.25rem;
+  width: 100%;
+  margin: 0;
+  padding: 0.85rem 0.75rem 0.45rem;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+button.studio-sidebar-footer.is-role-preview-enabled {
+  cursor: pointer;
+}
+
+button.studio-sidebar-footer.is-role-preview-enabled:hover,
+button.studio-sidebar-footer.is-menu-open {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+button.studio-sidebar-footer:focus-visible {
+  outline: 2px solid var(--studio-sidebar-active-border);
+  outline-offset: 2px;
+}
+
+.studio-sidebar-footer-caret {
+  margin-left: auto;
+  flex-shrink: 0;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid #94a3b8;
+}
+
+button.studio-sidebar-footer.is-menu-open .studio-sidebar-footer-caret {
+  transform: rotate(180deg);
+}
+
+.studio-role-preview-menu {
+  position: absolute;
+  left: 0.5rem;
+  right: 0.5rem;
+  bottom: calc(100% + 0.35rem);
+  z-index: 8;
+  padding: 0.45rem 0.35rem 0.4rem;
+  border: 1px solid var(--studio-sidebar-border);
+  border-radius: 8px;
+  background: #1a1a1a;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+}
+
+.studio-role-preview-menu__title {
+  margin: 0 0.45rem 0.35rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  font-variation-settings: var(--fv-caption);
+}
+
+.studio-role-preview-menu__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.studio-role-preview-menu__item {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0.48rem 0.55rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--studio-sidebar-fg-strong);
+  font: inherit;
+  font-size: 0.86rem;
+  text-align: left;
+  cursor: pointer;
+  font-variation-settings: var(--fv-label);
+}
+
+.studio-role-preview-menu__item:hover,
+.studio-role-preview-menu__item:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.studio-role-preview-menu__item.is-selected {
+  background: var(--studio-sidebar-active-bg);
+  box-shadow: inset 2px 0 0 var(--studio-sidebar-active-border);
+}
+
+.studio-topbar-admin-label.is-preview {
+  color: #0f172a;
+  padding: 0.18rem 0.45rem;
+  border-radius: 999px;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
 }
 
 .studio-avatar {
@@ -295,6 +400,8 @@ button.studio-wordmark-btn:hover {
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
+  flex: 1;
+  min-width: 0;
 }
 
 .studio-user-meta span:first-child {
@@ -6316,6 +6423,34 @@ a.studio-app-payload-link:hover {
   margin-top: 0.35rem;
 }
 
+.studio-art-enrolled-list {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.studio-art-enrolled-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+}
+
+.studio-art-enrolled-name {
+  font-weight: 600;
+  min-width: 0;
+}
+
+.studio-art-enrolled-id {
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+
 /* Permissions + segment control */
 .studio-perm-role-tabs {
   display: flex;
@@ -6368,6 +6503,15 @@ a.studio-app-payload-link:hover {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+}
+
+.studio-perm-matrix__group td {
+  padding: 0.65rem 0.5rem 0.25rem;
+  font-size: 0.72rem;
+  font-variation-settings: var(--fv-label-strong);
+  color: var(--studio-muted);
+  background: color-mix(in srgb, var(--c2) 4%, var(--studio-workspace-bg) 96%);
+  border-bottom: 1px solid color-mix(in srgb, var(--c2) 10%, transparent);
 }
 
 .studio-perm-super-list {

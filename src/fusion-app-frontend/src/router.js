@@ -10,6 +10,7 @@ import {
     ensureSoundEnvironmentPositionListeners,
     syncSoundEnvironmentPosition,
 } from './utils/soundEnvironmentMount.js';
+import { applyProfileCardModeForCohortPath } from './utils/artistCohortRoutes.js';
 
 import { renderHeader } from './components/shared/header.js';
 import { renderFooter } from './components/shared/footer.js';
@@ -54,6 +55,7 @@ function shouldDeferSeoToPage(path) {
     if (path === '/join-network') return true;
     if (path.startsWith('/profile')) return true;
     if (path.startsWith('/settings')) return true;
+    if (path === '/artists' || path.startsWith('/artists/')) return true;
     const isEditionDetail =
         path.startsWith('/editions/') && path.slice('/editions/'.length).split('/').filter(Boolean)[0];
     const isProgramDetail =
@@ -183,6 +185,12 @@ const routes = {
         description: 'Contact the Fusion team — partnerships, programs, and general inquiries.',
         contentGenerator: 'generateContactContent',
     },
+    '/links': {
+        loader: () => import('./components/links.js'),
+        title: 'Links | Fusion',
+        description: 'Selected pages and destinations from Fusion.',
+        contentGenerator: 'generateLinksContent',
+    },
     '/join-fusion': {
         loader: () => import('./components/joinFusion.js'),
         title: 'Join Fusion team | Fusion',
@@ -281,6 +289,9 @@ function matchContentRoute(path) {
             return routes['/event-view'];
         }
     }
+    if (path === '/artists' || path.startsWith('/artists/')) {
+        return routes['/artists'];
+    }
     return routes[path] || null;
 }
 
@@ -344,12 +355,15 @@ class Router {
             document.documentElement.setAttribute('data-fusion-page', 'profile');
         } else if (path === '/join-network') {
             document.documentElement.setAttribute('data-fusion-page', 'join-network');
+        } else if (path === '/links') {
+            document.documentElement.setAttribute('data-fusion-page', 'links');
         } else {
             document.documentElement.removeAttribute('data-fusion-page');
         }
         /* Artwork/Profile card toggle: home + artists only (program pages use profile-first images on confirmed strip). */
-        if (path === '/' || path === '/artists') {
+        if (path === '/' || path === '/artists' || path.startsWith('/artists/')) {
             document.documentElement.setAttribute('data-fusion-artist-card-toggle', 'on');
+            applyProfileCardModeForCohortPath(path);
         } else {
             document.documentElement.removeAttribute('data-fusion-artist-card-toggle');
         }
@@ -365,33 +379,35 @@ class Router {
     syncLoadscreenForPath(path) {
         const ls = document.querySelector('app-loadscreen');
         if (!ls) return;
-        // Debug shortcuts (Studio, Profile settings) can run before “click to enter” — hide the veil.
-        if (path === '/studio' || path.startsWith('/settings')) {
+        // Debug shortcuts (Studio, Profile settings) and shareable /links skip “click to enter”.
+        if (path === '/studio' || path === '/links' || path.startsWith('/settings')) {
             ls.visible = false;
             ls.style.zIndex = '';
         }
     }
 
     /**
-     * Settings routes bypass the loadscreen enter animation, so direct loads must
+     * Settings and /links bypass the loadscreen enter animation, so direct loads must
      * activate the injected public chrome explicitly after it exists.
      * @param {string} path
      */
     activateChromeForSettingsPath(path) {
-        if (!path.startsWith('/settings')) return;
+        if (!path.startsWith('/settings') && path !== '/links') return;
         document.getElementById('header')?.setAttribute('active', 'true');
         document.getElementById('footer')?.setAttribute('active', 'true');
         headerAndFooterActive = true;
     }
 
     /**
-     * After route HTML is in place, same as a tap on the loadscreen: `performEnterSite` on program deep links
-     * so the veil recedes and #header / #footer get `active` (not before `handleRoute` injects chrome — an early
-     * call can set `_userHasEnteredSite` with no header and block a second enter).
+     * After route HTML is in place, same as a tap on the loadscreen: `performEnterSite` on program
+     * deep links and /links so the veil recedes and #header / #footer get `active` (not before
+     * `handleRoute` injects chrome — an early call can set `_userHasEnteredSite` with no header
+     * and block a second enter).
      * @param {string} path
      */
     applyProgramViewAutoEnterIfNeeded(path) {
-        if (typeof document === 'undefined' || !isProgramViewPath(path)) return;
+        if (typeof document === 'undefined') return;
+        if (!isProgramViewPath(path) && path !== '/links') return;
         const run = () => {
             const ls = document.querySelector('app-loadscreen');
             if (ls && typeof ls.performEnterSite === 'function') {
@@ -936,6 +952,9 @@ class Router {
                 contextContent?.classList.add('active');
                 break;
             default:
+                if (path.startsWith('/artists/')) {
+                    artistsContent?.classList.add('active');
+                }
                 break;
         }
     }

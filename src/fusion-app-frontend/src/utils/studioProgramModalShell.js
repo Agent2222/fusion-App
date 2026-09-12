@@ -137,6 +137,18 @@ export function renderProgramEditorShell(opts) {
             <input name="depositAmountDisplay" class="studio-prog-editor-input" value="${esc(escapeHtml, String(p.depositAmountDisplay ?? ''))}" placeholder="e.g. $1,000" autocomplete="off" />
           </label>
           <label class="studio-prog-editor-field">
+            <span class="studio-prog-editor-field__label">Partner 1 (USD)</span>
+            <input name="partner1Amount" class="studio-prog-editor-input" inputmode="decimal" value="${esc(escapeHtml, String(p.partner1Amount ?? ''))}" placeholder="0.00" autocomplete="off" />
+          </label>
+          <label class="studio-prog-editor-field">
+            <span class="studio-prog-editor-field__label">Partner 2 (USD)</span>
+            <input name="partner2Amount" class="studio-prog-editor-input" inputmode="decimal" value="${esc(escapeHtml, String(p.partner2Amount ?? ''))}" placeholder="0.00" autocomplete="off" />
+          </label>
+          <label class="studio-prog-editor-field">
+            <span class="studio-prog-editor-field__label">Partner 3 (USD)</span>
+            <input name="partner3Amount" class="studio-prog-editor-input" inputmode="decimal" value="${esc(escapeHtml, String(p.partner3Amount ?? ''))}" placeholder="0.00" autocomplete="off" />
+          </label>
+          <label class="studio-prog-editor-field">
             <span class="studio-prog-editor-field__label">featuredOrder</span>
             <input name="featuredOrder" type="number" class="studio-prog-editor-input" value="${esc(escapeHtml, String(p.featuredOrder ?? 0))}" />
           </label>

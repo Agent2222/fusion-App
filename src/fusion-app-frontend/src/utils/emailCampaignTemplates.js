@@ -17,8 +17,10 @@ import {
     sampleProgramCalendarEvents,
 } from './scheduleCalendarEmail.js';
 import { interpolateRadarDiscountHtml, joinUrlForPromoCode } from './studioPromoCodes.js';
+import { DRAW_GOAL_NOT_REACHED_TEMPLATE_ID } from './trialAccessCode.js';
 import { sampleFlightFollowUpHtml } from './flightFollowUpEmail.js';
 import { sampleProgramCommsInviteHtml } from './programCommsInvite.js';
+import { sampleProgramArtistsAnnounceHtml } from './programArtistsAnnounceEmail.js';
 
 /**
  * @typedef {'artist' | 'journal' | 'program' | 'video' | 'website'} EmailContentSourceType
@@ -33,6 +35,7 @@ import { sampleProgramCommsInviteHtml } from './programCommsInvite.js';
  *   bodyHtml: string,
  *   notes?: string,
  *   requiresRosterPlaceholders?: boolean,
+ *   requiresTrialAccessPlaceholders?: boolean,
  *   contentSourceTypes?: EmailContentSourceType[],
  *   defaultEyebrow?: string,
  *   templateGroup?: 'updates' | 'spotlights' | 'campaigns' | 'features',
@@ -133,6 +136,47 @@ export const EMAIL_CAMPAIGN_TEMPLATES = {
         bodyHtml: renderFusionEmailFromSlots(generalSlots),
         notes: 'Full-width branded layout; edit copy and links per campaign.',
     },
+    tpl_draw_goal_not_reached: {
+        id: DRAW_GOAL_NOT_REACHED_TEMPLATE_ID,
+        name: 'Draw goal not reached',
+        templateGroup: 'campaigns',
+        defaultEyebrow: 'Program Draw',
+        defaultSubject: 'The draw goal was not reached — your engagement award is inside',
+        defaultPreview: 'Every entrant still receives the engagement award: a 3-month trial and 1 application credit.',
+        bodyHtml: renderFusionEmailFromSlots({
+            ...defaultProgramUpdateLayoutSlots(),
+            eyebrow: 'Program Draw',
+            pillLabel: 'ENGAGEMENT AWARD',
+            headlineHtml: 'The draw<br>goal was<br>not reached.',
+            bodyHtml: [
+                fusionEmailParagraph(
+                    'The current Program Draw did not reach its entry goal. The draw was not executed — and every entrant still receives the engagement award.',
+                    'lead',
+                ),
+                fusionEmailParagraph(
+                    'Your award is a unique <strong>3-month Fusion trial</strong>. Use it to set up your artist profile, explore exclusive content, and stay close to upcoming residencies.',
+                ),
+                fusionEmailParagraph(
+                    'It also includes <strong>1 application credit</strong> for a future residency — no application fee when you apply.',
+                ),
+                fusionEmailParagraph(
+                    'Your personal access code is below. Open the join link, enter the code, and redeem — existing members redeem the same way.',
+                ),
+                fusionEmailDiscountCodeBlock({
+                    code: '{{TRIAL_ACCESS_CODE}}',
+                    label: '3-month trial + 1 application credit',
+                }),
+                fusionEmailParagraph(
+                    `Questions? Write us at ${fusionEmailLink('mailto:info@fusionart.world', 'info@fusionart.world')}.`,
+                    'last',
+                ),
+            ].join('\n'),
+            cta: { label: 'REDEEM YOUR TRIAL', href: '{{TRIAL_JOIN_URL}}' },
+            footnote: 'Each code is single-use. Redeem while signed in with your Fusion Internet Identity.',
+        }),
+        notes: 'Current draw applicants: unique 3-month trial code + 1 application credit per recipient.',
+        requiresTrialAccessPlaceholders: true,
+    },
     tpl_program_update: {
         id: 'tpl_program_update',
         name: 'Program Update',
@@ -158,6 +202,17 @@ export const EMAIL_CAMPAIGN_TEMPLATES = {
             cta: { label: 'VIEW PROGRAM', href: 'https://www.fusionart.world/programs' },
         }),
         notes: 'Bind a program card to auto-fill hero, title, and CTA.',
+    },
+    tpl_program_artists: {
+        id: 'tpl_program_artists',
+        name: 'Meet the Artists',
+        templateGroup: 'updates',
+        defaultEyebrow: 'Program Artists',
+        contentSourceTypes: ['program'],
+        defaultSubject: 'Meet the artists — Kaga Fall 2026',
+        defaultPreview: 'Introducing the artists joining FUSION’s Kaga Fall 2026 residency.',
+        bodyHtml: sampleProgramArtistsAnnounceHtml(),
+        notes: 'Select a program to fill the 3-up artist grid and link to that cohort’s artists page.',
     },
     tpl_program_calendar: {
         id: 'tpl_program_calendar',
@@ -646,6 +701,21 @@ export const EMAIL_TEMPLATE_GROUPS = [
     { key: 'campaigns', label: 'Campaigns' },
     { key: 'features', label: 'Features' },
 ];
+
+export { DRAW_GOAL_NOT_REACHED_TEMPLATE_ID };
+
+/**
+ * @param {string} [templateId]
+ * @param {string} [html]
+ */
+export function templateRequiresTrialAccessPlaceholders(templateId, html) {
+    const id = String(templateId || '').trim();
+    if (id === DRAW_GOAL_NOT_REACHED_TEMPLATE_ID) return true;
+    const tpl = EMAIL_CAMPAIGN_TEMPLATES[id];
+    if (tpl?.requiresTrialAccessPlaceholders) return true;
+    const s = String(html || '');
+    return s.includes('{{TRIAL_ACCESS_CODE}}') || s.includes('{{TRIAL_JOIN_URL}}');
+}
 
 /**
  * @param {string} id

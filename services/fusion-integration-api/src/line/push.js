@@ -6,15 +6,90 @@ export const LINE_PUSH_MAX_CHARS = 5000;
 export const LINE_API_BASE = 'https://api.line.me/v2/bot';
 
 /**
+ * Candid optional / tuple-safe text.
+ * @param {unknown} val
+ * @returns {string}
+ */
+export function candidText(val) {
+    if (val == null) return '';
+    if (typeof val === 'string') return val.trim();
+    if (typeof val === 'number' || typeof val === 'bigint') return String(val).trim();
+    if (Array.isArray(val)) return candidText(val[0]);
+    return '';
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {{ programId: string, groupGeneralId: string, groupAnnounceId: string }}
+ */
+export function normalizeLineBinding(raw) {
+    if (Array.isArray(raw)) {
+        if (raw.length === 1 && raw[0] && typeof raw[0] === 'object' && !Array.isArray(raw[0])) {
+            return normalizeLineBinding(raw[0]);
+        }
+        if (raw.length >= 3) {
+            return {
+                programId: candidText(raw[0]),
+                groupGeneralId: candidText(raw[1]),
+                groupAnnounceId: candidText(raw[2]),
+            };
+        }
+        return { programId: '', groupGeneralId: '', groupAnnounceId: '' };
+    }
+    const rec = raw && typeof raw === 'object' ? /** @type {Record<string, unknown>} */ (raw) : {};
+    return {
+        programId: candidText(rec.programId),
+        groupGeneralId: candidText(rec.groupGeneralId ?? rec.group_general_id),
+        groupAnnounceId: candidText(rec.groupAnnounceId ?? rec.group_announce_id),
+    };
+}
+
+/**
+ * Infer General vs Announcements from the LINE group title.
+ * @param {unknown} name
+ * @returns {'' | 'general' | 'announce'}
+ */
+export function lineRoomRoleFromName(name) {
+    const n = String(name || '').trim().toLowerCase();
+    if (!n) return '';
+    if (/announce|announcement|お知らせ|告知/.test(n)) return 'announce';
+    if (/general|メインチャット|雑談/.test(n)) return 'general';
+    return '';
+}
+
+/**
+ * Schedule / day announce must post to Announcements — never General.
+ * If Comms assigned the two groups backwards, send using the slot that is actually Announcements.
+ * @param {unknown} binding
+ * @param {{ announceName?: string, generalName?: string }} [names]
+ * @returns {string}
+ */
+export function pickAnnounceGroupId(binding, names = {}) {
+    const rec = normalizeLineBinding(binding);
+    const announceId = rec.groupAnnounceId;
+    const generalId = rec.groupGeneralId;
+    const announceRole = lineRoomRoleFromName(names.announceName);
+    const generalRole = lineRoomRoleFromName(names.generalName);
+    if (announceId && generalId && announceId !== generalId) {
+        if (announceRole === 'general' && generalRole === 'announce') return generalId;
+        if (announceRole === 'general' && !generalRole) return generalId;
+        if (!announceRole && generalRole === 'announce') return generalId;
+    }
+    if (announceId && announceRole !== 'general') return announceId;
+    if (generalId && generalRole === 'announce') return generalId;
+    return announceId;
+}
+
+/**
  * @param {unknown} binding
  * @param {string} [room]
  * @returns {string}
  */
 export function resolveBoundGroupId(binding, room) {
     const key = String(room || '').trim().toLowerCase();
-    const rec = binding && typeof binding === 'object' ? /** @type {Record<string, unknown>} */ (binding) : {};
-    if (key === 'general') return String(rec.groupGeneralId ?? '').trim();
-    if (key === 'announce' || key === 'announcements') return String(rec.groupAnnounceId ?? '').trim();
+    const rec = normalizeLineBinding(binding);
+    if (key === 'general') return rec.groupGeneralId;
+    if (key === 'announce' || key === 'announcements') return rec.groupAnnounceId;
     return '';
 }
 

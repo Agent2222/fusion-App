@@ -329,6 +329,9 @@ body {
 
 .artists-page #featuredArtist2 {
   scroll-margin-top: 200px;
+  flex-shrink: 0;
+  min-height: min-content;
+  width: 100%;
 }
 
 .profile-page {
@@ -1289,6 +1292,10 @@ body {
   color: var(--c2);
 }
 
+.event-detail-meta-line[hidden] {
+  display: none;
+}
+
 .event-detail-description {
   font-size: clamp(0.9rem, 1.1vw, 1.1rem);
   line-height: 1.5;
@@ -1961,9 +1968,9 @@ html[data-fusion-sound-mobile-menu="true"] .fusion-sound-env-host {
   overflow-y: auto;
 }
 
-/* Connection / cohort: short labels — more columns, smaller tracks */
+/* Connection / cohort: program names need a wider track than year chips */
 #connectionFilter.filterButtonBlock {
-  grid-template-columns: repeat(auto-fill, minmax(4.5rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(8.75rem, 1fr));
 }
 
 /* Disciplines: longer copy — wider minimum so labels don’t crush */
@@ -1987,6 +1994,16 @@ html[data-fusion-sound-mobile-menu="true"] .fusion-sound-env-host {
   background: transparent;
 }
 
+a.filterButton {
+  text-decoration: none;
+  color: var(--c2);
+  box-sizing: border-box;
+}
+
+a.filterButton.active {
+  color: var(--c3);
+}
+
 .filterButton.active {
   background-color: var(--c2);
   color: var(--c3);
@@ -1995,6 +2012,7 @@ html[data-fusion-sound-mobile-menu="true"] .fusion-sound-env-host {
 
 #connectionFilter .filterButton {
   white-space: nowrap;
+  padding: 0.45em 0.7em;
 }
 
 #disciplineFilter .filterButton {
@@ -2199,9 +2217,21 @@ button:hover {
   transform: translateX(0);
 }
 
+#mainContent:focus,
+#mainContent:focus-visible {
+  outline: none;
+}
+
 .page-content {
   width: 100%;
   height: 100%;
+}
+
+/* /links — do not lock the page to the viewport or the half-screen tail is clipped. */
+html[data-fusion-page="links"] #mainContent .page-content.links-page {
+  height: auto;
+  min-height: min-content;
+  overflow: visible;
 }
 
 /* --- /join-fusion — avoid nested .page-content height:100% chains; brand CTAs (no global blue) --- */

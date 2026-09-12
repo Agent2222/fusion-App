@@ -70,6 +70,25 @@
   gap: 0.35rem;
 }
 
+.studio-promo-codes__trial {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  margin-top: 0.35rem;
+  padding-top: 1.15rem;
+  border-top: 1px solid color-mix(in srgb, var(--c2) 12%, transparent);
+}
+
+.studio-promo-codes__trial-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.studio-promo-codes__create--trial {
+  grid-template-columns: 6.5rem auto;
+}
+
 .studio-promo-codes .studio-radar-chip {
   font-size: 0.72rem;
 }

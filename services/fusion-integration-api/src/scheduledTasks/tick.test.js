@@ -101,6 +101,34 @@ describe('scheduled task tick', () => {
         assert.equal(emails.length, 1);
     });
 
+    it('posts LINE chat to the Comms Announcements room', async () => {
+        const tasks = [taskFixture({ channels: 'line', lineRooms: 'announce', customLineText: 'Hello rooms' })];
+        const pushed = [];
+        let run;
+        const actor = {
+            integrationListEnabledScheduledTasks: async () => tasks,
+            integrationClaimScheduledTask: async () => [tasks[0]],
+            integrationGetScheduledTaskAudience: async () => audienceFixture(),
+            integrationCompleteScheduledTaskRun: async (_id, recorded) => {
+                run = recorded;
+            },
+        };
+        await processOneScheduledTask({
+            actor,
+            taskId: 't1',
+            now: Date.parse('2026-09-15T00:00:00.000Z'),
+            sendEmailBatch: async () => ({ ok: true, results: [] }),
+            pushLine: async (opts) => {
+                pushed.push(opts);
+            },
+            fetchLineGroupName: async (id) => (id === 'A1' ? 'Announcements' : 'General'),
+        });
+        assert.equal(run.status, 'ok');
+        assert.equal(pushed.length, 1);
+        assert.equal(pushed[0].groupId, 'A1');
+        assert.equal(pushed[0].text, 'Hello rooms');
+    });
+
     it('records a failed LINE send when the chat is not connected', async () => {
         const tasks = [taskFixture({ channels: 'line', customLineText: 'Hello rooms' })];
         let run;

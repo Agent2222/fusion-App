@@ -11,6 +11,7 @@ import {
 } from '../utils/artistCardImageMode.js';
 import { applyDocumentSeo } from '../utils/documentSeo.js';
 import { startJoinCollageRotation } from '../utils/joinCollageRotate.js';
+import { trialAccessCodeFromSearch } from '../utils/trialAccessCode.js';
 
 const ROLE_KEYS = ['Artist', 'Gallery', 'Curator', 'Collector'];
 
@@ -419,6 +420,13 @@ export default async function initJoinNetworkPage() {
     const accessToggle = /** @type {HTMLButtonElement | null} */ (root.querySelector('#jnpAccessToggle'));
     const accessPanel = /** @type {HTMLElement | null} */ (root.querySelector('#jnpAccessPanel'));
     const accessInput = /** @type {HTMLInputElement | null} */ (root.querySelector('#jnpAccessCode'));
+    const prefilledCode = trialAccessCodeFromSearch();
+    if (prefilledCode && accessInput && accessPanel && accessToggle) {
+        accessInput.value = prefilledCode;
+        accessPanel.removeAttribute('hidden');
+        accessToggle.setAttribute('aria-expanded', 'true');
+        accessToggle.classList.add('is-open');
+    }
     accessToggle?.addEventListener('click', () => {
         if (!accessPanel || !accessToggle) return;
         const open = accessPanel.hasAttribute('hidden');

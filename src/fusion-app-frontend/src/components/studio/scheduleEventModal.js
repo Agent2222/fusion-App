@@ -4,10 +4,18 @@
 import '../../styles/studioScheduleEventModal.css';
 import {
     clampScheduleAvailability,
+    formatScheduleEventCostInputValue,
+    formatScheduleEventCostLabel,
     formatTimeRange,
     formatScheduleCanisterError,
     normalizeScheduleColor,
+    normalizeScheduleEventCostCents,
+    normalizeScheduleEventCostCurrency,
+    normalizeScheduleEventCostTba,
     normalizeScheduleImportance,
+    parseScheduleEventCostAmountToMinor,
+    SCHEDULE_EVENT_COST_CURRENCIES,
+    scheduleEventShowsCost,
     scheduleCategoryMeta,
     SCHEDULE_EVENT_CATEGORIES,
     parseYmd,
@@ -38,6 +46,7 @@ import {
 } from '../../utils/scheduleStore.js';
 import { getDataSource, memberRsvpScheduleEvent, studioReinterpretWithPrompt } from '../../utils/database.js';
 import {
+    applyScheduleEventRefineSuggestion,
     assignAllScheduleParticipantIds,
     assignAllScheduleStaff,
     buildScheduleEventRefinePrompt,
@@ -112,6 +121,7 @@ const ICONS = {
     more: `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>`,
     close: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>`,
     pin: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 21s7-5.2 7-11a7 7 0 1 0-14 0c0 5.8 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>`,
+    cost: `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M15.2 9.2C14.6 8.4 13.4 8 12 8c-2 0-3.2 1-3.2 2.2 0 3 6.4 1.4 6.4 4.4C15.2 16 13.8 17 12 17c-1.5 0-2.7-.5-3.3-1.4"/></svg>`,
     clock: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`,
     chevron: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>`,
     link: `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l1.46-1.46a5 5 0 0 0-7.07-7.07L10.5 6"/><path d="M14 11a5 5 0 0 0-7.54-.54L5 12a5 5 0 0 0 7.07 7.07L13.5 18"/></svg>`,
@@ -265,6 +275,10 @@ export function openScheduleEventModal(opts) {
               imageUrl: String(event.imageUrl || '').trim(),
               publicOnSite: Boolean(event.publicOnSite),
               importance: normalizeScheduleImportance(event.importance),
+              costCents: normalizeScheduleEventCostCents(event.costCents),
+              costCurrency: normalizeScheduleEventCostCurrency(event.costCurrency),
+              costTba: normalizeScheduleEventCostTba(event.costTba),
+              hasCost: scheduleEventShowsCost(event.costCents, event.costTba),
               acceptRsvp: Boolean(event.acceptRsvp),
               availability: clampScheduleAvailability(event.availability, Boolean(event.acceptRsvp)),
               rsvpIds: [...(event.rsvpIds || [])],
@@ -610,6 +624,21 @@ export function openScheduleEventModal(opts) {
             draft.imageUrl = imageEl.value.trim();
         }
         draft.importance = normalizeScheduleImportance(g('[name="importance"]') || draft.importance);
+        const hasCostEl = root.querySelector('[name="hasCost"]');
+        if (hasCostEl instanceof HTMLInputElement) {
+            draft.hasCost = hasCostEl.checked;
+            draft.costCurrency = hasCostEl.checked
+                ? normalizeScheduleEventCostCurrency(g('[name="costCurrency"]') || draft.costCurrency)
+                : 'USD';
+            const amountRaw = g('[name="costUsd"]');
+            if (!hasCostEl.checked) {
+                draft.costCents = 0;
+                draft.costTba = false;
+            } else {
+                draft.costCents = parseScheduleEventCostAmountToMinor(amountRaw, draft.costCurrency);
+                draft.costTba = draft.costCents === 0;
+            }
+        }
         const rsvpEl = root.querySelector('[name="acceptRsvp"]');
         draft.acceptRsvp = rsvpEl instanceof HTMLInputElement ? rsvpEl.checked : Boolean(draft.acceptRsvp);
         const availRaw = g('[name="availability"]');
@@ -718,7 +747,7 @@ export function openScheduleEventModal(opts) {
                 buildScheduleEventRefineSource(draft),
                 'en',
             );
-            const parsed = parseScheduleEventRefineJson(raw);
+            const parsed = applyScheduleEventRefineSuggestion(parseScheduleEventRefineJson(raw), draft);
             if (!parsed) {
                 throw new Error('The model did not return a usable title and description. Try again.');
             }
@@ -1275,6 +1304,29 @@ export function openScheduleEventModal(opts) {
             readFields();
         });
 
+        root.querySelector('[name="hasCost"]')?.addEventListener('change', () => {
+            markDirty();
+            readFields();
+            const wrap = root.querySelector('[data-ev-cost-amount]');
+            if (wrap instanceof HTMLElement) {
+                wrap.hidden = !draft.hasCost;
+            }
+            const amount = root.querySelector('[name="costUsd"]');
+            if (amount instanceof HTMLInputElement) {
+                amount.disabled = !draft.hasCost || !canEdit;
+                if (draft.hasCost) amount.focus();
+            }
+            const currency = root.querySelector('[name="costCurrency"]');
+            if (currency instanceof HTMLSelectElement) {
+                currency.disabled = !draft.hasCost || !canEdit;
+            }
+        });
+
+        root.querySelector('[name="costCurrency"]')?.addEventListener('change', () => {
+            markDirty();
+            readFields();
+        });
+
         syncStaffPublicVisibility(root, draft);
         syncAllDayTimeInputs(root, draft.allDay);
 
@@ -1323,6 +1375,9 @@ export function openScheduleEventModal(opts) {
                             ? false
                             : Boolean(draft.publicOnSite),
                         importance: normalizeScheduleImportance(draft.importance),
+                        costCents: normalizeScheduleEventCostCents(draft.costCents),
+                        costCurrency: normalizeScheduleEventCostCurrency(draft.costCurrency),
+                        costTba: Boolean(draft.hasCost) && normalizeScheduleEventCostTba(draft.costTba),
                         acceptRsvp: Boolean(draft.acceptRsvp),
                         availability: clampScheduleAvailability(draft.availability, Boolean(draft.acceptRsvp)),
                     });
@@ -1358,6 +1413,9 @@ export function openScheduleEventModal(opts) {
                             ? false
                             : Boolean(draft.publicOnSite),
                         importance: normalizeScheduleImportance(draft.importance),
+                        costCents: normalizeScheduleEventCostCents(draft.costCents),
+                        costCurrency: normalizeScheduleEventCostCurrency(draft.costCurrency),
+                        costTba: Boolean(draft.hasCost) && normalizeScheduleEventCostTba(draft.costTba),
                         acceptRsvp: Boolean(draft.acceptRsvp),
                         availability: clampScheduleAvailability(draft.availability, Boolean(draft.acceptRsvp)),
                     });
@@ -1371,6 +1429,10 @@ export function openScheduleEventModal(opts) {
                     assignedStaff: [...event.assignedStaff],
                     participantIds: [...(event.participantIds || [])],
                     rsvpIds: [...(event.rsvpIds || [])],
+                    costCents: normalizeScheduleEventCostCents(event.costCents),
+                    costCurrency: normalizeScheduleEventCostCurrency(event.costCurrency),
+                    costTba: normalizeScheduleEventCostTba(event.costTba),
+                    hasCost: scheduleEventShowsCost(event.costCents, event.costTba),
                 };
                 dirty = false;
                 mode = 'view';
@@ -1508,6 +1570,10 @@ function blankEvent(date, programIdHint = '') {
         imageUrl: '',
         publicOnSite: false,
         importance: /** @type {const} */ ('general'),
+        costCents: 0,
+        costCurrency: 'USD',
+        costTba: false,
+        hasCost: false,
         acceptRsvp: false,
         availability: 0,
         rsvpIds: [],
@@ -1581,6 +1647,16 @@ function buildDialogHtml(ctx) {
     const rsvpMode = Boolean(draft.acceptRsvp);
     const rsvpIds = Array.isArray(draft.rsvpIds) ? draft.rsvpIds : [];
     const availability = clampScheduleAvailability(draft.availability, rsvpMode);
+    const costCurrency = normalizeScheduleEventCostCurrency(draft.costCurrency);
+    const hasCost =
+        Boolean(draft.hasCost) ||
+        scheduleEventShowsCost(draft.costCents, draft.costTba);
+    const costLabel = formatScheduleEventCostLabel(draft);
+    const costUsdValue = formatScheduleEventCostInputValue(draft.costCents, costCurrency);
+    const currencyOptions = SCHEDULE_EVENT_COST_CURRENCIES.map(
+        (c) =>
+            `<option value="${esc(c.value)}" ${costCurrency === c.value ? 'selected' : ''}>${esc(c.label)}</option>`,
+    ).join('');
     const selectedIds = new Set(rsvpMode ? rsvpIds : draft.participantIds || []);
     const selectedStaffIds = new Set((draft.assignedStaff || []).map((s) => s.id));
     const q = String(participantQuery || '')
@@ -1842,6 +1918,17 @@ function buildDialogHtml(ctx) {
               <p class="event-fact__value">${esc(draft.locationName || '—')}</p>
             </div>
           </section>
+          ${
+              costLabel
+                  ? `<section class="event-fact">
+            ${ICONS.cost.replace('<svg', '<svg class="event-fact__icon"')}
+            <div>
+              <p class="event-eyebrow">Cost</p>
+              <p class="event-fact__value">${esc(costLabel)}</p>
+            </div>
+          </section>`
+                  : ''
+          }
           <section class="event-fact">
             ${ICONS.link.replace('<svg', '<svg class="event-fact__icon"')}
             <div>
@@ -1873,22 +1960,22 @@ function buildDialogHtml(ctx) {
           </button>
         </div>
         ${participantsPanel}
-        <section class="event-flier-view" aria-label="Event flier">
+        ${
+            String(draft.imageUrl || '').trim()
+                ? `<section class="event-flier-view" aria-label="Event flier">
           <p class="event-eyebrow">Flier</p>
-          ${
-              String(draft.imageUrl || '').trim()
-                  ? `<img class="event-flier-view__img" src="${esc(draft.imageUrl)}" alt="Event flier" />`
-                  : `<p class="event-fact__value">No flier</p>`
-          }
+          <img class="event-flier-view__img" src="${esc(draft.imageUrl)}" alt="Event flier" />
           <p class="event-flier-view__public ${draft.publicOnSite ? 'is-on' : ''}">
             ${draft.publicOnSite ? 'Shown on public site / journal' : 'Not on public site'}
           </p>
-        </section>
+        </section>`
+                : ''
+        }
         <section class="event-notes">
           ${ICONS.file}
           <div>
             <p class="event-eyebrow">Description</p>
-            <p class="event-notes__text">${esc(draft.notes) || '—'}</p>
+            <p class="event-notes__text${String(draft.notes || '').trim() ? '' : ' event-notes__text--pending'}">${esc(String(draft.notes || '').trim()) || 'Details pending'}</p>
           </div>
         </section>
       </div>`;
@@ -1920,6 +2007,27 @@ function buildDialogHtml(ctx) {
               <option value="optional" ${normalizeScheduleImportance(draft.importance) === 'optional' ? 'selected' : ''}>Optional</option>
             </select>`,
         )}
+        <div class="event-field event-field--wide">
+          <label class="event-public-toggle">
+            <input type="checkbox" name="hasCost" id="ev-hasCost" ${hasCost ? 'checked' : ''} ${editing && canEdit ? '' : 'disabled'} />
+            <span>Cost</span>
+          </label>
+          <p class="event-field__hint">Leave the amount empty to show TBA. Choose $ or ¥.</p>
+          <div class="event-cost-amount" data-ev-cost-amount ${hasCost ? '' : 'hidden'}>
+            <div class="event-cost-amount__row">
+              <label class="event-field__label event-cost-currency" for="ev-costCurrency">
+                Currency
+                <select class="event-field__control" id="ev-costCurrency" name="costCurrency" ${hasCost && editing && canEdit ? '' : 'disabled'}>
+                  ${currencyOptions}
+                </select>
+              </label>
+              <label class="event-field__label event-cost-amount__field" for="ev-costUsd">
+                Amount
+                <input class="event-field__control" id="ev-costUsd" name="costUsd" type="text" inputmode="decimal" placeholder="TBA" value="${esc(costUsdValue)}" ${hasCost && editing && canEdit ? '' : 'disabled'} />
+              </label>
+            </div>
+          </div>
+        </div>
         <div class="event-field event-field--wide">
           <span class="event-field__label">Assigned staff</span>
           ${staffHtml}

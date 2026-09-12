@@ -30,6 +30,7 @@ describe('studioArtistForm', () => {
         expect(html).toContain('id="studio-art-panel-advanced"');
         expect(html).toContain('id="studio-art-panel-credits"');
         expect(html).toContain('id="studio-art-tab-credits"');
+        expect(html).toContain('id="studio-art-enrolled-programs"');
         expect(html).toContain('Credits management is coming soon');
         expect(html).toContain('id="studio-art-panel-new-world"');
         expect(html).toContain('id="studio-art-audio-display-for-artist"');

@@ -12,17 +12,31 @@ let permissionsNavAllowed = false;
 /** Canister admin only — `#team` Team directory (separate from Permissions visibility). */
 let teamNavAllowed = false;
 
+/** Real canister admin (not a role preview). */
+let isAdmin = false;
+
+/** Admin role preview: `admin` | `staff` | `collaborator` | `` when the caller is not an admin. */
+let previewRole = '';
+
 /**
- * @param {{ effectiveMatrix: Map<string, { visible: boolean, canEdit: boolean }> | null, permissionsNavAllowed: boolean, teamNavAllowed?: boolean }} gate
+ * @param {{
+ *   effectiveMatrix: Map<string, { visible: boolean, canEdit: boolean }> | null,
+ *   permissionsNavAllowed: boolean,
+ *   teamNavAllowed?: boolean,
+ *   isAdmin?: boolean,
+ *   previewRole?: string,
+ * }} gate
  */
 export function setStudioShellGate(gate) {
     effectiveMatrix = gate.effectiveMatrix;
     permissionsNavAllowed = Boolean(gate.permissionsNavAllowed);
     teamNavAllowed = Boolean(gate.teamNavAllowed);
+    isAdmin = Boolean(gate.isAdmin);
+    previewRole = String(gate.previewRole || '');
 }
 
 export function getStudioShellGate() {
-    return { effectiveMatrix, permissionsNavAllowed, teamNavAllowed };
+    return { effectiveMatrix, permissionsNavAllowed, teamNavAllowed, isAdmin, previewRole };
 }
 
 /**

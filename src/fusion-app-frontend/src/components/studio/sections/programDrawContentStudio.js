@@ -103,12 +103,18 @@ function fieldsHtml(loc, locale) {
         ['emptyRecipientsSoft', 'Empty past recipients — line 3'],
         ['badgeInactive', 'Inactive badge'],
         ['subInactive', 'Inactive subtext'],
+        ['badgeClosed', 'Closed badge'],
+        ['headlineClosed', 'Closed headline'],
+        ['subClosed', 'Closed subtext'],
         ['getNotifiedLabel', 'Get Notified button'],
         ['applyToProgramLabel', 'Apply to program instead button'],
         ['learnHowLabel', 'Learn how link'],
         ['currentStatusLabel', 'Current status label'],
         ['statusNotActive', 'Status: not active'],
         ['statusNotScheduledBody', 'Status: not scheduled body'],
+        ['statusClosed', 'Status: draw closed'],
+        ['statusClosedBody', 'Status: draw closed body'],
+        ['engagementAwardLine', 'Closed: engagement award contact line'],
     ];
 
     const displayInputs = displayFields
@@ -117,10 +123,14 @@ function fieldsHtml(loc, locale) {
                 key === 'headline' ||
                 key === 'sub' ||
                 key === 'subInactive' ||
+                key === 'headlineClosed' ||
+                key === 'subClosed' ||
                 key === 'howBody' ||
                 key === 'selectionBody' ||
                 key === 'awardDate' ||
                 key === 'statusNotScheduledBody' ||
+                key === 'statusClosedBody' ||
+                key === 'engagementAwardLine' ||
                 key === 'supportLead' ||
                 key === 'emptyRecipientsLead' ||
                 key === 'emptyRecipientsBody' ||

@@ -106,6 +106,12 @@ persistent actor {
   stable var scheduleEventAvailabilityStable : [(Text, Nat)] = [];
   /// Event id → RSVP artist ids (or principal text fallback).
   stable var scheduleEventRsvpIdsStable : [(Text, [Text])] = [];
+  /// Event id → optional ticket/cost in minor units (USD cents or JPY yen; 0 = no priced amount).
+  stable var scheduleEventCostCentsStable : [(Text, Nat)] = [];
+  /// Event id → USD | JPY.
+  stable var scheduleEventCostCurrencyStable : [(Text, Text)] = [];
+  /// Event id → show TBA when no priced amount.
+  stable var scheduleEventCostTbaStable : [(Text, Bool)] = [];
   /// Studio Finance → Program team members (disbursements / expenses).
   stable var programTeamMembersStable : [(Text, Types.ProgramTeamMember)] = [];
   stable var programTeamOwedEntriesStable : [(Text, Types.ProgramTeamOwedEntry)] = [];
@@ -144,6 +150,8 @@ persistent actor {
   stable var joinInvitesStable : [(Text, Types.JoinInviteRecord)] = [];
   /// Join invite code -> trial month duration (only present for trial invites).
   stable var joinInviteTrialMonthsStable : [(Text, Nat)] = [];
+  /// Join invite code -> application credits granted on redeem (trial offers).
+  stable var joinInviteAppCreditsStable : [(Text, Nat)] = [];
   /// Account recovery codes (8-digit) — admin-generated; single-use; 7-day expiry.
   stable var accountRecoveryCodesStable : [(Text, Types.AccountRecoveryCodeRecord)] = [];
 
@@ -170,7 +178,7 @@ persistent actor {
   stable var artistFeaturedFeaturableIdsStable : [Text] = [];
   /// Manual featured order (max 8) — public home/artists strip when not in random mode.
   stable var artistFeaturedManualIdsStable : [Text] = [];
-  /// When true, public clients pick up to 8 from the featurable pool (shuffled client-side).
+  /// When true, public clients pick up to 24 from the featurable pool (shuffled client-side).
   stable var artistFeaturedRandomModeStable : Bool = false;
 
   /// Program Draw past recipients (Studio Manage checkbox) — keyed by artist id.
@@ -470,6 +478,15 @@ persistent actor {
   transient var scheduleEventRsvpIdsById : _HashMap.HashMap<Text, [Text]> =
     _HashMap.HashMap<Text, [Text]>(0, Text.equal, Text.hash);
 
+  transient var scheduleEventCostCentsById : _HashMap.HashMap<Text, Nat> =
+    _HashMap.HashMap<Text, Nat>(0, Text.equal, Text.hash);
+
+  transient var scheduleEventCostCurrencyById : _HashMap.HashMap<Text, Text> =
+    _HashMap.HashMap<Text, Text>(0, Text.equal, Text.hash);
+
+  transient var scheduleEventCostTbaById : _HashMap.HashMap<Text, Bool> =
+    _HashMap.HashMap<Text, Bool>(0, Text.equal, Text.hash);
+
   transient var programTeamMembersById : _HashMap.HashMap<Text, Types.ProgramTeamMember> =
     _HashMap.HashMap<Text, Types.ProgramTeamMember>(0, Text.equal, Text.hash);
 
@@ -544,6 +561,8 @@ persistent actor {
     _HashMap.HashMap<Text, Types.JoinInviteRecord>(0, Text.equal, Text.hash);
   transient var joinInviteTrialMonthsByCode : _HashMap.HashMap<Text, Nat> =
     _HashMap.HashMap<Text, Nat>(0, Text.equal, Text.hash);
+  transient var joinInviteAppCreditsByCode : _HashMap.HashMap<Text, Nat> =
+    _HashMap.HashMap<Text, Nat>(0, Text.equal, Text.hash);
 
   transient var accountRecoveryCodesByCode : _HashMap.HashMap<Text, Types.AccountRecoveryCodeRecord> =
     _HashMap.HashMap<Text, Types.AccountRecoveryCodeRecord>(0, Text.equal, Text.hash);
@@ -589,7 +608,7 @@ persistent actor {
   transient var emailOutboundRecordsById : _HashMap.HashMap<Text, Types.EmailOutboundRecord> =
     _HashMap.HashMap<Text, Types.EmailOutboundRecord>(0, Text.equal, Text.hash);
 
-  private let maxManualFeaturedStrip : Nat = 8;
+  private let maxManualFeaturedStrip : Nat = 24;
 
   private func isEightDigitAccessCode(t : Text) : Bool {
     if (Text.size(t) != 8) {
@@ -859,6 +878,9 @@ persistent actor {
   for (entry in joinInviteTrialMonthsStable.vals()) {
     joinInviteTrialMonthsByCode.put(entry.0, entry.1);
   };
+  for (entry in joinInviteAppCreditsStable.vals()) {
+    joinInviteAppCreditsByCode.put(entry.0, entry.1);
+  };
   for (entry in accountRecoveryCodesStable.vals()) {
     accountRecoveryCodesByCode.put(entry.0, entry.1);
     if (entry.1.active) {
@@ -966,15 +988,20 @@ persistent actor {
       "comms",
       "radar",
       "pending-approval",
+      "profile-images",
+      "audio-files",
       "broadcasts",
       "artists",
       "programs",
       "products",
       "gallery-access",
+      "join-network",
       "journal",
       "sound",
       "content",
       "community",
+      "videos",
+      "user-studio",
       "email",
       "ai",
       "galleries",
@@ -984,6 +1011,7 @@ persistent actor {
       "services",
       "settings",
       "scheduled-tasks",
+      "links",
       "team",
     ];
   };
@@ -2176,6 +2204,9 @@ persistent actor {
     scheduleEventAcceptRsvpStable := _Iter.toArray(scheduleEventAcceptRsvpById.entries());
     scheduleEventAvailabilityStable := _Iter.toArray(scheduleEventAvailabilityById.entries());
     scheduleEventRsvpIdsStable := _Iter.toArray(scheduleEventRsvpIdsById.entries());
+    scheduleEventCostCentsStable := _Iter.toArray(scheduleEventCostCentsById.entries());
+    scheduleEventCostCurrencyStable := _Iter.toArray(scheduleEventCostCurrencyById.entries());
+    scheduleEventCostTbaStable := _Iter.toArray(scheduleEventCostTbaById.entries());
     programTeamMembersStable := _Iter.toArray(programTeamMembersById.entries());
     programTeamOwedEntriesStable := _Iter.toArray(programTeamOwedEntriesById.entries());
     programTeamPaidEntriesStable := _Iter.toArray(programTeamPaidEntriesById.entries());
@@ -2207,6 +2238,7 @@ persistent actor {
     artistDrawStoryVideoStable := _Iter.toArray(artistDrawStoryVideoById.entries());
     joinInvitesStable := _Iter.toArray(joinInvitesByCode.entries());
     joinInviteTrialMonthsStable := _Iter.toArray(joinInviteTrialMonthsByCode.entries());
+    joinInviteAppCreditsStable := _Iter.toArray(joinInviteAppCreditsByCode.entries());
     accountRecoveryCodesStable := _Iter.toArray(accountRecoveryCodesByCode.entries());
     promoCodesStable := _Iter.toArray(promoCodesByCode.entries());
     promoRedemptionsStable := _Iter.toArray(promoRedemptionsByKey.entries());
@@ -2370,6 +2402,16 @@ persistent actor {
       joinInviteTrialMonthsByCode.put(entry.0, entry.1);
     };
     joinInviteTrialMonthsStable := [];
+
+    joinInviteAppCreditsByCode := _HashMap.HashMap<Text, Nat>(
+      joinInviteAppCreditsStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in joinInviteAppCreditsStable.vals()) {
+      joinInviteAppCreditsByCode.put(entry.0, entry.1);
+    };
+    joinInviteAppCreditsStable := [];
 
     accountRecoveryCodesByCode := _HashMap.HashMap<Text, Types.AccountRecoveryCodeRecord>(
       accountRecoveryCodesStable.size(),
@@ -2770,6 +2812,36 @@ persistent actor {
       scheduleEventRsvpIdsById.put(entry.0, entry.1);
     };
     scheduleEventRsvpIdsStable := [];
+
+    scheduleEventCostCentsById := _HashMap.HashMap<Text, Nat>(
+      scheduleEventCostCentsStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in scheduleEventCostCentsStable.vals()) {
+      scheduleEventCostCentsById.put(entry.0, entry.1);
+    };
+    scheduleEventCostCentsStable := [];
+
+    scheduleEventCostCurrencyById := _HashMap.HashMap<Text, Text>(
+      scheduleEventCostCurrencyStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in scheduleEventCostCurrencyStable.vals()) {
+      scheduleEventCostCurrencyById.put(entry.0, entry.1);
+    };
+    scheduleEventCostCurrencyStable := [];
+
+    scheduleEventCostTbaById := _HashMap.HashMap<Text, Bool>(
+      scheduleEventCostTbaStable.size(),
+      Text.equal,
+      Text.hash,
+    );
+    for (entry in scheduleEventCostTbaStable.vals()) {
+      scheduleEventCostTbaById.put(entry.0, entry.1);
+    };
+    scheduleEventCostTbaStable := [];
 
     programTeamMembersById := _HashMap.HashMap<Text, Types.ProgramTeamMember>(
       programTeamMembersStable.size(),
@@ -3400,6 +3472,7 @@ persistent actor {
       scheduledTaskRunsStable = ?(_Iter.toArray(scheduledTaskRunsByTaskId.entries()));
       joinInvitesStable = _Iter.toArray(joinInvitesByCode.entries());
       joinInviteTrialMonthsStable = ?(_Iter.toArray(joinInviteTrialMonthsByCode.entries()));
+      joinInviteAppCreditsStable = ?(_Iter.toArray(joinInviteAppCreditsByCode.entries()));
       accountRecoveryCodesStable = ?(_Iter.toArray(accountRecoveryCodesByCode.entries()));
       studioPermissionDefaultsStable = _Iter.toArray(studioPermissionDefaultsByCategory.entries());
       studioPermissionOverridesStable = _Iter.toArray(studioPermissionOverridesByPrincipal.entries());
@@ -3497,6 +3570,10 @@ persistent actor {
     artistFeaturedManualIdsStable := snapshot.artistFeaturedManualIdsStable;
     joinInvitesStable := snapshot.joinInvitesStable;
     joinInviteTrialMonthsStable := switch (snapshot.joinInviteTrialMonthsStable) {
+      case null { [] };
+      case (?rows) { rows };
+    };
+    joinInviteAppCreditsStable := switch (snapshot.joinInviteAppCreditsStable) {
       case null { [] };
       case (?rows) { rows };
     };
@@ -4574,6 +4651,7 @@ persistent actor {
         };
         joinInvitesByCode.put(cand, rec);
         ignore joinInviteTrialMonthsByCode.remove(cand);
+        ignore joinInviteAppCreditsByCode.remove(cand);
         return cand;
       };
       attempts += 1;
@@ -4632,11 +4710,120 @@ persistent actor {
         };
         joinInvitesByCode.put(cand, rec);
         joinInviteTrialMonthsByCode.put(cand, trialMonths);
+        ignore joinInviteAppCreditsByCode.remove(cand);
         return cand;
       };
       attempts += 1;
     };
     Debug.trap("Could not allocate trial join code");
+  };
+
+  /// Staff: create a single-use trial invite that also grants application credits on redeem.
+  public shared (msg) func adminCreateTrialJoinInviteCodeWithCredits(
+    role : Types.UserRole,
+    trialMonths : Nat,
+    appCredits : Nat,
+  ) : async Text {
+    assertStaffOrAdmin(msg.caller);
+    if (not roleAllowedForJoinInvite(role)) {
+      Debug.trap("Invalid role for join invite");
+    };
+    if (trialMonths == 0) {
+      Debug.trap("trialMonths must be >= 1");
+    };
+    let now = nowText();
+    var attempts : Nat = 0;
+    while (attempts < 50) {
+      let cand = randomEightDigitCandidate(attempts);
+      if (not isJoinInviteCodeTaken(cand)) {
+        let rec : Types.JoinInviteRecord = {
+          role = role;
+          active = true;
+          createdAt = now;
+        };
+        joinInvitesByCode.put(cand, rec);
+        joinInviteTrialMonthsByCode.put(cand, trialMonths);
+        if (appCredits > 0) {
+          joinInviteAppCreditsByCode.put(cand, appCredits);
+        } else {
+          ignore joinInviteAppCreditsByCode.remove(cand);
+        };
+        return cand;
+      };
+      attempts += 1;
+    };
+    Debug.trap("Could not allocate trial join code");
+  };
+
+  /// Staff: trial invites still on the months sidecar — (code, trialMonths, appCredits, active).
+  public shared query (msg) func staffListTrialJoinInvites() : async [(Text, Nat, Nat, Bool)] {
+    assertStaffOrAdmin(msg.caller);
+    var rows : Buffer.Buffer<(Text, Nat, Nat, Bool)> = Buffer.Buffer<(Text, Nat, Nat, Bool)>(
+      joinInviteTrialMonthsByCode.size()
+    );
+    for ((code, months) in joinInviteTrialMonthsByCode.entries()) {
+      let credits = switch (joinInviteAppCreditsByCode.get(code)) {
+        case null { 0 };
+        case (?n) { n };
+      };
+      let active = switch (joinInvitesByCode.get(code)) {
+        case null { false };
+        case (?inv) { inv.active };
+      };
+      rows.add((code, months, credits, active));
+    };
+    Buffer.toArray(rows);
+  };
+
+  private func grantJoinInviteAppCredits(p : Principal, code : Text) {
+    switch (joinInviteAppCreditsByCode.get(code)) {
+      case null {};
+      case (?n) {
+        if (n > 0) {
+          let bal = appCreditBalanceOf(p) + n;
+          quarterlyAppCreditBalanceByPrincipal.put(p, bal);
+          appendCreditLedger(Principal.toText(p), "app_grant", n, "credit", "trial_invite");
+        };
+      };
+    };
+  };
+
+  private func deactivateJoinInviteAndClearSidecars(code : Text, inv : Types.JoinInviteRecord) {
+    let invDone : Types.JoinInviteRecord = { inv with active = false };
+    joinInvitesByCode.put(code, invDone);
+    ignore joinInviteTrialMonthsByCode.remove(code);
+    ignore joinInviteAppCreditsByCode.remove(code);
+  };
+
+  /// Existing member: apply trial window + grant sidecar credits; deactivate the code.
+  public shared (msg) func redeemTrialJoinInviteForCaller(codeRaw : Text) : async Types.RedeemTrialJoinInviteResult {
+    switch (accountsByPrincipal.get(msg.caller)) {
+      case null { return #noAccount };
+      case (?_) {};
+    };
+    let code = normalizeJoinAccessCode(codeRaw);
+    if (not isEightDigitAccessCode(code)) {
+      return #invalidCode;
+    };
+    switch (joinInvitesByCode.get(code)) {
+      case null { return #invalidCode };
+      case (?inv) {
+        if (not inv.active) {
+          return #inviteInactive;
+        };
+        switch (joinInviteTrialMonthsByCode.get(code)) {
+          case null { return #notTrialInvite };
+          case (?months) {
+            let startSec = nowSec();
+            let endSec = startSec + (months * trialDurationSecPerMonth);
+            membershipTrialWindowByPrincipal.put(msg.caller, { startedAtSec = startSec; endsAtSec = endSec });
+            grantJoinInviteAppCredits(msg.caller, code);
+            deactivateJoinInviteAndClearSidecars(code, inv);
+            return #ok;
+          };
+        };
+      };
+    };
   };
 
   private func assertContactFieldLen(t : Text) {
@@ -4726,11 +4913,8 @@ persistent actor {
         };
         putUserAccountParts(core, m, msg.caller);
         accountContactByPrincipal.put(msg.caller, contact);
-        let invDone : Types.JoinInviteRecord = {
-          inv with active = false;
-        };
-        joinInvitesByCode.put(code, invDone);
-        ignore joinInviteTrialMonthsByCode.remove(code);
+        grantJoinInviteAppCredits(msg.caller, code);
+        deactivateJoinInviteAndClearSidecars(code, inv);
         return #ok;
       };
       case null {};
@@ -5151,7 +5335,7 @@ persistent actor {
     listDrawRecipientsSorted();
   };
 
-  /// Staff/admin: add/remove artist from the manual featured list (max 8). Returns 1-based slot or 0 if not featured.
+  /// Staff/admin: add/remove artist from the manual featured list (max 24). Returns 1-based slot or 0 if not featured.
   public shared (msg) func staffSetManualFeaturedForArtist(artistId : Text, featured : Bool) : async Nat {
     assertStaffOrAdmin(msg.caller);
     assertStudioFeatureEdit(msg.caller, "home");
@@ -5164,7 +5348,7 @@ persistent actor {
             case null {
               let n = manualFeaturedArtistIds.size();
               if (n >= maxManualFeaturedStrip) {
-                Debug.trap("At most 8 featured artists");
+                Debug.trap("At most 24 featured artists");
               };
               manualFeaturedArtistIds.add(artistId);
               manualFeaturedArtistIds.size();
@@ -6719,6 +6903,9 @@ persistent actor {
     ignore scheduleEventAcceptRsvpById.remove(eventId);
     ignore scheduleEventAvailabilityById.remove(eventId);
     ignore scheduleEventRsvpIdsById.remove(eventId);
+    ignore scheduleEventCostCentsById.remove(eventId);
+    ignore scheduleEventCostCurrencyById.remove(eventId);
+    ignore scheduleEventCostTbaById.remove(eventId);
   };
 
   private func truncateScheduleImageUrl(raw : Text) : Text {
@@ -6817,6 +7004,58 @@ persistent actor {
       case (?ids) { ids };
       case null { [] };
     }
+  };
+
+  private func scheduleEventCostCentsOf(eventId : Text) : Nat {
+    switch (scheduleEventCostCentsById.get(eventId)) {
+      case (?n) { n };
+      case null { 0 };
+    }
+  };
+
+  private func scheduleEventCostTbaOf(eventId : Text) : Bool {
+    switch (scheduleEventCostTbaById.get(eventId)) {
+      case (?b) { b };
+      case null { false };
+    }
+  };
+
+  private func normalizeScheduleCostCurrency(raw : Text) : Text {
+    let t = Text.toLowercase(Text.trim(raw, #char ' '));
+    if (t == "jpy" or t == "yen") { "JPY" } else { "USD" }
+  };
+
+  private func scheduleEventCostCurrencyOf(eventId : Text, costCents : Nat, costTba : Bool) : Text {
+    switch (scheduleEventCostCurrencyById.get(eventId)) {
+      case (?t) { normalizeScheduleCostCurrency(t) };
+      case null {
+        if (costTba or costCents > 0) { "USD" } else { "" }
+      };
+    }
+  };
+
+  private func putScheduleEventCostCents(eventId : Text, costCents : Nat) {
+    if (costCents == 0) {
+      ignore scheduleEventCostCentsById.remove(eventId);
+    } else {
+      scheduleEventCostCentsById.put(eventId, costCents);
+    };
+  };
+
+  private func putScheduleEventCostMeta(eventId : Text, costCents : Nat, costCurrency : Text, costTba : Bool) {
+    if (costTba) {
+      scheduleEventCostTbaById.put(eventId, true);
+      scheduleEventCostCurrencyById.put(eventId, normalizeScheduleCostCurrency(costCurrency));
+      putScheduleEventCostCents(eventId, costCents);
+    } else if (costCents > 0) {
+      ignore scheduleEventCostTbaById.remove(eventId);
+      scheduleEventCostCurrencyById.put(eventId, normalizeScheduleCostCurrency(costCurrency));
+      putScheduleEventCostCents(eventId, costCents);
+    } else {
+      ignore scheduleEventCostTbaById.remove(eventId);
+      ignore scheduleEventCostCurrencyById.remove(eventId);
+      putScheduleEventCostCents(eventId, 0);
+    };
   };
 
   private func putScheduleEventRsvpMeta(
@@ -6998,6 +7237,9 @@ persistent actor {
     let acceptRsvp = scheduleEventAcceptRsvpOf(e.id);
     let availability = scheduleEventAvailabilityOf(e.id);
     let rsvpIds = scheduleEventRsvpIdsOf(e.id);
+    let costCents = scheduleEventCostCentsOf(e.id);
+    let costTba = scheduleEventCostTbaOf(e.id);
+    let costCurrency = scheduleEventCostCurrencyOf(e.id, costCents, costTba);
     let myRsvp = switch (viewer) {
       case (?p) { textListContains(rsvpIds, scheduleRsvpIdentity(p)) };
       case null { false };
@@ -7033,6 +7275,9 @@ persistent actor {
       # ",\"availability\":" # Nat.toText(availability)
       # ",\"rsvpIds\":" # calendarParticipantIdsJson(rsvpIds)
       # ",\"rsvpCount\":" # Nat.toText(rsvpIds.size())
+      # ",\"costCents\":" # Nat.toText(costCents)
+      # ",\"costCurrency\":" # jsonText(costCurrency)
+      # ",\"costTba\":" # jsonBool(costTba)
       # ",\"myRsvp\":" # jsonBool(myRsvp)
       # ",\"conflicts\":[]"
       # ",\"createdAt\":" # jsonText(e.createdAt)
@@ -7120,6 +7365,9 @@ persistent actor {
     importance : Text,
     acceptRsvp : Bool,
     availability : Nat,
+    costCents : Nat,
+    costCurrency : Text,
+    costTba : Bool,
   ) : async Text {
     assertStaffOrAdmin(msg.caller);
     assertStudioFeatureEdit(msg.caller, "schedule");
@@ -7220,6 +7468,7 @@ persistent actor {
     let publicOnSiteEffective = if (relKind == "staff") { false } else { publicOnSite };
     putScheduleEventPublicMeta(rowId, imageUrl, publicOnSiteEffective);
     putScheduleEventRsvpMeta(rowId, importance, acceptRsvp, availability);
+    putScheduleEventCostMeta(rowId, costCents, costCurrency, costTba);
     rowId
   };
 
@@ -7313,6 +7562,12 @@ persistent actor {
           scheduleEventImportanceOf(src.id),
           scheduleEventAcceptRsvpOf(src.id),
           scheduleEventAvailabilityOf(src.id),
+        );
+        putScheduleEventCostMeta(
+          newId,
+          scheduleEventCostCentsOf(src.id),
+          scheduleEventCostCurrencyOf(src.id, scheduleEventCostCentsOf(src.id), scheduleEventCostTbaOf(src.id)),
+          scheduleEventCostTbaOf(src.id),
         );
         newId
       };
@@ -12321,6 +12576,22 @@ persistent actor {
       travelPrepLinks = links;
       applicants = Buffer.toArray(buf);
     };
+  };
+
+  public shared query (msg) func integrationListScheduleEventsForDay(programId : Text, date : Text) : async Text {
+    assertIntegrationCaller(msg.caller);
+    let pid = Text.trim(programId, #char ' ');
+    let ymd = Text.trim(date, #char ' ');
+    var out : Text = "[";
+    var first = true;
+    for ((_, e) in scheduleEventsById.entries()) {
+      if (e.programId == pid and e.date == ymd and e.status != "cancelled" and Text.size(e.title) > 0) {
+        if (not first) { out := out # "," };
+        first := false;
+        out := out # calendarEventJson(e);
+      };
+    };
+    out # "]"
   };
 
   public shared (msg) func staffDeleteTravelPrepLink(programId : Text, linkId : Text) : async () {

@@ -174,13 +174,26 @@ export default function initJoinFusion() {
                     sub.disabled = true;
                 }
                 try {
-                    const outcome = await registerWithJoinAccessCodeForCaller(
+                    let outcome = await registerWithJoinAccessCodeForCaller(
                         userRoleFromSelect(roleVal),
                         codeRaw,
                         first,
                         last,
                         email
                     );
+                    if (outcome === 'accountExists') {
+                        try {
+                            const { redeemTrialJoinInviteForCaller } = await import('../utils/database.js');
+                            const redeem = await redeemTrialJoinInviteForCaller(codeRaw);
+                            if (redeem === 'ok') {
+                                outcome = 'ok';
+                            } else if (redeem === 'inviteInactive') {
+                                outcome = 'inviteInactive';
+                            }
+                        } catch {
+                            /* keep accountExists */
+                        }
+                    }
                     if (outcome !== 'ok') {
                         const map = {
                             invalidCode: 'The code is not valid. Use the 8 digits you received.',

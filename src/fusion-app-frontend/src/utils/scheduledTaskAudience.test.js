@@ -57,6 +57,14 @@ describe('scheduledTaskAudience', () => {
         expect(lineRoomsMissing(task, { groupGeneralId: 'G1', groupAnnounceId: '' })).toEqual(['announce']);
     });
 
+    it('always includes Announcements when that Comms room is bound', () => {
+        const task = { channels: 'line', lineRooms: 'general' };
+        expect(lineRoomsForTask(task, { groupGeneralId: 'G1', groupAnnounceId: 'A1' })).toEqual([
+            { room: 'announce', groupId: 'A1' },
+            { room: 'general', groupId: 'G1' },
+        ]);
+    });
+
     it('posts announce-day only to Announcements and never emails', () => {
         const task = { kind: 'announce_day', channels: 'line', lineRooms: 'announce' };
         expect(emailRecipientsForTask(task, [confirmed])).toEqual([]);

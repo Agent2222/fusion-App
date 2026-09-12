@@ -13,6 +13,7 @@ import {
     getMyProgramAwardEntryDetailed,
     getMyProgramPath,
     getProgramDrawConfigPublic,
+    getPrograms,
     invalidateProgramDrawProgressCache,
     PROGRAM_APPLICATION_ERROR_CODE,
     setMyAccountContactForCaller,
@@ -49,7 +50,11 @@ import {
     getProgramApplicationDraft,
     saveProgramApplicationDraft,
 } from '../../utils/programApplicationDraft.js';
-import { DRAW_ENTRY_FEE_CENTS } from '../../utils/applicantsDrawModel.js';
+import {
+    DRAW_ENTRY_FEE_CENTS,
+    resolveDrawClosedFlag,
+    resolveProgramDrawLiveState,
+} from '../../utils/applicantsDrawModel.js';
 import { emptyApplicationPaymentOptions } from '../../utils/programApplicationFormContext.js';
 import { MEMBERSHIP_TIER_META, planIdForTier } from '../../utils/membershipPlanChange.js';
 import { programFormFieldLabels } from '../../utils/programFormCopy.js';
@@ -496,12 +501,18 @@ class ProgramDrawFormComponent extends HTMLElement {
     }
 
     static get observedAttributes() {
-        return ['active', 'data-program-id', 'hidden'];
+        return ['active', 'data-program-id', 'data-draw-closed', 'data-applications-open', 'hidden'];
     }
 
     attributeChangedCallback(prop, oldVal, newVal) {
         if (prop === 'hidden') return;
-        if ((prop === 'active' || prop === 'data-program-id') && oldVal !== newVal) {
+        if (
+            (prop === 'active' ||
+                prop === 'data-program-id' ||
+                prop === 'data-draw-closed' ||
+                prop === 'data-applications-open') &&
+            oldVal !== newVal
+        ) {
             void this._refresh();
         }
     }
@@ -1376,6 +1387,34 @@ class ProgramDrawFormComponent extends HTMLElement {
         return String(this.getAttribute('data-program-id') || '').trim();
     }
 
+    /** Pass-through for the display: hide “Apply to program instead” when formal apps are closed. */
+    _applicationsOpenAttr() {
+        const attr = this.getAttribute('data-applications-open');
+        if (attr === 'true' || attr === 'false') return attr;
+        return '';
+    }
+
+    /**
+     * Closed if the attribute is true **or** `localesJson.draw.closed` on the program row.
+     * A stale `data-draw-closed="false"` must not keep the entry form open.
+     * @returns {Promise<boolean>}
+     */
+    async _resolveDrawClosed() {
+        const attr = this.getAttribute('data-draw-closed');
+        if (attr === 'true') return true;
+        const id = this._programId();
+        if (!id) return false;
+        try {
+            const rows = await getPrograms();
+            const row = Array.isArray(rows)
+                ? rows.find((p) => String(p.id) === id || String(p.enCard?.id ?? '') === id)
+                : null;
+            return resolveDrawClosedFlag(attr, row);
+        } catch {
+            return false;
+        }
+    }
+
     /**
      * @returns {Record<string, string>}
      */
@@ -2220,7 +2259,13 @@ class ProgramDrawFormComponent extends HTMLElement {
             cfg = null;
         }
         if (token !== this._renderToken) return;
-        if (!cfg?.active) {
+        const closed = await this._resolveDrawClosed();
+        if (token !== this._renderToken) return;
+        const liveState = resolveProgramDrawLiveState({
+            closed,
+            active: cfg == null ? true : Boolean(cfg.active),
+        });
+        if (liveState !== 'open') {
             this.shadowRoot.innerHTML = `
         <style>${this._styles()}</style>
         <div class="application-form-root">
@@ -2228,7 +2273,9 @@ class ProgramDrawFormComponent extends HTMLElement {
           <app-program-draw-display
             id="draw-display"
             data-program-id="${escapeHtml(id || '')}"
-            data-draw-active="false"
+            data-draw-active="${cfg?.active ? 'true' : 'false'}"
+            data-draw-closed="${closed ? 'true' : 'false'}"
+            ${this._applicationsOpenAttr() ? `data-applications-open="${this._applicationsOpenAttr()}"` : ''}
           ></app-program-draw-display>
           <app-program-draw-notify-modal id="draw-notify-modal"></app-program-draw-notify-modal>
         </div>`;
@@ -2330,6 +2377,7 @@ class ProgramDrawFormComponent extends HTMLElement {
           data-program-id="${escapeHtml(id || '')}"
           data-draw-active="true"
           data-user-entered="true"
+          ${this._applicationsOpenAttr() ? `data-applications-open="${this._applicationsOpenAttr()}"` : ''}
         ></app-program-draw-display>
         <div class="app-view-details-row">
           <button type="button" class="app-btn app-btn--ghost" id="draw-view-program-details">${escapeHtml(D.viewProgramDetails)}</button>
@@ -2398,6 +2446,7 @@ class ProgramDrawFormComponent extends HTMLElement {
           data-program-id="${escapeHtml(id || '')}"
           data-draw-active="true"
           data-user-entered="false"
+          ${this._applicationsOpenAttr() ? `data-applications-open="${this._applicationsOpenAttr()}"` : ''}
         ></app-program-draw-display>
         ${gateHtml}
         <div class="app-view-details-row">

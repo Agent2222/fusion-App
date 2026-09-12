@@ -16,7 +16,10 @@ import {
     resetStudioWorkspaceTrail,
     setStudioWorkspaceSectionTitle,
 } from './studio/studioWorkspaceChrome.js';
-import { refreshStudioShellAccessState } from '../utils/database.js';
+import {
+    adminGetStudioPermissionDefaultsStudio,
+    refreshStudioShellAccessState,
+} from '../utils/database.js';
 import { getAuthSnapshot, loginInternetIdentity } from '../utils/icAuth.js';
 import {
     getStudioShellGate,
@@ -29,6 +32,19 @@ import studioWordmarkLogo from '../assets/Fusion-X-logo-03.png';
 import { isRadarPreviewActive } from '../utils/radarPreview.js';
 import { isBroadcastsPreviewActive } from '../utils/broadcastsPreview.js';
 import { isScheduledTasksPreviewActive } from '../utils/scheduledTasksPreview.js';
+import {
+    mergeStudioPermissionMap,
+    parseStudioPermissionMatrixTuples,
+} from '../utils/studioPermissionFeatures.js';
+import {
+    applyStudioRolePreviewToGate,
+    getStudioRolePreview,
+    isStudioRolePreviewActive,
+    setStudioRolePreview,
+    studioRolePreviewInitial,
+    studioRolePreviewLabel,
+    studioRolePreviewMenuItems,
+} from '../utils/studioRolePreview.js';
 
 function isStudioDevPreviewActive() {
     return isRadarPreviewActive() || isBroadcastsPreviewActive() || isScheduledTasksPreviewActive();
@@ -118,11 +134,32 @@ export function render() {
                 <nav class="studio-nav" id="studioNav">
                     ${renderNavButtons(initial)}
                 </nav>
-                <div class="studio-sidebar-footer">
-                    <div class="studio-avatar" aria-hidden="true">A</div>
-                    <div class="studio-user-meta">
-                        <span>Admin</span>
-                        <span>Studio</span>
+                <div class="studio-sidebar-footer-wrap">
+                    <button
+                        type="button"
+                        class="studio-sidebar-footer"
+                        id="studioSidebarFooter"
+                        aria-haspopup="menu"
+                        aria-expanded="false"
+                        aria-controls="studioRolePreviewMenu"
+                        aria-disabled="true"
+                    >
+                        <div class="studio-avatar" id="studioSidebarAvatar" aria-hidden="true">A</div>
+                        <div class="studio-user-meta">
+                            <span id="studioSidebarRoleLabel">Admin</span>
+                            <span id="studioSidebarRoleHint">Studio</span>
+                        </div>
+                        <span class="studio-sidebar-footer-caret" id="studioSidebarRoleCaret" hidden aria-hidden="true"></span>
+                    </button>
+                    <div
+                        id="studioRolePreviewMenu"
+                        class="studio-role-preview-menu"
+                        hidden
+                        role="menu"
+                        aria-labelledby="studioRolePreviewMenuTitle"
+                    >
+                        <p class="studio-role-preview-menu__title" id="studioRolePreviewMenuTitle">View Studio as</p>
+                        <div class="studio-role-preview-menu__list" id="studioRolePreviewMenuList"></div>
                     </div>
                 </div>
             </aside>
@@ -133,7 +170,7 @@ export function render() {
                     </button>
                     <h1 id="studioSectionHeading">${sectionTitle(initial)}</h1>
                     <div class="studio-topbar-actions">
-                        <span class="studio-topbar-admin-label">Admin</span>
+                        <span class="studio-topbar-admin-label" id="studioTopbarRoleLabel">Admin</span>
                         <button type="button" class="studio-topbar-account-btn" id="studioAccountBtn" aria-label="Account dashboard">Account</button>
                         <button type="button" id="studioSettingsBtn" aria-label="Settings">
                             <span class="studio-topbar-settings-icon" aria-hidden="true">◦</span>
@@ -208,6 +245,91 @@ function setHash(sectionId) {
     }
 }
 
+/**
+ * @param {{
+ *   isAdmin?: boolean,
+ *   isSuperStaff?: boolean,
+ *   permissionsNavAllowed?: boolean,
+ *   teamNavAllowed?: boolean,
+ *   effectiveMatrix?: Map<string, { visible: boolean, canEdit: boolean }> | null,
+ * }} shell
+ */
+async function overlayStudioRolePreview(shell) {
+    if (!shell?.isAdmin) {
+        return applyStudioRolePreviewToGate(shell, 'admin', null);
+    }
+    const role = getStudioRolePreview();
+    if (role === 'admin') {
+        return applyStudioRolePreviewToGate(shell, 'admin', null);
+    }
+    try {
+        const tuples = await adminGetStudioPermissionDefaultsStudio(role);
+        const matrix = mergeStudioPermissionMap(parseStudioPermissionMatrixTuples(tuples));
+        return applyStudioRolePreviewToGate(shell, role, matrix);
+    } catch {
+        setStudioRolePreview('admin');
+        return applyStudioRolePreviewToGate(shell, 'admin', null);
+    }
+}
+
+function paintStudioRolePreviewChrome() {
+    const gate = getStudioShellGate();
+    const canPreview = Boolean(gate.isAdmin);
+    const role = canPreview ? (gate.previewRole || getStudioRolePreview() || 'admin') : 'admin';
+    const previewing = canPreview && isStudioRolePreviewActive(role);
+    const label = studioRolePreviewLabel(role);
+    const footer = document.getElementById('studioSidebarFooter');
+    const avatar = document.getElementById('studioSidebarAvatar');
+    const roleLabel = document.getElementById('studioSidebarRoleLabel');
+    const roleHint = document.getElementById('studioSidebarRoleHint');
+    const caret = document.getElementById('studioSidebarRoleCaret');
+    const topbar = document.getElementById('studioTopbarRoleLabel');
+    const root = document.getElementById('studioRoot');
+    if (avatar) avatar.textContent = studioRolePreviewInitial(role);
+    if (roleLabel) roleLabel.textContent = label;
+    if (roleHint) roleHint.textContent = previewing ? 'Preview' : 'Studio';
+    if (topbar) {
+        topbar.textContent = previewing ? `${label} preview` : label;
+        topbar.classList.toggle('is-preview', previewing);
+    }
+    if (root) {
+        if (previewing) root.setAttribute('data-studio-role-preview', role);
+        else root.removeAttribute('data-studio-role-preview');
+    }
+    if (footer) {
+        footer.classList.toggle('is-role-preview-enabled', canPreview);
+        footer.setAttribute('aria-disabled', canPreview ? 'false' : 'true');
+        footer.setAttribute(
+            'aria-label',
+            canPreview ? `View Studio as ${label}. Open role preview.` : label,
+        );
+    }
+    if (caret) caret.hidden = !canPreview;
+    const list = document.getElementById('studioRolePreviewMenuList');
+    if (list) {
+        list.innerHTML = studioRolePreviewMenuItems(role)
+            .map((item) => {
+                const selected = item.selected ? ' is-selected' : '';
+                return `<button type="button" class="studio-role-preview-menu__item${selected}" role="menuitemradio" aria-checked="${item.selected ? 'true' : 'false'}" data-studio-role-preview="${escapeHtml(item.id)}">${escapeHtml(item.label)}</button>`;
+            })
+            .join('');
+    }
+}
+
+/**
+ * @param {boolean} open
+ */
+function setStudioRolePreviewMenuOpen(open) {
+    const footer = document.getElementById('studioSidebarFooter');
+    const menu = document.getElementById('studioRolePreviewMenu');
+    if (!footer || !menu) return;
+    const canPreview = footer.classList.contains('is-role-preview-enabled');
+    const next = Boolean(open) && canPreview;
+    menu.hidden = !next;
+    footer.setAttribute('aria-expanded', next ? 'true' : 'false');
+    footer.classList.toggle('is-menu-open', next);
+}
+
 const NAV_DRAWER_MQ = '(max-width: 768px)';
 
 function isStudioMobileNav() {
@@ -225,6 +347,10 @@ let _studioAccountOverlayInited = false;
 let _studioAccountOverlayKeydown = null;
 /** @type {(() => void) | null} */
 let _studioAuthChangeHandler = null;
+/** @type {((e: MouseEvent) => void) | null} */
+let _studioRolePreviewDocClick = null;
+/** @type {((e: KeyboardEvent) => void) | null} */
+let _studioRolePreviewKeydown = null;
 
 export default function initStudio() {
     const root = document.getElementById('studioRoot');
@@ -322,8 +448,10 @@ export default function initStudio() {
     };
 
     const refreshShellAndNav = async () => {
-        const shell = await refreshStudioShellAccessState();
+        setStudioRolePreviewMenuOpen(false);
+        const shell = await overlayStudioRolePreview(await refreshStudioShellAccessState());
         setStudioShellGate(shell);
+        paintStudioRolePreviewChrome();
         const navEl = document.getElementById('studioNav');
         if (navEl) {
             navEl.innerHTML = buildStudioNavButtonsHtml(normalizeHash());
@@ -349,6 +477,48 @@ export default function initStudio() {
         void refreshShellAndNav();
     };
     window.addEventListener('fusion-studio-shell-refresh', _studioShellRefreshHandler);
+
+    const roleFooter = document.getElementById('studioSidebarFooter');
+    const roleMenu = document.getElementById('studioRolePreviewMenu');
+    roleFooter?.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (roleFooter.getAttribute('aria-disabled') === 'true') return;
+        const open = roleFooter.getAttribute('aria-expanded') !== 'true';
+        if (open) paintStudioRolePreviewChrome();
+        setStudioRolePreviewMenuOpen(open);
+    });
+    roleMenu?.addEventListener('click', (e) => {
+        const btn = /** @type {HTMLElement | null} */ (
+            e.target instanceof Element ? e.target.closest('[data-studio-role-preview]') : null
+        );
+        if (!btn) return;
+        e.preventDefault();
+        const nextRole = btn.getAttribute('data-studio-role-preview') || 'admin';
+        setStudioRolePreviewMenuOpen(false);
+        setStudioRolePreview(nextRole);
+        void refreshShellAndNav();
+    });
+    if (_studioRolePreviewDocClick) {
+        document.removeEventListener('click', _studioRolePreviewDocClick);
+    }
+    _studioRolePreviewDocClick = (e) => {
+        const wrap = document.querySelector('#studioSidebar .studio-sidebar-footer-wrap');
+        if (!wrap || (e.target instanceof Node && wrap.contains(e.target))) return;
+        setStudioRolePreviewMenuOpen(false);
+    };
+    document.addEventListener('click', _studioRolePreviewDocClick);
+    if (_studioRolePreviewKeydown) {
+        window.removeEventListener('keydown', _studioRolePreviewKeydown);
+    }
+    _studioRolePreviewKeydown = (e) => {
+        if (e.key !== 'Escape') return;
+        const menu = document.getElementById('studioRolePreviewMenu');
+        if (!menu || menu.hidden) return;
+        e.preventDefault();
+        setStudioRolePreviewMenuOpen(false);
+        document.getElementById('studioSidebarFooter')?.focus();
+    };
+    window.addEventListener('keydown', _studioRolePreviewKeydown);
 
     const overlay = document.getElementById('studioAccountOverlay');
     const overlayBody = document.getElementById('studioAccountOverlayBody');
@@ -480,7 +650,9 @@ export default function initStudio() {
                 effectiveMatrix: null,
                 permissionsNavAllowed: true,
                 teamNavAllowed: true,
+                isAdmin: false,
             });
+            paintStudioRolePreviewChrome();
             const navEl = document.getElementById('studioNav');
             if (navEl) {
                 navEl.innerHTML = buildStudioNavButtonsHtml(normalizeHash());

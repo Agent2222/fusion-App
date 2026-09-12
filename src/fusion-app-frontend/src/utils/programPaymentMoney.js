@@ -8,6 +8,7 @@ import {
     getApplicantIsTester,
     getApplicantLocalTravelCostCents,
     getApplicantManualDepositSubmitted,
+    getApplicantPartnerOverrideCents,
     getApplicantSpecialProgramTotalCents,
     getApplicantSponsorshipMode,
     getApplicantSponsoredCreditCents,
@@ -54,6 +55,67 @@ export function formatUsdFromCents(cents) {
         currency: 'USD',
         maximumFractionDigits: 2,
     }).format(normalizeCents(cents) / 100);
+}
+
+/**
+ * @param {unknown} cents
+ * @returns {string}
+ */
+export function centsToUsdFieldValue(cents) {
+    const n = normalizeCents(cents);
+    return n > 0 ? (n / 100).toFixed(2) : '';
+}
+
+/**
+ * Program-level Partner 1–3 defaults stored on `localesJson.finance`.
+ *
+ * @param {unknown} localesJsonOrRow
+ * @returns {{ partner1Cents: number, partner2Cents: number, partner3Cents: number }}
+ */
+export function parseProgramFinancePartnerDefaults(localesJsonOrRow) {
+    const empty = { partner1Cents: 0, partner2Cents: 0, partner3Cents: 0 };
+    let finance = null;
+    if (localesJsonOrRow && typeof localesJsonOrRow === 'object' && !Array.isArray(localesJsonOrRow)) {
+        const rec = /** @type {Record<string, unknown>} */ (localesJsonOrRow);
+        if (rec.finance && typeof rec.finance === 'object' && !Array.isArray(rec.finance)) {
+            finance = rec.finance;
+        } else if (typeof rec.localesJson === 'string') {
+            try {
+                const parsed = JSON.parse(rec.localesJson);
+                if (parsed?.finance && typeof parsed.finance === 'object') finance = parsed.finance;
+            } catch {
+                finance = null;
+            }
+        }
+    } else if (typeof localesJsonOrRow === 'string') {
+        try {
+            const parsed = JSON.parse(localesJsonOrRow);
+            if (parsed?.finance && typeof parsed.finance === 'object') finance = parsed.finance;
+        } catch {
+            finance = null;
+        }
+    }
+    if (!finance || typeof finance !== 'object') return empty;
+    const f = /** @type {Record<string, unknown>} */ (finance);
+    return {
+        partner1Cents: normalizeCents(f.partner1Cents),
+        partner2Cents: normalizeCents(f.partner2Cents),
+        partner3Cents: normalizeCents(f.partner3Cents),
+    };
+}
+
+/**
+ * @param {string} payloadJson
+ * @param {object | null | undefined} programRow
+ * @param {1 | 2 | 3} slot
+ */
+export function resolveApplicantPartnerCents(payloadJson, programRow, slot) {
+    const override = getApplicantPartnerOverrideCents(payloadJson, slot);
+    if (override != null) return override;
+    const defaults = parseProgramFinancePartnerDefaults(programRow);
+    if (slot === 1) return defaults.partner1Cents;
+    if (slot === 2) return defaults.partner2Cents;
+    return defaults.partner3Cents;
 }
 
 /**
@@ -580,6 +642,32 @@ export function isApplicantFinanceActive(applicant) {
 }
 
 /**
+ * Confirmed applicant who paid a deposit, then withdrew or was pulled out.
+ * @param {object | null | undefined} applicant
+ * @param {ReturnType<typeof buildProgramPaymentIndex>} index
+ * @param {object | null | undefined} [programRow]
+ */
+export function isApplicantFinancePhantom(applicant, index, programRow = null) {
+    if (!applicant || typeof applicant !== 'object') return false;
+    if (isApplicantFinanceActive(applicant)) return false;
+    if (!isApplicantSlotSecured(applicant, index)) return false;
+    return isApplicantDepositPaid(applicant, index, programRow);
+}
+
+/**
+ * @param {object | null | undefined} applicant
+ * @param {ReturnType<typeof buildProgramPaymentIndex>} index
+ * @param {object | null | undefined} [programRow]
+ */
+export function shouldIncludeApplicantInFinanceTable(applicant, index, programRow = null) {
+    if (!applicant || typeof applicant !== 'object') return false;
+    if (getApplicantIsTester(String(applicant.payloadJson || ''))) return false;
+    if (!isApplicantSlotSecured(applicant, index)) return false;
+    if (isApplicantFinanceActive(applicant)) return true;
+    return isApplicantFinancePhantom(applicant, index, programRow);
+}
+
+/**
  * @param {object} applicant
  * @param {ReturnType<typeof buildProgramPaymentIndex>} index
  */
@@ -645,9 +733,10 @@ export function applicantPaymentContext(applicant, index) {
  * @param {object} applicant
  * @param {object | null | undefined} programRow
  * @param {ReturnType<typeof buildProgramPaymentIndex>} index
- * @param {{ partner1Cents?: number, partner2Cents?: number, partner3Cents?: number }} [partners]
+ * @param {{ phantom?: boolean, partner1Cents?: number, partner2Cents?: number, partner3Cents?: number }} [opts]
  */
-export function buildStudioProgramFinanceRow(applicant, programRow, index, partners = {}) {
+export function buildStudioProgramFinanceRow(applicant, programRow, index, opts = {}) {
+    const phantom = Boolean(opts.phantom);
     const appId = String(applicant?.id || '').trim();
     const programId = String(applicant?.programId || '').trim();
     const payloadJson = String(applicant?.payloadJson || '');
@@ -657,23 +746,37 @@ export function buildStudioProgramFinanceRow(applicant, programRow, index, partn
     const depositAmountCents = depositWaived
         ? 0
         : resolveApplicantDepositAmountCents(ctx.summary, programRow);
-    const totalPaymentsCents = computeEffectiveTotalPaymentsCents(
+    const liveTotalPaymentsCents = computeEffectiveTotalPaymentsCents(
         applicant,
         ctx.ledger,
         ctx.summary,
         depositAmountCents,
     );
-    const ticketsCents = getApplicantFlightCostCents(payloadJson);
-    const localTravelPayloadCents = getApplicantLocalTravelCostCents(payloadJson);
-    const localTravelLedgerCents = sumLedgerTravelFeesCents(ctx.ledger);
+    const ticketsCents = phantom ? 0 : getApplicantFlightCostCents(payloadJson);
+    const localTravelPayloadCents = phantom ? 0 : getApplicantLocalTravelCostCents(payloadJson);
+    const localTravelLedgerCents = phantom ? 0 : sumLedgerTravelFeesCents(ctx.ledger);
     const localTravelCents = localTravelPayloadCents + localTravelLedgerCents;
-    const partner1Cents = normalizeCents(partners.partner1Cents);
-    const partner2Cents = normalizeCents(partners.partner2Cents);
-    const partner3Cents = normalizeCents(partners.partner3Cents);
+    const partner1Cents = phantom
+        ? 0
+        : opts.partner1Cents != null
+          ? normalizeCents(opts.partner1Cents)
+          : resolveApplicantPartnerCents(payloadJson, programRow, 1);
+    const partner2Cents = phantom
+        ? 0
+        : opts.partner2Cents != null
+          ? normalizeCents(opts.partner2Cents)
+          : resolveApplicantPartnerCents(payloadJson, programRow, 2);
+    const partner3Cents = phantom
+        ? 0
+        : opts.partner3Cents != null
+          ? normalizeCents(opts.partner3Cents)
+          : resolveApplicantPartnerCents(payloadJson, programRow, 3);
+    const paymentFeesCents = phantom ? 0 : ctx.paymentFeesCents;
+    const totalPaymentsCents = phantom ? depositAmountCents : liveTotalPaymentsCents;
     const subtotalCents =
-        ctx.paymentFeesCents + ticketsCents + localTravelCents + partner1Cents + partner2Cents + partner3Cents;
+        paymentFeesCents + ticketsCents + localTravelCents + partner1Cents + partner2Cents + partner3Cents;
     const profitCents = totalPaymentsCents - subtotalCents;
-    const remainingBalanceCents = Math.max(0, ctx.priceCategoryCents - totalPaymentsCents);
+    const remainingBalanceCents = phantom ? 0 : Math.max(0, ctx.priceCategoryCents - totalPaymentsCents);
     const depositPaid = !depositWaived && isApplicantDepositPaid(applicant, index, programRow);
     return {
         applicantId: appId,
@@ -693,10 +796,10 @@ export function buildStudioProgramFinanceRow(applicant, programRow, index, partn
         depositWaived,
         slotSecured: isApplicantSlotSecured(applicant, index),
         depositPaid,
-        planActive: ctx.planActive,
-        planPriceCents: ctx.planPriceCents,
+        planActive: phantom ? false : ctx.planActive,
+        planPriceCents: phantom ? 0 : ctx.planPriceCents,
         totalPaymentsCents,
-        paymentFeesCents: ctx.paymentFeesCents,
+        paymentFeesCents,
         ticketsCents,
         localTravelPayloadCents,
         localTravelLedgerCents,
@@ -713,6 +816,8 @@ export function buildStudioProgramFinanceRow(applicant, programRow, index, partn
         plan: ctx.plan,
         payloadJson,
         isTester: getApplicantIsTester(payloadJson),
+        phantom,
+        status: String(applicant?.status || ''),
     };
 }
 
@@ -743,14 +848,14 @@ export function buildStudioProgramFinanceRows(applicants, programs, index, opts 
             const isActive = status === 'active' || status === 'open' || status === 'full';
             if (!isActive) continue;
         }
-        if (getApplicantIsTester(String(applicant.payloadJson || ''))) continue;
-        if (!isApplicantFinanceActive(applicant)) continue;
-        if (!isApplicantSlotSecured(applicant, index)) continue;
-        rows.push(buildStudioProgramFinanceRow(applicant, programRow, index));
+        if (!shouldIncludeApplicantInFinanceTable(applicant, index, programRow)) continue;
+        const phantom = isApplicantFinancePhantom(applicant, index, programRow);
+        rows.push(buildStudioProgramFinanceRow(applicant, programRow, index, { phantom }));
     }
     rows.sort((a, b) => {
         const pc = a.programId.localeCompare(b.programId);
         if (pc !== 0) return pc;
+        if (Boolean(a.phantom) !== Boolean(b.phantom)) return a.phantom ? 1 : -1;
         return `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`, undefined, {
             sensitivity: 'base',
         });
@@ -813,10 +918,9 @@ export function computeProgramCollectedPaymentsCents(programRow, applicantsForPr
     let remainingBalanceCents = 0;
     for (const applicant of applicants) {
         if (!applicant || typeof applicant !== 'object') continue;
-        if (getApplicantIsTester(String(applicant.payloadJson || ''))) continue;
-        if (!isApplicantFinanceActive(applicant)) continue;
-        if (!isApplicantSlotSecured(applicant, index)) continue;
-        const row = buildStudioProgramFinanceRow(applicant, programRow, index);
+        if (!shouldIncludeApplicantInFinanceTable(applicant, index, programRow)) continue;
+        const phantom = isApplicantFinancePhantom(applicant, index, programRow);
+        const row = buildStudioProgramFinanceRow(applicant, programRow, index, { phantom });
         totalPaymentsCents += normalizeCents(row.totalPaymentsCents);
         remainingBalanceCents += normalizeCents(row.remainingBalanceCents);
     }
@@ -839,19 +943,107 @@ export function teamMemberExpenseSubtotalCents(member) {
 }
 
 /**
+ * Sum displayed money columns for the program finance table footer.
+ * Staff rows are included; the footer is always the last visual row.
+ *
+ * @param {ReturnType<typeof buildStudioProgramFinanceRow>[]} applicantRows
+ * @param {object[]} [teamMembers]
+ * @param {number} [programProfitCents]
+ */
+export function computeFinanceProgramTableTotals(applicantRows, teamMembers = [], programProfitCents = 0) {
+    const totals = {
+        depositCents: 0,
+        planPriceCents: 0,
+        totalPaymentsCents: 0,
+        paymentFeesCents: 0,
+        ticketsCents: 0,
+        localTravelCents: 0,
+        partner1Cents: 0,
+        partner2Cents: 0,
+        partner3Cents: 0,
+        subtotalCents: 0,
+        remainingBalanceCents: 0,
+        profitCents: 0,
+        projectedPayoutCents: 0,
+    };
+    for (const row of Array.isArray(applicantRows) ? applicantRows : []) {
+        if (!row || typeof row !== 'object') continue;
+        if (row.depositPaid || row.phantom) {
+            totals.depositCents += normalizeCents(row.depositAmountCents);
+        }
+        if (row.planActive) totals.planPriceCents += normalizeCents(row.planPriceCents);
+        totals.totalPaymentsCents += normalizeCents(row.totalPaymentsCents);
+        totals.paymentFeesCents += normalizeCents(row.paymentFeesCents);
+        totals.ticketsCents += normalizeCents(row.ticketsCents);
+        totals.localTravelCents += normalizeCents(row.localTravelCents);
+        totals.partner1Cents += normalizeCents(row.partner1Cents);
+        totals.partner2Cents += normalizeCents(row.partner2Cents);
+        totals.partner3Cents += normalizeCents(row.partner3Cents);
+        totals.subtotalCents += normalizeCents(row.subtotalCents);
+        totals.remainingBalanceCents += normalizeCents(row.remainingBalanceCents);
+        totals.profitCents += Number(row.profitCents) || 0;
+    }
+    for (const member of Array.isArray(teamMembers) ? teamMembers : []) {
+        if (!member || String(member.status || 'active') === 'removed') continue;
+        const subtotal = teamMemberExpenseSubtotalCents(member);
+        totals.ticketsCents += normalizeCents(member.ticketsCents);
+        totals.localTravelCents += normalizeCents(member.localTravelCents);
+        totals.partner1Cents += normalizeCents(member.partner1Cents);
+        totals.partner2Cents += normalizeCents(member.partner2Cents);
+        totals.partner3Cents += normalizeCents(member.partner3Cents);
+        totals.subtotalCents += subtotal;
+        totals.profitCents -= subtotal;
+        const pct = Math.max(0, Math.min(100, Number(member.payoutPercent) || 0));
+        totals.projectedPayoutCents += computeProjectedPayoutCents(programProfitCents, pct);
+    }
+    return totals;
+}
+
+/**
+ * Sort key for a finance promotion: start date, then end, then created.
+ * Missing dates sort as oldest.
+ * @param {object | null | undefined} promo
+ * @returns {number}
+ */
+export function financePromotionDateMs(promo) {
+    const raw = String(
+        promo?.startIso || promo?.endIso || promo?.createdAt || promo?.updatedAt || '',
+    ).trim();
+    if (!raw) return 0;
+    const t = Date.parse(raw);
+    return Number.isFinite(t) ? t : 0;
+}
+
+/**
+ * Newest first (most recent start/date at the top).
+ * @param {object[] | null | undefined} promotions
+ * @returns {object[]}
+ */
+export function sortFinancePromotionsByDateDesc(promotions) {
+    return (Array.isArray(promotions) ? promotions.slice() : []).sort((a, b) => {
+        const diff = financePromotionDateMs(b) - financePromotionDateMs(a);
+        if (diff !== 0) return diff;
+        return String(b?.id || '').localeCompare(String(a?.id || ''));
+    });
+}
+
+/**
  * Active promotions linked to a program (`target === "program"`).
+ * Newest date first.
  * @param {object[] | null | undefined} promotions
  * @param {string | null | undefined} programId
  */
 export function programPromotionsForProgram(promotions, programId) {
     const pid = String(programId || '').trim();
     if (!pid) return [];
-    return (Array.isArray(promotions) ? promotions : []).filter((p) => {
-        if (!p || typeof p !== 'object') return false;
-        if (String(p.status || 'active') === 'archived') return false;
-        if (String(p.target || '') !== 'program') return false;
-        return String(p.programId || '').trim() === pid;
-    });
+    return sortFinancePromotionsByDateDesc(
+        (Array.isArray(promotions) ? promotions : []).filter((p) => {
+            if (!p || typeof p !== 'object') return false;
+            if (String(p.status || 'active') === 'archived') return false;
+            if (String(p.target || '') !== 'program') return false;
+            return String(p.programId || '').trim() === pid;
+        }),
+    );
 }
 
 /**
@@ -1075,10 +1267,9 @@ export function computeProgramBaseExpenseCents(
     let applicantExpenses = 0;
     for (const applicant of applicants) {
         if (!applicant || typeof applicant !== 'object') continue;
-        if (getApplicantIsTester(String(applicant.payloadJson || ''))) continue;
-        if (!isApplicantFinanceActive(applicant)) continue;
-        if (!isApplicantSlotSecured(applicant, index)) continue;
-        const row = buildStudioProgramFinanceRow(applicant, programRow, index);
+        if (!shouldIncludeApplicantInFinanceTable(applicant, index, programRow)) continue;
+        const phantom = isApplicantFinancePhantom(applicant, index, programRow);
+        const row = buildStudioProgramFinanceRow(applicant, programRow, index, { phantom });
         applicantExpenses += normalizeCents(row.subtotalCents);
     }
     let teamExpenses = 0;
@@ -1111,10 +1302,9 @@ export function computeProgramProfitCents(
     let applicantProfit = 0;
     for (const applicant of applicants) {
         if (!applicant || typeof applicant !== 'object') continue;
-        if (getApplicantIsTester(String(applicant.payloadJson || ''))) continue;
-        if (!isApplicantFinanceActive(applicant)) continue;
-        if (!isApplicantSlotSecured(applicant, index)) continue;
-        const row = buildStudioProgramFinanceRow(applicant, programRow, index);
+        if (!shouldIncludeApplicantInFinanceTable(applicant, index, programRow)) continue;
+        const phantom = isApplicantFinancePhantom(applicant, index, programRow);
+        const row = buildStudioProgramFinanceRow(applicant, programRow, index, { phantom });
         applicantProfit += normalizeCents(row.profitCents);
     }
     let teamExpenses = 0;

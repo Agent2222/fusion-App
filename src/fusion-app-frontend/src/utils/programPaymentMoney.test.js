@@ -8,7 +8,11 @@ vi.mock('./studioArtistPrograms.js', () => ({
 import {
     buildProgramPaymentIndex,
     buildStudioProgramFinanceRow,
+    buildStudioProgramFinanceRows,
     computeApplicantEffectiveTotalDueCents,
+    computeFinanceProgramTableTotals,
+    parseProgramFinancePartnerDefaults,
+    resolveApplicantPartnerCents,
     computeApplicantEffectiveTotalDueFromPayload,
     computeProgramExpectedRevenueCents,
     computeProgramCollectedPaymentsCents,
@@ -20,6 +24,8 @@ import {
     computeAdminNetProgramPayoutCents,
     computeProjectedPayoutCents,
     programPromotionExpenseCents,
+    programPromotionsForProgram,
+    sortFinancePromotionsByDateDesc,
     sumTeamMemberOwedCents,
     sumTeamMemberPaidCents,
     teamMemberDisbursementRemainingCents,
@@ -35,6 +41,7 @@ import {
     PROGRAM_RESIDENCY_BASE_TOTAL_CENTS,
     PROGRAM_VETERAN_DISCOUNT_CENTS,
 } from './programPaymentMoney.js';
+import { mergeApplicantStaffFields } from './studioPlainForms.js';
 
 describe('computeApplicantEffectiveTotalDueCents', () => {
     it('uses list price by default', () => {
@@ -481,5 +488,184 @@ describe('program profit and projected payout', () => {
         // 50% of 100000 = 50000 − 3000 admin-funded paid − 5000 outstanding
         expect(computeAdminNetProgramPayoutCents(admin, 100000, [admin, staff])).toBe(42000);
         expect(computeProjectedPayoutCents(100000, 50)).toBe(50000);
+    });
+});
+
+describe('program partner defaults and applicant overrides', () => {
+    const programRow = {
+        id: 'prog-1',
+        localesJson: JSON.stringify({
+            en: {},
+            ja: {},
+            finance: { partner1Cents: 15000, partner2Cents: 25000, partner3Cents: 0 },
+        }),
+    };
+
+    it('reads partner defaults from localesJson.finance', () => {
+        expect(parseProgramFinancePartnerDefaults(programRow)).toEqual({
+            partner1Cents: 15000,
+            partner2Cents: 25000,
+            partner3Cents: 0,
+        });
+    });
+
+    it('uses program defaults unless the applicant payload overrides a slot', () => {
+        expect(resolveApplicantPartnerCents('{}', programRow, 1)).toBe(15000);
+        expect(resolveApplicantPartnerCents('{"staffApplicantPartner1Cents":0}', programRow, 1)).toBe(0);
+        expect(resolveApplicantPartnerCents('{"staffApplicantPartner2Cents":40000}', programRow, 2)).toBe(40000);
+        expect(resolveApplicantPartnerCents('{}', programRow, 3)).toBe(0);
+    });
+
+    it('can clear an override back to the program default', () => {
+        const withOverride = mergeApplicantStaffFields(
+            {
+                internalNotes: '',
+                manualDepositSubmitted: false,
+                partner1Cents: 0,
+            },
+            '{}',
+        );
+        expect(resolveApplicantPartnerCents(withOverride, programRow, 1)).toBe(0);
+        const cleared = mergeApplicantStaffFields(
+            {
+                internalNotes: '',
+                manualDepositSubmitted: false,
+                partner1Cents: null,
+            },
+            withOverride,
+        );
+        expect(resolveApplicantPartnerCents(cleared, programRow, 1)).toBe(15000);
+    });
+});
+
+describe('finance table phantom rows and totals', () => {
+    const depositIndex = buildProgramPaymentIndex({
+        summaries: [
+            {
+                applicationId: 'gone',
+                depositStatus: 'paid',
+                totalPaidCents: 100000,
+                depositAmountCents: 100000,
+            },
+            {
+                applicationId: 'stay',
+                depositStatus: 'paid',
+                totalPaidCents: 200000,
+                depositAmountCents: 100000,
+            },
+        ],
+        ledger: [
+            { applicationId: 'gone', paymentType: 'deposit', status: 'succeeded', amountCents: 100000 },
+            { applicationId: 'stay', paymentType: 'deposit', status: 'succeeded', amountCents: 200000 },
+        ],
+    });
+
+    it('includes a deposit-only phantom row for pulled-out applicants who paid', () => {
+        const rows = buildStudioProgramFinanceRows(
+            [
+                {
+                    id: 'gone',
+                    programId: 'prog-1',
+                    status: 'pulledOut',
+                    fullName: 'Gone Person',
+                    payloadJson: JSON.stringify({ firstName: 'Gone', lastName: 'Person' }),
+                },
+                {
+                    id: 'stay',
+                    programId: 'prog-1',
+                    status: 'accepted',
+                    fullName: 'Stay Person',
+                    payloadJson: JSON.stringify({ firstName: 'Stay', lastName: 'Person' }),
+                },
+            ],
+            [{ id: 'prog-1', studioStatus: 'active' }],
+            depositIndex,
+        );
+        expect(rows.map((r) => r.applicantId)).toEqual(['stay', 'gone']);
+        const phantom = rows.find((r) => r.applicantId === 'gone');
+        expect(phantom?.phantom).toBe(true);
+        expect(phantom?.totalPaymentsCents).toBe(100000);
+        expect(phantom?.profitCents).toBe(100000);
+        expect(phantom?.partner1Cents).toBe(0);
+        expect(phantom?.ticketsCents).toBe(0);
+    });
+
+    it('sums applicant and staff columns and keeps staff after applicants', () => {
+        const applicantRows = [
+            {
+                depositPaid: true,
+                depositAmountCents: 100000,
+                planActive: true,
+                planPriceCents: 50000,
+                totalPaymentsCents: 200000,
+                paymentFeesCents: 1000,
+                ticketsCents: 2000,
+                localTravelCents: 3000,
+                partner1Cents: 4000,
+                partner2Cents: 0,
+                partner3Cents: 0,
+                subtotalCents: 10000,
+                remainingBalanceCents: 300000,
+                profitCents: 190000,
+            },
+            {
+                phantom: true,
+                depositPaid: true,
+                depositAmountCents: 100000,
+                totalPaymentsCents: 100000,
+                paymentFeesCents: 0,
+                ticketsCents: 0,
+                localTravelCents: 0,
+                partner1Cents: 0,
+                partner2Cents: 0,
+                partner3Cents: 0,
+                subtotalCents: 0,
+                remainingBalanceCents: 0,
+                profitCents: 100000,
+            },
+        ];
+        const team = [
+            {
+                ticketsCents: 5000,
+                localTravelCents: 1000,
+                partner1Cents: 2000,
+                partner2Cents: 0,
+                partner3Cents: 0,
+                payoutPercent: 10,
+                status: 'active',
+            },
+        ];
+        const totals = computeFinanceProgramTableTotals(applicantRows, team, 200000);
+        expect(totals.depositCents).toBe(200000);
+        expect(totals.totalPaymentsCents).toBe(300000);
+        expect(totals.ticketsCents).toBe(7000);
+        expect(totals.partner1Cents).toBe(6000);
+        expect(totals.subtotalCents).toBe(18000);
+        expect(totals.profitCents).toBe(282000);
+        expect(totals.projectedPayoutCents).toBe(20000);
+    });
+});
+
+describe('finance promotion date order', () => {
+    it('sorts most recent start date first', () => {
+        const sorted = sortFinancePromotionsByDateDesc([
+            { id: 'old', startIso: '2025-01-01' },
+            { id: 'new', startIso: '2026-08-15' },
+            { id: 'mid', startIso: '2026-03-01' },
+        ]);
+        expect(sorted.map((p) => p.id)).toEqual(['new', 'mid', 'old']);
+    });
+
+    it('lists program promotions newest first and skips archived', () => {
+        const rows = programPromotionsForProgram(
+            [
+                { id: 'a', target: 'program', programId: 'p1', startIso: '2024-06-01', status: 'active' },
+                { id: 'b', target: 'program', programId: 'p1', startIso: '2026-01-10', status: 'active' },
+                { id: 'c', target: 'program', programId: 'p1', startIso: '2025-12-01', status: 'archived' },
+                { id: 'd', target: 'program', programId: 'other', startIso: '2026-09-01', status: 'active' },
+            ],
+            'p1',
+        );
+        expect(rows.map((p) => p.id)).toEqual(['b', 'a']);
     });
 });

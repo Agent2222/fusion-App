@@ -31,7 +31,9 @@ function normalizePath(pathname) {
  * @returns {boolean}
  */
 export function isFilterSoundRoute(pathname) {
-    return FILTER_SOUND_ROUTES.includes(normalizePath(pathname));
+    const p = normalizePath(pathname);
+    if (FILTER_SOUND_ROUTES.includes(p)) return true;
+    return p.startsWith('/artists/');
 }
 
 /**

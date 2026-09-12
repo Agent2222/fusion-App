@@ -50,6 +50,7 @@ import {
     getApplicantIsTester,
     getApplicantLocalTravelCostCents,
     getApplicantManualDepositSubmitted,
+    getApplicantPartnerOverrideCents,
     getApplicantSpecialProgramTotalCents,
     getApplicantSponsorshipMode,
     getApplicantSponsoredCreditCents,
@@ -65,7 +66,10 @@ import { parseProgramEndDate } from '../../utils/programAlumniEligibility.js';
 import {
     buildProgramPaymentIndex,
     buildStudioProgramFinanceRows,
+    centsToUsdFieldValue,
     computeFinancePanelTotals,
+    computeFinanceProgramTableTotals,
+    parseProgramFinancePartnerDefaults,
     computeProgramBaseExpenseCents,
     computeProgramExpectedRevenueCents,
     computeProgramCollectedPaymentsCents,
@@ -87,6 +91,7 @@ import {
     PROGRAM_VETERAN_DISCOUNT_CENTS,
     programPromotionExpenseCents,
     programPromotionsForProgram,
+    sortFinancePromotionsByDateDesc,
     sumTeamMemberOwedCents,
     sumTeamMemberPaidCents,
     teamMemberDisbursementRemainingCents,
@@ -639,8 +644,9 @@ function financeProgramCardHtml(item, selected) {
 
 /**
  * @param {ReturnType<typeof buildStudioProgramFinanceRows>[number]} row
+ * @param {boolean} [canEdit]
  */
-function financeProgramTableRowHtml(row) {
+function financeProgramTableRowHtml(row, canEdit = false) {
     const priceBadges = [];
     if (normalizeCentsSafe(row.specialProgramTotalCents) > 0) {
         priceBadges.push('<span class="studio-status-pill studio-status-pill--category-veteran-plus">Special</span>');
@@ -668,6 +674,30 @@ function financeProgramTableRowHtml(row) {
         : row.depositPaid
           ? `<span class="mpd-payments-pill mpd-payments-pill--paid">Paid</span> <span class="studio-finance-price-amount">${escapeHtml(formatUsdFromCents(row.depositAmountCents))}</span>`
           : '<span class="studio-muted">—</span>';
+    if (row.phantom) {
+        const statusLabel = String(row.status || '') === 'withdrawn' ? 'Canceled' : 'Pulled out';
+        return `<tr class="studio-finance-phantom-row" data-finance-applicant-id="${escapeHtml(row.applicantId)}" data-finance-phantom="1">
+        <td class="studio-finance-sticky-col studio-finance-sticky-col--first">${escapeHtml(row.firstName || '—')}</td>
+        <td class="studio-finance-sticky-col studio-finance-sticky-col--second">${escapeHtml(row.lastName || '—')}</td>
+        <td>${escapeHtml(row.discipline || '—')}</td>
+        <td class="studio-finance-price-category"><span class="studio-status-pill studio-status-pill--category-partial">${escapeHtml(statusLabel)}</span></td>
+        <td class="studio-finance-price-category">${depositCell}</td>
+        <td><span class="studio-muted">—</span></td>
+        <td><span class="studio-muted">—</span></td>
+        <td>${escapeHtml(formatUsdFromCents(row.totalPaymentsCents))}</td>
+        <td><span class="studio-muted">—</span></td>
+        <td><span class="studio-muted">—</span></td>
+        <td><span class="studio-muted">—</span></td>
+        <td><span class="studio-muted">—</span></td>
+        <td><span class="studio-muted">—</span></td>
+        <td><span class="studio-muted">—</span></td>
+        <td><span class="studio-muted">—</span></td>
+        <td><span class="studio-muted">—</span></td>
+        <td>${escapeHtml(formatUsdFromCents(row.profitCents))}</td>
+        <td><span class="studio-muted">—</span></td>
+        <td><span class="studio-muted">—</span></td>
+    </tr>`;
+    }
     const planCell = row.planActive
         ? '<span class="mpd-payments-pill mpd-payments-pill--active">Active</span>'
         : '<span class="studio-muted">—</span>';
@@ -678,6 +708,10 @@ function financeProgramTableRowHtml(row) {
         : '';
     const moneyBtn = (mode, cents, extraHtml = '') =>
         `<button type="button" class="studio-finance-money-btn" data-finance-ledger-open="1" data-applicant-id="${escapeHtml(row.applicantId)}" data-finance-ledger-mode="${mode}">${escapeHtml(formatUsdFromCents(cents))}</button>${extraHtml}`;
+    const partnerCell = (slot, cents) =>
+        canEdit
+            ? `<button type="button" class="studio-finance-money-btn" data-finance-applicant-partner="${slot}" data-applicant-id="${escapeHtml(row.applicantId)}">${escapeHtml(formatUsdFromCents(cents))}</button>`
+            : escapeHtml(formatUsdFromCents(cents));
     return `<tr data-finance-applicant-id="${escapeHtml(row.applicantId)}">
         <td class="studio-finance-sticky-col studio-finance-sticky-col--first">${escapeHtml(row.firstName || '—')}</td>
         <td class="studio-finance-sticky-col studio-finance-sticky-col--second">${escapeHtml(row.lastName || '—')}</td>
@@ -690,9 +724,9 @@ function financeProgramTableRowHtml(row) {
         <td>${moneyBtn('fees', row.paymentFeesCents)}</td>
         <td class="studio-finance-tickets-cell">${moneyBtn('tickets', row.ticketsCents, ticketsLabel ? ` ${ticketsLabel}` : '')}</td>
         <td>${moneyBtn('travel', row.localTravelCents)}</td>
-        <td>${escapeHtml(formatUsdFromCents(row.partner1Cents))}</td>
-        <td>${escapeHtml(formatUsdFromCents(row.partner2Cents))}</td>
-        <td>${escapeHtml(formatUsdFromCents(row.partner3Cents))}</td>
+        <td>${partnerCell(1, row.partner1Cents)}</td>
+        <td>${partnerCell(2, row.partner2Cents)}</td>
+        <td>${partnerCell(3, row.partner3Cents)}</td>
         <td>${escapeHtml(formatUsdFromCents(row.subtotalCents))}</td>
         <td>${escapeHtml(formatUsdFromCents(row.remainingBalanceCents))}</td>
         <td>${escapeHtml(formatUsdFromCents(row.profitCents))}</td>
@@ -788,7 +822,7 @@ function financeProgramTableHtml(
     }
     const applicantBody =
         rows.length > 0
-            ? rows.map((row) => financeProgramTableRowHtml(row)).join('')
+            ? rows.map((row) => financeProgramTableRowHtml(row, canEdit)).join('')
             : '';
     const teamBody =
         selectedProgramId && Array.isArray(teamMembers) && teamMembers.length
@@ -812,6 +846,35 @@ function financeProgramTableHtml(
                       ? 'No slot-secured applicants or team members for this program.'
                       : 'No slot-secured applicants on active programs. Select a program to manage team.'
               }</td></tr>`;
+    const totals =
+        applicantBody || teamBody
+            ? computeFinanceProgramTableTotals(rows, selectedProgramId ? teamMembers : [], programProfitCents)
+            : null;
+    const foot = totals
+        ? `<tfoot>
+            <tr class="studio-finance-totals-row">
+                <td class="studio-finance-sticky-col studio-finance-sticky-col--first">Total</td>
+                <td class="studio-finance-sticky-col studio-finance-sticky-col--second"></td>
+                <td></td>
+                <td></td>
+                <td>${escapeHtml(formatUsdFromCents(totals.depositCents))}</td>
+                <td></td>
+                <td>${escapeHtml(formatUsdFromCents(totals.planPriceCents))}</td>
+                <td>${escapeHtml(formatUsdFromCents(totals.totalPaymentsCents))}</td>
+                <td>${escapeHtml(formatUsdFromCents(totals.paymentFeesCents))}</td>
+                <td>${escapeHtml(formatUsdFromCents(totals.ticketsCents))}</td>
+                <td>${escapeHtml(formatUsdFromCents(totals.localTravelCents))}</td>
+                <td>${escapeHtml(formatUsdFromCents(totals.partner1Cents))}</td>
+                <td>${escapeHtml(formatUsdFromCents(totals.partner2Cents))}</td>
+                <td>${escapeHtml(formatUsdFromCents(totals.partner3Cents))}</td>
+                <td>${escapeHtml(formatUsdFromCents(totals.subtotalCents))}</td>
+                <td>${escapeHtml(formatUsdFromCents(totals.remainingBalanceCents))}</td>
+                <td>${escapeHtml(formatUsdFromCents(totals.profitCents))}</td>
+                <td>${escapeHtml(formatUsdFromCents(totals.projectedPayoutCents))}</td>
+                <td></td>
+            </tr>
+          </tfoot>`
+        : '';
     return `
         <section class="member-profile-dashboard__card studio-finance-program-table-section">
             <div class="mpd-payments-section-head">
@@ -844,6 +907,7 @@ function financeProgramTableHtml(
                         </tr>
                     </thead>
                     <tbody>${body}</tbody>
+                    ${foot}
                 </table>
             </div>
         </section>
@@ -1793,7 +1857,7 @@ export async function initFinance(mainEl) {
             tbody.innerHTML = '<tr><td colspan="6">No promotions yet. Click Add promotion.</td></tr>';
             return;
         }
-        tbody.innerHTML = financePromotions
+        tbody.innerHTML = sortFinancePromotionsByDateDesc(financePromotions)
             .map((p) => {
                 const target =
                     String(p.target || '') === 'program'
@@ -2886,6 +2950,74 @@ export async function initFinance(mainEl) {
         renderProgramTable();
     };
 
+    const openApplicantPartnerModal = (applicantId, slot) => {
+        const n = Number(slot);
+        if (n !== 1 && n !== 2 && n !== 3) return;
+        const row = financeRowByApplicantId.get(applicantId);
+        const applicant = applicantById.get(applicantId);
+        if (!row || !applicant || row.phantom) return;
+        const programRow =
+            allPrograms.find((p) => String(p.id || '') === String(row.programId || '')) || null;
+        const defaults = parseProgramFinancePartnerDefaults(programRow);
+        const defaultCents =
+            n === 1 ? defaults.partner1Cents : n === 2 ? defaults.partner2Cents : defaults.partner3Cents;
+        const override = getApplicantPartnerOverrideCents(row.payloadJson, /** @type {1|2|3} */ (n));
+        const useDefault = override == null;
+        const displayCents = useDefault ? defaultCents : override;
+        const body = `
+          <form class="studio-modal-form" id="studio-finance-applicant-partner-form">
+            <p class="studio-muted">Program default: ${escapeHtml(formatUsdFromCents(defaultCents))}</p>
+            <label class="studio-field studio-field--inline-check">
+              <input type="checkbox" class="studio-checkbox" id="studio-finance-applicant-partner-default" ${useDefault ? 'checked' : ''} />
+              <span>Use program default</span>
+            </label>
+            <label class="studio-field"><span>Partner ${n} (USD)</span>
+              <input class="studio-input" id="studio-finance-applicant-partner-amount" inputmode="decimal" value="${escapeHtml(centsToUsdFieldValue(displayCents))}" ${useDefault ? 'disabled' : ''} />
+            </label>
+            <div class="studio-modal-actions">
+              <button type="submit" class="studio-btn-primary">Save</button>
+              <button type="button" class="studio-btn-ghost" data-studio-modal-close="1">Cancel</button>
+            </div>
+            <p class="studio-muted" id="studio-finance-applicant-partner-status" role="status"></p>
+          </form>`;
+        const { close, root } = openStudioModal(body, { title: `Partner ${n}` });
+        const defaultBox = root.querySelector('#studio-finance-applicant-partner-default');
+        const amountInput = root.querySelector('#studio-finance-applicant-partner-amount');
+        defaultBox?.addEventListener('change', () => {
+            if (!(defaultBox instanceof HTMLInputElement) || !(amountInput instanceof HTMLInputElement)) return;
+            amountInput.disabled = defaultBox.checked;
+            if (defaultBox.checked) amountInput.value = centsToUsdFieldValue(defaultCents);
+        });
+        root.querySelector('#studio-finance-applicant-partner-form')?.addEventListener('submit', async (ev) => {
+            ev.preventDefault();
+            const statusEl = root.querySelector('#studio-finance-applicant-partner-status');
+            const useProgDefault =
+                defaultBox instanceof HTMLInputElement ? defaultBox.checked : true;
+            const cents = parseUsdInputToCents(
+                amountInput instanceof HTMLInputElement ? amountInput.value : '',
+            );
+            const submitBtn = root.querySelector('button[type="submit"]');
+            if (submitBtn instanceof HTMLButtonElement) submitBtn.disabled = true;
+            if (statusEl) statusEl.textContent = 'Saving…';
+            try {
+                const payloadJson = mergeApplicantStaffFields(
+                    staffFieldsFromPayload(row.payloadJson, {
+                        partner1Cents: n === 1 ? (useProgDefault ? null : cents) : undefined,
+                        partner2Cents: n === 2 ? (useProgDefault ? null : cents) : undefined,
+                        partner3Cents: n === 3 ? (useProgDefault ? null : cents) : undefined,
+                    }),
+                    row.payloadJson,
+                );
+                await upsertApplicantStudio({ ...applicant, payloadJson });
+                close();
+                await reloadApplicantsAndFinance();
+            } catch (err) {
+                if (statusEl) statusEl.textContent = err instanceof Error ? err.message : String(err);
+                if (submitBtn instanceof HTMLButtonElement) submitBtn.disabled = false;
+            }
+        });
+    };
+
     const openTeamExpenseModal = (teamMemberId, field) => {
         const members = selectedTeamMembers();
         const member = members.find((m) => String(m.id || '') === teamMemberId);
@@ -3526,6 +3658,14 @@ export async function initFinance(mainEl) {
             ) {
                 openFinanceLedgerModal(applicantId, mode);
             }
+            return;
+        }
+        const applicantPartnerBtn =
+            e.target instanceof Element ? e.target.closest('[data-finance-applicant-partner]') : null;
+        if (applicantPartnerBtn && programsCanEdit) {
+            const applicantId = applicantPartnerBtn.getAttribute('data-applicant-id');
+            const slot = applicantPartnerBtn.getAttribute('data-finance-applicant-partner');
+            if (applicantId && slot) openApplicantPartnerModal(applicantId, slot);
             return;
         }
         const teamExpenseBtn =

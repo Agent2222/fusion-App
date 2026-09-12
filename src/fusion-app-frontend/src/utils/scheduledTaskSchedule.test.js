@@ -11,12 +11,16 @@ import {
     normalizeAnnounceDay,
     parseScheduledTaskWindow,
     resolveAnnounceDayYmd,
+    scheduledTaskTimezoneId,
     utcIsoToLocalDateTime,
 } from './scheduledTaskSchedule.js';
 
 describe('scheduledTaskSchedule', () => {
     it('converts Japan morning to the previous UTC evening', () => {
         expect(localDateTimeToUtcIso('2026-09-15T09:00', 'Asia/Tokyo')).toBe('2026-09-15T00:00:00.000Z');
+        expect(localDateTimeToUtcIso('2026-09-15T09:00', 'Japan')).toBe('2026-09-15T00:00:00.000Z');
+        expect(scheduledTaskTimezoneId('Japan')).toBe('Asia/Tokyo');
+        expect(scheduledTaskTimezoneId('')).toBe('Asia/Tokyo');
     });
 
     it('marks due when next send is in the past', () => {

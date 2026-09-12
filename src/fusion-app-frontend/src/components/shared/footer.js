@@ -6,6 +6,10 @@ import './newsletterSubscribe.js';
 
 /** Pixels from bottom to treat as "at bottom". */
 const BOTTOM_THRESHOLD_PX = 80;
+/** Mobile pull-down on the footer to dismiss it. */
+const MOBILE_PULL_DISMISS_PX = 48;
+const FOOTER_DISMISS_SCROLL_PX = 140;
+const MOBILE_FOOTER_MQ = '(max-width: 1024px)';
 
 class FooterComponent extends HTMLElement {
     constructor() {
@@ -19,6 +23,10 @@ class FooterComponent extends HTMLElement {
         this._onRouteChangeBound = null;
         /** @type {HTMLElement[]} */
         this._scrollTargetsAttached = [];
+        this._pullStartY = 0;
+        this._pullDismissed = false;
+        this._onFooterTouchStartBound = null;
+        this._onFooterTouchMoveBound = null;
     }
 
     get active() {
@@ -60,6 +68,7 @@ class FooterComponent extends HTMLElement {
     showFooter() {
         const el = this._footerEl || this.shadow.querySelector('footer');
         if (!el) return;
+        this.style.pointerEvents = 'none';
         gsap.to(el, {
             opacity: 1,
             duration: 0.35,
@@ -85,6 +94,8 @@ class FooterComponent extends HTMLElement {
     hideFooter() {
         const el = this._footerEl || this.shadow.querySelector('footer');
         if (!el) return;
+        el.style.pointerEvents = 'none';
+        this.style.pointerEvents = 'none';
         gsap.to(el, {
             opacity: 0,
             duration: 0.35,
@@ -93,7 +104,28 @@ class FooterComponent extends HTMLElement {
             pointerEvents: 'none',
             overwrite: 'auto',
         });
-        
+    }
+
+    /** Hand the next scroll back to the page body without requiring a tap. */
+    _releaseScrollToPage() {
+        const focused = this.shadow.activeElement;
+        if (focused && typeof focused.blur === 'function') focused.blur();
+        if (document.activeElement === this && typeof this.blur === 'function') this.blur();
+        const scroller =
+            document.getElementById('mainContent') ||
+            this._scrollTargetsAttached[0] ||
+            (document.scrollingElement instanceof HTMLElement ? document.scrollingElement : null);
+        if (!(scroller instanceof HTMLElement)) return;
+        if (!scroller.hasAttribute('tabindex')) scroller.setAttribute('tabindex', '-1');
+        try {
+            scroller.focus({ preventScroll: true });
+        } catch {
+            try {
+                scroller.focus();
+            } catch {
+                /* ignore */
+            }
+        }
     }
 
     _setFooterScrollVisible(visible) {
@@ -107,6 +139,76 @@ class FooterComponent extends HTMLElement {
     }
 
     /** @param {HTMLElement} el */
+    _isMobileFooter() {
+        return typeof window !== 'undefined' && window.matchMedia(MOBILE_FOOTER_MQ).matches;
+    }
+
+    /** @returns {HTMLElement | null} */
+    _scrollTargetAtBottom() {
+        return this._scrollTargetsAttached.find((el) => this._isScrolledToBottom(el)) || null;
+    }
+
+    _nudgeScrollAwayFromBottom() {
+        const el =
+            this._scrollTargetAtBottom() ||
+            this._scrollTargetsAttached[0] ||
+            (document.scrollingElement instanceof HTMLElement ? document.scrollingElement : null);
+        if (!el) return;
+        el.scrollTop = Math.max(0, el.scrollTop - FOOTER_DISMISS_SCROLL_PX);
+    }
+
+    _dismissFooterFromPull() {
+        this._nudgeScrollAwayFromBottom();
+        this._setFooterScrollVisible(false);
+        this._releaseScrollToPage();
+    }
+
+    _onFooterTouchStart(e) {
+        if (!this._isMobileFooter() || !this._footerScrollVisible) return;
+        const t = e.changedTouches?.[0];
+        if (!t) return;
+        this._pullStartY = t.clientY;
+        this._pullDismissed = false;
+    }
+
+    _onFooterTouchMove(e) {
+        if (this._pullDismissed) return;
+        if (!this._isMobileFooter() || this.getAttribute('active') !== 'true' || !this._footerScrollVisible) {
+            return;
+        }
+        const t = e.changedTouches?.[0];
+        if (!t) return;
+        if (t.clientY - this._pullStartY >= MOBILE_PULL_DISMISS_PX) {
+            this._pullDismissed = true;
+            this._dismissFooterFromPull();
+        }
+    }
+
+    _ensureFooterPullHandlers() {
+        if (this._onFooterTouchStartBound) return;
+        this._onFooterTouchStartBound = (e) => this._onFooterTouchStart(e);
+        this._onFooterTouchMoveBound = (e) => this._onFooterTouchMove(e);
+    }
+
+    _attachFooterPullDismiss() {
+        this._ensureFooterPullHandlers();
+        const el = this._footerEl || this.shadow?.querySelector('footer');
+        if (!(el instanceof HTMLElement)) return;
+        el.addEventListener('touchstart', this._onFooterTouchStartBound, { passive: true });
+        el.addEventListener('touchmove', this._onFooterTouchMoveBound, { passive: true });
+    }
+
+    _detachFooterPullDismiss() {
+        const el = this._footerEl || this.shadow?.querySelector('footer');
+        if (el instanceof HTMLElement && this._onFooterTouchStartBound) {
+            el.removeEventListener('touchstart', this._onFooterTouchStartBound);
+            el.removeEventListener('touchmove', this._onFooterTouchMoveBound);
+        }
+        this._onFooterTouchStartBound = null;
+        this._onFooterTouchMoveBound = null;
+        this._pullDismissed = false;
+    }
+
     _handleScrollEvent(el) {
         if (this.getAttribute('active') !== 'true') return;
         this._setFooterScrollVisible(this._isScrolledToBottom(el));
@@ -152,6 +254,7 @@ class FooterComponent extends HTMLElement {
             this.syncFooterVisibilityFromScroll();
         };
         window.addEventListener('routeChange', this._onRouteChangeBound);
+        this._attachFooterPullDismiss();
         this.bindScrollTargets();
     }
 
@@ -159,6 +262,10 @@ class FooterComponent extends HTMLElement {
         if (this._onScrollBound) {
             for (const el of this._scrollTargetsAttached) {
                 el.removeEventListener('scroll', this._onScrollBound);
+                if (this._onFooterTouchStartBound) {
+                    el.removeEventListener('touchstart', this._onFooterTouchStartBound);
+                    el.removeEventListener('touchmove', this._onFooterTouchMoveBound);
+                }
             }
         }
         this._scrollTargetsAttached = [];
@@ -174,6 +281,10 @@ class FooterComponent extends HTMLElement {
         ].filter(Boolean);
         for (const el of targets) {
             el.addEventListener('scroll', this._onScrollBound, { passive: true });
+            if (this._onFooterTouchStartBound) {
+                el.addEventListener('touchstart', this._onFooterTouchStartBound, { passive: true });
+                el.addEventListener('touchmove', this._onFooterTouchMoveBound, { passive: true });
+            }
             this._scrollTargetsAttached.push(el);
         }
         if (window.location.pathname.startsWith('/settings')) {
@@ -189,11 +300,16 @@ class FooterComponent extends HTMLElement {
         if (this._onScrollBound) {
             for (const el of this._scrollTargetsAttached) {
                 el.removeEventListener('scroll', this._onScrollBound);
+                if (this._onFooterTouchStartBound) {
+                    el.removeEventListener('touchstart', this._onFooterTouchStartBound);
+                    el.removeEventListener('touchmove', this._onFooterTouchMoveBound);
+                }
             }
             window.removeEventListener('scroll', this._onScrollBound);
         }
         this._scrollTargetsAttached = [];
         this._onScrollBound = null;
+        this._detachFooterPullDismiss();
     }
 
     connectedCallback() {
@@ -214,6 +330,7 @@ class FooterComponent extends HTMLElement {
             <style>
             :host {
                 display: block;
+                pointer-events: none;
                 /* Host must set semantic text color — body uses a fixed #333 that would otherwise inherit into the shadow tree. */
                 color: var(--c2, #000000);
             }

@@ -3,22 +3,27 @@ import { getEventsList, subscribeDataSource } from '../utils/database.js';
 import { applyDocumentSeo } from '../utils/documentSeo.js';
 import { SEO_MEDIA_DEFAULT, withSeoImageAlt } from '../utils/mediaAltSeo.js';
 import { firstNonEmptyString, mergeLocaleDeep } from '../utils/localeFallback.js';
+import { formatScheduleEventCostLabel } from '../utils/scheduleModel.js';
 
 /**
- * @returns {number | null}
+ * @returns {string | null}
  */
 function eventIdFromPathname() {
     const path = window.location.pathname;
     if (!path.startsWith('/event/')) return null;
     const seg = path.slice('/event/'.length).split('/').filter(Boolean)[0];
     if (!seg) return null;
-    const id = parseInt(seg, 10);
-    return Number.isFinite(id) ? id : null;
+    try {
+        return decodeURIComponent(seg);
+    } catch {
+        return seg;
+    }
 }
 
 function findEventById(id, list) {
     if (id == null || !Array.isArray(list)) return null;
-    return list.find((e) => Number(e?.id) === id) ?? null;
+    const key = String(id);
+    return list.find((e) => String(e?.id) === key) ?? null;
 }
 
 export function generateEventContent() {
@@ -42,6 +47,7 @@ export function generateEventContent() {
                                     <p id="eventDetailTime" class="event-detail-meta-line"></p>
                                     <p id="eventDetailLocation" class="event-detail-meta-line"></p>
                                     <p id="eventDetailAddress" class="event-detail-meta-line"></p>
+                                    <p id="eventDetailCost" class="event-detail-meta-line" hidden></p>
                                 </div>
                                 <p id="eventDetailDescription" class="event-detail-description"></p>
                             </div>
@@ -92,6 +98,13 @@ function applyEventToDom(ev) {
     const location = loc?.location ?? '';
     const address = loc?.address ?? '';
     const description = loc?.description ?? '';
+    const costLabel =
+        firstNonEmptyString(loc?.cost, ev.cost) ||
+        formatScheduleEventCostLabel({
+            costCents: loc?.costCents ?? ev.costCents,
+            costCurrency: loc?.costCurrency ?? ev.costCurrency,
+            costTba: loc?.costTba ?? ev.costTba,
+        });
 
     const imgEl = document.getElementById('eventDetailImage');
     const catEl = document.getElementById('eventDetailCategory');
@@ -100,13 +113,18 @@ function applyEventToDom(ev) {
     const timeEl = document.getElementById('eventDetailTime');
     const locEl = document.getElementById('eventDetailLocation');
     const addrEl = document.getElementById('eventDetailAddress');
+    const costEl = document.getElementById('eventDetailCost');
     const descEl = document.getElementById('eventDetailDescription');
     const pastNote = document.getElementById('eventDetailPastNote');
     const rsvpSection = document.getElementById('eventRsvpSection');
 
     if (imgEl) {
-        imgEl.src = firstNonEmptyString(ev.image, jaE?.image, enE?.image);
+        const imageSrc = firstNonEmptyString(ev.image, jaE?.image, enE?.image);
+        imgEl.src = imageSrc;
         imgEl.alt = withSeoImageAlt(title);
+        const hero = imgEl.closest('.event-detail-hero');
+        if (hero instanceof HTMLElement) hero.hidden = !imageSrc;
+        imgEl.hidden = !imageSrc;
     }
     if (catEl) catEl.textContent = category;
     if (titleEl) titleEl.textContent = title;
@@ -114,7 +132,11 @@ function applyEventToDom(ev) {
     if (timeEl) timeEl.textContent = time;
     if (locEl) locEl.textContent = location;
     if (addrEl) addrEl.textContent = address;
-    if (descEl) descEl.textContent = description;
+    if (costEl) {
+        costEl.textContent = costLabel ? `Cost ${costLabel}` : '';
+        costEl.hidden = !costLabel;
+    }
+    if (descEl) descEl.textContent = String(description || '').trim() || 'Details pending';
 
     const upcoming = ev.status === 'upcoming';
     if (pastNote) pastNote.hidden = upcoming;
@@ -159,7 +181,7 @@ function mountOtherEventRows(currentId, list) {
     const host = document.getElementById('eventOtherRows');
     if (!section || !host) return;
 
-    const others = list.filter((e) => Number(e?.id) !== currentId);
+    const others = list.filter((e) => String(e?.id) !== String(currentId));
     host.innerHTML = '';
 
     if (others.length === 0) {

@@ -58,6 +58,8 @@ class FeaturedArtistComponent extends HTMLElement {
     setFeaturedArtist(data) {
         this.data = data;
         this.render();
+        const n = this.data?.artists?.length ?? 0;
+        if (n > 0) void this.createArtistCard(n);
     }
 
     static get observedAttributes() {

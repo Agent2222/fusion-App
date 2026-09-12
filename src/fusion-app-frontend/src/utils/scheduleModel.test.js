@@ -17,6 +17,13 @@ import {
     scheduleEventRsvpCountLabel,
     scheduleImportanceLabel,
     scheduleImportancePillClass,
+    formatScheduleEventCostInputValue,
+    formatScheduleEventCostLabel,
+    normalizeScheduleEventCostCents,
+    normalizeScheduleEventCostCurrency,
+    parseScheduleEventCostAmountToMinor,
+    parseScheduleEventCostUsdToCents,
+    scheduleEventShowsCost,
     weekRangeContaining,
 } from './scheduleModel.js';
 
@@ -97,6 +104,42 @@ describe('schedule importance pills', () => {
         expect(scheduleImportancePillClass('')).toBe(
             'event-dialog__importance event-dialog__importance--general',
         );
+    });
+});
+
+describe('schedule event cost', () => {
+    it('normalizes missing and invalid cost to 0', () => {
+        expect(normalizeScheduleEventCostCents(undefined)).toBe(0);
+        expect(normalizeScheduleEventCostCents('')).toBe(0);
+        expect(normalizeScheduleEventCostCents(-5)).toBe(0);
+    });
+
+    it('parses USD input to cents and formats a label', () => {
+        expect(parseScheduleEventCostUsdToCents('$25')).toBe(2500);
+        expect(parseScheduleEventCostUsdToCents('12.50')).toBe(1250);
+        expect(parseScheduleEventCostUsdToCents('')).toBe(0);
+        expect(formatScheduleEventCostLabel(2500)).toBe('$25');
+        expect(formatScheduleEventCostLabel(1250)).toBe('$12.50');
+        expect(formatScheduleEventCostLabel(0)).toBe('');
+    });
+
+    it('parses yen as whole yen and formats with ¥', () => {
+        expect(normalizeScheduleEventCostCurrency('¥')).toBe('JPY');
+        expect(parseScheduleEventCostAmountToMinor('3,000', 'JPY')).toBe(3000);
+        expect(parseScheduleEventCostAmountToMinor('¥2500', 'JPY')).toBe(2500);
+        expect(formatScheduleEventCostLabel(3000, 'JPY')).toBe('¥3000');
+        expect(formatScheduleEventCostInputValue(3000, 'JPY')).toBe('3000');
+    });
+
+    it('shows TBA when no priced amount is set', () => {
+        expect(formatScheduleEventCostLabel(0, 'USD', true)).toBe('TBA');
+        expect(formatScheduleEventCostLabel({ costCents: 0, costCurrency: 'JPY', costTba: true })).toBe(
+            'TBA',
+        );
+        expect(parseScheduleEventCostAmountToMinor('TBA', 'USD')).toBe(0);
+        expect(scheduleEventShowsCost(0, true)).toBe(true);
+        expect(scheduleEventShowsCost(0, false)).toBe(false);
+        expect(scheduleEventShowsCost(2500, false)).toBe(true);
     });
 });
 

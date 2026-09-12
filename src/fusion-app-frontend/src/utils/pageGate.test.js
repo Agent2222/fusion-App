@@ -17,6 +17,7 @@ describe('pathnameToPageStatusKey', () => {
         expect(pathnameToPageStatusKey('/journal/entry/1')).toBe('journal');
         expect(pathnameToPageStatusKey('/studio')).toBe(null);
         expect(pathnameToPageStatusKey('/contact')).toBe(null);
+        expect(pathnameToPageStatusKey('/links')).toBe(null);
     });
 });
 

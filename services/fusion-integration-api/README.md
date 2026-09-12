@@ -87,14 +87,14 @@ stripe listen --forward-to localhost:8787/webhooks/stripe
 
 ### Host scheduler (engineers)
 
-Create a Render Cron Job (or equivalent) every 5 minutes:
+The API also runs due tasks on its own every 5 minutes after boot (`SCHEDULED_TASKS_TICK_MS`, set `0` to disable). A Render Cron Job can still hit the same path as a backup:
 
 ```
 POST https://fusion-app-sycs.onrender.com/scheduled-tasks/tick
 Authorization: Bearer <INTEGRATION_API_KEY>
 ```
 
-Staff manage tasks in Studio → Operations → Scheduled Tasks. Do not expose this URL in the Studio UI.
+Staff manage tasks in Studio → Operations → Scheduled Tasks. Do not expose this URL in the Studio UI. Time is stored as UTC from the task’s IANA zone (`Asia/Tokyo` for Japan). LINE posts always include the Comms Announcements room.
 - `GET /payments/config` — PayPal mode + `planMonthly` / `planQuarterly` / `planAnnual` / `planBimonthlyLegacy`
 - `POST /payments/subscription` — PayPal membership create (`subscriptionTier`: `monthly` | `quarterly` | `annual`)
 - `POST /payments/subscription/link` — bind pay-first subscription to principal after II

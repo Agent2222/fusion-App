@@ -50,6 +50,26 @@ describe('scheduled task audience', () => {
         assert.deepEqual(lineRoomsMissing(task, { groupGeneralId: 'G1', groupAnnounceId: '' }), ['announce']);
     });
 
+    it('always includes the Comms Announcements room when that slot is bound', () => {
+        const task = { channels: 'line', lineRooms: 'general' };
+        assert.deepEqual(lineRoomsForTask(task, { groupGeneralId: 'G1', groupAnnounceId: 'A1' }), [
+            { room: 'announce', groupId: 'A1' },
+            { room: 'general', groupId: 'G1' },
+        ]);
+    });
+
+    it('uses the group that is actually Announcements when slots were swapped', () => {
+        const task = { kind: 'announce_day', channels: 'line', lineRooms: 'announce' };
+        assert.deepEqual(
+            lineRoomsForTask(
+                task,
+                { groupGeneralId: 'Cann', groupAnnounceId: 'Cgen' },
+                { announceName: 'Kaga General', generalName: 'Kaga Announcements' },
+            ),
+            [{ room: 'announce', groupId: 'Cann' }],
+        );
+    });
+
     it('posts announce-day only to Announcements and never emails', () => {
         const task = { kind: 'announce_day', channels: 'line', lineRooms: 'announce' };
         assert.deepEqual(emailRecipientsForTask(task, [confirmed]), []);

@@ -38,12 +38,18 @@
  *   emptyRecipientsSoft: string,
  *   badgeInactive: string,
  *   subInactive: string,
+ *   badgeClosed: string,
+ *   headlineClosed: string,
+ *   subClosed: string,
  *   getNotifiedLabel: string,
  *   applyToProgramLabel: string,
  *   learnHowLabel: string,
  *   currentStatusLabel: string,
  *   statusNotActive: string,
  *   statusNotScheduledBody: string,
+ *   statusClosed: string,
+ *   statusClosedBody: string,
+ *   engagementAwardLine: string,
  * }} ProgramDrawDisplayCopy
  *
  * @typedef {{
@@ -104,12 +110,18 @@ export function emptyProgramDrawDisplay() {
         emptyRecipientsSoft: '',
         badgeInactive: '',
         subInactive: '',
+        badgeClosed: '',
+        headlineClosed: '',
+        subClosed: '',
         getNotifiedLabel: '',
         applyToProgramLabel: '',
         learnHowLabel: '',
         currentStatusLabel: '',
         statusNotActive: '',
         statusNotScheduledBody: '',
+        statusClosed: '',
+        statusClosedBody: '',
+        engagementAwardLine: '',
     };
 }
 
@@ -187,12 +199,20 @@ export function defaultProgramDrawLocaleEn() {
             badgeInactive: 'Program Draw',
             subInactive:
                 "The Program Draw is not active yet. Join the waitlist and we'll notify you when it opens.",
+            badgeClosed: 'Program Draw',
+            headlineClosed: 'This Program Draw has closed.',
+            subClosed: 'Subscribe to be notified when the next draw opens.',
             getNotifiedLabel: 'Get Notified',
             applyToProgramLabel: 'Apply to program instead',
             learnHowLabel: 'Learn how the Fusion Draw works →',
             currentStatusLabel: 'Current Status',
             statusNotActive: 'Not active',
             statusNotScheduledBody: 'The next round has not been scheduled yet.',
+            statusClosed: 'Draw closed',
+            statusClosedBody:
+                'This draw is no longer accepting entries. Join the waitlist and we’ll notify you when the next opening is announced.',
+            engagementAwardLine:
+                'If you entered as a guest and have not received your engagement award, email info@fusionart.world.',
         },
         about: {
             title: 'About Program Draw',
@@ -270,12 +290,20 @@ export function defaultProgramDrawLocaleJa() {
             badgeInactive: 'プログラム抽選',
             subInactive:
                 'プログラム抽選はまだ開始していません。ウェイトリストに登録すると、公開時にお知らせします。',
+            badgeClosed: 'プログラム抽選',
+            headlineClosed: 'このプログラム抽選は終了しました。',
+            subClosed: '次回の抽選が始まったらお知らせします。',
             getNotifiedLabel: '通知を受け取る',
             applyToProgramLabel: 'プログラムに応募',
             learnHowLabel: 'Fusion抽選の仕組みを見る →',
             currentStatusLabel: '現在のステータス',
             statusNotActive: '未開始',
             statusNotScheduledBody: '次のラウンドはまだ予定されていません。',
+            statusClosed: '抽選終了',
+            statusClosedBody:
+                '現在の抽選は受付を終了しています。ウェイトリストに登録すると、次回の募集開始時にお知らせします。',
+            engagementAwardLine:
+                'ゲストとしてエントリーし、エンゲージメント特典をまだ受け取っていない場合は、info@fusionart.world までご連絡ください。',
         },
         about: {
             title: 'プログラム抽選について',
@@ -433,12 +461,18 @@ export function normalizeProgramDrawLocale(raw, fallback) {
             emptyRecipientsSoft: d('emptyRecipientsSoft'),
             badgeInactive,
             subInactive: d('subInactive'),
+            badgeClosed: rewriteBadge(d('badgeClosed'), dFb.badgeClosed || dFb.badgeInactive || dFb.badge),
+            headlineClosed: d('headlineClosed'),
+            subClosed: d('subClosed'),
             getNotifiedLabel: d('getNotifiedLabel'),
             applyToProgramLabel: d('applyToProgramLabel'),
             learnHowLabel: d('learnHowLabel'),
             currentStatusLabel: d('currentStatusLabel'),
             statusNotActive: d('statusNotActive'),
             statusNotScheduledBody: d('statusNotScheduledBody'),
+            statusClosed: d('statusClosed'),
+            statusClosedBody: d('statusClosedBody'),
+            engagementAwardLine: d('engagementAwardLine'),
         },
         about: {
             title: String(aSrc.title ?? '').trim() || aFb.title,

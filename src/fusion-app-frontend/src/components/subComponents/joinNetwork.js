@@ -1851,20 +1851,38 @@ class JoinNetworkComponent extends HTMLElement {
       const { registerWithJoinAccessCodeForCaller } =
         await import("../../utils/database.js");
       const email = this._getEmailForSubscription() || this._formEmail.trim();
-      const outcome = await registerWithJoinAccessCodeForCaller(
+      let outcome = await registerWithJoinAccessCodeForCaller(
         categoryToUserRole(cat),
         code,
         this._formFirstName,
         this._formLastName,
         email,
       );
+      if (outcome === "accountExists") {
+        try {
+          const { redeemTrialJoinInviteForCaller } = await import("../../utils/database.js");
+          const redeem = await redeemTrialJoinInviteForCaller(code);
+          if (redeem === "ok") {
+            outcome = "ok";
+          } else if (redeem === "inviteInactive") {
+            outcome = "inviteInactive";
+          } else if (redeem === "invalidCode" || redeem === "notTrialInvite") {
+            outcome = "accountExists";
+          } else {
+            outcome = redeem === "noAccount" ? "accountExists" : "unknown";
+          }
+        } catch {
+          /* keep accountExists */
+        }
+      }
       if (outcome !== "ok") {
         const map = {
           invalidCode: "This access code is not valid.",
           wrongRole:
             "This code does not match the role you selected. Choose the role your invite was issued for (Artist, Gallery, Curator, or Collector). Team invites use the dedicated join page.",
           artistAlreadyLinked: "This artist profile is already linked to another account.",
-          accountExists: "This Internet Identity already has a Fusion account.",
+          accountExists:
+            "This Internet Identity already has a Fusion account. If you have a 3-month trial code, enter it here while signed in to redeem the trial and application credit.",
           inviteInactive: "This invite code has already been used or is inactive.",
           unknown: "Registration could not be completed. Try again.",
         };

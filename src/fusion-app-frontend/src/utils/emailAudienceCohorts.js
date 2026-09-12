@@ -18,6 +18,7 @@ import { normalizeProgramId } from './programAlumniEligibility.js';
 import {
     normalizeConfirmedArtistsList,
     studioArtistCanonicalEnglishName,
+    updateProgramReservedArtist,
 } from './studioArtistPrograms.js';
 import {
     studioEffectiveMembershipStatus,
@@ -293,6 +294,32 @@ function programIdIsCurrent(programId, currentIds) {
     return false;
 }
 
+const EXCLUDED_CURRENT_PROGRAM_STATUSES = new Set([
+    'withdrawn',
+    'withdrew',
+    'pulledout',
+    'rejected',
+    'exited',
+    'exit',
+    'cancelled',
+    'canceled',
+    'deleted',
+    'removed',
+    'rescinded',
+]);
+
+/**
+ * Pulled out, withdrawn, deleted, or otherwise off the current-program roster.
+ * @param {unknown} status
+ */
+export function isExcludedFromCurrentProgramAudienceStatus(status) {
+    const compact = String(status || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[\s_-]+/g, '');
+    return EXCLUDED_CURRENT_PROGRAM_STATUSES.has(compact);
+}
+
 /**
  * Accepted decision, or Confirmed (slot-secured) via deposit / full sponsorship.
  * @param {unknown} applicant
@@ -300,16 +327,136 @@ function programIdIsCurrent(programId, currentIds) {
 export function isCurrentProgramCohortApplicant(applicant) {
     if (!applicant || typeof applicant !== 'object') return false;
     const o = /** @type {Record<string, unknown>} */ (applicant);
+    if (isExcludedFromCurrentProgramAudienceStatus(o.status)) return false;
+    if (getApplicantIsTester(String(o.payloadJson || ''))) return false;
     const st = String(o.status || '')
         .trim()
         .toLowerCase();
-    if (st === 'withdrawn' || st === 'pulledout' || st === 'rejected') return false;
-    if (getApplicantIsTester(String(o.payloadJson || ''))) return false;
     if (st === 'accepted') return true;
     const payload = String(o.payloadJson || '');
     if (getApplicantSponsorshipMode(payload) === 'full') return true;
     if (getApplicantManualDepositSubmitted(payload)) return true;
     return false;
+}
+
+/**
+ * @param {EmailCohortContext} ctx
+ * @returns {Set<string>}
+ */
+function liveArtistIdSet(ctx) {
+    /** @type {Set<string>} */
+    const ids = new Set();
+    for (const a of ctx.artists || []) {
+        const id = String(/** @type {any} */ (a)?.id || '').trim();
+        if (id) ids.add(id);
+    }
+    return ids;
+}
+
+/**
+ * @param {unknown} applicant
+ * @param {string} programId
+ */
+function applicantOnProgram(applicant, programId) {
+    const pid = String(/** @type {any} */ (applicant)?.programId || '').trim();
+    const want = String(programId || '').trim();
+    if (!pid || !want) return false;
+    if (pid === want) return true;
+    return normalizeProgramId(pid) === normalizeProgramId(want);
+}
+
+/**
+ * @param {unknown} applicant
+ * @param {string} nameLower
+ * @param {string} artistId
+ * @param {EmailCohortContext} ctx
+ */
+function applicantMatchesConfirmedArtist(applicant, nameLower, artistId, ctx) {
+    const appAid = artistIdFromApplicant(applicant);
+    if (artistId && appAid && appAid === artistId) return true;
+    const fullName = String(/** @type {any} */ (applicant)?.fullName || '')
+        .trim()
+        .toLowerCase();
+    if (fullName && fullName === nameLower) return true;
+    if (artistId && ctx) {
+        const appEm = applicantEmail(applicant, ctx);
+        const artistEm = ctx.artistEmailById.get(artistId) || '';
+        if (appEm && artistEm && appEm === artistEm) return true;
+    }
+    return false;
+}
+
+/**
+ * Why a confirmed-list name should not receive current-program email.
+ * @param {string} name
+ * @param {string} programId
+ * @param {EmailCohortContext} ctx
+ * @returns {'deleted' | 'pulledOut' | ''}
+ */
+export function staleConfirmedArtistReason(name, programId, ctx) {
+    const want = String(name || '').trim().toLowerCase();
+    if (!want) return 'deleted';
+    const aid = ctx.artistIdByName.get(want) || '';
+    const liveIds = liveArtistIdSet(ctx);
+    if (!aid) return 'deleted';
+    if (liveIds.size > 0 && !liveIds.has(aid)) return 'deleted';
+    for (const app of ctx.applicants || []) {
+        if (!app || typeof app !== 'object') continue;
+        if (!applicantOnProgram(app, programId)) continue;
+        if (!applicantMatchesConfirmedArtist(app, want, aid, ctx)) continue;
+        if (isExcludedFromCurrentProgramAudienceStatus(/** @type {any} */ (app).status)) {
+            return 'pulledOut';
+        }
+    }
+    return '';
+}
+
+/**
+ * Confirmed-list leftovers on the current program (deleted artists or pulled-out applicants).
+ * @param {EmailCohortContext} ctx
+ * @returns {{ programId: string, name: string, reason: 'deleted' | 'pulledOut' }[]}
+ */
+export function listStaleCurrentProgramConfirmedArtists(ctx) {
+    /** @type {{ programId: string, name: string, reason: 'deleted' | 'pulledOut' }[]} */
+    const stale = [];
+    if (!ctx || typeof ctx !== 'object') return stale;
+    const currentIds = resolveCurrentProgramIds(ctx.programs, ctx.currentProgramSeason);
+    for (const prog of ctx.programs || []) {
+        if (!prog || typeof prog !== 'object') continue;
+        const programId = String(/** @type {any} */ (prog).id || '').trim();
+        if (!programIdIsCurrent(programId, currentIds)) continue;
+        for (const name of confirmedNamesForProgram(prog)) {
+            const reason = staleConfirmedArtistReason(name, programId, ctx);
+            if (reason) stale.push({ programId, name, reason });
+        }
+    }
+    return stale;
+}
+
+/**
+ * Remove pulled-out and deleted artists from the current program confirmed list.
+ * @param {{ ctx?: EmailCohortContext }} [opts]
+ * @returns {Promise<{ removed: number, failed: number, stale: { programId: string, name: string, reason: string }[] }>}
+ */
+export async function cleanCurrentProgramAudienceConfirmedLists(opts = {}) {
+    const ctx = opts.ctx || (await loadEmailCohortContext());
+    const stale = listStaleCurrentProgramConfirmedArtists(ctx);
+    let removed = 0;
+    let failed = 0;
+    for (const row of stale) {
+        try {
+            await updateProgramReservedArtist({
+                programId: row.programId,
+                artist: { en: { name: row.name } },
+                reserved: false,
+            });
+            removed += 1;
+        } catch {
+            failed += 1;
+        }
+    }
+    invalidateEmailCohortContextCache();
+    return { removed, failed, stale };
 }
 
 /**
@@ -588,11 +735,14 @@ function resolveFromContext(audienceValue, ctx) {
         /** @type {string[]} */
         const emails = [];
         const currentIds = resolveCurrentProgramIds(ctx.programs, ctx.currentProgramSeason);
+        const liveIds = liveArtistIdSet(ctx);
         for (const app of ctx.applicants) {
             if (!app || typeof app !== 'object') continue;
             const pid = String(/** @type {any} */ (app).programId || '').trim();
             if (!programIdIsCurrent(pid, currentIds)) continue;
             if (!isCurrentProgramCohortApplicant(app)) continue;
+            const appAid = artistIdFromApplicant(app);
+            if (appAid && liveIds.size > 0 && !liveIds.has(appAid)) continue;
             const em = applicantEmail(app, ctx);
             if (em) emails.push(em);
         }
@@ -600,7 +750,9 @@ function resolveFromContext(audienceValue, ctx) {
             programIdIsCurrent(String(/** @type {any} */ (p)?.id || ''), currentIds),
         );
         for (const prog of currentPrograms) {
+            const programId = String(/** @type {any} */ (prog).id || '').trim();
             for (const name of confirmedNamesForProgram(prog)) {
+                if (staleConfirmedArtistReason(name, programId, ctx)) continue;
                 const aid = ctx.artistIdByName.get(String(name).trim().toLowerCase());
                 if (!aid) continue;
                 const em = ctx.artistEmailById.get(aid);

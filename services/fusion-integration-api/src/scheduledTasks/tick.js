@@ -4,8 +4,7 @@
 import { randomUUID } from 'node:crypto';
 import {
     emailRecipientsForTask,
-    lineRoomsForTask,
-    lineRoomsMissing,
+    resolveLineRoomsForTask,
 } from './audience.js';
 import {
     isScheduledTaskRunnable,
@@ -25,6 +24,7 @@ import {
     renderFlightFollowUpEmail,
 } from './templates.js';
 import { buildDayFlexMessages, calendarRsvpUrl, normalizeAnnounceEvents } from '../line/flexSchedule.js';
+import { pickAnnounceGroupId, resolveBoundGroupId } from '../line/push.js';
 
 /**
  * @param {unknown} opt
@@ -111,8 +111,22 @@ async function sendAnnounceDayLine(opts) {
     const audience = opts.audience;
     const programId = opts.programId;
     const tz = String(task?.timezone || 'Asia/Tokyo');
+    const binding = audience?.lineBinding || {};
     const ymd = resolveAnnounceDayYmd(task?.customLineText, tz, opts.startedAt);
-    const rooms = lineRoomsForTask(task, audience?.lineBinding || {});
+    let announceName = '';
+    let generalName = '';
+    if (typeof opts.fetchLineGroupName === 'function') {
+        const storedAnnounce = resolveBoundGroupId(binding, 'announce');
+        const storedGeneral = resolveBoundGroupId(binding, 'general');
+        const [aName, gName] = await Promise.all([
+            storedAnnounce ? opts.fetchLineGroupName(storedAnnounce) : '',
+            storedGeneral ? opts.fetchLineGroupName(storedGeneral) : '',
+        ]);
+        announceName = aName || '';
+        generalName = gName || '';
+    }
+    const picked = pickAnnounceGroupId(binding, { announceName, generalName });
+    const rooms = picked ? [{ room: 'announce', groupId: picked }] : [];
     if (!rooms.length) {
         return { lineOk: 0, lineFail: 1, notes: [`LINE chat isn’t connected for this program (${programId}).`] };
     }
@@ -165,10 +179,13 @@ export async function executeScheduledTask(opts) {
         if (!pid) continue;
         const audience = await actor.integrationGetScheduledTaskAudience(pid);
         const binding = audience?.lineBinding || {};
-        const missing = lineRoomsMissing(task, binding);
-        if (missing.length && (channels === 'line' || channels === 'both')) {
+        const resolved =
+            !isAnnounceDay && (channels === 'line' || channels === 'both')
+                ? await resolveLineRoomsForTask(task, binding, opts.fetchLineGroupName)
+                : { rooms: [], missing: [] };
+        if (resolved.missing.length) {
             notes.push(`LINE chat isn’t connected for this program (${pid}).`);
-            lineFail += missing.length;
+            lineFail += resolved.missing.length;
         }
         const recipients = emailRecipientsForTask(task, audience?.applicants || []);
         const allConfirmed = (audience?.applicants || []).filter(
@@ -197,25 +214,27 @@ export async function executeScheduledTask(opts) {
         }
 
         if (isAnnounceDay) {
-            if (!missing.length) {
-                const out = await sendAnnounceDayLine({
-                    task,
-                    actor,
-                    audience,
-                    programId: pid,
-                    pushLine: opts.pushLine,
-                    rsvpUrl: opts.rsvpUrl,
-                    startedAt,
-                });
-                lineOk += out.lineOk;
-                lineFail += out.lineFail;
-                notes.push(...out.notes);
-            }
+            const out = await sendAnnounceDayLine({
+                task,
+                actor,
+                audience,
+                programId: pid,
+                pushLine: opts.pushLine,
+                fetchLineGroupName: opts.fetchLineGroupName,
+                rsvpUrl: opts.rsvpUrl,
+                startedAt,
+            });
+            lineOk += out.lineOk;
+            lineFail += out.lineFail;
+            notes.push(...out.notes);
         } else if (channels === 'line' || channels === 'both') {
             const text = lineTextForTask(task);
-            const rooms = lineRoomsForTask(task, binding);
+            const rooms = resolved.rooms;
             if (!text) {
                 notes.push(`No LINE message written for ${pid}.`);
+                lineFail += 1;
+            } else if (!rooms.length && !resolved.missing.length) {
+                notes.push(`LINE chat isn’t connected for this program (${pid}).`);
                 lineFail += 1;
             } else {
                 for (const room of rooms) {
@@ -289,6 +308,7 @@ export async function processDueScheduledTasks(opts) {
             actor,
             sendEmailBatch: opts.sendEmailBatch,
             pushLine: opts.pushLine,
+            fetchLineGroupName: opts.fetchLineGroupName,
             rsvpUrl: opts.rsvpUrl,
         });
         results.push(out);
@@ -313,6 +333,7 @@ export async function processOneScheduledTask(opts) {
         actor,
         sendEmailBatch: opts.sendEmailBatch,
         pushLine: opts.pushLine,
+        fetchLineGroupName: opts.fetchLineGroupName,
         rsvpUrl: opts.rsvpUrl,
     });
 }

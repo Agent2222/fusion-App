@@ -1,5 +1,5 @@
 /**
- * Admin-only Team directory: canister admins, super staff, staff / collaborator / account admin rows.
+ * Admin-only Team directory: canister admins and staff / collaborator / account-admin roles.
  */
 import { studioPageHeaderHtml } from '../../utils/studioCategoryLayout.js';
 import { escapeHtml } from '../../utils/textPreview.js';
@@ -16,6 +16,11 @@ import {
     isCallerAdminStudio,
     listAdminsForStudio,
 } from '../../utils/database.js';
+import {
+    collectStudioTeamDirectoryRows,
+    isStudioTeamAccountRole,
+    studioTeamRoleKey,
+} from '../../utils/studioTeamDirectory.js';
 
 /**
  * @param {string} roleKey
@@ -50,20 +55,12 @@ function patchAccountRole(row, newRoleKey) {
     };
 }
 
-function principalKey(p) {
-    if (p && typeof p === 'object' && 'toText' in p && typeof p.toText === 'function') {
-        return p.toText();
-    }
-    return String(p ?? '');
-}
-
 /**
  * @param {unknown} role — Motoko `UserRole` (Candid record)
  * @returns {string}
  */
 function joinInviteRoleLabel(role) {
-    if (!role || typeof role !== 'object') return '—';
-    const k = Object.keys(/** @type {Record<string, unknown>} */ (role))[0];
+    const k = studioTeamRoleKey(role);
     return k || '—';
 }
 
@@ -91,14 +88,17 @@ export function renderTeamSection() {
         <div class="studio-section-stack studio-category-page" id="studioTeamRoot">
             ${studioPageHeaderHtml({
                 title: 'Team',
-                subtitle: 'Canister administrators, super staff, and on-chain team roles',
+                subtitle: 'Admins, staff, and collaborators',
                 countId: 'studio-team-count',
-                countLabel: 'rows',
+                countLabel: 'people',
             })}
             <p class="studio-muted" id="studioTeamIntro">
-                <strong>Team</strong> is visible only to canister admins. Use join invites to onboard <strong>staff</strong> and <strong>collaborators</strong> via the public
-                <a class="studio-inline-link" href="/join-fusion" target="_blank" rel="noopener">/join-fusion</a> page. Collaborator access in Studio is controlled by the
-                <a class="studio-inline-link" href="#permissions">Permissions</a> matrix.
+                <strong>Team</strong> lists canister admins and accounts with a <strong>staff</strong>, <strong>collaborator</strong>, or
+                <strong>admin</strong> role. Artists, galleries, curators, and collectors live in their own sections. Use join invites to onboard
+                staff and collaborators via
+                <a class="studio-inline-link" href="/join-fusion" target="_blank" rel="noopener">/join-fusion</a>.
+                Studio access for those roles is set in
+                <a class="studio-inline-link" href="#permissions">Permissions</a>.
             </p>
             <div class="studio-toolbar-actions" id="studioTeamToolbar" style="display:none">
                 <button type="button" class="studio-btn-primary" id="studioTeamGenInvite" aria-haspopup="dialog">Generate team join invite</button>
@@ -121,9 +121,9 @@ export function renderTeamSection() {
             </div>
             <div id="studioTeamPendingInvitesWrap" class="studio-team-pending-invites" hidden>
                 <p class="studio-muted" style="margin-top:1.5rem">
-                    <strong>Pending join invites</strong> — single-use codes not yet redeemed. Staff and collaborators
-                    use <a class="studio-inline-link" href="/join-fusion" target="_blank" rel="noopener">/join-fusion</a>
-                    with the matching role; other roles use the join flow with the same role selected.
+                    <strong>Pending join invites</strong> — unused staff and collaborator codes. Redeem on
+                    <a class="studio-inline-link" href="/join-fusion" target="_blank" rel="noopener">/join-fusion</a>
+                    with the matching role.
                 </p>
                 <div class="studio-table-wrap studio-table-wrap--sticky-head">
                     <table class="studio-table studio-table--dense" aria-label="Pending join invites">
@@ -171,10 +171,13 @@ async function renderPendingJoinInvitesTable(mainEl) {
         })
         .filter((x) => {
             if (!x.rec || typeof x.rec !== 'object') return false;
-            return /** @type {Record<string, unknown>} */ (x.rec).active === true;
+            const rec = /** @type {Record<string, unknown>} */ (x.rec);
+            if (rec.active !== true) return false;
+            return isStudioTeamAccountRole(studioTeamRoleKey(rec.role));
         });
     if (pending.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="studio-muted">No active join invites.</td></tr>';
+        tbody.innerHTML =
+            '<tr><td colspan="4" class="studio-muted">No active staff or collaborator invites.</td></tr>';
     } else {
         pending.sort((a, b) => a.code.localeCompare(b.code));
         tbody.innerHTML = pending
@@ -195,8 +198,6 @@ async function renderPendingJoinInvitesTable(mainEl) {
     }
     wrap.hidden = false;
 }
-
-const INTERNAL_ROLES = new Set(['staff', 'admin', 'collaborator']);
 
 /**
  * @param {HTMLElement} mainEl
@@ -247,69 +248,22 @@ export async function initTeamSection(mainEl) {
         ]);
         let allAccounts = accInitial;
 
-        const adminOrder = new Map();
-        (adminPrincipals || []).forEach((p, i) => {
-            adminOrder.set(principalKey(p), i);
-        });
-
-        /** @type {Map<string, { principal: string, isAdmin: boolean, isSuperStaff: boolean, acc: import('../../utils/database.js').StudioAccountRow | null, contact: { firstName: string, lastName: string, email: string } | null }>} */
-        const rows = new Map();
-        const ensure = (k) => {
-            if (!rows.has(k)) {
-                rows.set(k, {
-                    principal: k,
-                    isAdmin: false,
-                    isSuperStaff: false,
-                    acc: null,
-                    contact: null,
-                });
-            }
-            return rows.get(k);
-        };
-
-        for (const p of adminPrincipals || []) {
-            const r = ensure(principalKey(p));
-            r.isAdmin = true;
-        }
-        for (const p of superList || []) {
-            const r = ensure(principalKey(p));
-            r.isSuperStaff = true;
-        }
-        for (const row of allAccounts) {
-            if (INTERNAL_ROLES.has(String(row.role))) {
-                const r = ensure(row.principal);
-                r.acc = row;
-            }
-        }
-        for (const pair of contactPairs || []) {
-            if (!Array.isArray(pair) && !(pair && typeof pair === 'object')) continue;
-            const pr = Array.isArray(pair) ? pair[0] : pair[0] ?? /** @type {any} */ (pair)['0'];
-            const c = Array.isArray(pair) ? pair[1] : pair[1] ?? /** @type {any} */ (pair)['1'];
-            if (!c || typeof c !== 'object') continue;
-            const r = ensure(principalKey(pr));
-            r.contact = {
-                firstName: String(/** @type {any} */ (c).firstName ?? c.first_name ?? ''),
-                lastName: String(/** @type {any} */ (c).lastName ?? c.last_name ?? ''),
-                email: String(/** @type {any} */ (c).email ?? ''),
-            };
-        }
-
-        const keys = [...rows.keys()].sort((a, b) => {
-            const ao = adminOrder.has(a) ? adminOrder.get(a) : 9999;
-            const bo = adminOrder.has(b) ? adminOrder.get(b) : 9999;
-            if (ao !== bo) return (ao ?? 0) - (bo ?? 0);
-            return a.localeCompare(b);
+        const directory = collectStudioTeamDirectoryRows({
+            adminPrincipals,
+            superStaffPrincipals: superList,
+            accounts: allAccounts,
+            contactPairs,
         });
 
         gate.className = 'studio-banner studio-banner--ok';
         gate.textContent = 'Directory is read from the canister. Save role changes after editing a row.';
-        if (countEl) countEl.textContent = String(keys.length);
+        if (countEl) countEl.textContent = String(directory.length);
         if (tableWrap) tableWrap.hidden = false;
 
-        tbody.innerHTML = keys
-            .map((k) => {
-                const row = rows.get(k);
-                if (!row) return '';
+        tbody.innerHTML = directory.length
+            ? directory
+            .map((row) => {
+                const k = row.principal;
                 const c = row.contact;
                 const memberNameRaw = [c?.firstName || '', c?.lastName || '']
                     .map((x) => String(x || '').trim())
@@ -322,9 +276,9 @@ export async function initTeamSection(mainEl) {
                               c.email ? (c.firstName || c.lastName ? ' · ' : '') + c.email : ''
                           }`
                         : '—';
-                const acc = row.acc;
+                const acc = /** @type {{ role?: string, status?: string } | null} */ (row.acc);
                 const role = acc ? acc.role : '—';
-                const st = acc ? acc.status : '—';
+                const st = acc ? acc.status || '—' : '—';
                 const canisterBadge = row.isAdmin
                     ? '<span class="studio-pill studio-pill--active">Canister admin</span>'
                     : '';
@@ -354,12 +308,13 @@ export async function initTeamSection(mainEl) {
           <div class="studio-team-badges">${canisterBadge}${superBadge}</div></td>
         <td>${escapeHtml(memberName)}</td>
         <td class="studio-td-clip">${escapeHtml(contactLine)}</td>
-        <td>${acc ? escapeHtml(role) : '—'}</td>
-        <td>${acc ? escapeHtml(st) : '—'}</td>
+        <td>${acc ? escapeHtml(String(role || '')) : '—'}</td>
+        <td>${acc ? escapeHtml(String(st || '')) : '—'}</td>
         <td class="studio-td-wrap">${roleSelect}</td>
       </tr>`;
             })
-            .join('');
+            .join('')
+            : '<tr><td colspan="6" class="studio-muted">No admins, staff, or collaborators yet.</td></tr>';
 
         const doSave = async (/** @type {string} */ p, /** @type {HTMLSelectElement} */ sel) => {
             const accRow = allAccounts.find((x) => x.principal === p);

@@ -6116,6 +6116,138 @@ a.mpd-section-card:hover {
   filter: none;
 }
 
+.mpd-join-unlock__access {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin: 0 0 1.15rem;
+  padding: 0.85rem 0 0;
+  border-top: 1px solid var(--mpd-join-line);
+}
+
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__access-toggle {
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  padding: 0;
+  border: 0 !important;
+  border-radius: 0;
+  background: transparent !important;
+  background-color: transparent !important;
+  color: var(--mpd-join-ink) !important;
+  font: inherit;
+  font-size: 0.9rem;
+  font-variation-settings: var(--fv-label-strong, "wght" 650);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__access-toggle:hover,
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__access-toggle:focus,
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__access-toggle:focus-visible {
+  background: transparent !important;
+  color: var(--mpd-join-ink) !important;
+  opacity: 0.75;
+  outline: none;
+}
+
+.mpd-join-unlock__access-panel {
+  width: 100%;
+}
+
+.mpd-join-unlock__access-panel[hidden] {
+  display: none !important;
+}
+
+.mpd-join-unlock__access-label {
+  display: block;
+  margin: 0 0 0.4rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-variation-settings: var(--fv-caption, "wght" 650);
+  color: var(--mpd-join-ink);
+  opacity: 0.7;
+}
+
+.mpd-join-unlock__access-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0.55rem;
+}
+
+.mpd-join-unlock__access-row input {
+  flex: 1 1 10rem;
+  min-width: 0;
+  border: 1px solid var(--mpd-join-line);
+  background: #fff;
+  padding: 0.72rem 0.8rem;
+  font: inherit;
+  font-size: 0.92rem;
+  color: var(--mpd-join-ink);
+  border-radius: 4px;
+  letter-spacing: 0.12em;
+}
+
+.mpd-join-unlock__access-row input:focus {
+  outline: 2px solid var(--mpd-join-ink);
+  outline-offset: 1px;
+}
+
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__access-redeem {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0.72rem 1rem;
+  border: 1px solid #0f172a !important;
+  border-radius: 4px;
+  background: #0f172a !important;
+  background-color: #0f172a !important;
+  color: #ffffff !important;
+  font: inherit;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-variation-settings: var(--fv-body-wide, "wght" 650);
+  cursor: pointer;
+}
+
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__access-redeem:hover,
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__access-redeem:focus,
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__access-redeem:focus-visible {
+  background: #1e293b !important;
+  background-color: #1e293b !important;
+  color: #ffffff !important;
+  outline: none;
+}
+
+.settings-profile-page .mpd-join-unlock button.mpd-join-unlock__access-redeem:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.mpd-join-unlock__access-msg {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--mpd-join-ink);
+}
+
+.mpd-join-unlock__access-msg.is-ok {
+  color: #2e7d32;
+}
+
+.mpd-join-unlock__access-msg.is-err {
+  color: #b42318;
+}
+
+.mpd-join-unlock__access-msg[hidden] {
+  display: none !important;
+}
+
 .mpd-join-unlock__foot {
   margin: 0.7rem 0 0;
   text-align: center;

@@ -2,8 +2,15 @@ import { renderHeader } from './shared/header.js';
 import { renderFooter } from './shared/footer.js';
 
 import { buildFeedPool } from './subComponents/artistsFeed.js';
+import {
+    applyProfileCardModeForCohortPath,
+    buildArtistCohortFilterOptions,
+    isArtistsRoute,
+    matchArtistCohortOption,
+} from '../utils/artistCohortRoutes.js';
+import { applyDocumentSeo } from '../utils/documentSeo.js';
 import { applyArtistFilters } from '../utils/feedFilterApply.js';
-import { getArtists, getFeaturedArtists } from '../utils/database.js';
+import { getAllProgramsBlock, getArtists, getFeaturedArtists } from '../utils/database.js';
 
 /** @type {((e: CustomEvent) => void) | null} */
 let _artistsFeedFilterHandler = null;
@@ -102,7 +109,7 @@ export function render() {
             <app-feed-filter state="artists"></app-feed-filter>
             <main id="artistsMain" class="main-cont">
                 <div id="artistsMainContent" class="feed-container">
-                    <h1 class="seo-primary-h1">Artists in Fusion’s curated art network</h1>
+                    <h1 class="seo-primary-h1" id="artistsPageHeadline">Artists in Fusion’s curated art network</h1>
                     <app-shout-headline data-content-slug="artists-page"></app-shout-headline>
                     <div class="artist-card-toggle-row"><app-artist-card-image-toggle id="artistsArtistCardImageToggle" aria-label="Artist card image mode"></app-artist-card-image-toggle></div>
                     <app-featured-artist id="featuredArtist2" active="true"></app-featured-artist>
@@ -122,6 +129,9 @@ export default function initArtists() {
     void (async () => {
         const all = await getArtists();
         const feat = await getFeaturedArtists();
+        const programsBlock = await getAllProgramsBlock().catch(() => null);
+        const programs = programsBlock?.programs?.en || [];
+        const cohortOptions = buildArtistCohortFilterOptions({ programs, artists: all || [] });
         const featuredKeys = featuredArtistExclusionKeys(feat);
         const featuredArtist = document.getElementById('featuredArtist2');
         const defaultCriteria = {
@@ -129,12 +139,39 @@ export default function initArtists() {
             disciplineKeys: [],
             locationKey: 'all',
             nameQuery: '',
+            cohortOptions,
         };
         let skipSearchScroll = true;
 
+        const syncCohortHeadline = (criteria) => {
+            applyProfileCardModeForCohortPath(window.location.pathname);
+            const matched =
+                matchArtistCohortOption(cohortOptions, window.location.pathname) ||
+                criteria?.cohortOption ||
+                null;
+            const headline = document.getElementById('artistsPageHeadline');
+            if (headline) {
+                headline.textContent = matched
+                    ? `${matched.label} cohort`
+                    : 'Artists in Fusion’s curated art network';
+            }
+            if (isArtistsRoute(window.location.pathname)) {
+                applyDocumentSeo({
+                    title: matched
+                        ? `${matched.label} artists | Fusion`
+                        : 'Artists on Fusion | Curated Art Network',
+                    description: matched
+                        ? `Artists in the ${matched.label} cohort on Fusion’s curated art network.`
+                        : 'Discover artists in Fusion’s curated art network — Japan-based programs connecting artists, galleries, curators, and collectors.',
+                    path: window.location.pathname,
+                });
+            }
+        };
+
         const applyArtistsPageFilters = async (criteria) => {
-            const nameSearching = Boolean(String(criteria.nameQuery || '').trim());
-            const filteredFeatured = buildFeedPool(applyArtistFilters(feat || [], criteria));
+            const nextCriteria = { ...criteria, cohortOptions };
+            const nameSearching = Boolean(String(nextCriteria.nameQuery || '').trim());
+            const filteredFeatured = buildFeedPool(applyArtistFilters(feat || [], nextCriteria));
 
             if (featuredArtist && typeof featuredArtist.setFeaturedArtist === 'function') {
                 featuredArtist.setFeaturedArtist({ artists: filteredFeatured });
@@ -149,8 +186,10 @@ export default function initArtists() {
                 const pool = nameSearching
                     ? all || []
                     : excludeFeaturedFromPool(all || [], featuredKeys);
-                artistsFeed.setArtists(buildFeedPool(applyArtistFilters(pool, criteria)));
+                artistsFeed.setArtists(buildFeedPool(applyArtistFilters(pool, nextCriteria)));
             }
+
+            syncCohortHeadline(nextCriteria);
 
             if (nameSearching && !skipSearchScroll) {
                 requestAnimationFrame(() => {
@@ -174,7 +213,11 @@ export default function initArtists() {
             queueMicrotask(() => {
                 const ff = document.querySelector('app-feed-filter[state="artists"]');
                 if (ff && typeof ff.hydrateFilterData === 'function') {
-                    ff.hydrateFilterData({ state: 'artists', artists: all || [] });
+                    ff.hydrateFilterData({
+                        state: 'artists',
+                        artists: all || [],
+                        programs,
+                    });
                 } else {
                     void applyArtistsPageFilters(defaultCriteria);
                 }

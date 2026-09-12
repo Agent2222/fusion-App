@@ -532,7 +532,7 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
           </label>
           <label class="studio-field studio-field--checkbox">
             <input type="checkbox" name="art-featured" ${a.featured === true ? 'checked' : ''} />
-            <span>Featured (home strip, max 8)</span>
+            <span>Featured (home / artists strip, max 24)</span>
           </label>
           <label class="studio-field studio-field--checkbox">
             <input type="checkbox" name="art-featurable" ${a.featurable === true ? 'checked' : ''} />
@@ -696,6 +696,12 @@ export function renderArtistManageModalHtml(escapeHtml, artist, opts = {}) {
       </div>
 
       <div id="studio-art-panel-programs" class="studio-tabs__panel" role="tabpanel" aria-labelledby="studio-art-tab-programs" hidden>
+        <h4 class="studio-prog-subhead">Programs this artist is in</h4>
+        <p class="studio-modal-hint">Roster tags used on the public artists filter. Remove a program if it was added by mistake.</p>
+        <div id="studio-art-enrolled-programs" class="studio-art-enrolled-programs">
+          <p class="studio-muted">Loading…</p>
+        </div>
+        <h4 class="studio-prog-subhead" style="margin-top:1.25rem">Program reservation</h4>
         <p class="studio-modal-hint">Application status is read-only. <strong>Reserved</strong> adds or removes this artist from the program&rsquo;s confirmed list (English name) and updates remaining slots.</p>
         <p id="studio-art-programs-status" class="studio-muted studio-art-programs-status" role="status"></p>
         <div class="studio-table-wrap studio-table-wrap--modal-programs">

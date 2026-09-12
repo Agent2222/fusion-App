@@ -713,6 +713,21 @@
   background: color-mix(in srgb, var(--c2) 4%, transparent);
 }
 
+.studio-finance-page .studio-finance-phantom-row td {
+  color: var(--studio-muted, #66615c);
+  background: color-mix(in srgb, var(--studio-workspace-bg, #f4f4f3) 72%, #fff 28%);
+}
+
+.studio-finance-page .studio-finance-program-table tfoot .studio-finance-totals-row td {
+  font-variation-settings: var(--fv-label-strong);
+  border-top: 2px solid color-mix(in srgb, var(--c2) 22%, transparent);
+  background: color-mix(in srgb, var(--studio-card-bg, #fff) 86%, var(--c2) 14%);
+}
+
+.studio-finance-page .studio-finance-program-table tfoot .studio-finance-sticky-col {
+  background: color-mix(in srgb, var(--studio-card-bg, #fff) 86%, var(--c2) 14%);
+}
+
 .studio-finance-page .studio-finance-program-cards-rail--unified {
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--c2) 28%, transparent) transparent;

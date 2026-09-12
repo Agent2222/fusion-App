@@ -3,7 +3,12 @@
  * Shown only when the member is entered (or tester fixture).
  */
 
-import { exitProgramAward, getProgramDrawProgressPublic } from '../../utils/database.js';
+import { exitProgramAward, getProgramDrawProgressPublic, getPrograms } from '../../utils/database.js';
+import { resolveDrawClosedFlag } from '../../utils/applicantsDrawModel.js';
+import {
+    settingsDrawStatusClosedCopy,
+    settingsDrawStatusCopy,
+} from '../../utils/programDrawStatusModel.js';
 import memberUserIcon from '../../assets/icons/fusion_svg_icons_b2/member-user.svg';
 import calendarSlotsIcon from '../../assets/icons/fusion_svg_icons_b2/calendar-slots.svg';
 
@@ -24,61 +29,6 @@ function escapeHtml(s) {
 function iconHtml(iconUrl, className) {
     const url = String(iconUrl || '').replace(/"/g, '');
     return `<span class="${className}" style="--pds-icon-url: url(&quot;${url}&quot;)" aria-hidden="true"></span>`;
-}
-
-/**
- * @param {'en'|'ja'} locale
- * @param {{ remaining: number, claimed: number, total: number, cycle: number }} n
- */
-function copy(locale, n) {
-    if (locale === 'ja') {
-        return {
-            badge: 'プログラム抽選',
-            title: 'プログラム抽選エントリー',
-            sub: `現在の抽選ラウンドにエントリー済みです。全 ${n.total} 枠が埋まったら、1名がランダムに選ばれます。`,
-            active: '開催中',
-            cycle: `ラウンド ${n.cycle}`,
-            remainingLabel: '残り',
-            remainingEntries: '残りエントリー',
-            untilWinner: `当選発表まであと ${n.remaining} エントリー`,
-            submitted: `${n.claimed} / ${n.total} エントリー提出済み`,
-            totalEntries: '合計エントリー',
-            estimatedDraw: '抽選予定',
-            estimatedBody: `${n.total} 枠が埋まった後、約1週間以内`,
-            yourEntry: 'あなたのエントリー',
-            entered: 'エントリー済み',
-            help: `${n.total} エントリーに達した時点で抽選に含まれます。`,
-            withdraw: 'エントリーを取り消す',
-            disclaimer: 'エントリーはいつでも取り消せます。返金はありません。',
-            withdrawConfirm:
-                'プログラム抽選のエントリーを取り消しますか？消費済みのアワードクレジットや支払いの返金はありません。',
-            demoToast: 'デモ表示のみです。',
-            withdrawing: '取り消し中…',
-        };
-    }
-    return {
-        badge: 'Program Draw',
-        title: 'Program Draw Entry',
-        sub: `You are entered in the current draw cycle. Once all ${n.total} spots are filled, one recipient is randomly selected.`,
-        active: 'Active',
-        cycle: `Cycle ${n.cycle}`,
-        remainingLabel: 'Remaining',
-        remainingEntries: 'Remaining entries',
-        untilWinner: `${n.remaining} entries until winner announcement`,
-        submitted: `${n.claimed} of ${n.total} entries submitted`,
-        totalEntries: 'Total entries',
-        estimatedDraw: 'Estimated draw',
-        estimatedBody: `Within 1 week after ${n.total} entries are filled`,
-        yourEntry: 'Your entry',
-        entered: 'Entered',
-        help: `You will be included in the draw when ${n.total} entries are reached.`,
-        withdraw: 'Withdraw entry',
-        disclaimer: 'You can withdraw your entry at any time. There is no refund.',
-        withdrawConfirm:
-            'Withdraw your Program Draw entry? Consumed award credits or payments are not refunded.',
-        demoToast: 'Demo only — not a live draw entry.',
-        withdrawing: 'Withdrawing…',
-    };
 }
 
 /**
@@ -106,10 +56,11 @@ class ProgramDrawStatusComponent extends HTMLElement {
         /** @type {{ claimed: number, total: number, cycle: number, active: boolean } | null} */
         this._progress = null;
         this._busy = false;
+        this._closed = false;
     }
 
     static get observedAttributes() {
-        return ['data-program-id', 'data-fixture'];
+        return ['data-program-id', 'data-fixture', 'data-draw-closed'];
     }
 
     attributeChangedCallback() {
@@ -126,6 +77,27 @@ class ProgramDrawStatusComponent extends HTMLElement {
 
     _programId() {
         return String(this.getAttribute('data-program-id') || '').trim();
+    }
+
+    /**
+     * Closed if the attribute is true **or** `localesJson.draw.closed` on the program row.
+     * @returns {Promise<boolean>}
+     */
+    async _resolveDrawClosed() {
+        const attr = this.getAttribute('data-draw-closed');
+        if (attr === 'true') return true;
+        if (this._isFixture()) return false;
+        const id = this._programId();
+        if (!id) return false;
+        try {
+            const rows = await getPrograms();
+            const row = Array.isArray(rows)
+                ? rows.find((p) => String(p.id) === id || String(p.enCard?.id ?? '') === id)
+                : null;
+            return resolveDrawClosedFlag(attr, row);
+        } catch {
+            return false;
+        }
     }
 
     async _loadProgress() {
@@ -153,13 +125,20 @@ class ProgramDrawStatusComponent extends HTMLElement {
 
     async render() {
         if (!this.shadowRoot) return;
-        await this._loadProgress();
+        await Promise.all([this._loadProgress(), this._resolveDrawClosed().then((c) => {
+            this._closed = c;
+        })]);
         const p = this._progress || { claimed: 0, total: 100, cycle: 1, active: true };
         const claimed = Math.max(0, Math.floor(p.claimed));
         const total = Math.max(1, Math.floor(p.total));
         const remaining = Math.max(0, total - claimed);
         const cycle = Math.max(1, Math.floor(p.cycle || 1));
-        const L = copy(loc(), { remaining, claimed, total, cycle });
+        const locale = loc();
+        if (this._closed) {
+            this._renderClosed(settingsDrawStatusClosedCopy(locale));
+            return;
+        }
+        const L = settingsDrawStatusCopy(locale, { remaining, claimed, total, cycle });
 
         this.shadowRoot.innerHTML = `
       <style>${this._styles()}</style>
@@ -229,7 +208,51 @@ class ProgramDrawStatusComponent extends HTMLElement {
     }
 
     /**
-     * @param {ReturnType<typeof copy>} L
+     * @param {ReturnType<typeof settingsDrawStatusClosedCopy>} L
+     */
+    _renderClosed(L) {
+        if (!this.shadowRoot) return;
+        this.shadowRoot.innerHTML = `
+      <style>${this._styles()}</style>
+      <article class="pds pds--closed" aria-label="${escapeHtml(L.title)}">
+        <header class="pds__header">
+          <div class="pds__header-main">
+            <span class="pds__badge">${escapeHtml(L.badge)}</span>
+            <h3 class="pds__title">${escapeHtml(L.title)}</h3>
+            <p class="pds__sub">${escapeHtml(L.sub)}</p>
+          </div>
+          <div class="pds__header-aside">
+            <span class="pds__closed"><span class="pds__closed-dot" aria-hidden="true"></span>${escapeHtml(L.closed)}</span>
+          </div>
+        </header>
+        <div class="pds__divider" role="presentation"></div>
+        <footer class="pds__footer">
+          <div class="pds__entry">
+            <div class="pds__entry-head">
+              <span class="pds__entry-label">${escapeHtml(L.yourEntry)}</span>
+              <span class="pds__entry-status"><span class="pds__entry-dot" aria-hidden="true"></span>${escapeHtml(L.entered)}</span>
+            </div>
+            <p class="pds__entry-help">${escapeHtml(L.help)}</p>
+          </div>
+          <div class="pds__actions">
+            <button type="button" class="pds__redeem" data-pds-redeem>${escapeHtml(L.redeem)}</button>
+          </div>
+        </footer>
+      </article>
+    `;
+        this.shadowRoot.querySelector('[data-pds-redeem]')?.addEventListener('click', () => {
+            this.dispatchEvent(
+                new CustomEvent('fusion-draw-status-redeem', {
+                    bubbles: true,
+                    composed: true,
+                    detail: { programId: this._programId() },
+                }),
+            );
+        });
+    }
+
+    /**
+     * @param {ReturnType<typeof settingsDrawStatusCopy>} L
      */
     async _onWithdraw(L) {
         if (this._busy) return;
@@ -367,6 +390,28 @@ class ProgramDrawStatusComponent extends HTMLElement {
         height: 6px;
         border-radius: 50%;
         background: #2e7d32;
+        flex: 0 0 auto;
+      }
+
+      .pds__closed {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px 4px 8px;
+        border-radius: 999px;
+        background: #f0f0f0;
+        color: #5a5a5a;
+        font-size: 12px;
+        font-weight: 600;
+        font-variation-settings: var(--fv-body-wide);
+        line-height: 1.2;
+      }
+
+      .pds__closed-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #8a8a8a;
         flex: 0 0 auto;
       }
 
@@ -616,6 +661,30 @@ class ProgramDrawStatusComponent extends HTMLElement {
       .pds__withdraw:disabled {
         opacity: 0.55;
         cursor: wait;
+      }
+
+      .pds__redeem {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0;
+        padding: 10px 18px;
+        border: 1px solid var(--c2, #111);
+        border-radius: 4px;
+        background: var(--c2, #111);
+        color: var(--bg, #fff);
+        font: inherit;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        font-variation-settings: var(--fv-cta);
+        cursor: pointer;
+      }
+
+      .pds__redeem:hover {
+        background: #333;
+        border-color: #333;
       }
 
       .pds__disclaimer {
