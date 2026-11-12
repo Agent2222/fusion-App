@@ -1,5 +1,6 @@
 import {
     getPublicWorldSourceFromLocales,
+    getWorldSourceForField,
     pickPublicWorldField,
 } from './worldPublicPick.js';
 
@@ -96,7 +97,12 @@ export function artistDisplayDiscipline(artist, locale) {
             ? /** @type {Record<string, unknown>} */ (artist.locales)
             : {};
     const src = getPublicWorldSourceFromLocales(root);
-    const pr = pickPublicWorldField(/** @type {Record<string, unknown>} */ (loc), 'practice', src);
+    const pr = pickPublicWorldField(
+        /** @type {Record<string, unknown>} */ (loc),
+        'practice',
+        src,
+        getWorldSourceForField(root, 'practice', src),
+    );
     if (pr != null && String(pr).trim()) return String(pr).trim();
     return '';
 }

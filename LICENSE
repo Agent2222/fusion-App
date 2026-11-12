@@ -1,0 +1,22 @@
+Copyright © Fusion. All rights reserved.
+
+FUSION — a curated art network for artists, galleries, curators, and collectors.
+
+This software, together with its source code, schemas, documentation, designs, and
+content (the "Software"), is proprietary and confidential.
+
+No licence or right is granted. The Software is made publicly visible solely so that
+it can be reviewed and evaluated (for example as part of a hackathon submission).
+Public visibility does not place the Software in the public domain and does not grant
+any right to use, copy, reproduce, modify, adapt, translate, publish, distribute,
+sublicense, sell, host, deploy, or create derivative works from it, in whole or in
+part, nor to use it as training data for machine-learning models.
+
+All intellectual property rights in the Software remain with their respective owners.
+Third-party components included in this repository (for example Internet Identity
+artifacts under `third_party/`) remain subject to their own licences and notices.
+
+Any use beyond review requires prior written permission. Requests should be directed
+to the project owner through the contact page of the live platform.
+
+The Software is provided "as is", without warranty of any kind, express or implied.

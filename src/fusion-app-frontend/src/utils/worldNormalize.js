@@ -6,6 +6,26 @@ import { isLlmFailureText } from './llmTextSanitize.js';
 
 const WORLD_ARRAY_KEYS = ['perspective', 'vision', 'constructing', 'context'];
 
+/** Section keys accepted in `locales.worldSourceByField` (kept in sync with worldPublicPick). */
+const WORLD_SOURCE_BY_FIELD_KEYS = ['practice', 'perspective', 'vision', 'constructing', 'context', 'quote'];
+
+/**
+ * Keep only known section keys with a valid `world` / `newWorld` value.
+ * @param {unknown} raw
+ * @returns {Record<string, string>}
+ */
+function normalizeWorldSourceByFieldForStorage(raw) {
+    /** @type {Record<string, string>} */
+    const out = {};
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+    const src = /** @type {Record<string, unknown>} */ (raw);
+    for (const key of WORLD_SOURCE_BY_FIELD_KEYS) {
+        const v = src[key];
+        if (v === 'world' || v === 'newWorld') out[key] = v;
+    }
+    return out;
+}
+
 /**
  * @param {string} s
  * @returns {boolean}
@@ -86,6 +106,12 @@ export function normalizeLocalesWorldForStorage(locales) {
         out.publicWorldSource = pws;
     } else {
         delete out.publicWorldSource;
+    }
+    const byField = normalizeWorldSourceByFieldForStorage(out.worldSourceByField);
+    if (Object.keys(byField).length) {
+        out.worldSourceByField = byField;
+    } else {
+        delete out.worldSourceByField;
     }
     const ad = out.audioDisplayForArtist;
     if (ad === true || ad === false) {

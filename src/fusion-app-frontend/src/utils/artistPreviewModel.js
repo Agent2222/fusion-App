@@ -13,6 +13,7 @@ import {
 import { introSlotsFromWorld } from './memberProfileForm.js';
 import {
     getPublicWorldSourceFromLocales,
+    getWorldSourceForField,
     pickPublicWorldField,
 } from './worldPublicPick.js';
 
@@ -93,6 +94,7 @@ export function shortPreviewBlurb(artist, locale = 'en') {
         /** @type {Record<string, unknown>} */ (loc),
         'practice',
         source,
+        getWorldSourceForField(locales, 'practice', source),
     );
     const practiceText = String(practice ?? '').trim();
     if (practiceText) return shortenPreviewText(practiceText);
@@ -103,6 +105,7 @@ export function shortPreviewBlurb(artist, locale = 'en') {
         /** @type {Record<string, unknown>} */ (en),
         'practice',
         source,
+        getWorldSourceForField(locales, 'practice', source),
     );
     if (String(enPractice ?? '').trim()) return shortenPreviewText(String(enPractice));
     return shortenPreviewText(String(/** @type {Record<string, unknown>} */ (en).bio ?? ''));

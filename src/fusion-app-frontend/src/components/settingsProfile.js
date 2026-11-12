@@ -20,8 +20,9 @@ import {
   updateMyArtistVisibility,
   normalizeArtistRosterVisibility,
   getPrograms,
-  generateAndUpdateMyArtistWorldFromBio,
   memberTranslateText,
+  memberTranslateEnToJa,
+  memberReinterpretWithPrompt,
   artistRowFromMyArtistRecord,
   hasUsableWorldLlmSourceInput,
   normalizeProgramVisibility,
@@ -77,6 +78,7 @@ import {
   readProfileDraftFromDom,
   readLinksFromContainer,
   safeJsonStringify,
+  textareaToWorldArray,
   worldFieldToTextarea,
 } from "../utils/memberProfileForm.js";
 import { publicSlugFromEnglishFirstLast } from "../utils/artistSlug.js";
@@ -86,11 +88,12 @@ import {
 } from "../utils/feedFilterApply.js";
 import { normalizeLocalesWorldForStorage } from "../utils/worldNormalize.js";
 import {
-  getPublicWorldSourceFromLocales,
-  localesHaveUsableWorldNew,
-  needsInitialWorldNew,
+  normalizeWorldSourceByField,
   worldFieldHasContent,
 } from "../utils/worldPublicPick.js";
+import { buildTrimmedSourceJsonForLlm } from "../utils/studioArtistWorldLlm.js";
+import { suggestWorldSectionValue } from "../utils/memberWorldSectionSuggest.js";
+import { applyStorySaveToLocales } from "../utils/memberStorySave.js";
 import { getAuthSnapshot } from "../utils/icAuth.js";
 import { DEV_MODE } from "../config.js";
 import { uploadBlobToS3 } from "../utils/studioS3Upload.js";
@@ -264,11 +267,8 @@ const MPD_WORLD_TEXT_FIELDS = /** @type {const} */ ([
   "context",
   "quote",
 ]);
-/** @type {'world' | 'newWorld'} */
-let mpdStoryWorldDisplaySource = "world";
-/** @type {Record<string, unknown> | null} */
-let mpdStoryWorldDraft = null;
-let mpdStoryWorldNewAvailable = false;
+/** Story & World sections whose AI suggestion is currently generating. */
+const mpdStorySuggestBusy = new Set();
 /** Profile context for module-level upload helpers (synced from initSettingsProfile.load). */
 let mpdCurrentArtistId = "";
 let mpdProfileSlug = "";
@@ -572,6 +572,10 @@ function setVal(id, v) {
   if (n && "value" in n) n.value = v;
 }
 
+/**
+ * Profile-level quote (hero quote) always comes from the artist's own words column.
+ * @returns {string}
+ */
 function getMpdProfileQuoteForSave() {
   return getVal("mpd_w_quote").trim();
 }
@@ -813,140 +817,236 @@ function mpdWorldBlockFromLocales(locales, active, which) {
     : {};
 }
 
-/** @param {Record<string, unknown>} world */
-function mpdStoryTextBlockFromWorld(world) {
-  /** @type {Record<string, unknown>} */
-  const out = {};
-  for (const key of MPD_WORLD_TEXT_FIELDS) out[key] = world[key];
-  return out;
-}
-
-/** @param {Record<string, unknown>} block */
-function mpdStoryTextBlockHasContent(block) {
-  return MPD_WORLD_TEXT_FIELDS.some((key) => worldFieldHasContent(block[key]));
-}
-
-function readMpdStoryWorldTextDraftFromDom() {
-  const draft = readProfileDraftFromDom(getVal);
-  const world =
-    draft.world && typeof draft.world === "object" && !Array.isArray(draft.world)
-      ? /** @type {Record<string, unknown>} */ (draft.world)
-      : {};
-  return mpdStoryTextBlockFromWorld(world);
-}
-
-/** @returns {Record<string, unknown>} */
+/**
+ * Read the Story & World form. The artist's own column keeps the historical
+ * `mpd_w_*` ids, so this is still the canonical single-locale draft for saves.
+ * @returns {Record<string, unknown>}
+ */
 function readMpdProfileDraftForSave() {
-  mpdStoryWorldDraft = readMpdStoryWorldTextDraftFromDom();
   return readProfileDraftFromDom(getVal);
 }
 
-/** @param {Record<string, unknown>} world */
-function setMpdStoryFieldsFromWorld(world) {
-  setVal("mpd_w_practice", String(world.practice ?? ""));
-  setVal("mpd_w_perspective", worldFieldToTextarea(world.perspective));
-  setVal("mpd_w_vision", worldFieldToTextarea(world.vision));
-  setVal("mpd_w_constructing", worldFieldToTextarea(world.constructing));
-  setVal("mpd_w_context", worldFieldToTextarea(world.context));
-  setVal("mpd_w_quote", String(world.quote ?? ""));
-}
-
-/** @param {boolean} readonly */
-function setMpdStoryFieldsReadonly(readonly) {
-  const story = document.getElementById("mpd-story");
-  if (story) story.classList.toggle("mpd-story--readonly", readonly);
-  document.querySelectorAll(".mpd-story-input").forEach((elNode) => {
-    if (
-      elNode instanceof HTMLInputElement ||
-      elNode instanceof HTMLTextAreaElement
-    ) {
-      elNode.readOnly = readonly;
-      elNode.setAttribute("aria-readonly", readonly ? "true" : "false");
-    }
-  });
-  document.querySelectorAll(".mpd-story-edit-btn").forEach((btn) => {
-    if (!(btn instanceof HTMLButtonElement)) return;
-    btn.disabled = readonly;
-    btn.setAttribute("aria-hidden", readonly ? "true" : "false");
-  });
+/**
+ * Read the AI (`worldNew`) column. Both columns are editable in the restyled editor.
+ * @returns {Record<string, unknown>}
+ */
+function readMpdStoryWorldNewFromDom() {
+  return {
+    practice: getVal("mpd_wn_practice"),
+    perspective: textareaToWorldArray(getVal("mpd_wn_perspective")),
+    vision: textareaToWorldArray(getVal("mpd_wn_vision")),
+    constructing: textareaToWorldArray(getVal("mpd_wn_constructing")),
+    context: textareaToWorldArray(getVal("mpd_wn_context")),
+    quote: getVal("mpd_wn_quote"),
+  };
 }
 
 /**
+ * Which column is published, per section.
+ * @returns {Record<string, 'world' | 'newWorld'>}
+ */
+function readMpdStoryWorldSourceFromDom() {
+  /** @type {Record<string, 'world' | 'newWorld'>} */
+  const out = {};
+  for (const field of MPD_WORLD_TEXT_FIELDS) {
+    const checked = document.querySelector(`input[name="mpd_pick_${field}"]:checked`);
+    out[field] =
+      checked instanceof HTMLInputElement && checked.value === "world" ? "world" : "newWorld";
+  }
+  return out;
+}
+
+/**
+ * Story state that lives outside the single-locale draft.
+ * @returns {{ worldNew: Record<string, unknown>, worldSourceByField: Record<string, 'world' | 'newWorld'> }}
+ */
+function readMpdStorySaveExtras() {
+  return {
+    worldNew: readMpdStoryWorldNewFromDom(),
+    worldSourceByField: readMpdStoryWorldSourceFromDom(),
+  };
+}
+
+/** @param {string} field */
+function mpdStorySectionLabel(field) {
+  const labels = {
+    practice: "Practice",
+    perspective: "Perspective",
+    vision: "Vision",
+    constructing: "Constructing",
+    context: "Context",
+    quote: "Quote",
+  };
+  return labels[field] || field;
+}
+
+/**
+ * Artist row shaped for the LLM, with whatever is currently typed in the form
+ * layered over the stored English locale (unsaved bio/discipline edits count).
+ * @param {Record<string, unknown> | null | undefined} artistRow
+ * @returns {Record<string, unknown>}
+ */
+function mpdStoryLlmRow(artistRow) {
+  const row = artistRow && typeof artistRow === "object" ? artistRow : {};
+  const locales =
+    row.locales && typeof row.locales === "object"
+      ? /** @type {Record<string, unknown>} */ (row.locales)
+      : { en: {}, ja: {} };
+  const en = localeBlock(locales, "en");
+  const draft = readProfileDraftFromDom(getVal);
+  const draftWorld =
+    draft.world && typeof draft.world === "object" && !Array.isArray(draft.world)
+      ? /** @type {Record<string, unknown>} */ (draft.world)
+      : {};
+  const enWorld =
+    en.world && typeof en.world === "object" && !Array.isArray(en.world)
+      ? /** @type {Record<string, unknown>} */ (en.world)
+      : {};
+  return {
+    ...row,
+    locales: {
+      ...locales,
+      en: {
+        ...en,
+        firstName: draft.firstName,
+        lastName: draft.lastName,
+        name: draft.name,
+        discipline: draft.discipline,
+        bio: draft.bio,
+        status: draft.status,
+        location: draft.location,
+        world: { ...enWorld, ...draftWorld },
+      },
+    },
+  };
+}
+
+/**
+ * @param {unknown} err
+ * @returns {string}
+ */
+function formatMpdStorySuggestError(err) {
+  const raw = err instanceof Error ? err.message : String(err ?? "");
+  if (/Live data source|requires Live data/i.test(raw)) {
+    return "AI suggestions need Live data. Connect the live backend to generate copy.";
+  }
+  if (
+    /empty suggestion|could not write this section|source text|not available right now/i.test(raw)
+  ) {
+    return "Couldn’t write that section yet. Add a little more detail to your bio, then try again.";
+  }
+  if (raw && raw.length < 200) return raw;
+  return "Couldn’t generate this section. Check your connection and try again.";
+}
+
+/**
+ * @param {Record<string, unknown>} world
+ * @param {'w' | 'wn'} [prefix]
+ */
+function setMpdStoryFieldsFromWorld(world, prefix = "w") {
+  const p = prefix === "wn" ? "mpd_wn_" : "mpd_w_";
+  setVal(`${p}practice`, String(world.practice ?? ""));
+  setVal(`${p}perspective`, worldFieldToTextarea(world.perspective));
+  setVal(`${p}vision`, worldFieldToTextarea(world.vision));
+  setVal(`${p}constructing`, worldFieldToTextarea(world.constructing));
+  setVal(`${p}context`, worldFieldToTextarea(world.context));
+  setVal(`${p}quote`, String(world.quote ?? ""));
+}
+
+/**
+ * Tick one section's publish column (radio) without firing DOM events.
+ * @param {string} field
  * @param {'world' | 'newWorld'} source
- * @param {boolean} newWorldAvailable
  */
-function renderPublicWorldSourceToggle(source, newWorldAvailable) {
-  const resolved = source === "newWorld" && newWorldAvailable ? "newWorld" : "world";
-  const hidden = /** @type {HTMLInputElement | null} */ (
-    document.getElementById("mpd_public_world_source")
-  );
-  if (hidden) hidden.value = resolved;
-  const note = document.getElementById("mpd_public_world_source_note");
-  if (note) {
-    note.textContent = `${resolved === "newWorld" ? "New World" : "World"} will display on your profile.`;
-  }
-  document.querySelectorAll("[data-mpd-world-source]").forEach((btn) => {
-    if (!(btn instanceof HTMLButtonElement)) return;
-    const buttonSource = btn.getAttribute("data-mpd-world-source");
-    const isNewWorld = buttonSource === "newWorld";
-    const active = buttonSource === resolved;
-    btn.classList.toggle("is-active", active);
-    btn.classList.toggle("is-disabled", isNewWorld && !newWorldAvailable);
-    btn.setAttribute("aria-pressed", active ? "true" : "false");
-    btn.disabled = Boolean(isNewWorld && !newWorldAvailable);
-    if (isNewWorld && !newWorldAvailable) {
-      btn.setAttribute("aria-disabled", "true");
-      btn.title = "New World will unlock after generated copy is available.";
-    } else {
-      btn.removeAttribute("aria-disabled");
-      btn.removeAttribute("title");
-    }
+function setMpdStoryPick(field, source) {
+  const pick = source === "world" ? "world" : "newWorld";
+  document.querySelectorAll(`input[name="mpd_pick_${field}"]`).forEach((node) => {
+    if (node instanceof HTMLInputElement) node.checked = node.value === pick;
   });
 }
 
 /**
- * Public profile toggle only — which block visitors see (World vs New World).
- * @param {Record<string, unknown>} locales
- * @param {unknown} [requested]
+ * Paint the per-section publish choice: green outline on the chosen column, the
+ * row note, and the card summary line.
  */
-function syncMpdPublicWorldSource(locales, requested) {
-  mpdStoryWorldNewAvailable = localesHaveUsableWorldNew(locales);
-  let source =
-    requested === "world" || requested === "newWorld"
-      ? requested
-      : getPublicWorldSourceFromLocales(locales);
-  if (source === "newWorld" && !mpdStoryWorldNewAvailable) source = "world";
-  renderPublicWorldSourceToggle(source, mpdStoryWorldNewAvailable);
-}
-
-/**
- * Story tab editor — always editable Story & World (`world`) fields.
- * @param {Record<string, unknown>} locales
- * @param {'en' | 'ja'} active
- * @param {boolean} [captureCurrent]
- */
-function loadMpdStoryWorldEditor(locales, active, captureCurrent = false) {
-  if (captureCurrent) {
-    mpdStoryWorldDraft = readMpdStoryWorldTextDraftFromDom();
+function syncMpdStoryPickUi() {
+  const picks = readMpdStoryWorldSourceFromDom();
+  for (const field of MPD_WORLD_TEXT_FIELDS) {
+    const row = document.querySelector(`[data-mpd-story-field="${field}"]`);
+    if (!(row instanceof HTMLElement)) continue;
+    const picked = picks[field] === "world" ? "world" : "newWorld";
+    row.setAttribute("data-mpd-story-picked", picked);
+    const ownEmpty = !getVal(`mpd_w_${field}`).trim();
+    const aiEmpty = !getVal(`mpd_wn_${field}`).trim();
+    row.querySelectorAll("[data-mpd-story-column]").forEach((col) => {
+      if (!(col instanceof HTMLElement)) return;
+      const column = col.getAttribute("data-mpd-story-column");
+      const isPicked = column === picked;
+      const isEmpty = column === "world" ? ownEmpty : aiEmpty;
+      col.classList.toggle("is-picked", isPicked);
+      col.classList.toggle("is-empty", isEmpty);
+      const radio = col.querySelector('input[type="radio"]');
+      if (radio instanceof HTMLInputElement) radio.checked = isPicked;
+    });
+    const note = row.querySelector("[data-mpd-story-pick-note]");
+    if (note) {
+      const pickedEmpty = picked === "world" ? ownEmpty : aiEmpty;
+      const columnName = picked === "world" ? "your words" : "the AI version";
+      note.textContent = pickedEmpty
+        ? `Publishing ${columnName} — this column is empty, so visitors see the other one.`
+        : `Publishing ${columnName}.`;
+    }
+    const suggestBtn = row.querySelector("[data-mpd-suggest-field]");
+    if (suggestBtn instanceof HTMLButtonElement) {
+      const busy = mpdStorySuggestBusy.has(field);
+      suggestBtn.setAttribute("aria-busy", busy ? "true" : "false");
+      suggestBtn.disabled = busy;
+      row.classList.toggle("is-generating", busy);
+    }
   }
-  const world = mpdWorldBlockFromLocales(locales, active, "world");
-  mpdStoryWorldNewAvailable = localesHaveUsableWorldNew(locales);
-  setMpdStoryFieldsFromWorld(
-    mpdStoryWorldDraft || mpdStoryTextBlockFromWorld(world),
-  );
-  setMpdStoryFieldsReadonly(false);
-  mpdStoryWorldDisplaySource = "world";
+  syncMpdStoryPickSummary(picks);
+}
+
+/** @param {Record<string, string>} [picks] */
+function syncMpdStoryPickSummary(picks) {
+  const el = document.getElementById("mpd_story_pick_summary");
+  if (!el) return;
+  const map = picks || readMpdStoryWorldSourceFromDom();
+  const aiCount = MPD_WORLD_TEXT_FIELDS.filter((f) => map[f] === "newWorld").length;
+  const aiWritten = MPD_WORLD_TEXT_FIELDS.filter((f) => getVal(`mpd_wn_${f}`).trim()).length;
+  if (aiCount === 0) {
+    el.textContent = "Your profile shows your own words in every story section.";
+    return;
+  }
+  el.textContent = `Your profile shows the AI version in ${String(aiCount)} of ${String(
+    MPD_WORLD_TEXT_FIELDS.length,
+  )} sections (${String(aiWritten)} written).`;
 }
 
 /**
+ * Fill both Story columns for the active language and restore the publish choice.
+ * Sections without an explicit choice default to the column that actually has copy
+ * (matching what the public profile falls back to).
  * @param {Record<string, unknown>} locales
  * @param {'en' | 'ja'} active
- * @param {unknown} requested
- * @param {boolean} [captureCurrent]
  */
-function applyMpdStoryWorldDisplay(locales, active, requested, captureCurrent = true) {
-  loadMpdStoryWorldEditor(locales, active, captureCurrent);
-  syncMpdPublicWorldSource(locales, requested);
+function fillMpdStoryColumns(locales, active) {
+  const world = mpdWorldBlockFromLocales(locales, active, "world");
+  const worldNew = mpdWorldBlockFromLocales(locales, active, "worldNew");
+  setMpdStoryFieldsFromWorld(world, "w");
+  setMpdStoryFieldsFromWorld(worldNew, "wn");
+  const explicit =
+    locales && typeof locales === "object"
+      ? normalizeWorldSourceByField(
+          /** @type {Record<string, unknown>} */ (locales).worldSourceByField,
+        )
+      : {};
+  for (const field of MPD_WORLD_TEXT_FIELDS) {
+    const stored = explicit[field];
+    const byContent = worldFieldHasContent(worldNew[field]) ? "newWorld" : "world";
+    setMpdStoryPick(field, stored === "world" || stored === "newWorld" ? stored : byContent);
+  }
+  syncMpdStoryPickUi();
 }
 
 /** @param {unknown} raw */
@@ -1142,32 +1242,12 @@ async function translateProfileDraftBlock(
  * @param {Record<string, unknown>} prev
  * @param {Record<string, unknown>} draft
  * @param {(id: string) => string | undefined} val
- * @param {{ translate?: boolean, _valOverrides?: Record<string, string> }} [options]
+ * @param {{ translate?: boolean, active?: 'en' | 'ja', story?: { worldNew?: Record<string, unknown>, worldSourceByField?: Record<string, unknown> } }} [options]
  */
 async function buildSmartProfileLocales(prev, draft, val, options = {}) {
-  const resolveVal = (id) => {
-    if (options._valOverrides && id in options._valOverrides) return options._valOverrides[id];
-    return val(id);
-  };
   const out = /** @type {Record<string, unknown>} */ (
     cloneMpdValue(prev && typeof prev === "object" ? prev : { en: {}, ja: {} }) || {}
   );
-  /** @param {'en' | 'ja'} code */
-  const preserveWorldNew = (code) => {
-    const prevBlock = localeBlock(prev, code);
-    const nextBlock = localeBlock(out, code);
-    const prevWorldNew = prevBlock.worldNew;
-    if (
-      nextBlock &&
-      typeof nextBlock === "object" &&
-      prevWorldNew &&
-      typeof prevWorldNew === "object" &&
-      !Array.isArray(prevWorldNew)
-    ) {
-      nextBlock.worldNew = cloneMpdValue(prevWorldNew);
-      out[code] = nextBlock;
-    }
-  };
   if (options.translate === false) {
     out.en = cloneMpdValue(draft);
     out.ja = cloneMpdValue(draft);
@@ -1197,14 +1277,7 @@ async function buildSmartProfileLocales(prev, draft, val, options = {}) {
       );
     }
   }
-  preserveWorldNew("en");
-  preserveWorldNew("ja");
-  const srcPick = resolveVal("mpd_public_world_source");
-  if (srcPick === "world") {
-    out.publicWorldSource = "world";
-  } else {
-    delete out.publicWorldSource;
-  }
+  applyStorySaveToLocales(out, prev, options);
   return normalizeLocalesWorldForStorage(out);
 }
 
@@ -1241,7 +1314,6 @@ function fillFormFromLocales(locales, active) {
   setVal("mpd_loc_state", String(loc.state ?? ""));
   setVal("mpd_loc_country", String(loc.country ?? ""));
   setVal("mpd_loc_display", String(loc.display ?? ""));
-  mpdStoryWorldDraft = mpdStoryTextBlockFromWorld(w);
   const slots = introSlotsFromWorld(w);
   for (let i = 0; i < 3; i++) {
     const s = slots[i] || { src: "", alt: "", caption: "" };
@@ -1289,8 +1361,7 @@ function fillFormFromLocales(locales, active) {
   );
   if (devTa && DEV_MODE) devTa.value = safeJsonStringify(locales);
   renderLinkRows(Array.isArray(b.links) ? b.links : []);
-  loadMpdStoryWorldEditor(locales, active, false);
-  syncMpdPublicWorldSource(locales, getPublicWorldSourceFromLocales(locales));
+  fillMpdStoryColumns(locales, active);
   syncMpdAudioSectionVisibility(locales);
 }
 
@@ -4313,10 +4384,40 @@ function updateSettingsProfileContactEmailField(knownEmail = mpdKnownContactEmai
   }
 }
 
+/**
+ * Modal-level save progress. Keeps the choice sheet open with a spinner so the
+ * picked action always shows a loading animation (translate can take a while).
+ * @param {boolean} busy
+ * @param {string} [label]
+ * @param {'translate' | 'just-save' | ''} [choice]
+ */
+function setMpdSaveChoiceBusy(busy, label = "", choice = "") {
+  const modal = document.getElementById("mpdSaveChoiceModal");
+  if (!modal) return;
+  modal.classList.toggle("is-busy", busy);
+  modal.setAttribute("aria-busy", busy ? "true" : "false");
+  const progress = modal.querySelector("#mpdSaveChoiceProgress");
+  const progressLabel = modal.querySelector("#mpdSaveChoiceProgressLabel");
+  if (progressLabel) progressLabel.textContent = label || "Saving your profile…";
+  if (progress) progress.toggleAttribute("hidden", !busy);
+  const translationBlocked = mpdMembershipGate === "needsSubscription";
+  modal.querySelectorAll(".mpd-save-choice-modal__actions button").forEach((btn) => {
+    if (!(btn instanceof HTMLButtonElement)) return;
+    const isTranslate = btn.id === "mpdSaveChoiceTranslate";
+    const isJustSave = btn.id === "mpdSaveChoiceJustSave";
+    const isChosen =
+      (choice === "translate" && isTranslate) || (choice === "just-save" && isJustSave);
+    btn.disabled = busy || (isTranslate && translationBlocked);
+    if (busy && isChosen) btn.setAttribute("aria-busy", "true");
+    else btn.removeAttribute("aria-busy");
+  });
+}
+
 function openMpdSaveChoiceModal() {
   const modal = document.getElementById("mpdSaveChoiceModal");
   if (!modal) return;
   document.body.appendChild(modal);
+  setMpdSaveChoiceBusy(false);
   modal.hidden = false;
   modal.setAttribute("aria-hidden", "false");
   const translateBtn = /** @type {HTMLButtonElement | null} */ (
@@ -4339,9 +4440,13 @@ function openMpdSaveChoiceModal() {
 function closeMpdSaveChoiceModal() {
   const modal = document.getElementById("mpdSaveChoiceModal");
   if (!modal) return;
+  setMpdSaveChoiceBusy(false);
   modal.hidden = true;
   modal.setAttribute("aria-hidden", "true");
 }
+
+/** Keeps the save-choice progress label in sync with the active operation. */
+let _mpdSaveChoiceStatusWired = false;
 
 function wireMpdSaveChoiceModal() {
   const modal = document.getElementById("mpdSaveChoiceModal");
@@ -4352,6 +4457,8 @@ function wireMpdSaveChoiceModal() {
   const justSaveBtn = modal.querySelector("#mpdSaveChoiceJustSave");
   const translateBtn = modal.querySelector("#mpdSaveChoiceTranslate");
   const cancel = () => {
+    const current = document.getElementById("mpdSaveChoiceModal");
+    if (current?.classList.contains("is-busy")) return;
     closeMpdSaveChoiceModal();
     window.dispatchEvent(
       new CustomEvent("fusion-settings-profile-save-choice", {
@@ -4359,27 +4466,40 @@ function wireMpdSaveChoiceModal() {
       }),
     );
   };
+  /** @param {boolean} translate */
+  const choose = (translate) => {
+    if (modal.classList.contains("is-busy")) return;
+    setMpdSaveChoiceBusy(
+      true,
+      translate ? "Translating & saving your profile…" : "Saving your profile…",
+      translate ? "translate" : "just-save",
+    );
+    window.dispatchEvent(
+      new CustomEvent("fusion-settings-profile-save-choice", {
+        detail: { action: "save", translate },
+      }),
+    );
+  };
   scrim?.addEventListener("click", cancel);
   cancelBtn?.addEventListener("click", cancel);
-  justSaveBtn?.addEventListener("click", () => {
-    closeMpdSaveChoiceModal();
-    window.dispatchEvent(
-      new CustomEvent("fusion-settings-profile-save-choice", {
-        detail: { action: "save", translate: false },
-      }),
-    );
-  });
-  translateBtn?.addEventListener("click", () => {
-    closeMpdSaveChoiceModal();
-    window.dispatchEvent(
-      new CustomEvent("fusion-settings-profile-save-choice", {
-        detail: { action: "save", translate: true },
-      }),
-    );
-  });
+  justSaveBtn?.addEventListener("click", () => choose(false));
+  translateBtn?.addEventListener("click", () => choose(true));
   window.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && modal && !modal.hidden) cancel();
   });
+  if (!_mpdSaveChoiceStatusWired) {
+    _mpdSaveChoiceStatusWired = true;
+    window.addEventListener("fusion-profile-save-status", (event) => {
+      const current = document.getElementById("mpdSaveChoiceModal");
+      if (!current || current.hidden || !current.classList.contains("is-busy")) return;
+      const detail =
+        event instanceof CustomEvent && detailIsObject(event.detail) ? event.detail : {};
+      if (String(detail.state || "") !== "saving") return;
+      const progressLabel = current.querySelector("#mpdSaveChoiceProgressLabel");
+      const message = String(detail.message || "").trim();
+      if (progressLabel && message) progressLabel.textContent = message;
+    });
+  }
 }
 
 function wireMpdMembershipCancelModal() {
@@ -4863,6 +4983,112 @@ export function generateSettingsProfileContent() {
   const storyEditIconHtml = storyEditIcon
     ? `<img src="${mpdEscapeAttr(storyEditIcon)}" alt="" />`
     : '<span aria-hidden="true">✎</span>';
+  /**
+   * Two-column Story & World sections: the artist's words (`mpd_w_*`, historical ids
+   * used by the profile draft) and the AI version (`mpd_wn_*`), plus one publish radio
+   * per column and the per-section "suggest copy" button in the gutter.
+   */
+  const storySections = [
+    {
+      field: "practice",
+      label: "Practice",
+      hint: "Tell us more about the work you are currently pursuing.",
+      placeholder: "Describe what you are working on...",
+      rows: 3,
+    },
+    {
+      field: "perspective",
+      label: "Perspective",
+      hint: "How you see your practice in relation to the field.",
+      placeholder: "Share your point of view...&#10;&#10;Add another thought here...",
+      rows: 3,
+    },
+    {
+      field: "vision",
+      label: "Vision",
+      hint: "Where you want the work to go — aims, horizons, and what you are building toward.",
+      placeholder: "Where do you want the work to go?",
+      rows: 3,
+    },
+    {
+      field: "constructing",
+      label: "Constructing",
+      hint: "Materials, process, and what you are actively making right now.",
+      placeholder: "Materials, process, current experiments...",
+      rows: 2,
+    },
+    {
+      field: "context",
+      label: "Context",
+      hint: "Place, community, or history that situates the work.",
+      placeholder: "Place, community, history, or influences...",
+      rows: 2,
+    },
+    {
+      field: "quote",
+      label: "Quote",
+      hint: "A single line visitors can read at a glance.",
+      placeholder: "A short line visitors can remember...",
+      rows: 1,
+    },
+  ];
+  const storyRowsHtml = storySections
+    .map((section) => {
+      const ownId = `mpd_w_${section.field}`;
+      const aiId = `mpd_wn_${section.field}`;
+      const ownControl =
+        section.field === "quote"
+          ? `<input type="text" id="${ownId}" class="studio-input mpd-story-input" placeholder="${section.placeholder}" />`
+          : `<textarea id="${ownId}" class="studio-textarea mpd-story-input" rows="${String(section.rows)}" placeholder="${section.placeholder}"></textarea>`;
+      const aiControl =
+        section.field === "quote"
+          ? `<input type="text" id="${aiId}" class="studio-input mpd-story-input mpd-story-input--ai" placeholder="No AI version yet — press ✦" />`
+          : `<textarea id="${aiId}" class="studio-textarea mpd-story-input mpd-story-input--ai" rows="${String(section.rows)}" placeholder="No AI version yet — press ✦"></textarea>`;
+      return `
+                                    <div class="mpd-story-row" data-mpd-story-field="${section.field}">
+                                        <div class="mpd-story-row__head">
+                                            <span class="mpd-story-field-label">${section.label}</span>
+                                            <span class="mpd-field-hint">${section.hint}</span>
+                                        </div>
+                                        <div class="mpd-story-row__cols">
+                                            <div class="mpd-story-col mpd-story-col--own" data-mpd-story-column="world">
+                                                <div class="mpd-story-col__head">
+                                                    <label class="mpd-story-pick">
+                                                        <input type="radio" class="mpd-story-pick__input" name="mpd_pick_${section.field}" value="world" aria-label="Publish your own ${section.label} copy" />
+                                                        <span class="mpd-story-pick__dot" aria-hidden="true"></span>
+                                                        <span class="mpd-story-col__label">Your words</span>
+                                                    </label>
+                                                    <button type="button" class="mpd-story-edit-btn" data-mpd-edit-target="${ownId}" aria-label="Edit your ${section.label} copy">${storyEditIconHtml}</button>
+                                                </div>
+                                                ${ownControl}
+                                            </div>
+                                            <div class="mpd-story-gutter">
+                                                <button type="button" class="mpd-story-suggest" data-mpd-suggest-field="${section.field}" data-mpd-tip="Write an AI version of ${section.label} from your bio, discipline and location. Nothing goes public until you pick the AI column." aria-label="Write an AI version of ${section.label}" aria-busy="false">
+                                                    <span class="mpd-story-suggest__icon" aria-hidden="true">✦</span>
+                                                    <span class="mpd-story-suggest__spinner" aria-hidden="true"></span>
+                                                </button>
+                                            </div>
+                                            <div class="mpd-story-col mpd-story-col--ai" data-mpd-story-column="newWorld">
+                                                <div class="mpd-story-col__head">
+                                                    <label class="mpd-story-pick">
+                                                        <input type="radio" class="mpd-story-pick__input" name="mpd_pick_${section.field}" value="newWorld" aria-label="Publish the AI ${section.label} copy" checked />
+                                                        <span class="mpd-story-pick__dot" aria-hidden="true"></span>
+                                                        <span class="mpd-story-col__label">AI version</span>
+                                                    </label>
+                                                    <button type="button" class="mpd-story-edit-btn" data-mpd-edit-target="${aiId}" aria-label="Edit the AI ${section.label} copy">${storyEditIconHtml}</button>
+                                                </div>
+                                                ${aiControl}
+                                                <div class="mpd-story-col__loader" data-mpd-story-loader="${section.field}" hidden aria-hidden="true">
+                                                    <span class="mpd-story-col__spin" aria-hidden="true"></span>
+                                                    <span>Writing suggestion…</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <p class="mpd-story-row__note" data-mpd-story-pick-note role="status" aria-live="polite"></p>
+                                    </div>`;
+    })
+    .join("");
+
   const userIdCopyIcon = studioIconHref("assist-copy");
   const mpdUserIdCopyIconHtml = userIdCopyIcon
     ? `<img src="${mpdEscapeAttr(userIdCopyIcon)}" alt="" class="mpd-user-id__copy-icon" />`
@@ -5302,65 +5528,17 @@ export function generateSettingsProfileContent() {
                         </div>
 
                             <div class="mpd-identity-tab-panel" id="mpd-identity-panel-story" data-mpd-identity-panel="story" hidden>
-                            <section class="member-profile-dashboard__card" id="mpd-story">
-                                    <div class="mpd-story-public-source">
-                                        <input type="hidden" id="mpd_public_world_source" value="newWorld" />
-                                        <div class="mpd-world-source-toggle" role="group" aria-label="Show on my public profile">
-                                            <button type="button" class="mpd-world-source-toggle__btn" data-mpd-world-source="world" aria-pressed="false">World</button>
-                                            <button type="button" class="mpd-world-source-toggle__btn is-active" data-mpd-world-source="newWorld" aria-pressed="true" disabled aria-disabled="true">New World</button>
-                                </div>
-                                        <p class="mpd-world-source-note" id="mpd_public_world_source_note">New World will display on your profile.</p>
-                                    </div>
+                            <section class="member-profile-dashboard__card mpd-story-card" id="mpd-story">
                                     <h2>Story &amp; World</h2>
-                                <div class="mpd-story-dual-grid">
-                                    <div class="mpd-story-field-dual">
-                                            <div class="mpd-story-field-meta">
-                                                <span class="mpd-story-field-label">Practice</span>
-                                                <span class="mpd-field-hint">Tell us more about the work you are currently pursuing.</span>
-                                        </div>
-                                            <textarea id="mpd_w_practice" class="studio-textarea mpd-story-input" rows="2" placeholder="Describe what you are working on..."></textarea>
-                                            <button type="button" class="mpd-story-edit-btn" data-mpd-edit-target="mpd_w_practice" aria-label="Edit practice">${storyEditIconHtml}</button>
+                                    <p class="studio-muted mpd-story-intro">Write your own version, generate an AI version, then pick the column visitors should see. Green marks what is live on your profile — you can mix sections.</p>
+                                    <div class="mpd-story-columns-head" aria-hidden="true">
+                                        <span>Your words</span>
+                                        <span class="mpd-story-columns-head__mid">✦</span>
+                                        <span>AI version</span>
                                     </div>
-                                    <div class="mpd-story-field-dual">
-                                            <div class="mpd-story-field-meta">
-                                                <span class="mpd-story-field-label">Perspective</span>
-                                                <span class="mpd-field-hint">How you see your practice in relation to the field.</span>
-                                        </div>
-                                            <textarea id="mpd_w_perspective" class="studio-textarea mpd-story-input" rows="3" placeholder="Share your point of view...&#10;&#10;Add another thought here..."></textarea>
-                                            <button type="button" class="mpd-story-edit-btn" data-mpd-edit-target="mpd_w_perspective" aria-label="Edit perspective">${storyEditIconHtml}</button>
-                                    </div>
-                                    <div class="mpd-story-field-dual">
-                                            <div class="mpd-story-field-meta">
-                                                <span class="mpd-story-field-label">Vision</span>
-                                                <span class="mpd-field-hint">Where you want the work to go — aims, horizons, and what you are building toward.</span>
-                                        </div>
-                                            <textarea id="mpd_w_vision" class="studio-textarea mpd-story-input" rows="3" placeholder="Where do you want the work to go?"></textarea>
-                                            <button type="button" class="mpd-story-edit-btn" data-mpd-edit-target="mpd_w_vision" aria-label="Edit vision">${storyEditIconHtml}</button>
-                                    </div>
-                                    <div class="mpd-story-field-dual">
-                                            <div class="mpd-story-field-meta">
-                                                <span class="mpd-story-field-label">Constructing</span>
-                                                <span class="mpd-field-hint">Materials, process, and what you are actively making right now.</span>
-                                        </div>
-                                            <textarea id="mpd_w_constructing" class="studio-textarea mpd-story-input" rows="2" placeholder="Materials, process, current experiments..."></textarea>
-                                            <button type="button" class="mpd-story-edit-btn" data-mpd-edit-target="mpd_w_constructing" aria-label="Edit constructing">${storyEditIconHtml}</button>
-                                    </div>
-                                    <div class="mpd-story-field-dual">
-                                            <div class="mpd-story-field-meta">
-                                                <span class="mpd-story-field-label">Context</span>
-                                                <span class="mpd-field-hint">Place, community, or history that situates the work.</span>
-                                        </div>
-                                            <textarea id="mpd_w_context" class="studio-textarea mpd-story-input" rows="2" placeholder="Place, community, history, or influences..."></textarea>
-                                            <button type="button" class="mpd-story-edit-btn" data-mpd-edit-target="mpd_w_context" aria-label="Edit context">${storyEditIconHtml}</button>
-                                    </div>
-                                    <div class="mpd-story-field-dual">
-                                            <div class="mpd-story-field-meta">
-                                                <span class="mpd-story-field-label">Quote</span>
-                                                <span class="mpd-field-hint">A single line visitors can read at a glance.</span>
-                                        </div>
-                                            <input type="text" id="mpd_w_quote" class="studio-input mpd-story-input" placeholder="A short line visitors can remember..." />
-                                            <button type="button" class="mpd-story-edit-btn" data-mpd-edit-target="mpd_w_quote" aria-label="Edit quote">${storyEditIconHtml}</button>
-                                    </div>
+                                    <p class="mpd-story-pick-summary" id="mpd_story_pick_summary" role="status" aria-live="polite"></p>
+                                    <div class="mpd-story-rows">
+                                        ${storyRowsHtml}
                                 </div>
                                 ${storyCardFooter}
                             </section>
@@ -5815,6 +5993,10 @@ export function generateSettingsProfileContent() {
                             </p>
                         </div>
                         <p id="mpdSaveChoiceTranslateNote" class="mpd-save-choice-modal__note" hidden></p>
+                        <p id="mpdSaveChoiceProgress" class="mpd-save-choice-modal__progress" role="status" aria-live="polite" hidden>
+                            <span class="mpd-save-choice-modal__spinner" aria-hidden="true"></span>
+                            <span id="mpdSaveChoiceProgressLabel">Saving your profile…</span>
+                        </p>
                         <div class="mpd-save-choice-modal__actions">
                             <button type="button" class="studio-btn-primary" id="mpdSaveChoiceTranslate">
                                 Translate and save
@@ -6358,74 +6540,57 @@ export default function initSettingsProfile() {
   };
 
   /**
-   * After-save: fill empty New World only when nothing is there yet (live IC).
-   * @param {Record<string, unknown>} mergedSaved
-   * @returns {Promise<boolean>} false when generation failed after the profile itself saved.
+   * Per-section AI suggestion for the Story & World "AI version" column.
+   * Uses the stored profile plus whatever is currently typed (unsaved bio edits count),
+   * writes only the one section, and pre-selects the AI column for that row.
+   * @param {string} field
    */
-  const runMemberWorldGenerationAfterSave = async (mergedSaved) => {
+  const runMpdStorySuggest = async (field) => {
+    if (!MPD_WORLD_TEXT_FIELDS.includes(/** @type {any} */ (field))) return;
+    if (!localesState) return;
+    if (mpdStorySuggestBusy.has(field)) return;
     if (getDataSource() === "test") {
-      setStatus("Saved.");
-      return true;
+      setStatus("AI suggestions need Live data. Connect the live backend to generate copy.");
+      return;
     }
-    if (!needsInitialWorldNew(mergedSaved)) {
-      setStatus("Saved.");
-      return true;
+    const loader = document.querySelector(`[data-mpd-story-loader="${field}"]`);
+    const label = mpdStorySectionLabel(field);
+    mpdStorySuggestBusy.add(field);
+    if (loader instanceof HTMLElement) {
+      loader.hidden = false;
+      loader.setAttribute("aria-hidden", "false");
     }
+    syncMpdStoryPickUi();
+    setStatus(`Writing an AI version of ${label}…`);
     try {
       const rec = await getMyArtistRecord();
-      const row = artistRowFromMyArtistRecord(rec);
-      if (!row) throw new Error("Could not load profile for world generation.");
+      const row = mpdStoryLlmRow(artistRowFromMyArtistRecord(rec));
       if (!hasUsableWorldLlmSourceInput(row)) {
-        setStatus("Saved.");
-        return true;
+        throw new Error(
+          "Add a bio, discipline, or location first — the AI needs something to work from.",
+        );
       }
-      if (
-        !beginMpdOperation("new-world-generation", {
-          operation: "New World",
-          detail: "Generating New World",
-          message: "Generating New World…",
-          pendingMessage: "Still generating New World...",
-        })
-      ) {
-        return false;
+      const value = await suggestWorldSectionValue(field, {
+        sourceJson: buildTrimmedSourceJsonForLlm(row),
+        locale: activeLocale,
+        reinterpret: memberReinterpretWithPrompt,
+        translate: memberTranslateEnToJa,
+      });
+      setVal(`mpd_wn_${field}`, worldFieldToTextarea(value));
+      setMpdStoryPick(field, "newWorld");
+      syncMpdStoryPickUi();
+      setStatus(`AI suggestion ready for ${label}. Edit it, or switch back to your words.`);
+    } catch (err) {
+      console.error("Story section suggestion failed.", err);
+      setStatus(formatMpdStorySuggestError(err));
+    } finally {
+      mpdStorySuggestBusy.delete(field);
+      const freshLoader = document.querySelector(`[data-mpd-story-loader="${field}"]`);
+      if (freshLoader instanceof HTMLElement) {
+        freshLoader.hidden = true;
+        freshLoader.setAttribute("aria-hidden", "true");
       }
-      await generateAndUpdateMyArtistWorldFromBio(row, "fillEmpty");
-      const fresh = await getMyArtistRecord();
-      if (!fresh) throw new Error("Could not reload profile after world generation.");
-      const json = mpdLocalesJsonFromRecord(fresh);
-      try {
-        localesState = json ? JSON.parse(json) : { en: {}, ja: {} };
-      } catch {
-        localesState = { en: {}, ja: {} };
-      }
-      if (!localesState || typeof localesState !== "object")
-        localesState = { en: {}, ja: {} };
-      fillFormFromLocales(
-        /** @type {Record<string, unknown>} */ (localesState),
-        activeLocale,
-      );
-      refreshBaseline();
-      finishMpdOperation("new-world-generation", "idle", "New World generated.");
-      setStatus("Saved.");
-      return true;
-    } catch (e) {
-      console.error("New World generation failed after profile save.", e);
-      const friendly =
-        "Couldn’t generate New World. Your profile was saved with World. Please try saving again.";
-      if (localesState && typeof localesState === "object") {
-        /** @type {Record<string, unknown>} */ (localesState).publicWorldSource = "world";
-      }
-      loadMpdStoryWorldEditor(
-        /** @type {Record<string, unknown>} */ (localesState || mergedSaved),
-        activeLocale,
-        false,
-      );
-      syncMpdPublicWorldSource(
-        /** @type {Record<string, unknown>} */ (localesState || mergedSaved),
-        "world",
-      );
-      finishMpdOperation("new-world-generation", "error", friendly);
-      return false;
+      syncMpdStoryPickUi();
     }
   };
 
@@ -7061,7 +7226,7 @@ export default function initSettingsProfile() {
     if (!localesState) return false;
     const draft = readMpdProfileDraftForSave();
     const cur = snapshotState(
-      { draft },
+      { draft, story: readMpdStorySaveExtras() },
       activeLocale,
       getVal("mpd_hero_url").trim(),
       normalizeArtistRosterVisibility(getVal("mpd_profile_visibility").trim() || "public"),
@@ -7090,12 +7255,18 @@ export default function initSettingsProfile() {
     const vis = normalizeArtistRosterVisibility(
       getVal("mpd_profile_visibility").trim() || "public",
     );
-    baselineSnapshot = snapshotState({ draft }, activeLocale, heroImageUrl, vis, {
-      profileQuote: getMpdProfileQuoteForSave(),
-      audioUrl: getVal("mpd_audio_url").trim(),
-      audioTitle: getVal("mpd_audio_title").trim(),
-      heroProfileUrl: heroProfileImageUrl,
-    });
+    baselineSnapshot = snapshotState(
+      { draft, story: readMpdStorySaveExtras() },
+      activeLocale,
+      heroImageUrl,
+      vis,
+      {
+        profileQuote: getMpdProfileQuoteForSave(),
+        audioUrl: getVal("mpd_audio_url").trim(),
+        audioTitle: getVal("mpd_audio_title").trim(),
+        heroProfileUrl: heroProfileImageUrl,
+      },
+    );
     baselineMediaUploadRevision = mediaUploadRevision;
   };
 
@@ -7137,13 +7308,17 @@ export default function initSettingsProfile() {
     }
     if (!localesState) return;
     if (reportActiveMpdOperation()) return;
+    if (mpdStorySuggestBusy.size > 0) {
+      setStatus("Wait for the AI suggestion to finish, then save.");
+      return;
+    }
     pendingProfileSaveButton = fromBtn;
     openMpdSaveChoiceModal();
   };
 
   /**
    * @param {Element | undefined} [fromBtn]
-   * @param {{ translate?: boolean }} [options]
+   * @param {{ translate?: boolean, onCoreSaved?: () => void }} [options]
    */
   const saveProfileFromDom = async (fromBtn, options = {}) => {
     if (adminPreviewBypassEnabled) {
@@ -7181,14 +7356,12 @@ export default function initSettingsProfile() {
     );
     const capturedHeroCleared = heroImageCleared;
     const capturedHeroProfileCleared = heroProfileImageCleared;
-    const capturedWorldSource = getVal("mpd_public_world_source");
+    const capturedStory = readMpdStorySaveExtras();
 
     profileSaveInFlight = true;
     if (isStorySave) setStoryPanelAsyncBusy(true);
 
     const runPersist = async () => {
-    /** @type {boolean} */
-    let willAutoGen = false;
       /** @type {boolean} */
       let profileSaveFinished = false;
     try {
@@ -7211,9 +7384,7 @@ export default function initSettingsProfile() {
           capturedLocales,
           draft,
           () => undefined,
-          { translate, _valOverrides: {
-            mpd_public_world_source: capturedWorldSource,
-          } },
+          { translate, active: activeLocale, story: capturedStory },
       );
       const merged = normalizeLocalesWorldForStorage(
         /** @type {Record<string, unknown>} */ (localesState),
@@ -7291,21 +7462,22 @@ export default function initSettingsProfile() {
             profileSaveFinished = true;
         }
       }
-      willAutoGen =
-        getDataSource() !== "test" &&
-        !slugSaveFailed &&
-        needsInitialWorldNew(merged);
-      if (willAutoGen && !isStorySave) setStoryPanelAsyncBusy(true);
-
         fillFormFromLocales(
           /** @type {Record<string, unknown>} */ (localesState),
           activeLocale,
         );
       refreshBaseline();
 
+      /* Profile copy is persisted — let the save sheet close before any
+         optional work (media metadata warnings) surfaces. */
+    try {
+      options.onCoreSaved?.();
+    } catch {
+      /* ignore */
+    }
+
       if (!slugSaveFailed) {
         posthog.capture("profile_settings_saved");
-          const worldGenerationOk = await runMemberWorldGenerationAfterSave(merged);
           if (optionalSaveWarnings.length) {
             const warnText = optionalSaveWarnings.join(" ");
             const warnMessage = `Profile saved, but some media did not persist: ${warnText}`;
@@ -7315,13 +7487,11 @@ export default function initSettingsProfile() {
             finishMpdOperation("profile-save", "saved", "Profile saved.");
           }
           profileSaveFinished = true;
-          if (worldGenerationOk) {
             dispatchProfileSaveStatus("saved", "Profile saved", {
               operation: "Profile",
               detail: "All changes saved",
             });
         if (isStorySave) flashMpdStorySaveOk();
-          }
       }
     } catch (e) {
         finishMpdOperation("profile-save", "error", formatMemberProfileSaveError(e));
@@ -7331,11 +7501,11 @@ export default function initSettingsProfile() {
         if (!profileSaveFinished && activeMpdOperations.has("profile-save")) {
           finishMpdOperation("profile-save", "error", "Profile save did not complete. Try again.");
         }
-      if (isStorySave || willAutoGen) setStoryPanelAsyncBusy(false);
+      if (isStorySave) setStoryPanelAsyncBusy(false);
     }
   };
 
-    runPersist();
+    return runPersist();
   };
 
   const updateHeroPreview = (forceFresh = false) => {
@@ -7937,17 +8107,27 @@ export default function initSettingsProfile() {
         navigate(path.startsWith("/") ? path : `/${path}`);
         return;
       }
-      const worldSourceBtn =
+      const storySuggestBtn =
         e.target &&
-        /** @type {Element} */ (e.target).closest?.("[data-mpd-world-source]");
-      if (worldSourceBtn && rootEl.contains(worldSourceBtn)) {
+        /** @type {Element} */ (e.target).closest?.("[data-mpd-suggest-field]");
+      if (storySuggestBtn && rootEl.contains(storySuggestBtn)) {
         e.preventDefault();
-        if (!localesState) return;
-        mpdStoryWorldDraft = readMpdStoryWorldTextDraftFromDom();
-        syncMpdPublicWorldSource(
-          /** @type {Record<string, unknown>} */ (localesState),
-          worldSourceBtn.getAttribute("data-mpd-world-source"),
-        );
+        void runMpdStorySuggest(storySuggestBtn.getAttribute("data-mpd-suggest-field") || "");
+        return;
+      }
+      const storyColumn =
+        e.target &&
+        /** @type {Element} */ (e.target).closest?.("[data-mpd-story-column]");
+      if (storyColumn && rootEl.contains(storyColumn)) {
+        const storyRow = storyColumn.closest("[data-mpd-story-field]");
+        const storyField = storyRow ? storyRow.getAttribute("data-mpd-story-field") || "" : "";
+        if (storyField && MPD_WORLD_TEXT_FIELDS.includes(/** @type {any} */ (storyField))) {
+          setMpdStoryPick(
+            storyField,
+            storyColumn.getAttribute("data-mpd-story-column") === "world" ? "world" : "newWorld",
+          );
+          syncMpdStoryPickUi();
+        }
         return;
       }
       const statusBtn =
@@ -8222,11 +8402,9 @@ export default function initSettingsProfile() {
     rootEl.addEventListener("input", (e) => {
       const t = e.target;
       if (!(t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement)) return;
-      if (
-        t.classList.contains("mpd-story-input") &&
-        mpdStoryWorldDisplaySource === "world"
-      ) {
-        mpdStoryWorldDraft = readMpdStoryWorldTextDraftFromDom();
+      if (t.classList.contains("mpd-story-input")) {
+        /* Keep the row note / summary in sync with what is actually typed. */
+        syncMpdStoryPickUi();
       }
       if (
         t.id === "mpd_first_name" ||
@@ -8239,6 +8417,13 @@ export default function initSettingsProfile() {
       const t = e.target;
       if (t instanceof HTMLSelectElement && t.id === "mpd_discipline") {
         updateHeroProfileCardCopy();
+      }
+      if (
+        t instanceof HTMLInputElement &&
+        t.type === "radio" &&
+        t.name.startsWith("mpd_pick_")
+      ) {
+        syncMpdStoryPickUi();
       }
     });
   }
@@ -8774,14 +8959,8 @@ export default function initSettingsProfile() {
       ),
       activeLocale,
     );
-    if (!String(mpdStoryWorldDraft?.quote ?? "").trim()) {
-      mpdStoryWorldDraft = {
-        ...(mpdStoryWorldDraft || {}),
-        quote: String(p.quote ?? ""),
-      };
-      if (mpdStoryWorldDisplaySource === "world") {
-        setVal("mpd_w_quote", String(p.quote ?? ""));
-      }
+    if (!getVal("mpd_w_quote").trim()) {
+      setVal("mpd_w_quote", String(p.quote ?? ""));
     }
 
     refreshBaseline();
@@ -8874,8 +9053,24 @@ export default function initSettingsProfile() {
     const action = String(detail.action || "");
     const fromBtn = pendingProfileSaveButton;
     pendingProfileSaveButton = undefined;
-    if (action !== "save") return;
-    void saveProfileFromDom(fromBtn, { translate: detail.translate !== false });
+    if (action !== "save") {
+      setMpdSaveChoiceBusy(false);
+      return;
+    }
+    const translate = detail.translate !== false;
+    setMpdSaveChoiceBusy(
+      true,
+      translate ? "Translating & saving your profile…" : "Saving your profile…",
+      translate ? "translate" : "just-save",
+    );
+    void saveProfileFromDom(fromBtn, {
+      translate,
+      onCoreSaved: () => closeMpdSaveChoiceModal(),
+    })
+      .catch(() => {})
+      .finally(() => {
+        closeMpdSaveChoiceModal();
+      });
   };
   window.addEventListener("fusion-settings-profile-save-choice", _mpdSaveChoiceHandler);
   document

@@ -2,10 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { worldTextToParagraphs } from './worldNormalize.js';
 import {
     getPublicWorldSourceFromLocales,
+    getWorldSourceForField,
     localesHaveUsableWorldNew,
-    needsInitialWorldNew,
+    normalizeWorldSourceByField,
     pickPublicWorldField,
     PUBLIC_WORLD_SOURCE_DEFAULT,
+    WORLD_SECTION_KEYS,
     worldFieldHasContent,
 } from './worldPublicPick.js';
 
@@ -106,24 +108,60 @@ describe('pickPublicWorldField', () => {
     });
 });
 
-describe('needsInitialWorldNew', () => {
-    it('is true when worldNew is missing or all text fields empty', () => {
-        expect(needsInitialWorldNew({ en: {}, ja: {} })).toBe(true);
-        expect(
-            needsInitialWorldNew({
-                en: { worldNew: { practice: '', quote: '' } },
-                ja: { worldNew: {} },
-            }),
-        ).toBe(true);
+describe('pickPublicWorldField with a per-section source', () => {
+    const loc = {
+        world: { practice: 'A', perspective: 'P-world' },
+        worldNew: { practice: 'B', perspective: 'P-ai' },
+    };
+
+    it('lets the per-section choice win over the global source', () => {
+        expect(pickPublicWorldField(loc, 'practice', 'newWorld', 'world')).toBe('A');
+        expect(pickPublicWorldField(loc, 'practice', 'world', 'newWorld')).toBe('B');
     });
 
-    it('is false when any locale has content in a text field', () => {
+    it('falls back to the global source when the section choice is unknown', () => {
+        expect(pickPublicWorldField(loc, 'practice', 'world', null)).toBe('A');
+        expect(pickPublicWorldField(loc, 'practice', 'world', 'bogus')).toBe('A');
+    });
+});
+
+describe('getWorldSourceForField', () => {
+    const locales = {
+        publicWorldSource: 'newWorld',
+        worldSourceByField: { practice: 'world', quote: 'newWorld' },
+    };
+
+    it('uses the stored per-section choice', () => {
+        expect(getWorldSourceForField(locales, 'practice', 'newWorld')).toBe('world');
+        expect(getWorldSourceForField(locales, 'quote', 'world')).toBe('newWorld');
+    });
+
+    it('falls back to the global source for sections without a choice', () => {
+        expect(getWorldSourceForField(locales, 'vision', 'world')).toBe('world');
+        expect(getWorldSourceForField(locales, 'vision', 'newWorld')).toBe('newWorld');
+    });
+
+    it('defaults to New World and is safe for missing locales', () => {
+        expect(getWorldSourceForField({}, 'practice')).toBe(PUBLIC_WORLD_SOURCE_DEFAULT);
+        expect(getWorldSourceForField(null, 'practice', 'world')).toBe('world');
+        expect(getWorldSourceForField({ worldSourceByField: 'nope' }, 'practice')).toBe(
+            PUBLIC_WORLD_SOURCE_DEFAULT,
+        );
+    });
+});
+
+describe('normalizeWorldSourceByField', () => {
+    it('keeps known keys with valid values only', () => {
         expect(
-            needsInitialWorldNew({
-                en: { worldNew: { practice: 'x' } },
-                ja: {},
+            normalizeWorldSourceByField({
+                practice: 'world',
+                perspective: 'newWorld',
+                vision: 'bogus',
+                unknown: 'world',
             }),
-        ).toBe(false);
+        ).toEqual({ practice: 'world', perspective: 'newWorld' });
+        expect(normalizeWorldSourceByField(null)).toEqual({});
+        expect(WORLD_SECTION_KEYS).toHaveLength(6);
     });
 });
 

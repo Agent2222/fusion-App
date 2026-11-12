@@ -17,6 +17,7 @@ import { SEO_MEDIA_DEFAULT, withSeoImageAlt } from "../utils/mediaAltSeo.js";
 import { worldTextParts } from "../utils/worldNormalize.js";
 import {
   getPublicWorldSourceFromLocales,
+  getWorldSourceForField,
   pickPublicWorldField,
 } from "../utils/worldPublicPick.js";
 import posthog from "posthog-js";
@@ -499,6 +500,7 @@ export default function initProfile() {
         /** @type {Record<string, unknown>} */ (loc),
         key,
         publicWorldSource,
+        getWorldSourceForField(localesRoot, key, publicWorldSource),
       );
 
     const firstName = profileFirstNameForPlaceholders(loc, displayName);

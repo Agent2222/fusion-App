@@ -2,6 +2,7 @@ import { introSlotsFromWorld, localeBlock } from './memberProfileForm.js';
 import { isUsableImageUrl, probeImageSrc } from './imageProbe.js';
 import {
     getPublicWorldSourceFromLocales,
+    getWorldSourceForField,
     pickPublicWorldField,
     worldFieldHasContent,
 } from './worldPublicPick.js';
@@ -74,7 +75,14 @@ export function artistHasWorldStoryCopy(locales) {
     const publicWorldSource = getPublicWorldSourceFromLocales(localesObj);
     const en = localeBlock(localesObj, 'en');
     return ARTIST_WORLD_STORY_KEYS.every((key) =>
-        worldFieldHasContent(pickPublicWorldField(en, key, publicWorldSource)),
+        worldFieldHasContent(
+            pickPublicWorldField(
+                en,
+                key,
+                publicWorldSource,
+                getWorldSourceForField(localesObj, key, publicWorldSource),
+            ),
+        ),
     );
 }
 
@@ -171,7 +179,16 @@ export function getArtistProfileReadiness(row, probes = undefined) {
         const publicWorldSource = getPublicWorldSourceFromLocales(localesObj);
         const en = localeBlock(localesObj, 'en');
         for (const key of ARTIST_WORLD_STORY_KEYS) {
-            if (!worldFieldHasContent(pickPublicWorldField(en, key, publicWorldSource))) {
+            if (
+                !worldFieldHasContent(
+                    pickPublicWorldField(
+                        en,
+                        key,
+                        publicWorldSource,
+                        getWorldSourceForField(localesObj, key, publicWorldSource),
+                    ),
+                )
+            ) {
                 missing.push(`world.${key}`);
             }
         }

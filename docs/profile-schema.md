@@ -23,7 +23,29 @@ See inventory in the product plan. Fields include `name`, optional `firstName` /
 
 ### Public profile: `world` vs `worldNew`
 
-On `/profile/:slug`, each section (**practice**, **perspective**, **vision**, **constructing**, **context**, **quote**, and **introGallery**) resolves copy via `publicWorldSource` on `locales` (see `src/fusion-app-frontend/src/utils/worldPublicPick.js`). **New World (`worldNew`) is the default** when usable generated copy exists; artists may opt in to Story & World (`world`) in member profile settings (`publicWorldSource: "world"`). Per field, the preferred block is tried first; if that field is empty, the other block is used. Placeholders apply only when **both** are empty for the active locale.
+On `/profile/:slug`, each section (**practice**, **perspective**, **vision**, **constructing**, **context**, **quote**, and **introGallery**) resolves copy per field (see `src/fusion-app-frontend/src/utils/worldPublicPick.js`). Resolution order:
+
+1. `locales.worldSourceByField[key]` — the per-section column the artist picked in member settings (`"world"` or `"newWorld"`).
+2. `locales.publicWorldSource` — legacy single toggle (Studio batch, older saves).
+3. **New World (`worldNew`) is the default** when usable generated copy exists, else `world`.
+
+Per field the preferred block is tried first; if that field is empty, the other block is used. Placeholders apply only when **both** are empty for the active locale.
+
+**Story tab editor (`settingsProfile.js`):** a two-column editor — **Your words** (`mpd_w_*` → `locales.*.world`) and **AI version** (`mpd_wn_*` → `locales.*.worldNew`). Both columns are editable. Each section has one radio per column; the picked column gets the green (theme `--c4`) outline and is saved to `locales.worldSourceByField`. The card summary (`#mpd_story_pick_summary`) reports how many sections publish the AI version.
+
+Saving writes the artist's `world` draft plus the AI column for the language being edited (`applyStorySaveToLocales` in `src/fusion-app-frontend/src/utils/memberStorySave.js`): `worldNew` for the *other* language is preserved as stored, because translation of AI copy stays per language. AI copy is **never** copied into `world`, and an AI column that is empty (or only contains LLM refusal text) is removed instead of persisted.
+
+### Per-section AI suggestions (`memberWorldSectionSuggest.js`)
+
+The ✦ button in each row generates **one** section instead of the whole block:
+
+- Prompt: `buildWorldSectionPrompt(field)` — same third-person / SOURCE_JSON-only rules as the batch job, but a plain-text reply for a single field (`practice`/`quote` = one line, `perspective`/`constructing` = blank-line separated paragraphs, `vision` = exactly 4 lines, `context` = exactly 3 ordered lines with `NONE` for unsupported slots).
+- Source: `buildTrimmedSourceJsonForLlm` over the live profile merged with whatever is currently typed in the form (unsaved bio/discipline/location edits count).
+- LLM: `memberReinterpretWithPrompt`; for Japanese the English result is translated unit-by-unit with `memberTranslateEnToJa` so array slots keep their order.
+- Reply parsing (`parseWorldSectionReply`) strips fences/labels/quotes, rejects LLM failure text, pads short array replies, and throws instead of writing an empty section.
+- Nothing is published until the user presses **Save**; a successful suggestion pre-selects that row's AI column.
+
+There is **no** automatic generation after save anymore — the artist triggers each section explicitly.
 
 ### Studio: LLM batch job (“Generate world from bio (batch)”)
 
