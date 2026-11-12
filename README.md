@@ -107,7 +107,7 @@ Membership is the gate between the public site and the members area, and it is e
   with redemption requests (for example broadcast credits) that staff fulfil.
 - **Account recovery** — email-based account reconnect for members who lose their principal.
 
-### 5. Fusion Studio — `/studio`
+### 5. Fusion Studio
 
 The staff console for the entire network, grouped as *Overview · Management · Content · Moderation ·
 Accounts · Operations*:
@@ -117,13 +117,6 @@ Accounts · Operations*:
   user studio, email, and an AI **Assistance** panel (translate / reinterpret copy in place).
 - **Moderation** — member status approval, profile-image and audio-file review queues with notes,
   broadcast requests.
-- **Accounts** — artists, curators, collectors, galleries, join-network applications.
-- **Operations** — gallery access, users and roles, service configuration, scheduled tasks, links,
-  and site settings.
-
-Studio is permissioned **per feature**: staff principals carry explicit feature grants, enforced in
-Motoko (`listStudioPermissionFeatureKeys`, `assertStudioFeature*`), so a collaborator can edit the
-journal without seeing finance.
 
 ### 6. Fusion Radar — relationship intelligence
 
